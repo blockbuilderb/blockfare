@@ -197,11 +197,11 @@ export const BuildingFactory = {
     const baseX = pushed.x;
     const baseZ = pushed.z;
 
-    for (let ring = 0; ring <= 22; ring++) {
-      const samples = ring === 0 ? 1 : ring * 10;
+    for (let ring = 0; ring <= 10; ring++) {
+      const samples = ring === 0 ? 1 : Math.min(16, ring * 6);
       for (let i = 0; i < samples; i++) {
         const angle = (i / samples) * Math.PI * 2;
-        const dist = ring * 1.6;
+        const dist = ring * 1.8;
         const tx = baseX + Math.cos(angle) * dist;
         const tz = baseZ + Math.sin(angle) * dist;
         if (Math.abs(tx) < 19 && Math.abs(tz) > 8 && Math.abs(tz - 220) > 8 && Math.abs(tz + 220) > 8) {
@@ -214,18 +214,11 @@ export const BuildingFactory = {
         const ty = this.getGroundHeightAt(tx, tz);
         const g = this.worldToGrid(tx, ty + 0.25, tz);
 
-        let clear = true;
-        for (let dx = -1; dx <= 1 && clear; dx++) {
-          for (let dz = -1; dz <= 1 && clear; dz++) {
-            for (let dy = 0; dy <= 3; dy++) {
-              if (this.voxels.has(this.key(g.gx + dx, g.gy + dy, g.gz + dz))) {
-                clear = false;
-                break;
-              }
-            }
-          }
-        }
-        if (clear) {
+        if (
+          !this.voxels.has(this.key(g.gx, g.gy, g.gz)) &&
+          !this.voxels.has(this.key(g.gx, g.gy + 1, g.gz)) &&
+          !this.voxels.has(this.key(g.gx, g.gy + 2, g.gz))
+        ) {
           return new THREE.Vector3(tx, ty, tz);
         }
       }

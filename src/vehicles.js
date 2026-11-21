@@ -1713,6 +1713,14 @@ export class VehicleManager {
           bestDistSq = VEHICLE_STATS.ENGAGE_RANGE_VEHICLE * VEHICLE_STATS.ENGAGE_RANGE_VEHICLE;
           for (const otherV of this.vehicles) {
             if (otherV.dead || otherV.team === v.team || otherV.isAircraft) continue;
+            // Never shell unoccupied parked FOB motorcycles/ATVs
+            if (
+              !otherV.driver &&
+              !otherV.npcDriver &&
+              (otherV.isWarehouseBike || otherV.type === 'bike' || otherV.type === 'atv')
+            ) {
+              continue;
+            }
             const dSq = v.pos.distanceToSquared(otherV.pos);
             if (dSq < bestDistSq && isWithinElevationLimits(otherV.pos.x, otherV.pos.y + 1.4, otherV.pos.z)) {
               bestDistSq = dSq;
@@ -2189,39 +2197,41 @@ export class VehicleManager {
           }
         }
       } else if (!v.isEmplacement && v.type !== 'trebuchet') {
-        // 3D Terrain & 1-Block Obstacle Pitch / Roll Alignment for Tanks, APCs, AA & Tactical Cars
-        const fwdX = -Math.sin(v.yaw || 0);
-        const fwdZ = -Math.cos(v.yaw || 0);
-        const rightX = Math.cos(v.yaw || 0);
-        const rightZ = -Math.sin(v.yaw || 0);
-        const sampleSupportY = (sx, sz) => {
-          const gy = this.world.getGroundHeightAt(sx, sz);
-          const g = this.world.worldToGrid(sx, gy + 0.65, sz);
-          const v0 = this.world.voxels.get(this.world.key(g.gx, g.gy, g.gz));
-          const v1 = this.world.voxels.get(this.world.key(g.gx, g.gy + 1, g.gz));
-          if (v0 && !v1 && !v0.isProp) {
-            return Math.min(gy + 1.35, v0.maxY ?? gy + 1.25);
-          }
-          return gy;
-        };
-        const pSpanL = Math.max(1.2, (v.hullHalfLength || 2.8) * 0.75);
-        const pSpanW = Math.max(0.8, (v.hullHalfWidth || 1.6) * 0.75);
-        const frontY = sampleSupportY(v.pos.x + fwdX * pSpanL, v.pos.z + fwdZ * pSpanL);
-        const rearY = sampleSupportY(v.pos.x - fwdX * pSpanL, v.pos.z - fwdZ * pSpanL);
-        const rightY = sampleSupportY(v.pos.x + rightX * pSpanW, v.pos.z + rightZ * pSpanW);
-        const leftY = sampleSupportY(v.pos.x - rightX * pSpanW, v.pos.z - rightZ * pSpanW);
-        const targetPitch = THREE.MathUtils.clamp(
-          Math.atan2(frontY - rearY, pSpanL * 2),
-          -0.34,
-          0.34
-        );
-        const targetRoll = THREE.MathUtils.clamp(
-          Math.atan2(leftY - rightY, pSpanW * 2),
-          -0.28,
-          0.28
-        );
-        v.pitch = THREE.MathUtils.lerp(v.pitch || 0, targetPitch, Math.min(1, dt * 8.5));
-        v.roll = THREE.MathUtils.lerp(v.roll || 0, targetRoll, Math.min(1, dt * 8.5));
+        // 3D Terrain & 1-Block Obstacle Pitch / Roll Alignment for Moving Tanks, APCs, AA & Tactical Cars
+        if (Math.abs(v.forwardSpeed || 0) > 0.05 || (v.climbOffsetY || 0) > 0.01) {
+          const fwdX = -Math.sin(v.yaw || 0);
+          const fwdZ = -Math.cos(v.yaw || 0);
+          const rightX = Math.cos(v.yaw || 0);
+          const rightZ = -Math.sin(v.yaw || 0);
+          const sampleSupportY = (sx, sz) => {
+            const gy = this.world.getGroundHeightAt(sx, sz);
+            const g = this.world.worldToGrid(sx, gy + 0.65, sz);
+            const v0 = this.world.voxels.get(this.world.key(g.gx, g.gy, g.gz));
+            const v1 = this.world.voxels.get(this.world.key(g.gx, g.gy + 1, g.gz));
+            if (v0 && !v1 && !v0.isProp) {
+              return Math.min(gy + 1.35, v0.maxY ?? gy + 1.25);
+            }
+            return gy;
+          };
+          const pSpanL = Math.max(1.2, (v.hullHalfLength || 2.8) * 0.75);
+          const pSpanW = Math.max(0.8, (v.hullHalfWidth || 1.6) * 0.75);
+          const frontY = sampleSupportY(v.pos.x + fwdX * pSpanL, v.pos.z + fwdZ * pSpanL);
+          const rearY = sampleSupportY(v.pos.x - fwdX * pSpanL, v.pos.z - fwdZ * pSpanL);
+          const rightY = sampleSupportY(v.pos.x + rightX * pSpanW, v.pos.z + rightZ * pSpanW);
+          const leftY = sampleSupportY(v.pos.x - rightX * pSpanW, v.pos.z - rightZ * pSpanW);
+          const targetPitch = THREE.MathUtils.clamp(
+            Math.atan2(frontY - rearY, pSpanL * 2),
+            -0.34,
+            0.34
+          );
+          const targetRoll = THREE.MathUtils.clamp(
+            Math.atan2(leftY - rightY, pSpanW * 2),
+            -0.28,
+            0.28
+          );
+          v.pitch = THREE.MathUtils.lerp(v.pitch || 0, targetPitch, Math.min(1, dt * 8.5));
+          v.roll = THREE.MathUtils.lerp(v.roll || 0, targetRoll, Math.min(1, dt * 8.5));
+        }
         v.mesh.position.copy(v.pos);
         v.mesh.rotation.set(v.pitch || 0, v.yaw || 0, v.roll || 0, 'YXZ');
       } else {

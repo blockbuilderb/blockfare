@@ -741,39 +741,63 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       bot.rpgCooldown -= dt;
     }
 
+    bot._raycastsThisFrame = 0;
+    bot._armorScanTimer = (bot._armorScanTimer || 0) - dt;
     let nearestArmor = null;
     let nearestArmorDistSq = BOT.ENGAGE_RANGE_RPG_CHECK * BOT.ENGAGE_RANGE_RPG_CHECK;
     const isPrimitiveEra = this.world?.era === 'medieval' || this.world?.era === 'jurassic';
     if (!isPrimitiveEra && bot.role === 'ENGINEER' && vehicleManager && vehicleManager.vehicles) {
-      for (const veh of vehicleManager.vehicles) {
-        if (veh.dead || veh.team === bot.team) continue;
-        // Engineers carry both RPG-7 (Anti-Armor up to 135m) and Stinger/Igla MANPADS (Anti-Air up to 380m)!
-        if (veh.isAircraft) {
-          if (!veh.driver && !veh.aiPilotActive) continue;
-          const isStealthPlane = veh.isStealthAircraft || veh.aircraftRole === 'b2_spirit';
-          if (isStealthPlane && (veh.flareActiveTimer || 0) > 0) continue;
-          const maxManpadsRange = isStealthPlane ? 380 * (veh.stealthFactor || 0.12) : 380;
-          const airDistSq = bot.pos.distanceToSquared(veh.pos);
+      if (
+        bot._armorScanTimer > 0 &&
+        bot._cachedArmorTarget &&
+        !bot._cachedArmorTarget.dead &&
+        (bot._cachedArmorTarget.driver ||
+          bot._cachedArmorTarget.npcDriver ||
+          bot._cachedArmorTarget.aiPilotActive ||
+          (!bot._cachedArmorTarget.isWarehouseBike &&
+            bot._cachedArmorTarget.type !== 'bike' &&
+            bot._cachedArmorTarget.type !== 'atv'))
+      ) {
+        nearestArmor = bot._cachedArmorTarget;
+        nearestArmorDistSq = bot.pos.distanceToSquared(nearestArmor.pos);
+      } else {
+        bot._armorScanTimer = 0.35 + Math.random() * 0.25;
+        for (const veh of vehicleManager.vehicles) {
+          if (veh.dead || veh.team === bot.team) continue;
+          // Never waste RPG-7 rockets or 3D sightline raycasts on unoccupied parked FOB bikes/ATVs!
+          const isOccupied = Boolean(veh.driver || veh.npcDriver);
+          if (!isOccupied && (veh.isWarehouseBike || veh.type === 'bike' || veh.type === 'atv')) {
+            continue;
+          }
+          // Engineers carry both RPG-7 (Anti-Armor up to 135m) and Stinger/Igla MANPADS (Anti-Air up to 380m)!
+          if (veh.isAircraft) {
+            if (!veh.driver && !veh.aiPilotActive) continue;
+            if (veh.isLowAltRadarMasked || (veh.airborneRadarTimer || 0) < 4.0) continue;
+            const isStealthPlane = veh.isStealthAircraft || veh.aircraftRole === 'b2_spirit';
+            if (isStealthPlane && (veh.flareActiveTimer || 0) > 0) continue;
+            const maxManpadsRange = isStealthPlane ? 380 * (veh.stealthFactor || 0.12) : 380;
+            const airDistSq = bot.pos.distanceToSquared(veh.pos);
+            if (
+              airDistSq < maxManpadsRange * maxManpadsRange &&
+              (!nearestArmor || !nearestArmor.isAircraft || airDistSq < nearestArmorDistSq)
+            ) {
+              nearestArmorDistSq = airDistSq;
+              nearestArmor = veh;
+            }
+            continue;
+          }
+          // Engineers prioritize enemy armor that is actively driven by the Player or an NPC
+          const dSq = bot.pos.distanceToSquared(veh.pos);
+          const effectiveDistSq = isOccupied ? dSq * 0.7 : dSq;
           if (
-            airDistSq < maxManpadsRange * maxManpadsRange &&
-            (!nearestArmor || !nearestArmor.isAircraft || airDistSq < nearestArmorDistSq)
+            effectiveDistSq < nearestArmorDistSq &&
+            this.canBotSeeTarget(bot, `veh_${veh.id}`, veh.pos, true)
           ) {
-            nearestArmorDistSq = airDistSq;
+            nearestArmorDistSq = dSq;
             nearestArmor = veh;
           }
-          continue;
         }
-        // Engineers prioritize enemy armor that is actively driven by the Player or an NPC
-        const isOccupied = Boolean(veh.driver || veh.npcDriver);
-        const dSq = bot.pos.distanceToSquared(veh.pos);
-        const effectiveDistSq = isOccupied ? dSq * 0.7 : dSq;
-        if (
-          effectiveDistSq < nearestArmorDistSq &&
-          this.canBotSeeTarget(bot, `veh_${veh.id}`, veh.pos, true)
-        ) {
-          nearestArmorDistSq = dSq;
-          nearestArmor = veh;
-        }
+        bot._cachedArmorTarget = nearestArmor;
       }
     }
 
@@ -795,7 +819,6 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     }
 
     // Find nearest VISIBLE enemy (up to 115m engagement range, strictly respecting building walls & thin gaps!)
-    bot._raycastsThisFrame = 0;
     bot._targetScanTimer = (bot._targetScanTimer || 0) - dt;
     let nearestEnemy = null;
     let nearestDistSq = BOT.ENGAGE_RANGE_INFANTRY * BOT.ENGAGE_RANGE_INFANTRY;
@@ -1381,34 +1404,29 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     // =======================================================================
     // BUILDING EXTERIOR REPULSION, VOXEL WALL UNSTUCK, 8-ANGLE FAN WHISKERS & ANTI-STUCK WATCHDOG
     // =======================================================================
-    if (this.world.isInsideBuildingOrContainer && this.world.isInsideBuildingOrContainer(bot.pos.x, bot.pos.z, 1.35)) {
-      const pushedOut = this.world.pushOutOfBuildingFootprint(bot.pos.x, bot.pos.z, 1.95);
-      bot.pos.x = pushedOut.x;
-      bot.pos.z = pushedOut.z;
-    }
+    bot._wallRepulseTimer = (bot._wallRepulseTimer || 0) - dt;
+    if (bot._wallRepulseTimer <= 0) {
+      bot._wallRepulseTimer = 0.45 + Math.random() * 0.25;
+      if (this.world.isInsideBuildingOrContainer && this.world.isInsideBuildingOrContainer(bot.pos.x, bot.pos.z, 1.15)) {
+        const pushedOut = this.world.pushOutOfBuildingFootprint(bot.pos.x, bot.pos.z, 1.85);
+        bot.pos.x = pushedOut.x;
+        bot.pos.z = pushedOut.z;
+      }
 
-    // Immediate Voxel Wall & Corner Repulsion: if a soldier ever clips into a castle wall, tower, palisade, or corner,
-    // push them out to the nearest open 1.35m step (or findSafeSpawnPoint) so they NEVER get stuck in a wall!
-    if (this.isPointBlocked(bot.pos.x, bot.pos.y, bot.pos.z, 0.32)) {
-      let freed = false;
-      const escapeAngles = [0, Math.PI * 0.5, -Math.PI * 0.5, Math.PI, Math.PI * 0.25, -Math.PI * 0.25, Math.PI * 0.75, -Math.PI * 0.75];
-      for (const dist of [1.1, 1.85, 2.75]) {
+      // Check only if the soldier's center head/chest column is inside a full-height wall voxel
+      const gCenterHead = this.world.worldToGrid(bot.pos.x, bot.pos.y + 1.75, bot.pos.z);
+      if (this.world.voxels.has(this.world.key(gCenterHead.gx, gCenterHead.gy, gCenterHead.gz))) {
+        const escapeAngles = [0, Math.PI * 0.5, -Math.PI * 0.5, Math.PI, Math.PI * 0.25, -Math.PI * 0.25];
         for (let aIdx = 0; aIdx < escapeAngles.length; aIdx++) {
           const ang = (bot.yaw || 0) + Math.PI + escapeAngles[aIdx];
-          const tx = bot.pos.x + Math.sin(ang) * dist;
-          const tz = bot.pos.z + Math.cos(ang) * dist;
+          const tx = bot.pos.x + Math.sin(ang) * 1.65;
+          const tz = bot.pos.z + Math.cos(ang) * 1.65;
           const ty = this.world.getGroundHeightAt(tx, tz);
-          if (!this.isPointBlocked(tx, ty, tz, 0.45)) {
+          if (!this.isPointBlocked(tx, ty, tz, 0.15)) {
             bot.pos.set(tx, ty, tz);
-            freed = true;
             break;
           }
         }
-        if (freed) break;
-      }
-      if (!freed && typeof this.world.findSafeSpawnPoint === 'function') {
-        const safeP = this.world.findSafeSpawnPoint(bot.pos.x, bot.pos.z);
-        bot.pos.copy(safeP);
       }
     }
 
@@ -1416,55 +1434,62 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       bot.avoidanceTimer = Math.max(0, bot.avoidanceTimer - dt);
     }
 
-    // 8-Angle Fan Whisker Obstacle Avoidance so bots smoothly navigate around wide buildings & HESCO walls
+    // 8-Angle Fan Whisker Obstacle Avoidance (throttled per bot so 250 bots at FOB C never spike frame time)
     if (desiredSpeed > 0.1) {
-      const baseAngle = Math.atan2(desiredDir.x, desiredDir.z);
-      const centerBlockedNear = this.isPointBlocked(
-        bot.pos.x + Math.sin(baseAngle) * 1.7,
-        bot.pos.y,
-        bot.pos.z + Math.cos(baseAngle) * 1.7
-      );
-      const centerBlockedFar = this.isPointBlocked(
-        bot.pos.x + Math.sin(baseAngle) * 3.1,
-        bot.pos.y,
-        bot.pos.z + Math.cos(baseAngle) * 3.1
-      );
+      bot._whiskerTimer = (bot._whiskerTimer || 0) - dt;
+      if (bot._whiskerTimer <= 0) {
+        bot._whiskerTimer = 0.14 + Math.random() * 0.08;
+        const baseAngle = Math.atan2(desiredDir.x, desiredDir.z);
+        const centerBlockedNear = this.isPointBlocked(
+          bot.pos.x + Math.sin(baseAngle) * 1.7,
+          bot.pos.y,
+          bot.pos.z + Math.cos(baseAngle) * 1.7,
+          0.15
+        );
+        const centerBlockedFar =
+          centerBlockedNear ||
+          this.isPointBlocked(
+            bot.pos.x + Math.sin(baseAngle) * 3.0,
+            bot.pos.y,
+            bot.pos.z + Math.cos(baseAngle) * 3.0,
+            0.15
+          );
 
-      if (centerBlockedNear || centerBlockedFar) {
-        const sign = bot.avoidanceSign || 1;
-        const fanOffsets = [
-          0.48 * sign,
-          -0.48 * sign,
-          0.92 * sign,
-          -0.92 * sign,
-          1.38 * sign,
-          -1.38 * sign,
-          1.85 * sign,
-          -1.85 * sign
-        ];
-        let chosenAngle = baseAngle + 1.55 * sign;
-        for (let fIdx = 0; fIdx < fanOffsets.length; fIdx++) {
-          const testAngle = baseAngle + fanOffsets[fIdx];
-          const nearClear = !this.isPointBlocked(
-            bot.pos.x + Math.sin(testAngle) * 1.75,
-            bot.pos.y,
-            bot.pos.z + Math.cos(testAngle) * 1.75
-          );
-          const farClear = !this.isPointBlocked(
-            bot.pos.x + Math.sin(testAngle) * 3.1,
-            bot.pos.y,
-            bot.pos.z + Math.cos(testAngle) * 3.1
-          );
-          if (nearClear && farClear) {
-            chosenAngle = testAngle;
-            if (bot.avoidanceTimer <= 0) {
-              bot.avoidanceSign = Math.sign(fanOffsets[fIdx]) || 1;
-              bot.avoidanceTimer = 1.4;
+        if (centerBlockedNear || centerBlockedFar) {
+          const sign = bot.avoidanceSign || 1;
+          const fanOffsets = [
+            0.52 * sign,
+            -0.52 * sign,
+            1.05 * sign,
+            -1.05 * sign,
+            1.58 * sign,
+            -1.58 * sign
+          ];
+          let chosenAngle = baseAngle + 1.55 * sign;
+          for (let fIdx = 0; fIdx < fanOffsets.length; fIdx++) {
+            const testAngle = baseAngle + fanOffsets[fIdx];
+            const nearClear = !this.isPointBlocked(
+              bot.pos.x + Math.sin(testAngle) * 1.85,
+              bot.pos.y,
+              bot.pos.z + Math.cos(testAngle) * 1.85,
+              0.15
+            );
+            if (nearClear) {
+              chosenAngle = testAngle;
+              if (bot.avoidanceTimer <= 0) {
+                bot.avoidanceSign = Math.sign(fanOffsets[fIdx]) || 1;
+                bot.avoidanceTimer = 1.4;
+              }
+              break;
             }
-            break;
           }
+          bot._cachedSteerAngle = chosenAngle;
+        } else {
+          bot._cachedSteerAngle = null;
         }
-        desiredDir.set(Math.sin(chosenAngle), 0, Math.cos(chosenAngle));
+      }
+      if (typeof bot._cachedSteerAngle === 'number') {
+        desiredDir.set(Math.sin(bot._cachedSteerAngle), 0, Math.cos(bot._cachedSteerAngle));
       }
     }
 
@@ -1822,14 +1847,18 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
 
     // Distance-based 3D Render Culling & Animation LOD for 250-Bot Scale:
     // Soldiers beyond 340m (or 620m when scoped in) are hidden from WebGL draw calls while 100% active in AI simulation & Map!
-    // Soldiers beyond 130m skip sub-limb Euler updates while keeping 3D position & yaw active!
+    // Soldiers beyond 110m skip sub-limb Euler updates while keeping 3D position & yaw active!
+    // Soldiers between 42m and 110m update sub-limb gait on alternating frames (30Hz LOD) to keep 60 FPS at crowded FOB C!
     const distSqToPlayer = bot.pos.distanceToSquared(player.pos);
     const maxRenderDist = player.ads && (player.currentFov || 75) < 48 ? 620 : 340;
     const within3DRender = distSqToPlayer <= maxRenderDist * maxRenderDist;
     if (bot.mesh.visible !== within3DRender) {
       bot.mesh.visible = within3DRender;
     }
-    if (!within3DRender || distSqToPlayer > 130 * 130) {
+    if (!within3DRender || distSqToPlayer > 110 * 110) {
+      continue;
+    }
+    if (distSqToPlayer > 42 * 42 && ((bIdx + (this._frameRaycasts || 0)) & 1) === 1) {
       continue;
     }
 
