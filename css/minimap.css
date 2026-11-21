@@ -1,0 +1,35 @@
+#minimap-wrapper {
+  width: 184px;
+  background: rgba(12, 18, 24, 0.86);
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+#minimap-canvas {
+  display: block;
+}
+
+.minimap-footer {
+  font-size: 9px;
+  font-weight: 800;
+  text-align: center;
+  padding: 3px 4px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #bdc3c7;
+  letter-spacing: 0.7px;
+}
+
+#hud-map-cmd-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: rgba(10, 16, 22, 0.88);
+  border-bottom: 1px solid rgba(241, 196, 15, 0.35);
+  padding: 3px 6px;
+  font-size: 9.5px;
+  font-weight: 800;
+  color: #ecf0f1;
+  pointer-events: auto;
+}

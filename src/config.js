@@ -1,0 +1,871 @@
+// =========================================================================
+// CENTRALIZED GAME CONFIGURATION — BattleBit Clone
+// All gameplay-affecting magic numbers extracted into named constants.
+// Phase 1 Refactor: import { PLAYER, COMBAT, BOT, ... } from './config.js'
+// =========================================================================
+
+// ---------------------------------------------------------------------------
+// PLAYER
+// ---------------------------------------------------------------------------
+export const PLAYER = {
+  HP: 100,
+  MAX_HP: 100,
+  ARMOR: 50,
+  MAX_ARMOR: 50,
+  ARMOR_ABSORB_RATIO: 0.35,
+  SUPPRESSION_DECAY_RATE: 0.6,
+  RESPAWN_DELAY: 10,
+  STARTING_CASH: 150,
+  STARTING_BANDAGES: 3,
+  STARTING_GRENADES: 2,
+
+  // Mouse sensitivity
+  SENSITIVITY_ADS: 0.0011,
+  SENSITIVITY_HIP: 0.0021,
+
+  // Zeroing
+  ZERO_DISTANCE_DEFAULT: 100,
+  ZEROING_OPTIONS: [100, 200, 300, 400],
+  ZERO_ELEVATION_FACTOR: 0.00007,
+
+  // Eye heights (stance)
+  EYE_HEIGHT_DOWNED: 0.32,
+  EYE_HEIGHT_PRONE: 0.48,
+  EYE_HEIGHT_CROUCH: 1.05,
+  EYE_HEIGHT_STAND: 1.65,
+
+  // Recoil
+  RECOIL_KICK_Z: 0.085,
+  RECOIL_SCALE_PRONE: 0.55,   // prone reduces recoil by 45%
+  RECOIL_SCALE_CROUCH: 0.78,  // crouch reduces recoil by 22%
+
+  // Suppression spread
+  SUPPRESSION_SPREAD_MULT: 3.5,
+
+  // Downed state (Squad-calibrated generous 120s bleed-out window so Medics have ample time to rescue)
+  DOWNED_TIMER: 120.0,
+  REVIVE_HP: 35,            // Field Dressing revive stabilizes soldier at 35 HP; Medic Bag then heals to 100 HP!
+  GIVE_UP_RATE: 0.85,       // seconds to hold space to give up
+
+  // Multi-kill timer
+  MULTI_KILL_TIMER: 3.5,
+
+  // Bleed (Squad-calibrated slow wound bleed: 2 HP every 2.5s = ~0.8 HP/s so players & medics never have to panic)
+  BLEED_TICK_INTERVAL: 2.5,
+  BLEED_DAMAGE: 2,
+  BLEED_CHANCE_THRESHOLD: 15,
+  BLEED_CHANCE: 0.25,
+
+  // Squad 2-Item Medical System:
+  // 1) Field Dressings (Bandages): Medics carry 9, other classes carry 2 (+Rig/Pack bonus).
+  //    Used to stop bleeding [Hold H] or revive downed teammates [Hold F] (1 Dressing per revive!).
+  // 2) Medic Bag (Medical Kit): Carried by Medics (600 HP trauma supply).
+  //    Used to heal injured standing teammates & self all the way to 100/100 Max HP!
+  FIELD_DRESSINGS_MEDIC: 9,
+  FIELD_DRESSINGS_OTHER: 2,
+  MEDIC_BAG_MAX_SUPPLY: 600,
+  BANDAGE_DURATION_MEDIC: 1.25,
+  BANDAGE_DURATION_OTHER: 1.9,
+  BANDAGE_HEAL_MEDIC: 100,
+  BANDAGE_HEAL_OTHER: 40,
+
+  // Medkit / Medic Bag
+  MEDKIT_HEAL: 35,
+
+  // Field heal (press F on injured ally or get healed by friendly Medic to 100% Max HP)
+  FIELD_HEAL_MEDIC: 100,
+  FIELD_HEAL_OTHER: 50,
+  FIELD_HEAL_XP: 50,
+
+  // Revive
+  REVIVE_DURATION_MEDIC: 1.15,
+  REVIVE_DURATION_OTHER: 1.75,
+  REVIVE_DRAG_XP: 250,
+  REVIVE_XP: 200,
+
+  // Tarkov-style Slow Reload / Bullet-by-Bullet Mag Packing (time per single round pressed into mag)
+  MAG_PACK_BULLET_TIME: 0.22,
+  MAG_PACK_DURATION: 1.3,
+
+  // Speed reload
+  SPEED_RELOAD_MULT: 0.62,
+
+  // Walk bob / Sway limits
+  SWAY_MULT: 0.45,
+  SWAY_LIMIT: 0.04,
+  LEAN_OFFSET: 0.52,
+  LEAN_TILT: 0.16,
+
+  // Camera pitch limit
+  MAX_PITCH_OFFSET: 0.06,
+
+  // Quake / CPMA / Source Engine Air-Strafe & Auto-Bunnyhop Physics (Uncapped Horizontal Speed!)
+  GROUND_ACCEL: 11.5,         // Ground acceleration rate
+  GROUND_FRICTION: 6.2,       // Ground friction (skipped on landing frame when holding Space to bunnyhop!)
+  GROUND_STOP_SPEED: 3.2,     // Minimum speed threshold for ground friction curve
+  AIR_ACCEL: 16.0,            // Quake air acceleration multiplier
+  AIR_WISH_SPEED_CAP: 4.5,    // Quake/Source wishspeed dot-product cap in mid-air (turning into A/D builds uncapped speed!)
+  CPM_AIR_CONTROL: 155.0,     // CPMA-style smooth air steering when holding W or S in mid-air
+
+  // Vehicle camera
+  VEHICLE_3RD_PERSON_HEIGHT: 4.2,
+  VEHICLE_3RD_PERSON_DIST: -8.5,
+  VEHICLE_1ST_PERSON_HEIGHT: 3.05,
+  VEHICLE_FOV_ADS: 42,
+  VEHICLE_FOV_NORMAL: 75,
+};
+
+// ---------------------------------------------------------------------------
+// CLASS TRAITS (UNIQUE STRENGTHS & WEAKNESSES PER COMBAT ROLE)
+// - In Modern Era, ONLY the `pilot` class is flight-certified to pilot aircraft!
+// - Each class has balanced movement speed, body armor, reload/recoil handling,
+//   and role-specific combat strengths and weaknesses.
+// ---------------------------------------------------------------------------
+export const CLASS_TRAITS = {
+  pilot: {
+    id: 'pilot',
+    title: '✈️ COMBAT PILOT (FLIGHT OFFICER)',
+    canFlyAircraft: true,
+    moveSpeedMult: 1.12,      // +12% agile flight-suit foot speed
+    maxArmor: 25,             // WEAKNESS: Light G-Suit vest (25 Armor vs 50 standard)
+    armorAbsorbRatio: 0.25,
+    recoilMult: 1.05,         // Compact PDW handling
+    reloadTimeMult: 0.90,     // +10% faster PDW reloads
+    reserveMagMult: 0.75,     // WEAKNESS: Fewer spare magazines in survival rig
+    bonusGrenades: -1,        // WEAKNESS: Carries 1 grenade instead of 2
+    strengths: 'ONLY CLASS CERTIFIED TO FLY JETS, CAS, AC-130 & B-2 BOMBER • +28% Turn Rate G-Suit • +25 HP/s Airframe Auto-Repair • Zero-Damage Ejection Seat & Parachute • +12% Sprint Speed',
+    weaknesses: 'Light Flight-Suit Armor (25 Max Armor vs 50) • Compact PDW Primary Only • -25% Reserve Rifle Ammo • Only 1 Frag Grenade'
+  },
+  armor: {
+    id: 'armor',
+    title: '🛡️ ARMOR CREWMAN (TANK / IFV COMMANDER)',
+    canFlyAircraft: false,
+    moveSpeedMult: 0.92,      // WEAKNESS: Heavy spall-liner flak vest (-8% foot speed)
+    maxArmor: 65,             // STRENGTH: Reinforced crewman flak armor (65 Armor)
+    armorAbsorbRatio: 0.42,
+    recoilMult: 0.95,
+    reloadTimeMult: 0.95,
+    reserveMagMult: 0.85,     // WEAKNESS: Compact vehicle crew ammo rig
+    bonusGrenades: 0,
+    strengths: '+22 HP/s Passive Tank/IFV Hull Auto-Repair • +22% Faster Main Cannon Reload • [X] Trophy APS & 360° Smoke • 0 Vehicle Bailout Damage • 65 Heavy Flak Armor',
+    weaknesses: 'Cannot Fly Aircraft • -8% Infantry Movement Speed (Heavy Spall Vest) • Short-Range Crew PDW Primary'
+  },
+  engineer: {
+    id: 'engineer',
+    title: '🛠️ COMBAT ENGINEER (AT/AA & FORTIFICATIONS)',
+    canFlyAircraft: false,
+    moveSpeedMult: 0.94,      // WEAKNESS: Heavy RPG-7 / Stinger tubes & tool kit (-6% speed)
+    maxArmor: 55,             // STRENGTH: Reinforced blast vest (55 Armor)
+    armorAbsorbRatio: 0.38,
+    recoilMult: 1.08,         // WEAKNESS: +8% weapon recoil due to heavy ordnance load
+    reloadTimeMult: 1.0,
+    reserveMagMult: 1.0,
+    bonusGrenades: 0,
+    strengths: 'Dual RPG-7 HEAT (Anti-Tank) & FIM-92 Stinger SAM (Anti-Air) on [3] • 2× Faster Vehicle & Building Repair • Builds Heavy Emplacements',
+    weaknesses: 'Cannot Fly Aircraft • -6% Movement Speed (Heavy Launcher & Tool Load) • +8% Rifle Recoil'
+  },
+  assault: {
+    id: 'assault',
+    title: '💥 SHOCK ASSAULT (FRONT-LINE BREACHER)',
+    canFlyAircraft: false,
+    moveSpeedMult: 1.08,      // STRENGTH: +8% aggressive breach sprint speed
+    maxArmor: 50,
+    armorAbsorbRatio: 0.35,
+    recoilMult: 0.82,         // STRENGTH: -18% weapon recoil control
+    reloadTimeMult: 0.76,     // STRENGTH: -24% faster magazine reloads
+    reserveMagMult: 1.25,     // STRENGTH: +25% extra rifle magazines
+    bonusGrenades: 1,         // STRENGTH: +1 Extra Frag Grenade (3 total) + C4 Breach Charges
+    strengths: '-24% Faster Reload Speed • -18% Weapon Recoil • +8% Sprint Speed • +1 Bonus Frag Grenade & C4 Charges • +25% Reserve Ammo',
+    weaknesses: 'Cannot Fly Aircraft • No Long-Range Anti-Air / Anti-Tank Rockets • Standard 2 Field Dressings Only'
+  },
+  medic: {
+    id: 'medic',
+    title: '➕ FIELD COMBAT MEDIC (TRAUMA SPECIALIST)',
+    canFlyAircraft: false,
+    moveSpeedMult: 1.06,      // STRENGTH: +6% rapid rescue foot speed
+    maxArmor: 38,             // WEAKNESS: Lighter trauma vest (38 Armor vs 50)
+    armorAbsorbRatio: 0.30,
+    recoilMult: 0.92,
+    reloadTimeMult: 0.90,
+    reserveMagMult: 1.0,
+    bonusGrenades: -1,        // WEAKNESS: Focuses on medical triage instead of heavy ordnance
+    strengths: '9 Field Dressings + 600 HP Medic Bag • 2× Faster Teammate Revive & Bandaging • Passive Self-Triage Regen (+4 HP/s Out of Combat) • +6% Move Speed',
+    weaknesses: 'Cannot Fly Aircraft • Lighter Trauma Vest (38 Max Armor) • Zero Anti-Armor Explosives (No RPG / C4)'
+  },
+  support: {
+    id: 'support',
+    title: '📦 HEAVY SUPPORT GUNNER (EXO-ARMOR & RESUPPLY)',
+    canFlyAircraft: false,
+    moveSpeedMult: 0.88,      // WEAKNESS: Heavy 100-round LMG + ballistic plates (-12% foot speed)
+    maxArmor: 80,             // STRENGTH: Heavy steel ballistic plates (80 Armor, 48% absorb)
+    armorAbsorbRatio: 0.48,
+    recoilMult: 0.88,         // Heavy bipod/barrel stability
+    reloadTimeMult: 1.15,     // WEAKNESS: +15% slower box-mag reload
+    reserveMagMult: 1.50,     // STRENGTH: +50% reserve ammunition
+    bonusGrenades: 1,
+    strengths: 'Heavy Ballistic Plate Armor (80 Max Armor) • Deploys Squad Ammo & Kit Stashes [7] (-40% Cooldown) • 100-Rd LMG Suppression • +50% Reserve Ammo',
+    weaknesses: 'Cannot Fly Aircraft • -12% Movement Speed (Heavy Armor & LMG) • +15% Slower Reload Cadence'
+  },
+  recon: {
+    id: 'recon',
+    title: '🎯 RECON SNIPER (STEALTH MARKSMAN)',
+    canFlyAircraft: false,
+    moveSpeedMult: 1.14,      // STRENGTH: +14% ghillie recon sprint speed
+    maxArmor: 25,             // WEAKNESS: Ultra-light ghillie rig (25 Armor)
+    armorAbsorbRatio: 0.25,
+    recoilMult: 0.85,
+    reloadTimeMult: 0.92,
+    reserveMagMult: 1.0,
+    bonusGrenades: -1,        // WEAKNESS: 1 grenade
+    strengths: '+14% Stealth Sprint Speed • 8× Mil-Dot Sniper Precision • Deploys Squad Insertion Spawn Beacon [6] • -35% Scope Sway',
+    weaknesses: 'Cannot Fly Aircraft • Ultra-Light Ghillie Suit (25 Max Armor) • Low Close-Quarters Fire Rate'
+  },
+  swordsman: {
+    id: 'swordsman',
+    title: '⚔️ FOOTMAN SERGEANT (1H SWORD & 1H SHIELD)',
+    canFlyAircraft: false,
+    moveSpeedMult: 0.98,
+    maxArmor: 80,
+    armorAbsorbRatio: 0.48,
+    recoilMult: 1.0,
+    reloadTimeMult: 1.0,
+    reserveMagMult: 1.0,
+    bonusGrenades: 0,
+    strengths: '80 Heavy Mail & Plate Armor • 1H Heater Shield Blocks 70% Frontal Arrows & Melee [RMB] • Fast 132 RPM 1H Arming Sword + Throwing Blades',
+    weaknesses: 'Foot Mobility Only (No Personal Horse at Spawn) • Shorter 4.2m Reach Than Polearms & 2H Greatswords'
+  },
+  greatsword_knight: {
+    id: 'greatsword_knight',
+    title: '🗡️ SHOCK CHAMPION (2H LONGSWORD + 2H LARGE SHIELD)',
+    canFlyAircraft: false,
+    moveSpeedMult: 0.92,
+    maxArmor: 95,
+    armorAbsorbRatio: 0.52,
+    recoilMult: 1.0,
+    reloadTimeMult: 1.0,
+    reserveMagMult: 1.0,
+    bonusGrenades: 0,
+    strengths: '165 DMG 2H Zweihänder Greatsword (Cleaves up to 3 Enemies at 5.4m Reach!) • Slot [2] Carries 2H Large Pavise Tower Shield (92% Shield Wall Block!) • 95 Full Plate Armor',
+    weaknesses: 'Cannot Block Arrows While Swinging 2H Greatsword (Switch to Slot [2] 2H Large Shield Against Archers!) • -8% Move Speed'
+  },
+  polearm_knight: {
+    id: 'polearm_knight',
+    title: '🔱 LANCER KNIGHT (POLEARM / LONG SPEAR + WARHORSE)',
+    canFlyAircraft: false,
+    moveSpeedMult: 0.95,
+    maxArmor: 85,
+    armorAbsorbRatio: 0.50,
+    recoilMult: 1.0,
+    reloadTimeMult: 1.0,
+    reserveMagMult: 1.0,
+    bonusGrenades: 0,
+    strengths: 'Spawns with Armored Warhorse + Couched Cavalry Lance (280 DMG Charge!) • 5.8m Long Spear Reach on Foot + Anti-Cavalry Spear Brace [RMB] • Slot [2] 1H Sword & Shield',
+    weaknesses: 'Narrow Piercing Thrust Arc Requires Precise Aim in Close Quarters • Slower Swing Cadence Than 1H Swords'
+  },
+  archer: {
+    id: 'archer',
+    title: '🏹 FOOT LONGBOW ARCHER (YEW LONGBOW + 1H SWORD & SHIELD)',
+    canFlyAircraft: false,
+    moveSpeedMult: 1.08,
+    maxArmor: 40,
+    armorAbsorbRatio: 0.32,
+    recoilMult: 0.85,
+    reloadTimeMult: 0.85,
+    reserveMagMult: 1.25,
+    bonusGrenades: 0,
+    strengths: 'Rapid-Draw 150-lb Royal Yew Longbow (98 DMG Bodkin Arrows • 2.5× Headshot) • +8% Agile Foot Speed • Slot [2] 1H Sword & 1H Shield + Slot [3] Trauma Medkit',
+    weaknesses: 'Light Brigandine Archer Vest (40 Max Armor) • Vulnerable to Heavy Cavalry Charges if Caught in the Open'
+  },
+  crossbowman: {
+    id: 'crossbowman',
+    title: '🎯 SIEGE CROSSBOWMAN (ARBALEST + 2H LARGE PAVISE SHIELD)',
+    canFlyAircraft: false,
+    moveSpeedMult: 0.96,
+    maxArmor: 65,
+    armorAbsorbRatio: 0.42,
+    recoilMult: 0.80,
+    reloadTimeMult: 1.0,
+    reserveMagMult: 1.15,
+    bonusGrenades: 0,
+    strengths: '148 DMG Flat-Trajectory Heavy Siege Crossbow (260 m/s Armor-Piercing Quarrels!) • Slot [2] 2H Large Pavise Tower Shield (92% Shield Wall Block!) • Slot [3] 1H Sword',
+    weaknesses: '1.95s Windlass Reload Between Bolts • Must Swap to Slot [2] Pavise Shield While Advancing Under Fire'
+  },
+  mounted_knight: {
+    id: 'mounted_knight',
+    title: '🏇 MOUNTED CAVALRY ARCHER (WARHORSE + LONGBOW + LANCE)',
+    canFlyAircraft: false,
+    moveSpeedMult: 1.05,
+    maxArmor: 55,
+    armorAbsorbRatio: 0.38,
+    recoilMult: 0.90,
+    reloadTimeMult: 0.90,
+    reserveMagMult: 1.2,
+    bonusGrenades: 0,
+    strengths: 'Deploys Mounted on Armored Royal Warhorse (81 km/h Gallop + Trample) • Slot [1] Yew Longbow + Slot [2] Couched Cavalry Lance + Slot [3] 1H Sword & Shield',
+    weaknesses: 'Medium Cavalry Mail Armor (55 Max Armor) • Larger Silhouette While Mounted on Horseback'
+  },
+  dino_raptor: {
+    id: 'dino_raptor',
+    title: '🦖 VELOCIRAPTOR ALPHA PACK HUNTER',
+    canFlyAircraft: false,
+    moveSpeedMult: 1.45,
+    maxArmor: 60,
+    armorAbsorbRatio: 0.40,
+    recoilMult: 1.0,
+    reloadTimeMult: 0.8,
+    reserveMagMult: 1.0,
+    bonusGrenades: 0,
+    strengths: '+45% Apex Predator Sprint Speed • 110 DMG Sickle Talon Lunge + Neurotoxic Venom Spit • Can Mount Alpha T-Rex [E]',
+    weaknesses: 'Cannot Revive Downed Packmates • Cannot Use Human Firearms or Fortifications'
+  }
+};
+
+// ---------------------------------------------------------------------------
+// CENTRALIZED ERA ROLE & KIT SETTINGS (ISOLATED FROM UI & CONTROLLER FUNCTIONS)
+// Single source of truth for selectable classes, hotkeys (F5-F11), icons, and
+// descriptions across Modern, Medieval (Mount & Blade), and Jurassic eras.
+// ---------------------------------------------------------------------------
+export const ERA_ROLES = {
+  modern: [
+    { id: 'engineer', key: 'F5', icon: '🛠️', label: 'ENGINEER', short: 'ENG', sub: 'RPG/SAM + REPAIR', gadgetId: 'rpg7', gadget: 'RPG-7 HEAT / STINGER AA [3]' },
+    { id: 'assault', key: 'F6', icon: '💥', label: 'ASSAULT', short: 'ASL', sub: 'FAST RELOAD + C4', gadgetId: 'c4', gadget: 'C4 BREACH + EXTRA MAGS' },
+    { id: 'medic', key: 'F7', icon: '➕', label: 'MEDIC', short: 'MED', sub: '2× REVIVE + 9 DRESS', gadgetId: 'medkit', gadget: '600HP MEDIC BAG + 9 DRESSINGS' },
+    { id: 'support', key: 'F8', icon: '📦', label: 'SUPPORT', short: 'SUP', sub: '80 ARMOR + STASH', gadgetId: 'ammocrate', gadget: 'AMMO STASH [7] + 80 ARMOR' },
+    { id: 'recon', key: 'F9', icon: '🎯', label: 'RECON', short: 'RCN', sub: 'BEACON + +14% SPD', gadgetId: 'c4', gadget: 'SPAWN BEACON [6] + 8× SCOPE' },
+    { id: 'armor', key: 'F10', icon: '🛡️', label: 'ARMOR', short: 'ARM', sub: 'TANK APS + REPAIR', gadgetId: 'rpg7', gadget: 'TROPHY APS [X] + +22 HP/S HULL' },
+    { id: 'pilot', key: 'F11', icon: '✈️', label: 'PILOT', short: 'PLT', sub: 'FLY JETS & B-2 ONLY', gadgetId: 'stinger', gadget: 'EXCLUSIVE JET / B-2 PILOT LICENSE' }
+  ],
+  medieval: [
+    { id: 'swordsman', key: 'F5', icon: '⚔️', label: 'FOOTMAN (1H)', short: '1H', sub: '1H SWORD + 1H SHIELD', gadgetId: 'pitch_pot', gadget: '1H SWORD & 1H HEATER SHIELD (70% BLOCK)' },
+    { id: 'greatsword_knight', key: 'F6', icon: '🗡️', label: 'CHAMPION (2H)', short: '2H', sub: '2H LONGSWORD + 2H SHIELD', gadgetId: 'tower_shield_2h', gadget: '2H GREATSWORD (165 DMG) + 2H LARGE SHIELD' },
+    { id: 'polearm_knight', key: 'F7', icon: '🔱', label: 'LANCER KNIGHT', short: 'LNC', sub: 'POLEARM SPEAR + HORSE', gadgetId: 'knight_lance', gadget: 'LONG SPEAR / COUCHED LANCE + WARHORSE' },
+    { id: 'archer', key: 'F8', icon: '🏹', label: 'ARCHER', short: 'ARC', sub: 'YEW LONGBOW + 1H SWORD', gadgetId: 'medkit', gadget: 'ROYAL YEW LONGBOW + 1H SWORD & SHIELD' },
+    { id: 'crossbowman', key: 'F9', icon: '🎯', label: 'CROSSBOWMAN', short: 'XBW', sub: 'CROSSBOW + 2H SHIELD', gadgetId: 'tower_shield_2h', gadget: 'HEAVY ARBALEST (148 DMG) + 2H PAVISE SHIELD' },
+    { id: 'mounted_knight', key: 'F10', icon: '🏇', label: 'HORSE ARCHER', short: 'CAV', sub: 'WARHORSE + BOW + LANCE', gadgetId: 'knight_lance', gadget: 'ARMORED WARHORSE + LONGBOW + LANCE' }
+  ],
+  jurassic_human: [
+    { id: 'archer', key: 'F5', icon: '🏹', label: 'BOW HUNTER', short: 'BOW', sub: 'YEW LONGBOW + SWORD', gadgetId: 'medkit', gadget: 'YEW HUNTING LONGBOW + 1H SWORD & SHIELD' },
+    { id: 'crossbowman', key: 'F6', icon: '🎯', label: 'ARBALEST HUNTER', short: 'XBW', sub: 'HEAVY CROSSBOW + 2H SHIELD', gadgetId: 'tower_shield_2h', gadget: 'HEAVY DINO CROSSBOW (148 DMG) + 2H PAVISE SHIELD' },
+    { id: 'polearm_knight', key: 'F7', icon: '🔱', label: 'SPEAR LANCER', short: 'SPR', sub: 'LONG DINO SPEAR + SWORD', gadgetId: 'knight_lance', gadget: 'LONG DINO-PIERCING SPEAR (5.8M) + WARHORSE' },
+    { id: 'mounted_knight', key: 'F8', icon: '🏇', label: 'MOUNTED HUNTER', short: 'CAV', sub: 'WARHORSE + BOW + LANCE', gadgetId: 'knight_lance', gadget: 'WARHORSE MOUNT + LONGBOW + COUCHED LANCE' },
+    { id: 'greatsword_knight', key: 'F9', icon: '🗡️', label: 'APEX CLEAVER (2H)', short: '2H', sub: '2H GREATSWORD + 2H SHIELD', gadgetId: 'tower_shield_2h', gadget: '2H GREATSWORD (165 DMG) + 2H LARGE SHIELD' },
+    { id: 'swordsman', key: 'F10', icon: '⚔️', label: 'BLADE TRACKER (1H)', short: '1H', sub: '1H SWORD & SHIELD + DAGGERS', gadgetId: 'pitch_pot', gadget: '1H BLADE & SHIELD + THROWING SPEARS' }
+  ],
+  jurassic_dino: [
+    { id: 'dino_raptor', key: 'F5', icon: '🦖', label: 'VELOCIRAPTOR', short: 'RAP', sub: 'TALONS + VENOM + T-REX', gadgetId: 'medkit', gadget: 'SICKLE TALONS + ACID SPIT + MOUNT T-REX' }
+  ]
+};
+
+export function getEraRoles(era = 'modern', team = 'US') {
+  const normEra = String(era || 'modern').toLowerCase();
+  if (normEra === 'medieval') {
+    return ERA_ROLES.medieval;
+  }
+  if (normEra === 'jurassic') {
+    return team === 'RU' ? ERA_ROLES.jurassic_dino : ERA_ROLES.jurassic_human;
+  }
+  return ERA_ROLES.modern;
+}
+
+export function getAllowedRoleIds(era = 'modern', team = 'US') {
+  return getEraRoles(era, team).map((r) => r.id);
+}
+
+export function resolveRoleForEra(role, era = 'modern', team = 'US') {
+  const allowed = getAllowedRoleIds(era, team);
+  const norm = String(role || '').toLowerCase();
+  return allowed.includes(norm) ? norm : allowed[0];
+}
+
+export function getRoleByHotkey(keyCode, era = 'modern', team = 'US') {
+  const list = getEraRoles(era, team);
+  const found = list.find((r) => r.key === keyCode);
+  return found ? found.id : null;
+}
+
+// ---------------------------------------------------------------------------
+// COMBAT
+// ---------------------------------------------------------------------------
+export const COMBAT = {
+  // Kill XP
+  KILL_XP_HEADSHOT: 140,
+  KILL_XP_NORMAL: 100,
+  HEAL_XP: 50,
+  REVIVE_XP: 50,
+
+  // Spot / Ping
+  SPOT_DISTANCE: 220,
+  SPOT_PERP_RADIUS: 3.2,
+  SPOTTED_TIMER: 7.5,
+  PING_TIMER_ENEMY: 5.0,
+  PING_TIMER_SQUAD: 6.5,
+  SPOT_XP: 25,
+
+  // Suppression
+  SUPPRESSION_INTENSITY_PER_DMG: 0.015,
+  SUPPRESSION_MAX_INTENSITY: 0.5,
+
+  // Commo Rose
+  COMMS_XP: 15,
+  COMMS_MEDIC_RANGE: 35,
+  COMMS_SUPPORT_RANGE: 35,
+  COMMS_MEDIC_HEAL: 45,
+};
+
+// ---------------------------------------------------------------------------
+// PROJECTILES
+// ---------------------------------------------------------------------------
+export const PROJECTILES = {
+  RPG: { speed: 62, gravity: 4.2, life: 4.5 },
+  GRENADE: { speed: 22, gravity: 22, life: 2.6 },
+  C4: { speed: 17, gravity: 24, life: 60 },
+  TANK_SHELL: { speed: 155, gravity: 1.75, life: 3.8 },
+  AUTOCANNON: { speed: 135, gravity: 1.45, life: 3.2 },
+  AIR_ROCKET: { speed: 175, gravity: 0.65, life: 4.5 },
+  A2A_MISSILE: { speed: 215, gravity: 0.0, life: 6.5, turnRate: 3.8 },
+  STINGER_SAM: { speed: 265, gravity: 0.0, life: 6.5, turnRate: 5.2, blastRadius: 10.5, blastDamage: 560 },
+  JDAM_BOMB: { speed: 42, gravity: 26.0, life: 26.0, blastRadius: 11.5, blastDamage: 380 },
+  GBU28_BOMB: { speed: 38, gravity: 28.0, life: 26.0, blastRadius: 16.5, blastDamage: 560 },
+  B2_CARPET_BOMB: { speed: 95, gravity: 28.0, life: 28.0, blastRadius: 13.5, blastDamage: 460 },
+  GBU57_MOP: { speed: 85, gravity: 28.0, life: 28.0, blastRadius: 24.0, blastDamage: 950 },
+  WRIGHT_DYNAMITE: { speed: 28, gravity: 20.0, life: 26.0, blastRadius: 15.0, blastDamage: 680 },
+  MORTAR_SHELL: { speed: 78, gravity: 18.0, life: 18.0, blastRadius: 11.5, blastDamage: 340 },
+  AC130_40MM: { speed: 165, gravity: 1.8, life: 18.0, blastRadius: 7.5, blastDamage: 240 },
+  AC130_105MM: { speed: 145, gravity: 4.5, life: 22.0, blastRadius: 14.5, blastDamage: 620 },
+  C4_BLAST_RADIUS: 5.6,
+  C4_BLAST_DAMAGE: 250,
+};
+
+// ---------------------------------------------------------------------------
+// DISTANCES
+// ---------------------------------------------------------------------------
+export const DISTANCES = {
+  INTERACT_RANGE: 4.5,
+  VEHICLE_ENTER_RANGE: 7.5,
+  FLAG_EXTRA_PAD: 18,
+  RAYCAST_MAX: 3600,
+  HAMMER_RANGE: 5.2,
+};
+
+// ---------------------------------------------------------------------------
+// RALLY & BEACON
+// ---------------------------------------------------------------------------
+export const DEPLOYABLES = {
+  // Rally Point
+  RALLY_TIMER: 120,
+  RALLY_COOLDOWN: 90,
+  RALLY_ENEMY_CLEAR_RADIUS: 20,
+  RALLY_ENEMY_DESTROY_RADIUS: 8,
+
+  // Insertion Beacon
+  BEACON_SPAWNS: 2,
+  BEACON_TIMER: 180,
+
+  // Squad Field Ammo & Kit Stash / Supply Crate
+  AMMO_CRATE_TIMER: 120,
+  AMMO_CRATE_RADIUS: 6.0,
+  AMMO_STASH_COOLDOWN: 45,
+};
+
+// ---------------------------------------------------------------------------
+// VEHICLES (Consistent, realistic combat vehicle speed hierarchy across all eras)
+// - Main Battle Tank (M1A2 / T-90M): 19.0 m/s (68 km/h max), heavy 65-ton tracked inertia
+// - Mobile Air Defense (LAV-AD / Tunguska): 21.5 m/s (77 km/h max), 16-ton radar SPAAG
+// - Wheeled IFV / APC (LAV-25 / BTR-82A): 23.5 m/s (85 km/h max), 15-ton 8x8 amphibious IFV
+// - Tactical Armored Car (M1151 Humvee / GAZ Tigr): 26.5 m/s (95 km/h max), nimble 5-ton 4x4
+// - Tactical 4x4 Quad ATV (Polaris MV850): 29.0 m/s (104 km/h max), all-terrain scout quad
+// - Military Recon Motorcycles (M1030M1 / AWD 450 / SOF Silent / KLR650): 32.0–36.5 m/s (115–131 km/h)
+// ---------------------------------------------------------------------------
+export const VEHICLE_STATS = {
+  TANK: { maxHp: 1600, speed: 19.0, accelRate: 1.45, brakeRate: 2.4, turnRate: 0.98, minPitchRad: -0.18, maxPitchRad: 0.35 },
+  APC: { maxHp: 1050, speed: 23.5, accelRate: 1.95, brakeRate: 2.8, turnRate: 1.25, minPitchRad: -0.18, maxPitchRad: 0.52 },
+  AA_VEHICLE: { maxHp: 980, speed: 21.5, accelRate: 1.9, brakeRate: 2.7, turnRate: 1.25, minPitchRad: -0.14, maxPitchRad: 1.48 },
+  HUMVEE: { maxHp: 700, speed: 26.5, accelRate: 2.55, brakeRate: 3.4, turnRate: 1.5, minPitchRad: -0.21, maxPitchRad: 0.61 },
+  PLANE_CAS: { maxHp: 1550, speed: 58, minSpeed: 32, maxSpeed: 84, accelRate: 2.6, brakeRate: 2.8, turnRate: 1.35 },
+  PLANE_BOMBER: { maxHp: 1350, speed: 68, minSpeed: 40, maxSpeed: 98, accelRate: 2.8, brakeRate: 2.5, turnRate: 1.18 },
+  PLANE_FIGHTER: { maxHp: 1250, speed: 78, minSpeed: 42, maxSpeed: 115, accelRate: 3.4, brakeRate: 3.0, turnRate: 1.65 },
+  PLANE_GUNSHIP: { maxHp: 3200, speed: 44, minSpeed: 30, maxSpeed: 62, accelRate: 2.0, brakeRate: 2.2, turnRate: 0.95 },
+  PLANE_B2_SPIRIT: { maxHp: 2400, speed: 125, minSpeed: 48, maxSpeed: 185, accelRate: 5.8, brakeRate: 3.8, turnRate: 1.95, stealthFactor: 0.12 },
+  // 1903 Wright Flyer I ("Kitty Hawk Flyer" — Secret Cave Pioneer Biplane):
+  // Real-world stall speed: ~29 km/h (8.0 m/s / 18 mph); starts slow with gradual spool-up acceleration (accelRate: 0.24)
+  // before winding up to an incredible 522 km/h (145 m/s) cruise and 846 km/h (235 m/s) top speed!
+  PLANE_WRIGHT_FLYER: { maxHp: 1800, speed: 145.0, minSpeed: 8.0, maxSpeed: 235.0, accelRate: 0.24, brakeRate: 1.85, turnRate: 2.25, stealthFactor: 0.25 },
+  EMPLACEMENT: { maxHp: 650, speed: 0, accelRate: 0, brakeRate: 10, turnRate: 0, minPitchRad: -0.20, maxPitchRad: 0.65 },
+
+  // Military Recon Motorcycles, Silent E-Motos & Tactical 4x4 Quad ATV Stats (Consistent combat speeds)
+  BIKE_50CC: { maxHp: 380, speed: 24.0, accelRate: 3.5, brakeRate: 4.8, turnRate: 2.45, cc: 50 },
+  BIKE_125CC_2T: { maxHp: 420, speed: 29.5, accelRate: 4.8, brakeRate: 5.2, turnRate: 2.55, cc: 125, isTwoStroke: true },
+  BIKE_250CC_2T: { maxHp: 460, speed: 32.0, accelRate: 5.5, brakeRate: 5.4, turnRate: 2.4, cc: 250, isTwoStroke: false },
+  BIKE_500CC_2T: { maxHp: 520, speed: 35.0, accelRate: 6.2, brakeRate: 5.6, turnRate: 2.25, cc: 450, isTwoStroke: false },
+  BIKE_600CC: { maxHp: 560, speed: 36.5, accelRate: 5.8, brakeRate: 6.0, turnRate: 2.15, cc: 650 },
+  BIKE_750CC: { maxHp: 600, speed: 38.0, accelRate: 6.3, brakeRate: 6.2, turnRate: 2.1, cc: 750 },
+  BIKE_1000CC: { maxHp: 650, speed: 41.0, accelRate: 7.0, brakeRate: 6.8, turnRate: 2.05, cc: 1000 },
+  SCOOTER_KUKIRIN: { maxHp: 360, speed: 25.0, accelRate: 6.2, brakeRate: 5.5, turnRate: 2.75, isElectric: true },
+  EMOTO_TUTTIO: { maxHp: 390, speed: 24.0, accelRate: 6.5, brakeRate: 5.4, turnRate: 2.65, isElectric: true },
+  EMOTO_YOZMA: { maxHp: 430, speed: 27.5, accelRate: 6.9, brakeRate: 5.5, turnRate: 2.55, isElectric: true },
+  EMOTO_CEMOTO: { maxHp: 460, speed: 31.0, accelRate: 7.2, brakeRate: 5.6, turnRate: 2.45, isElectric: true },
+  EMOTO_SURRON: { maxHp: 480, speed: 33.5, accelRate: 7.8, brakeRate: 5.8, turnRate: 2.5, isElectric: true },
+  EMOTO_STARK_VARG: { maxHp: 550, speed: 37.5, accelRate: 8.8, brakeRate: 6.2, turnRate: 2.4, isElectric: true },
+  ATV_QUAD: { maxHp: 680, speed: 29.0, accelRate: 4.8, brakeRate: 5.2, turnRate: 2.1 },
+
+  // RPM values (Upgraded high-cadence mounted weapons: .50 Cal M2HB 720 RPM, 7.62mm Coax MG 950 RPM, 30mm Autocannon 330 RPM, A-10 GAU-8 1320 RPM)
+  RPM_TANK_US: 28,
+  RPM_TANK_RU: 26,
+  RPM_APC: 330,
+  RPM_AA_AUTOCANNON: 1050,
+  RPM_HUMVEE: 720,
+  RPM_COAX: 950,
+  RPM_GAU8: 1320,
+  RPM_BOMBER_JDAM: 48,
+  RPM_B2_CARPET: 260,
+  RPM_WRIGHT_GATLING: 840,
+  RPM_FIGHTER_VULCAN: 1080,
+  RPM_AC130_25MM: 1600,
+  RPM_AC130_40MM: 120,
+  RPM_AC130_105MM: 18,
+  RPM_EMPLACE_HMG: 750,
+  RPM_EMPLACE_AA: 1100,
+  RPM_MORTAR: 24,
+
+  // Respawn delays (seconds) & Faction War-Chest Economy
+  RESPAWN_DELAY_TANK: 28.0,
+  RESPAWN_DELAY_APC: 22.0,
+  RESPAWN_DELAY_HUMVEE: 15.0,
+  RESPAWN_DELAY_PLANE: 35.0,
+  RESPAWN_DELAY_B2_SPIRIT: 90.0,
+
+  // Faction Treasury / Money costs for aircraft respawns & B-2 Kill-Gate
+  INITIAL_FACTION_FUNDS: 5000,
+  FACTION_KILL_REWARD: 120,
+  FACTION_CAPTURE_REWARD: 450,
+  FACTION_COST_PLANE: 800,
+  FACTION_COST_B2_SPIRIT: 2000,
+  B2_UNLOCK_KILLS: 25,
+
+  // Ticket costs
+  TICKET_COST_TANK: 15,
+  TICKET_COST_APC: 10,
+  TICKET_COST_HUMVEE: 5,
+  TICKET_COST_PLANE: 12,
+  TICKET_COST_B2_SPIRIT: 25,
+
+  // Standoff radii (STAY_CLOSE vs FAN_OUT)
+  STANDOFF_CLOSE_TANK: 42,
+  STANDOFF_CLOSE_APC: 36,
+  STANDOFF_CLOSE_HUMVEE: 32,
+  STANDOFF_FAN_TANK: 105,
+  STANDOFF_FAN_APC: 100,
+  STANDOFF_FAN_HUMVEE: 95,
+
+  // AI Vehicle engage ranges
+  ENGAGE_RANGE_VEHICLE: 155,
+  ENGAGE_RANGE_INFANTRY: 135,
+  ENGAGE_RANGE_AIRCRAFT: 650,
+
+  // Combat & XP
+  DESTROY_XP_TANK: 400,
+  DESTROY_XP_PLANE: 350,
+  DESTROY_XP_OTHER: 250,
+  BAILOUT_DAMAGE: 42,
+  ROADKILL_XP: 150,
+  ROADKILL_DAMAGE_BOT: 160,
+  ROADKILL_DAMAGE_PLAYER: 150,
+
+  // Expanded Battlefield Two-Tier Map & High-Altitude Airspace Bounds (4,800m x 3,200m Theater, 3,500m Ceiling)
+  AIRSPACE_MAX_X: 2400,
+  AIRSPACE_MAX_Z: 1650,
+  AIRSPACE_MAX_ALT: 3500,
+  AIRSPACE_DEFAULT_ALT: 150,
+};
+export const VEHICLES = VEHICLE_STATS;
+
+// ---------------------------------------------------------------------------
+// CAMERA & RENDERER
+// ---------------------------------------------------------------------------
+export const CAMERA = {
+  FOV: 75,
+  NEAR: 0.08,
+  FAR: 9500,
+  PIXEL_RATIO_CAP: 1.35,
+};
+
+// ---------------------------------------------------------------------------
+// LIGHTING
+// ---------------------------------------------------------------------------
+export const LIGHTING = {
+  HEMI_INTENSITY: 0.78,
+  SUN_INTENSITY: 1.25,
+  SUN_POSITION: [160, 220, 120],
+  SHADOW_MAP_SIZE: 1024,
+  SHADOW_NEAR: 10,
+  SHADOW_FAR: 550,
+  SHADOW_EXTENT: 260,
+};
+
+// ---------------------------------------------------------------------------
+// MATCH
+// ---------------------------------------------------------------------------
+export const MATCH = {
+  DURATION: 15 * 60,  // 900 seconds
+  BLEED_POPUP_INTERVAL: 10.0,
+  MAX_TICKETS: 999,
+
+  // Contested base bleed rates (per min)
+  CONTESTED_BLEED_CAN_RESPAWN: 36,
+  CONTESTED_BLEED_LOCKED: 90,
+
+  // Death orbit camera
+  ORBIT_SPEED: 0.12,
+  ORBIT_RADIUS_X: 85,
+  ORBIT_RADIUS_Z: 62,
+  ORBIT_HEIGHT: 46,
+
+  // Cash gain
+  CASH_MIN: 10,
+  CASH_MULT: 0.45,
+
+  // UAV recon assist
+  UAV_RECON_ASSIST_PTS: 35,
+};
+
+// ---------------------------------------------------------------------------
+// WEATHER
+// ---------------------------------------------------------------------------
+export const WEATHER = {
+  TIMER_MIN: 120,
+  TIMER_RAND: 180,
+  FOG_DENSITY_BASE: 0.0006,
+};
+
+// ---------------------------------------------------------------------------
+// TERRAIN
+// ---------------------------------------------------------------------------
+export const TERRAIN = {
+  MAX_SPAN: 3,          // structural integrity cantilever span
+  BRIDGE_DECK_HEIGHT: 1.15,
+  BUILDING_COLLAPSE_THRESHOLD: 0.45, // ratio: <= 0.45 means >55% destroyed -> collapse
+  FLAG_RADIUS_DEFAULT: 34,
+  FLAG_RADIUS_CHARLIE: 36,
+};
+
+// ---------------------------------------------------------------------------
+// MATERIALS (voxel HP values)
+// ---------------------------------------------------------------------------
+export const MAT_HP = {
+  BRICK: 90,
+  CONCRETE: 130,
+  DARK_CONCRETE: 165,
+  SANDBAG: 85,
+  WOOD: 55,
+  CONTAINER: 150,
+  PROP: 35,
+};
+
+// ---------------------------------------------------------------------------
+// BOT
+// ---------------------------------------------------------------------------
+export const BOT = {
+  HP: 100,
+  MAX_HP: 100,
+  ARMOR_HP: 35,
+  BLEEDOUT_TIMER: 95.0,
+  RESPAWN_TIMER: 3.5,
+
+  // Engage ranges
+  ENGAGE_RANGE_INFANTRY: 115,
+  ENGAGE_RANGE_RPG_CHECK: 135,
+  ENGAGE_RANGE_RPG_TOGGLE: 130,
+  COMBAT_RANGE_INFANTRY: 68,
+  COMBAT_RANGE_VEHICLE: 65,
+
+  // Rescue threat ranges — medic assess/re-assess/approach/point-blank/ambush
+  RESCUE_THREAT_MEDIC_ASSESS: 36,
+  RESCUE_THREAT_CASUALTY_ASSESS: 32,
+  RESCUE_THREAT_MEDIC_REASSESS: 34,
+  RESCUE_THREAT_CASUALTY_REASSESS: 28,
+  RESCUE_THREAT_APPROACH_MEDIC: 48,
+  RESCUE_THREAT_APPROACH_CASUALTY: 42,
+  RESCUE_THREAT_POINTBLANK_MEDIC: 12,
+  RESCUE_THREAT_POINTBLANK_CASUALTY: 10,
+  RESCUE_THREAT_AMBUSH_MEDIC: 10,
+  RESCUE_THREAT_AMBUSH_CASUALTY: 9,
+
+  // Rescue ranges
+  RESCUE_RANGE_MEDIC: 95,
+  RESCUE_RANGE_OTHER: 20,
+
+  // Medic Injury Healing & Squad Medical Supplies (9 Field Dressings for Medics, 2 for others + 1 Medic Bag)
+  FIELD_DRESSINGS_MEDIC: 9,
+  FIELD_DRESSINGS_OTHER: 2,
+  MEDIC_BAG_MAX_SUPPLY: 600,
+  MEDIC_HEAL_RANGE: 60,
+  MEDIC_HEAL_AURA_RADIUS: 7.5,
+  MEDIC_HEAL_RATE: 34,
+
+  // Revive (Field Dressing stabilizes casualty at 40 HP; Medic Bag then heals to 100 HP!)
+  REVIVE_HP: 40,
+  POST_REVIVE_TIMER: 2.2,
+  POST_REVIVE_WEAPON_READY: 1.85,
+  MEDIC_REVIVE_TIME: 1.55,
+  NON_MEDIC_REVIVE_TIME: 2.25,
+
+  // Drag
+  DRAG_TIMER: 1.75,
+  DRAG_SPEED: 4.5,
+
+  // Movement speeds
+  SPEED_SPRINT: 8.4,
+  SPEED_APPROACH_SLOW: 7.2,
+  SPEED_APPROACH_FAST: 8.4,
+  SPEED_COMBAT_SLOW: 6.2,
+  SPEED_COMBAT_MED: 6.5,
+  SPEED_COMBAT_FAST: 6.8,
+  SPEED_PATROL: 7.6,
+
+  // Physics
+  GRAVITY: 24.0,
+  VAULT_JUMP_SPEED: 7.6,
+
+  // Shoot cooldowns
+  BURST_PAUSE_BASE: 0.48,
+  BURST_PAUSE_RAND: 0.4,
+  BURST_SHOT_INTERVAL: 0.11,
+  RPG_COOLDOWN_BASE: 3.6,
+  RPG_COOLDOWN_RAND: 1.4,
+
+  // AI think
+  RETHINK_TIMER_BASE: 3.5,
+  RETHINK_TIMER_RAND: 4.5,
+
+  // Speech
+  SPEECH_BUBBLE_TIMER: 4.2,
+  COMMS_FORCE_COOLDOWN: 0.45,
+  COMMS_NORMAL_COOLDOWN: 2.6,
+
+  // FOV cone
+  FOV_BEHIND_DOT: -0.3,     // dot < -0.3 means behind
+  FOV_CHECK_BEYOND: 14,     // only check FOV beyond 14m
+
+  // Smoke screen
+  SMOKE_MAX_CLOUDS: 18,
+  SMOKE_LIFE: 7.5,
+
+  // Base radii
+  MAIN_BASE_RADIUS: 58,
+  FLAG_CONTEST_RADIUS: 34,
+
+  // Vehicle seeking
+  VEHICLE_SEEK_RANGE_BRAVO: 240,
+  VEHICLE_SEEK_RANGE_OTHER: 95,
+  VEHICLE_BOARD_DISTANCE: 4.8,
+
+  // Turn rates
+  TURN_RATE_POST_REVIVE: 1.35,
+  TURN_RATE_GETTING_UP: 2.15,
+  TURN_RATE_NORMAL: 3.2,
+
+  // Aim
+  AIM_RAISE_RATE: 1.85,
+  AIM_FIRE_GATE: 0.85,
+  AIM_OFF_TARGET_THRESHOLD: 0.26,
+};
+
+// ---------------------------------------------------------------------------
+// FORMATION SPACING (STAY_CLOSE vs FAN_OUT)
+// ---------------------------------------------------------------------------
+export const FORMATION = {
+  CLOSE_STANDOFF_BASE: 11,
+  CLOSE_STANDOFF_STEP: 2.0,
+  FAN_STANDOFF_BASE: 25,
+  FAN_STANDOFF_STEP: 3.5,
+
+  CLOSE_OBJ_BASE: 8,
+  CLOSE_OBJ_STEP: 1.5,
+  FAN_OBJ_BASE: 16,
+  FAN_OBJ_STEP: 2.8,
+
+  CLOSE_CLUSTER_BASE: 2.0,
+  CLOSE_CLUSTER_ALT: 1.8,
+  FAN_CLUSTER_BASE: 6.5,
+  FAN_CLUSTER_ALT: 5.0,
+};
+
+// ---------------------------------------------------------------------------
+// UI
+// ---------------------------------------------------------------------------
+export const UI = {
+  INITIAL_TICKETS_US: 800,
+  INITIAL_TICKETS_RU: 800,
+  INITIAL_MATCH_TIME: 900,
+  FPS_SMOOTHED_DEFAULT: 60,
+  FRAME_MS_SMOOTHED_DEFAULT: 16.7,
+  ROSTER_UPDATE_INTERVAL: 0.25,   // 4 Hz
+  MARKER_UPDATE_INTERVAL: 0.05,   // 20 Hz
+  MINIMAP_UPDATE_INTERVAL: 0.066, // 15 Hz
+};
+
+// ---------------------------------------------------------------------------
+// AUDIO
+// ---------------------------------------------------------------------------
+export const AUDIO = {
+  MASTER_GAIN: 0.78,
+  DEFAULT_MASTER_VOLUME: 80,
+  DEFAULT_WEAPONS_VOLUME: 85,
+  DEFAULT_EXPLOSIONS_VOLUME: 85,
+  DEFAULT_RADIO_VOLUME: 80,
+  MAX_ACTIVE_VOICES: 24,
+  VOICE_CULL_DIST: 30,
+  TANK_CANNON_MAX_DIST: 250,
+  EXPLOSION_MAX_DIST: 250,
+  AUTOCANNON_IMPACT_MAX_DIST: 145,
+  WHIZ_COOLDOWN_MS: 150,
+  EXPLOSION_COOLDOWN_MS: 55,
+  AUTOCANNON_COOLDOWN_MS: 75,
+};
+
+// ---------------------------------------------------------------------------
+// NETWORK & BATTLEBIT AI POPULATION SCALE (125 per side = 250 AI default)
+// ---------------------------------------------------------------------------
+export const NETWORK = {
+  BOTS_MASSIVE_AI: 125, // 125 US + 125 RU = 250 AI Soldiers (BattleBit 127v127 Scale)
+  BOTS_LARGE_AI: 80,    // 80 US + 80 RU = 160 AI Soldiers
+  BOTS_TACTICAL_AI: 40, // 40 US + 40 RU = 80 AI Soldiers
+  BOTS_FULL_AI: 125,    // Default: 250 Total AI Soldiers
+  BOTS_SQUAD_AI: 16,    // 16 US + 16 RU = 32 AI Soldiers
+  WS_SYNC_INTERVAL: 0.06,
+  HTTP_SYNC_INTERVAL: 0.16,
+  ROOM_POLL_INTERVAL: 2.2,
+  REMOTE_TIMEOUT_MS: 5500,
+  SPEECH_BUBBLE_TIMER: 4.5,
+  REMOTE_GUNSHOT_RANGE: 130,
+};
+
+// ---------------------------------------------------------------------------
+// TELEMETRY
+// ---------------------------------------------------------------------------
+export const TELEMETRY = {
+  SNAPSHOT_INTERVAL: 3.5,
+  FLUSH_INTERVAL: 1.5,
+  MAX_EVENTS: 80,
+};
+
+// ---------------------------------------------------------------------------
+// GROUP ALIASES (for convenience)
+// ---------------------------------------------------------------------------
+export const SQUADS = FORMATION;
+export const TICKETS = MATCH;
+export const COOLDOWNS = {
+  RALLY_COOLDOWN: DEPLOYABLES.RALLY_COOLDOWN,
+  BURST_PAUSE_BASE: BOT.BURST_PAUSE_BASE,
+  BURST_PAUSE_RAND: BOT.BURST_PAUSE_RAND,
+  BURST_SHOT_INTERVAL: BOT.BURST_SHOT_INTERVAL,
+  RPG_COOLDOWN_BASE: BOT.RPG_COOLDOWN_BASE,
+  RPG_COOLDOWN_RAND: BOT.RPG_COOLDOWN_RAND,
+  COMMS_FORCE_COOLDOWN: BOT.COMMS_FORCE_COOLDOWN,
+  COMMS_NORMAL_COOLDOWN: BOT.COMMS_NORMAL_COOLDOWN,
+};
+
+// ---------------------------------------------------------------------------
+// SKY / FOG COLOR  (shared scene.background & scene.fog)
+// ---------------------------------------------------------------------------
+export const SKY_FOG_COLOR = 0x87b8d8;

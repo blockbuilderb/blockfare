@@ -1,0 +1,39 @@
+{
+  "description": "Centralized CC0 Audio Asset Package for BattleBit Clone (Infantry, Armor, Ordnance)",
+  "sources": [
+    "buddingmonkey/FreeFirearmsSFXLibrary (CC0 Public Domain)",
+    "Deases/GunLib (CC0 Public Domain)"
+  ],
+  "packages": {
+    "infantry": {
+      "directory": "assets/audio/infantry/",
+      "files": {
+        "rifle_ar15": { "file": "rifle_ar15.wav", "maxDurationSec": 0.22, "caliber": "5.56x45mm NATO" },
+        "rifle_ak47": { "file": "rifle_ak47.wav", "maxDurationSec": 0.22, "caliber": "7.62x39mm" },
+        "smg_9mm": { "file": "smg_9mm.wav", "maxDurationSec": 0.16, "caliber": "9x19mm" },
+        "lmg_762": { "file": "lmg_762.wav", "maxDurationSec": 0.23, "caliber": "7.62x54mmR" },
+        "sniper_308": { "file": "sniper_308.wav", "maxDurationSec": 0.38, "caliber": ".308 / .30-06" },
+        "pistol_9mm": { "file": "pistol_9mm.wav", "maxDurationSec": 0.15, "caliber": "9x19mm" },
+        "reload_rifle": { "file": "reload_rifle.ogg", "maxDurationSec": 0.95 },
+        "reload_sniper": { "file": "reload_sniper.ogg", "maxDurationSec": 0.45 },
+        "weapon_click": { "file": "weapon_click.ogg", "maxDurationSec": 0.08 }
+      }
+    },
+    "armor": {
+      "directory": "assets/audio/armor/",
+      "files": {
+        "autocannon_30mm": { "file": "autocannon_30mm.wav", "maxDurationSec": 0.15, "vehicle": "LAV-25 / BTR-82A 30mm HE" },
+        "hmg_50cal": { "file": "hmg_50cal.wav", "maxDurationSec": 0.16, "vehicle": "M1151 Humvee / GAZ Tigr .50 BMG" },
+        "tank_cannon_120mm": { "file": "tank_cannon_120mm.wav", "maxDurationSec": 0.38, "vehicle": "M1A2 Abrams 120mm / T-90M 125mm" },
+        "armor_ricochet": { "file": "armor_ricochet.ogg", "maxDurationSec": 0.075 }
+      }
+    },
+    "ordnance": {
+      "directory": "assets/audio/ordnance/",
+      "files": {
+        "rpg_launch": { "file": "rpg_launch.ogg", "maxDurationSec": 0.28 },
+        "explosion_blast": { "file": "explosion_blast.ogg", "maxDurationSec": 0.44 }
+      }
+    }
+  }
+}

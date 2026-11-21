@@ -1,0 +1,3006 @@
+import * as THREE from '../../vendor/three.module.js';
+import { sound } from '../audio.js?v=90';
+import {
+  PLAYER,
+  COMBAT,
+  PROJECTILES,
+  DISTANCES,
+  DEPLOYABLES,
+  getAllowedRoleIds,
+  resolveRoleForEra
+} from '../config.js?v=90';
+import { events } from '../events.js?v=90';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=90';
+
+export const CombatMethods = {
+  getActiveOpticType() {
+    const cur = this.currentWeapon();
+    if (!cur || !cur.def.opticType) return null;
+    if (this.useCantedSight && cur.def.hasCantedSight) {
+      return 'reddot';
+    }
+    return cur.def.opticType;
+  },
+
+  /**
+   * Finds the nearest injured standing friendly soldier (hp < 100) within `maxDist` meters.
+   */
+  findNearestInjuredFriendly(maxDist = DISTANCES.INTERACT_RANGE) {
+    if (!this.botManager || !this.botManager.bots) return null;
+    let best = null;
+    let bestDist = maxDist;
+    for (const b of this.botManager.bots) {
+      if (b.dead || b.downed || b.team !== this.team || b.hp >= PLAYER.MAX_HP) continue;
+      const d = b.pos.distanceTo(this.pos);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = b;
+      }
+    }
+    return best;
+  },
+
+  /**
+   * Finds the nearest standing friendly MEDIC soldier within `maxDist` meters who can heal the Player's injuries.
+   */
+  findNearestFriendlyMedic(maxDist = 6.5) {
+    if (!this.botManager || !this.botManager.bots) return null;
+    let best = null;
+    let bestDist = maxDist;
+    for (const b of this.botManager.bots) {
+      if (b.dead || b.downed || b.drivingVehicle || b.team !== this.team || b.role !== 'MEDIC') continue;
+      const d = b.pos.distanceTo(this.pos);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = b;
+      }
+    }
+    return best;
+  },
+
+  /**
+   * Finds the nearest uncollected In-Building Armory Case Key within `maxDist` meters.
+   */
+  findNearestBuildingKey(maxDist = 4.8) {
+    if (!this.world || !Array.isArray(this.world.buildingKeys)) return null;
+    let best = null;
+    let bestDist = maxDist;
+    for (const kObj of this.world.buildingKeys) {
+      if (!kObj || kObj.collected) continue;
+      const d = Math.hypot(
+        kObj.pos.x - this.pos.x,
+        kObj.pos.y - (this.pos.y + 0.9),
+        kObj.pos.z - this.pos.z
+      );
+      if (d <= bestDist) {
+        bestDist = d;
+        best = kObj;
+      }
+    }
+    return best;
+  },
+
+  /**
+   * Collects an In-Building Armory Case Key (worth $250 for unlocking CS2 Mystery Cases!).
+   */
+  collectBuildingKeyObject(kObj) {
+    if (!kObj || kObj.collected) return false;
+    kObj.collected = true;
+    if (kObj.mesh && this.world && this.world.scene) {
+      this.world.scene.remove(kObj.mesh);
+    }
+    this.ensureWarehouseStructures?.();
+    this.caseKeys = (this.caseKeys || 0) + 1;
+    this.score = (this.score || 0) + 50;
+    this.saveGunsmithState?.();
+    sound.playBuy?.();
+    if (this.onAwardXp) {
+      this.onAwardXp(
+        50,
+        `🔑 FOUND ARMORY CASE KEY IN ${kObj.roomLabel || 'BUILDING ROOM'}! (KEYS OWNED: ${this.caseKeys})`
+      );
+    }
+    if (window.game?.ui?.updateCashAndGunsmithHud) {
+      window.game.ui.updateCashAndGunsmithHud();
+    }
+    return true;
+  },
+
+  /**
+   * Finds the nearest Ammo & Kit Stash within `maxDist` meters.
+   */
+  findNearestAmmoCrate(maxDist = DISTANCES.INTERACT_RANGE) {
+    if (!this.world || !this.world.ammoCrates) return null;
+    let best = null;
+    let bestDist = maxDist;
+    for (const crate of this.world.ammoCrates) {
+      const d = crate.pos.distanceTo(this.pos);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = crate;
+      }
+    }
+    return best;
+  },
+
+  /**
+   * Returns true if the player is standing near an Ammo & Kit Stash, inside their Main HQ Base,
+   * or inside a Friendly Captured Objective Flag zone where they can resupply [F] and swap Loadout/Weapons [L].
+   */
+  isAtResupplyPoint(maxCrateDist = DISTANCES.INTERACT_RANGE + 1.5) {
+    if (this.findNearestAmmoCrate(maxCrateDist)) return true;
+    const basePos =
+      this.team === 'RU'
+        ? this.world?.spawns?.RU_BASE || this.world?.ruBase
+        : this.world?.spawns?.US_BASE || this.world?.usBase;
+    if (basePos && Math.hypot(this.pos.x - basePos.x, this.pos.z - basePos.z) <= 52) {
+      return true;
+    }
+    if (this.world && Array.isArray(this.world.flags)) {
+      for (const f of this.world.flags) {
+        if (
+          f.owner === this.team &&
+          Math.hypot(this.pos.x - f.pos.x, this.pos.z - f.pos.z) <= (f.radius || 28)
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  },
+
+  /**
+   * Finds the nearest Enemy Loot Pack (or downed/fallen enemy soldier) within `maxDist` meters.
+   */
+  findNearestEnemyLoot(maxDist = 5.2) {
+    if (!this.world) return null;
+    let best = null;
+    let bestDist = maxDist;
+
+    if (Array.isArray(this.world.lootPacks)) {
+      for (const pack of this.world.lootPacks) {
+        if (!pack || !pack.items || pack.items.every((it) => it.looted)) continue;
+        // Never allow looting friendly teammates!
+        if (pack.ownerTeam && pack.ownerTeam === this.team) continue;
+        if (pack.botRef && pack.botRef.team === this.team) continue;
+        const d = Math.hypot(pack.pos.x - this.pos.x, pack.pos.z - this.pos.z);
+        if (d <= bestDist) {
+          bestDist = d;
+          best = pack;
+        }
+      }
+    }
+
+    // Also check nearby downed enemy bots that don't have a lootPack spawned yet
+    if (!best && this.botManager && Array.isArray(this.botManager.bots)) {
+      for (const b of this.botManager.bots) {
+        if (!b || b.team === this.team || (!b.downed && !b.dead)) continue;
+        const d = Math.hypot(b.pos.x - this.pos.x, b.pos.z - this.pos.z);
+        if (d <= bestDist) {
+          if (!b.lootPack && typeof this.world.spawnEnemyLootPack === 'function') {
+            b.lootPack = this.world.spawnEnemyLootPack(b);
+          }
+          if (b.lootPack && b.lootPack.items && b.lootPack.items.some((it) => !it.looted)) {
+            bestDist = d;
+            best = b.lootPack;
+          }
+        }
+      }
+    }
+    return best;
+  },
+
+  /**
+   * Returns all nearby Enemy Loot Packs within `maxDist` meters, sorted closest-first.
+   * Keeps the currently inspected pack visible while the Manual Loot UI is open even as items are looted.
+   */
+  findNearbyEnemyLootPacks(maxDist = 8.5, activePackId = null) {
+    if (!this.world) return [];
+    // Ensure any downed enemy within maxDist has a lootPack created
+    if (this.botManager && Array.isArray(this.botManager.bots)) {
+      for (const b of this.botManager.bots) {
+        if (!b || b.team === this.team || (!b.downed && !b.dead)) continue;
+        const d = Math.hypot(b.pos.x - this.pos.x, b.pos.z - this.pos.z);
+        if (d <= maxDist && !b.lootPack && typeof this.world.spawnEnemyLootPack === 'function') {
+          b.lootPack = this.world.spawnEnemyLootPack(b);
+        }
+      }
+    }
+    const list = [];
+    if (Array.isArray(this.world.lootPacks)) {
+      for (const pack of this.world.lootPacks) {
+        if (!pack || !pack.items) continue;
+        // Never include friendly teammate packs!
+        if (pack.ownerTeam && pack.ownerTeam === this.team) continue;
+        if (pack.botRef && pack.botRef.team === this.team) continue;
+        const isCurrentlyInspected = activePackId && pack.id === activePackId;
+        if (!isCurrentlyInspected && pack.items.every((it) => it.looted)) continue;
+        const dist = Math.hypot(pack.pos.x - this.pos.x, pack.pos.z - this.pos.z);
+        if (dist <= maxDist) {
+          list.push({ pack, dist });
+        }
+      }
+    }
+    list.sort((a, b) => a.dist - b.dist);
+    return list.map((x) => x.pack);
+  },
+
+  /**
+   * Removes any fully-looted 3D enemy loot packs once the Loot UI is closed.
+   */
+  cleanupEmptyLootPacks() {
+    if (!this.world || !Array.isArray(this.world.lootPacks)) return;
+    for (let i = this.world.lootPacks.length - 1; i >= 0; i--) {
+      const pack = this.world.lootPacks[i];
+      if (pack && Array.isArray(pack.items) && pack.items.every((it) => it.looted)) {
+        if (pack.mesh) this.scene.remove(pack.mesh);
+        this.world.lootPacks.splice(i, 1);
+      }
+    }
+  },
+
+  /**
+   * Swaps the player's active Primary Firearm (`this.slots[0]`) with a looted enemy firearm in the field!
+   */
+  swapFieldWeapon(weaponId) {
+    const baseDef = WEAPON_DEFS[weaponId];
+    if (!baseDef || baseDef.type !== 'gun') return false;
+    this.ensureWarehouseStructures?.();
+    const def = this.buildCustomizedWeaponDef
+      ? this.buildCustomizedWeaponDef(baseDef, true, weaponId)
+      : baseDef;
+    const wepAtts = this.getWeaponAttachmentMap
+      ? this.getWeaponAttachmentMap(weaponId)
+      : this.equippedUpgrades;
+    this.slots[0] = {
+      def,
+      clip: def.clipSize,
+      reserve: def.reserveAmmo,
+      looseAmmo: def.maxLooseAmmo || 60,
+      maxLooseAmmo: def.maxLooseAmmo || 60,
+      mags: this.buildMagArray(def.clipSize, def.reserveAmmo),
+      mesh: createWeaponViewModel(def, this.team, wepAtts)
+    };
+    this.switchSlot(0);
+    sound.playReload();
+    return true;
+  },
+
+  /**
+   * Loots a single item from an Enemy Loot Pack into the player's Rig / Backpack.
+   */
+  lootItemFromPack(pack, itemId, mode = 'take') {
+    if (!pack || !Array.isArray(pack.items)) return false;
+    const item = pack.items.find((it) => it.id === itemId && !it.looted);
+    if (!item) return false;
+
+    const primarySlot = this.slots[0];
+    let msg = '';
+
+    if (item.type === 'weapon') {
+      if (mode === 'scrap') {
+        const scrapCash = item.scrapValue || 220;
+        this.addCash?.(scrapCash, `STRIPPED ${item.shortName || item.name} PARTS`, false);
+        msg = `🔩 STRIPPED ${item.name} FOR +$${scrapCash} MATCH CASH`;
+      } else {
+        this.swapFieldWeapon(item.weaponId);
+        msg = `🔫 LOOTED & EQUIPPED ENEMY ${item.name} (${pack.ownerName})`;
+      }
+    } else if (item.type === 'mags') {
+      if (primarySlot && primarySlot.def && primarySlot.def.clipSize > 1) {
+        const addCount = item.magCount || 2;
+        const clipSz = primarySlot.def.clipSize;
+        if (!Array.isArray(primarySlot.mags)) primarySlot.mags = [];
+        // Fill any partially-depleted mags first, then add full spare pouches
+        for (let i = 0; i < primarySlot.mags.length; i++) {
+          if (primarySlot.mags[i] < clipSz) primarySlot.mags[i] = clipSz;
+        }
+        const maxPouches = (primarySlot.def.spareMagSlots || 6) + 2;
+        for (let c = 0; c < addCount && primarySlot.mags.length < maxPouches; c++) {
+          primarySlot.mags.unshift(clipSz);
+        }
+        this.syncReserveFromMags(primarySlot);
+        msg = `▱ LOOTED +${addCount} LOADED MAGAZINES INTO CHEST RIG (${primarySlot.mags.length} MAGS READY)`;
+      }
+    } else if (item.type === 'loose_ammo') {
+      if (primarySlot) {
+        const rounds = item.rounds || 90;
+        const cap = Math.max(primarySlot.maxLooseAmmo || 120, (primarySlot.looseAmmo || 0) + rounds);
+        primarySlot.maxLooseAmmo = cap;
+        primarySlot.looseAmmo = Math.min(cap, (primarySlot.looseAmmo || 0) + rounds);
+        msg = `🎒 LOOTED +${rounds} LOOSE BULLETS INTO BACKPACK (${primarySlot.looseAmmo} RDS TOTAL)`;
+      }
+    } else if (item.type === 'dressings') {
+      const addDress = item.dressings || 2;
+      const maxD = (this.maxBandages || (this.role === 'medic' ? 9 : 2)) + 2;
+      this.bandages = Math.min(maxD, (this.bandages || 0) + addDress);
+      const healHp = item.healHp || 35;
+      this.hp = Math.min(PLAYER.MAX_HP, this.hp + healHp);
+      this.bleeding = false;
+      if (this.role === 'medic') {
+        this.medicBagSupply = Math.min(
+          this.maxMedicBagSupply || 600,
+          (this.medicBagSupply || 0) + (item.medicBagBonus || 180)
+        );
+      }
+      msg = `🩹 LOOTED +${addDress} FIELD DRESSINGS (${this.bandages} TOTAL) & +${healHp} HP TRAUMA TREATMENT`;
+    } else if (item.type === 'ordnance') {
+      this.grenades = Math.min(6, (this.grenades || 0) + (item.grenades || 1));
+      if (this.slots[2] && this.slots[2].def) {
+        const s2 = this.slots[2];
+        if (s2.def.type === 'rpg' || s2.def.type === 'c4' || s2.def.type === 'ammocrate') {
+          s2.reserve = (s2.reserve || 0) + (item.rockets || 1);
+          if (s2.clip === 0 && s2.reserve > 0) {
+            s2.clip = 1;
+            s2.reserve--;
+          }
+        }
+      }
+      msg = `💣 LOOTED +${item.grenades || 1} FRAG GRENADE & +${item.rockets || 1} ORDNANCE CHARGE`;
+    } else if (item.type === 'armor_plate') {
+      const addArmor = item.armorAmount || 55;
+      let upgradedPackName = '';
+      if (item.backpackUpgradeId && this.equippedUpgrades) {
+        const bpList = ATTACHMENT_CATALOG.backpack || [];
+        const curBp = bpList.find((b) => b.id === (this.equippedUpgrades.backpack || 'no_pack'));
+        const newBp = bpList.find((b) => b.id === item.backpackUpgradeId);
+        if (newBp && (!curBp || (newBp.cells || 4) > (curBp.cells || 4))) {
+          this.equippedUpgrades.backpack = newBp.id;
+          this.ownedUpgrades?.add(newBp.id);
+          this.saveGunsmithState?.();
+          upgradedPackName = ` + EQUIPPED ${newBp.shortName} (${newBp.gridLabel})!`;
+        }
+      }
+      this.maxArmor = Math.max(this.maxArmor || 50, 100);
+      this.armor = Math.min(this.maxArmor + 25, (this.armor || 0) + addArmor);
+      msg = `🛡️ LOOTED BALLISTIC PLATE (+${addArmor} ARMOR HP)${upgradedPackName}`;
+    } else if (item.type === 'bounty') {
+      const cashVal = item.cashValue || pack.halfLootCash || 150;
+      const totalCarried = item.ownerMatchCash || pack.ownerMatchCash || cashVal * 2;
+      if (pack.botRef && typeof pack.botRef.matchCash === 'number') {
+        pack.botRef.matchCash = Math.max(0, pack.botRef.matchCash - cashVal);
+        pack.botRef.cashLooted = true;
+      }
+      pack.cashAutoLooted = true;
+      this.addCash?.(
+        cashVal,
+        `LOOTED 50% POCKET CASH (${pack.ownerRank} ${pack.ownerName})`,
+        false
+      );
+      if (!Array.isArray(this.lootedDogtags)) this.lootedDogtags = [];
+      this.lootedDogtags.unshift({
+        name: `${pack.ownerRank} ${pack.ownerName}`,
+        team: pack.ownerTeam,
+        role: pack.ownerRole,
+        cash: cashVal,
+        totalCarried
+      });
+      if (this.lootedDogtags.length > 8) this.lootedDogtags.pop();
+      msg = `💵 AUTO-LOOTED 50% POCKET CASH: +$${cashVal} OF $${totalCarried} ON ${pack.ownerRank} ${pack.ownerName} (MATCH CASH ONLY)`;
+    }
+
+    item.looted = true;
+    item.lootedMode = mode;
+    if (typeof this.recordLootedFieldItem === 'function') {
+      this.recordLootedFieldItem(item, pack, mode);
+    }
+    this.score = (this.score || 0) + 20;
+    sound.playReload();
+    if (msg && this.onAwardXp) {
+      this.onAwardXp(20, msg);
+    }
+
+    // If all items in pack are looted AND the manual loot UI is closed, remove its 3D mesh from the world
+    const modalEl =
+      typeof document !== 'undefined' ? document.getElementById('gunsmith-modal') : null;
+    const isLootModalOpen = Boolean(modalEl && !modalEl.classList.contains('hidden'));
+    if (
+      !isLootModalOpen &&
+      pack.items.every((it) => it.looted) &&
+      this.world &&
+      Array.isArray(this.world.lootPacks)
+    ) {
+      if (pack.mesh) this.scene.remove(pack.mesh);
+      const idx = this.world.lootPacks.indexOf(pack);
+      if (idx !== -1) this.world.lootPacks.splice(idx, 1);
+    }
+    return true;
+  },
+
+  /**
+   * Automatically loots 50% of any nearby downed/fallen enemy's on-hand Match Cash (excluding Warehouse Vault)
+   * when the player walks within `maxDist` meters of their body, and also allows pressing [F] to instantly
+   * loot all remaining ammo/meds/plates/pocket-cash from the nearest fallen enemy!
+   */
+  autoLootNearbyEnemyCash(maxDist = 4.2) {
+    if (!this.world || this.dead || this.downed || this.activeVehicle) return 0;
+    const packs = this.findNearbyEnemyLootPacks(maxDist);
+    let totalLootedCash = 0;
+    for (const pack of packs) {
+      if (!pack || pack.cashAutoLooted || !Array.isArray(pack.items)) continue;
+      const bountyItem = pack.items.find((it) => it.type === 'bounty' && !it.looted);
+      if (bountyItem) {
+        this.lootItemFromPack(pack, bountyItem.id, 'take');
+        totalLootedCash += bountyItem.cashValue || pack.halfLootCash || 0;
+      } else {
+        pack.cashAutoLooted = true;
+      }
+    }
+    return totalLootedCash;
+  },
+
+  /**
+   * Loots all non-weapon gear items (plus strips the weapon for parts if not swapping) from an Enemy Loot Pack.
+   */
+  lootAllFromPack(pack, swapWeaponToo = false, keepWeaponUnlooted = false) {
+    if (!pack || !Array.isArray(pack.items)) return false;
+    let count = 0;
+    for (const item of pack.items) {
+      if (item.looted) continue;
+      if (item.type === 'weapon') {
+        if (keepWeaponUnlooted && !swapWeaponToo) continue;
+        this.lootItemFromPack(pack, item.id, swapWeaponToo ? 'take' : 'scrap');
+      } else {
+        this.lootItemFromPack(pack, item.id, 'take');
+      }
+      count++;
+    }
+    return count > 0;
+  },
+
+  /**
+   * Computes the player's Visualized 2D Backpack Cell Grid (`cols × rows`) and the items occupying cells inside it.
+   */
+  getBackpackGridUsage() {
+    const bpItem = this.getEquippedItem ? this.getEquippedItem('backpack') : null;
+    const bpId = bpItem?.id || this.equippedUpgrades?.backpack || 'no_pack';
+    const gridDimMap = {
+      no_pack: { cols: 2, rows: 2, totalCells: 4, name: 'OPERATOR POCKETS (2×2)' },
+      sling_pack: { cols: 3, rows: 3, totalCells: 9, name: 'TACTICAL SLING PACK (3×3)' },
+      berkut_pack: { cols: 4, rows: 4, totalCells: 16, name: 'BERKUT ASSAULT PACK (4×4)' },
+      beta2_pack: { cols: 5, rows: 5, totalCells: 25, name: 'BETA-2 BATTLE BACKPACK (5×5)' },
+      raid_pack: { cols: 6, rows: 6, totalCells: 36, name: '6SH118 RAID RUCKSACK (6×6)' }
+    };
+    const dim = gridDimMap[bpId] || gridDimMap.no_pack;
+
+    const cells = [];
+    const prim = this.slots[0];
+    const looseRds = prim ? prim.looseAmmo || 0 : 0;
+    const ammoBoxes = Math.ceil(looseRds / 60);
+    for (let i = 0; i < ammoBoxes; i++) {
+      const boxRds = i === ammoBoxes - 1 ? looseRds - i * 60 || 60 : 60;
+      cells.push({
+        icon: '📦',
+        title: `${prim?.def?.shortName || 'RIFLE'} LOOSE AMMO`,
+        sub: `${boxRds} RDS [P]`,
+        col: '#f1c40f',
+        bg: 'rgba(241, 196, 15, 0.16)'
+      });
+    }
+
+    // Field Dressings (up to 3 per cell)
+    const dressCount = this.bandages || 0;
+    const dressStacks = Math.ceil(dressCount / 3);
+    for (let i = 0; i < dressStacks; i++) {
+      const stackN = i === dressStacks - 1 ? dressCount - i * 3 || 3 : 3;
+      cells.push({
+        icon: '🩹',
+        title: 'FIELD DRESSING',
+        sub: `×${stackN} BANDAGE [H/F]`,
+        col: '#2ecc71',
+        bg: 'rgba(46, 204, 113, 0.16)'
+      });
+    }
+
+    // Medic Bag (for Medic class, occupies 2 cells)
+    if (this.role === 'medic') {
+      const bagPct = Math.round(
+        ((this.medicBagSupply ?? 600) / (this.maxMedicBagSupply || 600)) * 100
+      );
+      cells.push({
+        icon: '🏥',
+        title: 'SQUAD MEDIC BAG',
+        sub: `${bagPct}% (${Math.ceil(this.medicBagSupply ?? 600)} HP)`,
+        col: '#7bed9f',
+        bg: 'rgba(46, 204, 113, 0.24)'
+      });
+    }
+
+    // Frag Grenades
+    const frags = this.grenades || 0;
+    if (frags > 0) {
+      cells.push({
+        icon: '💣',
+        title: 'M67 FRAG POUCH',
+        sub: `×${frags} GRENADES [G]`,
+        col: '#e67e22',
+        bg: 'rgba(230, 126, 34, 0.18)'
+      });
+    }
+
+    // Class Gadget / Ordnance Reserve
+    const gadSlot = this.slots[2];
+    if (gadSlot && gadSlot.def && (gadSlot.clip + gadSlot.reserve > 0)) {
+      cells.push({
+        icon: '🚀',
+        title: gadSlot.def.shortName || gadSlot.def.name,
+        sub: `×${(gadSlot.clip || 0) + (gadSlot.reserve || 0)} READY [3]`,
+        col: '#74b9ff',
+        bg: 'rgba(52, 152, 219, 0.18)'
+      });
+    }
+
+    // Looted Enemy Dogtags
+    if (Array.isArray(this.lootedDogtags)) {
+      for (const dt of this.lootedDogtags.slice(0, 4)) {
+        cells.push({
+          icon: '🏷️',
+          title: `DOGTAG: ${dt.name}`,
+          sub: `+$${dt.cash} BOUNTY`,
+          col: '#fd79a8',
+          bg: 'rgba(232, 67, 147, 0.18)'
+        });
+      }
+    }
+
+    return {
+      ...dim,
+      bpId,
+      usedCells: Math.min(dim.totalCells, cells.length),
+      cells: cells.slice(0, dim.totalCells)
+    };
+  },
+
+  /**
+   * Returns true if all weapon slots, bandages, grenades, and armor are already at 100% capacity.
+   */
+  isFullyResupplied() {
+    const vestDef = this.getEquippedItem('vest');
+    const backpackDef = this.getEquippedItem('backpack');
+    const maxArmor = vestDef ? vestDef.maxArmor : PLAYER.MAX_ARMOR;
+    const baseDressings =
+      this.role === 'medic' ? PLAYER.FIELD_DRESSINGS_MEDIC || 9 : PLAYER.FIELD_DRESSINGS_OTHER || 2;
+    const maxBandages =
+      baseDressings +
+      (vestDef ? vestDef.bonusBandages : 0) +
+      (backpackDef ? backpackDef.bonusBandages : 0);
+    const maxGrenades =
+      2 + (vestDef ? vestDef.bonusGrenades : 0) + (backpackDef ? backpackDef.bonusGrenades : 0);
+    if (this.armor < maxArmor || this.bandages < maxBandages || this.grenades < maxGrenades) {
+      return false;
+    }
+    if (this.role === 'medic' && (this.medicBagSupply || 0) < (this.maxMedicBagSupply || 600)) {
+      return false;
+    }
+    for (const s of this.slots) {
+      if (
+        s.clip < s.def.clipSize ||
+        s.reserve < s.def.reserveAmmo ||
+        (s.maxLooseAmmo > 0 && (s.looseAmmo || 0) < s.maxLooseAmmo)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  },
+
+  /**
+   * [F] Key Handler:
+   * 1. Revive downed friendly soldier (Hold [F], consumes 1 Field Dressing!) or Heal injured standing friendly soldier (Press [F])
+   * 2. At Ammo & Kit Stash (Press [F]):
+   *    - Resupplies 100% Ammo, Magazines, Field Dressings (9 for Medic, 2+ for others), Medic Bag & Armor
+   * 3. Build Defense Fortifications ([F])
+   */
+  handleInteractKey() {
+    if (this.activeVehicle) return;
+
+    // 1a. Downed Friendly within interact range -> Holding [F] revives them (consumes 1 Field Dressing!)
+    const nearDowned =
+      this.draggedBot || this.botManager.findNearestDownedFriendly(this.pos, this.team, DISTANCES.INTERACT_RANGE);
+    if (nearDowned && nearDowned.downed && !nearDowned.dead) {
+      this._fUsedForFriendlyAction = true;
+      this._pendingEnemyLootPack = null;
+      if ((this.bandages || 0) <= 0) {
+        if (this.onAwardXp) {
+          this.onAwardXp(
+            0,
+            '⚠️ 0 FIELD DRESSINGS LEFT — RESUPPLY AT AMMO STASH [7] TO REVIVE!'
+          );
+        }
+        return;
+      }
+      this.reviveTargetBot = nearDowned;
+      return;
+    }
+
+    // 1b. If Player is injured (hp < 100 or bleeding) and near a friendly MEDIC -> Press [F] to have Medic max out your HP with their Medic Bag!
+    if (this.hp < PLAYER.MAX_HP || this.bleeding) {
+      const nearMedic = this.findNearestFriendlyMedic(6.5);
+      if (nearMedic && (nearMedic.medicBagSupply ?? 600) > 0) {
+        this._fUsedForFriendlyAction = true;
+        this._pendingEnemyLootPack = null;
+        if (this.bleeding && (nearMedic.fieldDressings ?? 9) > 0) {
+          nearMedic.fieldDressings = Math.max(0, (nearMedic.fieldDressings ?? 9) - 1);
+        }
+        this.bleeding = false;
+        const neededHp = Math.max(0, PLAYER.MAX_HP - this.hp);
+        const healedHp = Math.min(neededHp, nearMedic.medicBagSupply ?? 600);
+        this.hp = Math.min(PLAYER.MAX_HP, this.hp + healedHp);
+        nearMedic.medicBagSupply = Math.max(0, (nearMedic.medicBagSupply ?? 600) - healedHp);
+        this.beingHealedByMedic = `${nearMedic.name} [${nearMedic.fieldDressings ?? 9}/9 DRESSINGS]`;
+        this.medicHealTimer = 1.6;
+        sound.playReload();
+        if (this.onAwardXp) {
+          this.onAwardXp(
+            25,
+            `🏥 MEDIC BAG (${nearMedic.name}): INJURIES HEALED TO ${Math.ceil(this.hp)}/100 HP! (${nearMedic.fieldDressings ?? 9}/9 DRESSINGS LEFT)`
+          );
+        }
+        return;
+      }
+    }
+
+    // 1c. Injured standing Friendly Soldier within interact range -> Press [F] to Field Heal them!
+    // Squad rule: Medics use their Medic Bag (heals to 100/100 HP); Non-Medics must spend 1 Field Dressing!
+    const injuredAlly = this.findNearestInjuredFriendly(DISTANCES.INTERACT_RANGE);
+    if (injuredAlly) {
+      this._fUsedForFriendlyAction = true;
+      this._pendingEnemyLootPack = null;
+      if (this.role === 'medic') {
+        if ((this.medicBagSupply ?? 600) <= 0) {
+          if (this.onAwardXp) {
+            this.onAwardXp(0, '⚠️ MEDIC BAG DEPLETED — RESUPPLY AT AMMO STASH!');
+          }
+          return;
+        }
+        const needed = Math.max(0, PLAYER.MAX_HP - injuredAlly.hp);
+        const healAmt = Math.min(needed, this.medicBagSupply ?? 600);
+        injuredAlly.hp = Math.min(PLAYER.MAX_HP, injuredAlly.hp + healAmt);
+        this.medicBagSupply = Math.max(0, (this.medicBagSupply ?? 600) - healAmt);
+        sound.playReload();
+        this.score += PLAYER.FIELD_HEAL_XP;
+        if (this.onAwardXp) {
+          this.onAwardXp(
+            PLAYER.FIELD_HEAL_XP,
+            `🏥 MEDIC BAG HEALED ${injuredAlly.name} TO ${Math.ceil(injuredAlly.hp)}/100 HP`
+          );
+        }
+      } else {
+        if ((this.bandages || 0) <= 0) {
+          if (this.onAwardXp) {
+            this.onAwardXp(0, '⚠️ 0 FIELD DRESSINGS LEFT — RESUPPLY AT AMMO STASH!');
+          }
+          return;
+        }
+        this.bandages--;
+        const healAmt = PLAYER.FIELD_HEAL_OTHER;
+        injuredAlly.hp = Math.min(PLAYER.MAX_HP, injuredAlly.hp + healAmt);
+        sound.playReload();
+        this.score += PLAYER.FIELD_HEAL_XP;
+        if (this.onAwardXp) {
+          this.onAwardXp(
+            PLAYER.FIELD_HEAL_XP,
+            `🩹 FIELD DRESSING APPLIED TO ${injuredAlly.name} (${this.bandages}/${this.maxBandages || 2} LEFT)`
+          );
+        }
+      }
+      return;
+    }
+
+    // 2. In-Building Armory Case Key within 4.8m -> Press [F] to pick up the Key!
+    const nearKey = this.findNearestBuildingKey(4.8);
+    if (nearKey) {
+      this._fUsedForFriendlyAction = true;
+      this.collectBuildingKeyObject(nearKey);
+      return;
+    }
+
+    // 3. Squad Ammo & Kit Stash within interact range -> [F] Resupplies All!
+    const nearCrate = this.findNearestAmmoCrate(DISTANCES.INTERACT_RANGE);
+    if (nearCrate) {
+      this.resupplyAll(false);
+      return;
+    }
+
+    // 4. Fallen Enemy / Enemy Loot Pack within interact range:
+    //    - Quick Tap [F] (< 0.28s, triggered on keyup) = Instant Auto-Loot
+    //    - Long Press / Hold [F] (>= 0.28s) = Opens the Side-by-Side Enemy Gear & Backpack Manual Loot UI
+    const nearEnemyLoot = this.findNearestEnemyLoot(5.2);
+    if (nearEnemyLoot) {
+      this._pendingEnemyLootPack = nearEnemyLoot;
+      this._enemyLootHoldTriggered = false;
+      return;
+    }
+
+    // 4b. Medieval Siege Trebuchet within 26m -> Press [F] to call men over to set up & hurl boulders!
+    const nearTreb = this.vehicleManager?.findNearestTrebuchet?.(this.pos, 26.0, this.team);
+    if (nearTreb && typeof this.callMenToSetupTrebuchet === 'function') {
+      this._fUsedForFriendlyAction = true;
+      this.callMenToSetupTrebuchet(nearTreb);
+      return;
+    }
+
+    // 5. CS2 Weapon / Knife Inspect ([F] or [V]) when holding a firearm or Karambit/Butterfly Knife!
+    //    (Building fortifications remains on [T] or when holding the Standard Sledgehammer in Slot 4)
+    const curWep = this.currentWeapon ? this.currentWeapon() : null;
+    if (
+      curWep &&
+      (curWep.def.type === 'gun' || curWep.def.skinFinish === 'karambit' || curWep.def.skinFinish === 'butterfly') &&
+      typeof this.startWeaponInspect === 'function'
+    ) {
+      this.startWeaponInspect();
+      return;
+    }
+
+    // 6. Build Chest Wall / Point Defense Fortifications ([T] or [F] with Sledgehammer)!
+    this.tryBuildPointDefenses();
+  },
+
+  resupplyAll(silentXp = false) {
+    const vestDef = this.getEquippedItem('vest');
+    const backpackDef = this.getEquippedItem('backpack');
+    this.maxArmor = vestDef ? vestDef.maxArmor : PLAYER.MAX_ARMOR;
+    this.armorAbsorbRatio = vestDef ? vestDef.absorbRatio : PLAYER.ARMOR_ABSORB_RATIO;
+    for (const s of this.slots) {
+      s.clip = s.def.clipSize;
+      s.reserve = s.def.reserveAmmo;
+      s.looseAmmo = s.def.maxLooseAmmo || 0;
+      s.maxLooseAmmo = s.def.maxLooseAmmo || 0;
+      s.mags = this.buildMagArray(s.def.clipSize, s.def.reserveAmmo);
+    }
+    const baseDressings =
+      this.role === 'medic' ? PLAYER.FIELD_DRESSINGS_MEDIC || 9 : PLAYER.FIELD_DRESSINGS_OTHER || 2;
+    this.maxBandages =
+      baseDressings +
+      (vestDef ? vestDef.bonusBandages : 0) +
+      (backpackDef ? backpackDef.bonusBandages : 0);
+    this.bandages = this.maxBandages;
+    this.maxMedicBagSupply = this.role === 'medic' ? PLAYER.MEDIC_BAG_MAX_SUPPLY || 600 : 0;
+    this.medicBagSupply = this.maxMedicBagSupply;
+    this.grenades =
+      2 + (vestDef ? vestDef.bonusGrenades : 0) + (backpackDef ? backpackDef.bonusGrenades : 0);
+    this.armor = this.maxArmor;
+    sound.playReload();
+    if (!silentXp && this.onAwardXp) {
+      this.onAwardXp(
+        20,
+        `📦 RESUPPLIED: ${this.bandages} FIELD DRESSINGS${
+          this.role === 'medic' ? ' + MEDIC BAG (100%)' : ''
+        }, MAGS & LOOSE AMMO`
+      );
+    }
+  },
+
+  /**
+   * Squad-Style Field Role / Kit Swap:
+   * Changes the player's combat role & weapon kit live in the field when near an Ammo & Kit Stash
+   * (or at Main HQ Base) without dying or costing a team ticket!
+   */
+  changeRoleInField(newRole, requireCrate = true) {
+    if (this.dead || this.downed || this.activeVehicle) return false;
+    const era = this.world?.era || 'modern';
+    const targetRole = resolveRoleForEra(newRole, era, this.team);
+
+    if (requireCrate) {
+      if (!this.isAtResupplyPoint(DISTANCES.INTERACT_RANGE + 1.5)) {
+        if (this.onAwardXp) {
+          this.onAwardXp(0, '⚠️ MOVE NEAR AN AMMO STASH / BASE OR PRESS [7] TO DEPLOY ONE TO CHANGE KIT!');
+        }
+        return false;
+      }
+    }
+
+    this.equipLoadout(targetRole);
+    this.resupplyAll(true);
+    if (targetRole === 'mounted_knight' && this.vehicleManager?.spawnOrGetPersonalMount) {
+      const horse = this.vehicleManager.spawnOrGetPersonalMount(this.team, this.pos, this.yaw, 'warhorse');
+      if (horse && typeof this.enterVehicle === 'function') {
+        this.enterVehicle(horse);
+      }
+    }
+    const primaryWep = this.slots[0]?.def?.shortName || this.slots[0]?.def?.name || 'PRIMARY';
+    const gadgetWep = this.slots[2]?.def?.shortName || this.slots[2]?.def?.name || 'GADGET';
+    events.emit('player:role-changed', {
+      role: targetRole,
+      primary: primaryWep,
+      gadget: gadgetWep
+    });
+    if (this.onAwardXp) {
+      this.onAwardXp(
+        0,
+        `🎒 FIELD KIT SWAPPED: ${targetRole.toUpperCase()} (${primaryWep} + ${gadgetWep})`
+      );
+    }
+    return true;
+  },
+
+  cycleFieldRole() {
+    const era = this.world?.era || 'modern';
+    const roles = getAllowedRoleIds(era, this.team);
+    const idx = roles.indexOf(this.role || roles[0]);
+    const nextRole = roles[(idx + 1) % roles.length];
+    return this.changeRoleInField(nextRole, true);
+  },
+
+  buildMagArray(clipSize, reserveAmmo) {
+    if (!clipSize || clipSize <= 1) return [];
+    const count = Math.max(1, Math.round(reserveAmmo / clipSize));
+    return Array.from({ length: count }, () => clipSize);
+  },
+
+  syncReserveFromMags(slot) {
+    if (!slot || !slot.mags || slot.def.clipSize <= 1) return;
+    slot.reserve = slot.mags.reduce((sum, n) => sum + n, 0);
+  },
+
+  equipLoadout(roleName) {
+    this.role = roleName;
+    this.applyCustomizationsToActiveLoadout(false);
+  },
+
+  switchSlot(index) {
+    if (index < 0 || index >= this.slots.length) return;
+    this.currentSlotIndex = index;
+    this.reloading = false;
+    this.fastReload = false;
+    this.slowReloading = false;
+    this.magPackProgress = 0;
+    this.isAds = false;
+    this.useCantedSight = false;
+
+    while (this.viewModelGroup.children.length > 0) {
+      this.viewModelGroup.remove(this.viewModelGroup.children[0]);
+    }
+    const cur = this.currentWeapon();
+    if (cur && cur.mesh) {
+      cur.mesh.position.set(0.22, -0.2, -0.31);
+      this.viewModelGroup.add(cur.mesh);
+    }
+    if (cur && cur.def && cur.def.type === 'melee_sword') {
+      // Start in the scabbard (swordSlungBlend = 1.0) and smoothly draw/unsheathe into hand!
+      this.swordSlung = false;
+      this.swordSlungBlend = 1.0;
+      this.swordSwingTimer = 0;
+    }
+    events.emit('weapon:switched', {
+      index,
+      slot: cur,
+      weapon: cur ? cur.def : null
+    });
+  },
+
+  toggleSwordSlung(forceState = null) {
+    const cur = this.currentWeapon();
+    if (!cur || !cur.def || cur.def.type !== 'melee_sword') return false;
+    this.swordSlung = typeof forceState === 'boolean' ? forceState : !this.swordSlung;
+    this.swordSwingTimer = 0;
+    sound.playWeaponSwitch?.();
+    return this.swordSlung;
+  },
+
+  currentWeapon() {
+    return this.slots[this.currentSlotIndex];
+  },
+
+  // =========================================================================
+  // SQUAD-STYLE DEPLOYABLE AMMO & KIT STASH ([7] Key or Support [3] Gadget)
+  // =========================================================================
+  deployFieldAmmoStash() {
+    if (this.dead || this.downed || this.activeVehicle) return false;
+    // Support class has dedicated Ammo Crate charges on slot [3]; other roles use [7] field stash cooldown
+    if (this.role !== 'support' && (this.ammoStashCooldown || 0) > 0) {
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          `⏳ FIELD AMMO & KIT STASH COOLDOWN: ${Math.ceil(this.ammoStashCooldown)}s`
+        );
+      }
+      return false;
+    }
+    this.ammoStashCooldown = this.role === 'support' ? 12 : DEPLOYABLES.AMMO_STASH_COOLDOWN || 45;
+    this.dropAmmoCrate(true);
+    return true;
+  },
+
+  dropAmmoCrate(fromFieldKey = false) {
+    if (this.dead || this.downed) return;
+
+    const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const cratePos = this.pos.clone().addScaledVector(forward, 2.4);
+    cratePos.y = this.world.getGroundHeightAt(cratePos.x, cratePos.z);
+
+    // If deployed via [7] field stash key, replace any older non-permanent stash owned by this player
+    if (fromFieldKey && this.world.ammoCrates) {
+      for (let i = this.world.ammoCrates.length - 1; i >= 0; i--) {
+        const c = this.world.ammoCrates[i];
+        if (!c.permanent && c.owner === this.name && c.isFieldStash) {
+          this.scene.remove(c.mesh);
+          this.world.ammoCrates.splice(i, 1);
+        }
+      }
+    }
+
+    if (typeof this.world.addAmmoCrate === 'function') {
+      const entry = this.world.addAmmoCrate(
+        cratePos.x,
+        cratePos.z,
+        this.team,
+        this.name,
+        false,
+        DEPLOYABLES.AMMO_CRATE_TIMER || 120
+      );
+      if (entry) {
+        entry.isFieldStash = Boolean(fromFieldKey);
+        entry.resupplyRadius = DEPLOYABLES.AMMO_CRATE_RADIUS || 6.0;
+      }
+    }
+
+    this.score = (this.score || 0) + 25;
+    if (this.onAwardXp) {
+      this.onAwardXp(
+        25,
+        '📦 AMMO & KIT STASH DEPLOYED — [F] RESUPPLY • [L] / F5–F9 CHANGE ROLE'
+      );
+    }
+    sound.playReload();
+  },
+
+  /**
+   * Tarkov Slow Reload (Pressing Loose Bullets one-by-one into Existing Magazines):
+   * Triggered by pressing [P], holding [R], or pressing [R] when all Chest Rig mags are empty.
+   */
+  startSlowReload() {
+    const cur = this.currentWeapon();
+    if (!cur || !cur.mags || cur.def.clipSize <= 1 || this.reloading) return false;
+
+    const hasDepletedMag =
+      cur.clip < cur.def.clipSize || cur.mags.some((m) => m < cur.def.clipSize);
+    const canConsolidateMags =
+      cur.mags.filter((m) => m > 0 && m < cur.def.clipSize).length >= 2;
+    const hasLooseBullets = (cur.looseAmmo || 0) > 0;
+
+    if (!hasDepletedMag || (!hasLooseBullets && !canConsolidateMags)) {
+      return false;
+    }
+
+    this.slowReloading = true;
+    this.reloading = false;
+    this.fastReload = false;
+    this.isAds = false;
+    const bulletTime = PLAYER.MAG_PACK_BULLET_TIME || 0.22;
+    this.magPackBulletTimer = bulletTime;
+    this.magPackBulletDuration = bulletTime;
+    this.magPackProgress = 0.02;
+    this.slowReloadRoundsPacked = 0;
+    sound.playReload();
+    if (this.onAwardXp) {
+      this.onAwardXp(
+        0,
+        `🎒 SLOW RELOAD: PRESSING BULLETS INTO MAG (${cur.looseAmmo || 0} LOOSE RDS IN PACK)`
+      );
+    }
+    return true;
+  },
+
+  ejectDroppedMagVisual() {
+    if (!this.world || !this.world.debrisParticles || this.world.debrisParticles.length > 120) return;
+    const camPos = this.camera.getWorldPosition(new THREE.Vector3());
+    const camQuat = this.camera.getWorldQuaternion(new THREE.Quaternion());
+    const offset = new THREE.Vector3(0.05, -0.24, -0.32).applyQuaternion(camQuat);
+    const vel = new THREE.Vector3(0.4, -1.6, -0.6).applyQuaternion(camQuat);
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.044, 0.16, 0.072),
+      new THREE.MeshStandardMaterial({ color: 0x22282e, roughness: 0.75 })
+    );
+    mesh.position.copy(camPos).add(offset);
+    this.scene.add(mesh);
+    this.world.debrisParticles.push({
+      mesh,
+      vel,
+      rotVel: new THREE.Vector3(6, 4, 8),
+      life: 1.5
+    });
+  },
+
+  startReload(forceSlowReload = false) {
+    const cur = this.currentWeapon();
+    if (!cur) return;
+    if (cur.def.type === 'hammer' || cur.def.type === 'c4' || cur.def.type === 'medkit') return;
+
+    if (forceSlowReload) {
+      this.startSlowReload();
+      return;
+    }
+
+    // Double-Tap [R] while already doing a Fast Mag-Swap triggers Emergency Drop Speed Reload!
+    if (this.reloading) {
+      if (!this.fastReload) {
+        this.fastReload = true;
+        this.reloadTimer *= PLAYER.SPEED_RELOAD_MULT;
+        this.ejectDroppedMagVisual();
+        if (this.onAwardXp) this.onAwardXp(0, '⚡ EMERGENCY SPEED RELOAD (MAG DROPPED)');
+      }
+      return;
+    }
+
+    // If currently Slow-Reloading (pressing bullets into mags) and player taps [R],
+    // switch to a Fast Mag-Swap if a fuller magazine exists in the Chest Rig!
+    if (this.slowReloading) {
+      this.slowReloading = false;
+      this.magPackProgress = 0;
+    }
+
+    // Check if Chest Rig (`cur.mags`) has a magazine with more rounds than the active clip
+    if (cur.mags && cur.def.clipSize > 1) {
+      const bestRigMag = cur.mags.reduce((max, m) => Math.max(max, m), 0);
+      const canSwapMag =
+        cur.clip < cur.def.clipSize && bestRigMag > 0 && bestRigMag > cur.clip;
+
+      if (!canSwapMag) {
+        // No fuller magazine in Chest Rig -> automatically start Tarkov Slow Reload (pressing loose bullets into mags)!
+        this.startSlowReload();
+        return;
+      }
+    } else if (cur.clip >= cur.def.clipSize || cur.reserve <= 0) {
+      return;
+    }
+
+    this.reloading = true;
+    this.fastReload = false;
+    this.slowReloading = false;
+    this.reloadTotalTime = cur.def.reloadTime;
+    this.reloadTimer = cur.def.reloadTime;
+    this.isAds = false;
+    sound.playReload();
+    events.emit('player:reloaded', {
+      weapon: cur.def,
+      clip: cur.clip,
+      reserve: cur.reserve,
+      fastReload: false,
+      stage: 'start'
+    });
+  },
+
+  tryFireSingle() {
+    const cur = this.currentWeapon();
+    if (!cur || this.reloading || this.fireTimer > 0) return;
+    if (this.slowReloading) {
+      this.slowReloading = false;
+      this.magPackProgress = 0;
+    }
+    this.executeFire(cur);
+  },
+
+  fireWeapon(cur) {
+    return this.executeFire(cur || this.currentWeapon());
+  },
+
+  executeFire(cur) {
+    const def = cur.def;
+    const interval = 60 / def.rpm;
+    this.fireTimer = interval;
+
+    // Ensure camera world matrix matches the exact current aim before firing raycast
+    this.syncCameraTransform();
+
+    if (def.type === 'hammer') {
+      this.useHammer(false);
+      return;
+    }
+
+    if (def.type === 'medkit') {
+      if ((this.medicBagSupply ?? 600) <= 0) {
+        if (this.onAwardXp) {
+          this.onAwardXp(0, '⚠️ MEDIC BAG DEPLETED — RESUPPLY AT AMMO STASH [7]!');
+        }
+        return;
+      }
+      const injuredAlly = this.findNearestInjuredFriendly(6.0);
+      if (injuredAlly) {
+        const needed = Math.max(0, PLAYER.MAX_HP - injuredAlly.hp);
+        const healAmt = Math.min(needed, this.medicBagSupply ?? 600);
+        injuredAlly.hp = Math.min(PLAYER.MAX_HP, injuredAlly.hp + healAmt);
+        this.medicBagSupply = Math.max(0, (this.medicBagSupply ?? 600) - healAmt);
+        sound.playReload();
+        this.score += PLAYER.FIELD_HEAL_XP;
+        if (this.onAwardXp) {
+          this.onAwardXp(
+            PLAYER.FIELD_HEAL_XP,
+            `🏥 MEDIC BAG HEALED ${injuredAlly.name} TO ${Math.ceil(injuredAlly.hp)}/100 MAX HP!`
+          );
+        }
+      }
+      if (this.hp < PLAYER.MAX_HP || this.bleeding) {
+        this.bleeding = false;
+        const healPulse = Math.min(
+          PLAYER.MAX_HP - this.hp,
+          PLAYER.MEDKIT_HEAL || 35,
+          this.medicBagSupply ?? 600
+        );
+        this.hp = Math.min(PLAYER.MAX_HP, this.hp + healPulse);
+        this.medicBagSupply = Math.max(0, (this.medicBagSupply ?? 600) - healPulse);
+        sound.playReload();
+        if (this.onAwardXp) {
+          this.onAwardXp(
+            15,
+            this.hp >= PLAYER.MAX_HP
+              ? '🏥 MEDIC BAG: INJURIES FULLY HEALED (100/100 MAX HP)!'
+              : `🏥 MEDIC BAG SELF-HEAL: HP ${Math.ceil(this.hp)}/100`
+          );
+        }
+      }
+      return;
+    }
+
+    if (def.type === 'ammocrate') {
+      this.dropAmmoCrate();
+      return;
+    }
+
+    if (def.type === 'melee_sword') {
+      this.useMeleeSword(def);
+      return;
+    }
+
+    if (cur.clip <= 0) {
+      this.startReload();
+      return;
+    }
+
+    cur.clip--;
+
+    if (def.type === 'rpg' || def.type === 'stinger') {
+      sound.playRocketLaunch(0);
+      if (def.type === 'stinger') {
+        this.launchStingerMissile();
+      } else {
+        this.launchRocket();
+      }
+      events.emit('player:fired', {
+        weapon: def,
+        type: def.type,
+        clip: cur.clip,
+        reserve: cur.reserve
+      });
+      this.recoilKickZ = PLAYER.RECOIL_KICK_Z;
+      this.recoilOffsetPitch += def.recoilPitch || 0.014;
+      this.yaw += (Math.random() - 0.5) * (def.recoilYaw || 0.006);
+      this.addShake(0.32);
+      const warhead = cur.mesh.getObjectByName('rpgWarhead');
+      if (warhead) warhead.visible = false;
+      if (cur.clip === 0 && cur.reserve > 0) {
+        setTimeout(() => this.startReload(), 280);
+      }
+      return;
+    }
+
+    if (def.type === 'c4') {
+      this.throwC4();
+      events.emit('player:fired', {
+        weapon: def,
+        type: 'c4',
+        clip: cur.clip,
+        reserve: cur.reserve
+      });
+      return;
+    }
+
+    if (def.isBow || def.isCrossbow) {
+      sound.playBowTwang?.(0, 0, Boolean(def.isCrossbow));
+      this.muzzleFlashTimer = 0;
+    } else if (def.isThrowingBlade || def.isVenomSpit) {
+      sound.playMeleeSwing?.(0, 0, false);
+      this.muzzleFlashTimer = 0;
+    } else {
+      sound.playGunshot(def.soundType, 0, 0, Boolean(def.silenced));
+      this.muzzleFlashTimer = def.flashMult === 0 ? 0 : 0.032;
+      this.ejectBrassCasing();
+    }
+    events.emit('player:fired', {
+      weapon: def,
+      type: 'gun',
+      clip: cur.clip,
+      reserve: cur.reserve
+    });
+
+    const suppressionSpreadMult = 1 + this.suppressionLevel * PLAYER.SUPPRESSION_SPREAD_MULT; // Suppression degrades accuracy
+    const spread = (this.isAds ? def.spreadAds : def.spreadHip) * suppressionSpreadMult;
+    const muzzleVel = def.muzzleVelocity || 780;
+    const bulletGrav = def.bulletGravity ?? 9.81;
+    // Authentic ballistic zeroing elevation angle: theta = (g * D_zero) / (2 * v0^2)
+    // In ADS, zeroes to `this.zeroDistance` (100m/200m/300m/400m via [X]); in hipfire, uses a 50m point-blank battle zero.
+    const activeZeroDist = this.isAds ? this.zeroDistance || PLAYER.ZERO_DISTANCE_DEFAULT || 100 : 50;
+    const zeroElevation = (bulletGrav * activeZeroDist) / (2 * muzzleVel * muzzleVel);
+    const camQuat = this.camera.getWorldQuaternion(new THREE.Quaternion());
+    const origin = this.camera.getWorldPosition(new THREE.Vector3());
+    const pelletCount = Math.max(1, def.pellets || 1);
+    const armorPenMult = def.armorPenMult || 1.0;
+
+    for (let p = 0; p < pelletCount; p++) {
+      let sx = 0;
+      let sy = 0;
+      if (pelletCount > 1) {
+        // 12-Gauge 00 Buckshot Circular Pattern:
+        // Pellet 0 is the center core pellet; Pellets 1..7 form a radial ring cone that widens over distance
+        if (p === 0) {
+          sx = (Math.random() - 0.5) * spread * 0.22;
+          sy = (Math.random() - 0.5) * spread * 0.22;
+        } else {
+          const angle = ((p - 1) / (pelletCount - 1)) * Math.PI * 2 + (Math.random() - 0.5) * 0.45;
+          const radius = spread * (0.38 + Math.random() * 0.62);
+          sx = Math.cos(angle) * radius;
+          sy = Math.sin(angle) * radius;
+        }
+      } else {
+        sx = (Math.random() - 0.5) * spread;
+        sy = (Math.random() - 0.5) * spread;
+      }
+
+      const dir = new THREE.Vector3(sx, sy + zeroElevation, -1).normalize();
+      dir.applyQuaternion(camQuat);
+
+      this.fireBallisticRay(
+        origin,
+        dir,
+        def.damage,
+        def.headshotMult,
+        def.voxelDamage,
+        def.shortName,
+        armorPenMult,
+        def,
+        pelletCount
+      );
+    }
+
+    // Apply recoil kick after the round leaves the barrel (Prone reduces recoil by 45%, Crouch by 22%,
+    // and resting rifle on prepared sandbags/parapets inside a Friendly Forward Base reduces recoil by 30%!)
+    const stanceScale = this.prone
+      ? PLAYER.RECOIL_SCALE_PRONE
+      : this.crouching
+      ? PLAYER.RECOIL_SCALE_CROUCH
+      : 1.0;
+    const baseDefenseRecoilMult = this.inFriendlyForwardBase ? 0.70 : 1.0;
+    const recoilScale = stanceScale * baseDefenseRecoilMult;
+    this.recoilKickZ = PLAYER.RECOIL_KICK_Z * recoilScale;
+    this.recoilOffsetPitch += (def.recoilPitch || 0.014) * recoilScale;
+    this.yaw += (Math.random() - 0.5) * (def.recoilYaw || 0.006) * recoilScale;
+
+    if (cur.clip === 0 && (cur.reserve > 0 || (cur.looseAmmo || 0) > 0)) {
+      this.startReload();
+    }
+  },
+
+  /**
+   * Computes distance-based ballistic damage drop-off:
+   * - 12-Gauge 00 Buckshot (`pelletCount > 1`):
+   *   - 0m–8m (Point-Blank CQB): 100% damage (20 dmg × 8 = 160 max damage — lethal 1-shot CQB!)
+   *   - 8m–20m (Short Range): Steep drop from 100% down to 46% (~9 dmg/pellet)
+   *   - 20m–34m (Medium Range): Drops from 46% down to 14% (~2.8 dmg/pellet)
+   *   - >34m (Long Range): 14% minimum (~2 dmg/pellet), dissipating past 54m.
+   * - SMGs & Pistols: 100% up to 35m, smooth drop to 62% at 95m.
+   * - Carbines / 5.56 Assault Rifles: 100% up to 85m, smooth drop to 75% at 210m.
+   * - 7.62 Battle Rifles, LMGs, DMRs & Snipers: Full velocity & power across long range.
+   */
+  getDistanceDamageMultiplier(dist, wepDef = null, pelletCount = 1) {
+    if (!Number.isFinite(dist) || dist <= 0) return 1.0;
+
+    if (pelletCount > 1 || (wepDef && wepDef.damageFalloffStart !== undefined)) {
+      const start = wepDef?.damageFalloffStart ?? 8;
+      const mid = 20;
+      const end = wepDef?.damageFalloffEnd ?? 34;
+      const minMult = wepDef?.minDamageMult ?? 0.14;
+      if (dist <= start) return 1.0;
+      if (dist <= mid) {
+        const t = (dist - start) / Math.max(1, mid - start);
+        return 1.0 - t * 0.54; // 1.0 -> 0.46 at 20m
+      }
+      if (dist <= end) {
+        const t = (dist - mid) / Math.max(1, end - mid);
+        return 0.46 - t * (0.46 - minMult); // 0.46 -> 0.14 at 34m
+      }
+      return minMult;
+    }
+
+    const sType = wepDef?.soundType || '';
+    if (sType === 'smg' || sType === 'pistol') {
+      if (dist <= 35) return 1.0;
+      if (dist >= 95) return 0.62;
+      return 1.0 - ((dist - 35) / 60) * 0.38;
+    }
+    if (sType === 'rifle' && (wepDef?.damage || 30) < 42) {
+      if (dist <= 85) return 1.0;
+      if (dist >= 210) return 0.75;
+      return 1.0 - ((dist - 85) / 125) * 0.25;
+    }
+    return 1.0;
+  },
+
+  /**
+   * Spawns a finite-velocity ballistic bullet in `this.activeBullets` that physically travels
+   * through the air at `muzzleVelocity` (m/s) with gravity drop (`9.81 m/s²`) and aerodynamic drag,
+   * stepping and raycasting segment-by-segment each frame in `updateBallisticBullets(dt)` so
+   * targets are only injured when the bullet physically reaches them!
+   */
+  fireBallisticRay(
+    origin,
+    dir,
+    damage,
+    headshotMult,
+    voxelDamage,
+    weaponLabel,
+    armorPenMult = 1.0,
+    wepDef = null,
+    pelletCount = 1,
+    tracerOriginOverride = null
+  ) {
+    if (!Array.isArray(this.activeBullets)) {
+      this.activeBullets = [];
+    }
+
+    const isBuckshot = pelletCount > 1;
+    const isMountedMg = Boolean(
+      (wepDef && wepDef.isMountedMg) ||
+        weaponLabel === '.50 CAL HMG' ||
+        weaponLabel === '7.62MM COAX MG' ||
+        weaponLabel === '30MM GAU-8 AVENGER' ||
+        weaponLabel === '25MM GAU-12 EQUALIZER' ||
+        weaponLabel === '20MM VULCAN A2A'
+    );
+    const isHeavyPenCaliber =
+      !isBuckshot && (isMountedMg || damage >= 52 || armorPenMult >= 1.15);
+    const isRiflePenCaliber = !isBuckshot && damage >= 26;
+    const maxCollateralTargets = isBuckshot ? 1 : isMountedMg ? 4 : isHeavyPenCaliber ? 3 : 2;
+    const collateralFalloff = isMountedMg
+      ? 0.88
+      : isHeavyPenCaliber
+      ? 0.82
+      : isRiflePenCaliber
+      ? 0.68
+      : 0.5;
+    const maxRayRange =
+      wepDef && wepDef.maxEffectiveRange ? wepDef.maxEffectiveRange : DISTANCES.RAYCAST_MAX;
+
+    let muzzleVelocity = wepDef && wepDef.muzzleVelocity ? wepDef.muzzleVelocity : 0;
+    if (!muzzleVelocity) {
+      if (
+        weaponLabel === '20MM VULCAN A2A' ||
+        weaponLabel === '30MM GAU-8 AVENGER' ||
+        weaponLabel === '25MM GAU-12 EQUALIZER' ||
+        weaponLabel === '25MM GAU-12 AA' ||
+        weaponLabel === '30MM 2A38M AA'
+      ) {
+        muzzleVelocity = 360;
+      } else if (weaponLabel === '.50 CAL HMG') muzzleVelocity = 890;
+      else if (weaponLabel === '7.62MM COAX MG') muzzleVelocity = 840;
+      else if (isBuckshot) muzzleVelocity = 410;
+      else muzzleVelocity = 780;
+    }
+    const bulletGravity =
+      wepDef && typeof wepDef.bulletGravity === 'number'
+        ? wepDef.bulletGravity
+        : isMountedMg
+        ? 4.5
+        : 9.81;
+
+    this.shotsFired = (this.shotsFired || 0) + 1;
+    const curWep = typeof this.currentWeapon === 'function' ? this.currentWeapon() : null;
+    const isArrowOrBolt = Boolean(
+      (wepDef && (wepDef.isBow || wepDef.isCrossbow || wepDef.isThrowingBlade)) ||
+        String(weaponLabel || '').includes('BOW') ||
+        String(weaponLabel || '').includes('CROSSBOW') ||
+        String(weaponLabel || '').includes('BLADE')
+    );
+    const isFireArrow = Boolean(
+      isArrowOrBolt &&
+        !(wepDef && wepDef.isThrowingBlade) &&
+        ((wepDef && wepDef.isFireArrow) || this.fireArrowsActive)
+    );
+    if (isFireArrow) {
+      damage += 22; // Bonus incendiary burn damage when Fire Arrows [V] are lit!
+    }
+    const isVenomProj = Boolean(
+      (wepDef && wepDef.isVenomSpit) || String(weaponLabel || '').includes('VENOM')
+    );
+    const hideTracers = Boolean(
+      (isArrowOrBolt && !isFireArrow) ||
+        (!isMountedMg &&
+          !isArrowOrBolt &&
+          !isVenomProj &&
+          curWep &&
+          curWep.def &&
+          curWep.def.hideTracers)
+    );
+    const tracerInterval =
+      isFireArrow || isVenomProj
+        ? 1
+        : wepDef && typeof wepDef.tracerEveryShots === 'number'
+        ? wepDef.tracerEveryShots
+        : 6;
+    const isBrightTracer = !hideTracers && this.shotsFired % tracerInterval === 1;
+    const tracerStart =
+      tracerOriginOverride || this.getWeaponMuzzleWorldPosition(origin, dir);
+    const muzzleOffset = tracerStart.clone().sub(origin);
+
+    let tracerLine = null;
+    if (!hideTracers && this.scene && this.activeBullets.length < 140) {
+      const tracerColor = isVenomProj
+        ? 0x2ecc71
+        : isFireArrow
+        ? 0xff5e00
+        : isMountedMg
+        ? 0xffb142
+        : isBrightTracer
+        ? 0xffeaa7
+        : 0xf6d365;
+      const points = [tracerStart.clone(), tracerStart.clone().addScaledVector(dir, 0.35)];
+      const geo = new THREE.BufferGeometry().setFromPoints(points);
+      const mat = new THREE.LineBasicMaterial({
+        color: tracerColor,
+        transparent: true,
+        opacity: isFireArrow || isVenomProj || isBrightTracer || isMountedMg ? 0.94 : 0.55
+      });
+      tracerLine = new THREE.Line(geo, mat);
+      this.scene.add(tracerLine);
+    }
+
+    let arrowMesh = null;
+    if (isArrowOrBolt && this.scene && this.activeBullets.length < 90) {
+      arrowMesh = new THREE.Group();
+      const isXbow = Boolean(
+        (wepDef && wepDef.isCrossbow) || String(weaponLabel || '').includes('CROSSBOW')
+      );
+      const shaftMat = new THREE.MeshBasicMaterial({ color: isXbow ? 0x8b5a2b : 0xc89652 });
+      const tipMat = new THREE.MeshBasicMaterial({ color: isFireArrow ? 0xff7f00 : 0xd0d7de });
+      const fletchMat = new THREE.MeshBasicMaterial({
+        color: this.team === 'RU' ? 0xe74c3c : 0xf5f6fa
+      });
+      // Clean physical 3D wooden shaft + steel broadhead + feathered fletching (plus flame head when Fire Arrow [V] is lit!)
+      const shaftLen = isXbow ? 1.15 : 1.45;
+      const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.044, shaftLen), shaftMat);
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.3, 4), tipMat);
+      tip.rotation.x = Math.PI / 2;
+      tip.position.set(0, 0, shaftLen * 0.5 + 0.12);
+      const fletchH = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.02, 0.26), fletchMat);
+      fletchH.position.set(0, 0, -shaftLen * 0.5 + 0.14);
+      const fletchV = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.22, 0.26), fletchMat);
+      fletchV.position.set(0, 0, -shaftLen * 0.5 + 0.14);
+      arrowMesh.add(shaft, tip, fletchH, fletchV);
+      if (isFireArrow) {
+        const flameCone = new THREE.Mesh(
+          new THREE.ConeGeometry(0.14, 0.46, 6),
+          new THREE.MeshBasicMaterial({ color: 0xff5500, transparent: true, opacity: 0.9 })
+        );
+        flameCone.rotation.x = -Math.PI / 2;
+        flameCone.position.set(0, 0, shaftLen * 0.5 + 0.04);
+        arrowMesh.add(flameCone);
+      }
+      const launchPos = origin
+        .clone()
+        .addScaledVector(dir, 0.55)
+        .add(new THREE.Vector3(0, -0.05, 0));
+      arrowMesh.position.copy(launchPos);
+      arrowMesh.lookAt(launchPos.clone().add(dir));
+      this.scene.add(arrowMesh);
+    }
+
+    const normDir = dir.clone().normalize();
+    const bullet = {
+      pos: origin.clone(),
+      startOrigin: origin.clone(),
+      tracerStart: tracerStart.clone(),
+      muzzleOffset,
+      vel: normDir.clone().multiplyScalar(muzzleVelocity),
+      muzzleVelocity,
+      gravity: bulletGravity,
+      traveledDist: 0,
+      flightTime: 0,
+      maxRayRange,
+      damage,
+      headshotMult,
+      voxelDamage,
+      weaponLabel,
+      armorPenMult,
+      wepDef,
+      pelletCount,
+      isBuckshot,
+      isMountedMg,
+      isHeavyPenCaliber,
+      isRiflePenCaliber,
+      maxCollateralTargets,
+      collateralFalloff,
+      penetratedCover: false,
+      coverPenMult: 1.0,
+      ignoredVoxelKey: null,
+      hitBots: new Set(),
+      collateralHits: 0,
+      collateralKills: 0,
+      isBrightTracer,
+      tracerLine,
+      arrowMesh,
+      explosiveSplash: wepDef && wepDef.explosiveSplash ? wepDef.explosiveSplash : null
+    };
+
+    this.activeBullets.push(bullet);
+  },
+
+  /**
+   * Advances all in-flight ballistic bullets each frame (`dt`), applying gravity drop (`9.81 m/s²`)
+   * and aerodynamic drag, and raycasting strictly along the frame's physical travel segment
+   * (`prevPos ➔ nextPos`, length `speed * dt`) so targets take damage only when the bullet arrives.
+   */
+  updateBallisticBullets(dt) {
+    if (!Array.isArray(this.activeBullets) || this.activeBullets.length === 0) return;
+    const clampedDt = Math.min(dt, 0.08);
+    if (clampedDt <= 0) return;
+
+    for (let i = this.activeBullets.length - 1; i >= 0; i--) {
+      const b = this.activeBullets[i];
+      const keepAlive = this._stepBallisticBullet(b, clampedDt);
+      if (!keepAlive) {
+        if (b.tracerLine) {
+          this.scene.remove(b.tracerLine);
+          b.tracerLine.geometry.dispose();
+          b.tracerLine.material.dispose();
+          b.tracerLine = null;
+        }
+        if (b.arrowMesh) {
+          this.scene.remove(b.arrowMesh);
+          b.arrowMesh.traverse((ch) => {
+            if (ch.isMesh) {
+              ch.geometry?.dispose?.();
+              ch.material?.dispose?.();
+            }
+          });
+          b.arrowMesh = null;
+        }
+        this.activeBullets.splice(i, 1);
+      }
+    }
+  },
+
+  _stepBallisticBullet(bullet, dt) {
+    const prevPos = bullet.pos.clone();
+
+    // 1. Apply ballistic gravity drop & subtle aerodynamic drag over flight time
+    bullet.vel.y -= bullet.gravity * dt;
+    const dragFactor = bullet.isBuckshot ? 0.35 : 0.06;
+    bullet.vel.multiplyScalar(Math.max(0.88, 1 - dragFactor * dt));
+
+    const stepVec = bullet.vel.clone().multiplyScalar(dt);
+    let stepDist = stepVec.length();
+    if (stepDist <= 0.0001) return false;
+
+    const remainingRange = bullet.maxRayRange - bullet.traveledDist;
+    if (remainingRange <= 0) return false;
+
+    const stepDir = stepVec.clone().divideScalar(stepDist);
+    let reachedMaxRange = false;
+    if (stepDist >= remainingRange) {
+      stepDist = remainingRange;
+      reachedMaxRange = true;
+    }
+
+    bullet.flightTime += dt;
+
+    // 2. Check 3D Voxel Grid along this frame's segment `[prevPos, prevPos + stepDir * stepDist]`
+    let voxelHit = this.world.raycastVoxel(
+      prevPos,
+      stepDir,
+      stepDist,
+      0,
+      bullet.ignoredVoxelKey
+    );
+    let maxSegmentEntityDist = stepDist;
+    let stoppedByVoxel = null;
+
+    if (voxelHit && voxelHit.distance <= stepDist) {
+      if (voxelHit.voxel && !bullet.penetratedCover) {
+        const vType = voxelHit.voxel.type;
+        const isWoodOrProp = Boolean(voxelHit.voxel.isProp || vType === 'wood');
+        const isSandbagOrBrick =
+          vType === 'sandbag' ||
+          (bullet.isHeavyPenCaliber && vType === 'brick') ||
+          (bullet.isMountedMg && (vType === 'brick' || vType === 'concrete'));
+
+        if (isWoodOrProp && bullet.damage >= 22) {
+          bullet.penetratedCover = true;
+          bullet.coverPenMult = bullet.isMountedMg
+            ? 0.9
+            : bullet.isHeavyPenCaliber
+            ? 0.78
+            : 0.6;
+          bullet.ignoredVoxelKey = voxelHit.voxel.key;
+          this.world.damageVoxel(
+            voxelHit.voxel.gx,
+            voxelHit.voxel.gy,
+            voxelHit.voxel.gz,
+            bullet.voxelDamage,
+            this.onBroadcast
+          );
+          this.world.spawnBulletImpact(
+            voxelHit.point,
+            voxelHit.normal,
+            voxelHit.voxel.baseColor
+          );
+          const secondHit = this.world.raycastVoxel(
+            prevPos,
+            stepDir,
+            stepDist,
+            0,
+            bullet.ignoredVoxelKey
+          );
+          if (secondHit && secondHit.distance <= stepDist) {
+            maxSegmentEntityDist = secondHit.distance;
+            stoppedByVoxel = secondHit;
+          }
+        } else if (
+          isSandbagOrBrick &&
+          (bullet.isMountedMg || bullet.isHeavyPenCaliber || bullet.armorPenMult > 1.05)
+        ) {
+          bullet.penetratedCover = true;
+          bullet.coverPenMult = bullet.isMountedMg
+            ? 0.82
+            : bullet.isHeavyPenCaliber
+            ? 0.68
+            : 0.52;
+          bullet.ignoredVoxelKey = voxelHit.voxel.key;
+          const chipDmg = bullet.isMountedMg
+            ? Math.max(24, Math.round(bullet.voxelDamage * 0.65))
+            : Math.max(8, Math.round(bullet.voxelDamage * 0.45));
+          this.world.damageVoxel(
+            voxelHit.voxel.gx,
+            voxelHit.voxel.gy,
+            voxelHit.voxel.gz,
+            chipDmg,
+            this.onBroadcast
+          );
+          this.world.spawnBulletImpact(
+            voxelHit.point,
+            voxelHit.normal,
+            voxelHit.voxel.baseColor
+          );
+          const secondHit = this.world.raycastVoxel(
+            prevPos,
+            stepDir,
+            stepDist,
+            0,
+            bullet.ignoredVoxelKey
+          );
+          if (secondHit && secondHit.distance <= stepDist) {
+            maxSegmentEntityDist = secondHit.distance;
+            stoppedByVoxel = secondHit;
+          }
+        } else {
+          maxSegmentEntityDist = voxelHit.distance;
+          stoppedByVoxel = voxelHit;
+        }
+      } else {
+        maxSegmentEntityDist = voxelHit.distance;
+        stoppedByVoxel = voxelHit;
+      }
+    }
+
+    // 3. Raycast against Soldiers & Vehicles within this frame's segment `[0, maxSegmentEntityDist]`
+    this.raycaster.set(prevPos, stepDir);
+    this.raycaster.far = Math.max(0.01, maxSegmentEntityDist);
+
+    const targets = [];
+    if (this.vehicleManager && Array.isArray(this.vehicleManager.hitMeshes)) {
+      for (let vIdx = 0; vIdx < this.vehicleManager.hitMeshes.length; vIdx++) {
+        const vm = this.vehicleManager.hitMeshes[vIdx];
+        if (!vm || (this.activeVehicle && vm.userData && vm.userData.vehicle === this.activeVehicle)) {
+          continue;
+        }
+        targets.push(vm);
+      }
+    }
+    if (this.botManager && this.botManager.bots) {
+      for (let i = 0; i < this.botManager.bots.length; i++) {
+        const b = this.botManager.bots[i];
+        if (
+          b.dead ||
+          b.downed ||
+          (typeof b.hp === 'number' && b.hp <= 0) ||
+          (typeof b.bleedOutTimer === 'number' && b.bleedOutTimer > 0) ||
+          b.drivingVehicle ||
+          (b.team === this.team && !this.friendlyFireEnabled) ||
+          !b.hitMeshes ||
+          bullet.hitBots.has(b)
+        ) {
+          continue;
+        }
+        const vx = b.pos.x - prevPos.x;
+        const vy = b.pos.y + 0.9 - prevPos.y;
+        const vz = b.pos.z - prevPos.z;
+        const proj = vx * stepDir.x + vy * stepDir.y + vz * stepDir.z;
+        if (proj < -2.0 || proj > maxSegmentEntityDist + 2.0) continue;
+        const perpSq = vx * vx + vy * vy + vz * vz - proj * proj;
+        if (perpSq <= 6.25) {
+          for (let m = 0; m < b.hitMeshes.length; m++) {
+            targets.push(b.hitMeshes[m]);
+          }
+        }
+      }
+    }
+    if (this.onGetRemoteMeshes) {
+      targets.push(...this.onGetRemoteMeshes());
+    }
+
+    let terminatedOnEntity = false;
+    let impactPoint = prevPos.clone().addScaledVector(stepDir, maxSegmentEntityDist);
+
+    if (targets.length > 0) {
+      const hits = this.raycaster.intersectObjects(targets, false);
+      for (let hIdx = 0; hIdx < hits.length; hIdx++) {
+        const hit = hits[hIdx];
+        if (hit.distance > maxSegmentEntityDist + 0.05) break;
+
+        if (hit.object.userData.bot) {
+          const bot = hit.object.userData.bot;
+          if (
+            (bot.team === this.team && !this.friendlyFireEnabled) ||
+            bot.dead ||
+            bot.downed ||
+            (typeof bot.hp === 'number' && bot.hp <= 0) ||
+            (typeof bot.bleedOutTimer === 'number' && bot.bleedOutTimer > 0) ||
+            bullet.hitBots.has(bot)
+          ) {
+            continue;
+          }
+
+          let bestBotHit = hit;
+          if (!hit.object.userData.isHead) {
+            for (let k = hIdx + 1; k < hits.length; k++) {
+              const cand = hits[k];
+              if (cand.distance > hit.distance + 0.65) break;
+              if (cand.object.userData.bot === bot && cand.object.userData.isHead) {
+                bestBotHit = cand;
+                break;
+              }
+            }
+          }
+
+          const isHeadshot = Boolean(bestBotHit.object.userData.isHead);
+          const hitThroughCover = Boolean(bullet.penetratedCover);
+          const totalFlightDist = bullet.traveledDist + bestBotHit.distance;
+
+          const penIndex = bullet.hitBots.size;
+          const bodyPenMult = Math.pow(bullet.collateralFalloff, penIndex);
+          const envMult = hitThroughCover ? bullet.coverPenMult : 1.0;
+          const distMult = this.getDistanceDamageMultiplier(
+            totalFlightDist,
+            bullet.wepDef,
+            bullet.pelletCount
+          );
+          const dmg = Math.max(
+            1,
+            Math.round(
+              bullet.damage *
+                distMult *
+                bodyPenMult *
+                envMult *
+                (isHeadshot ? bullet.headshotMult : 1)
+            )
+          );
+
+          const res = this.botManager.damageBot(
+            bot,
+            dmg,
+            this.name,
+            this.team,
+            bullet.weaponLabel,
+            isHeadshot,
+            this.onKillEvent,
+            this.onAwardXp
+          );
+          if (res && res.ignoredDowned) {
+            continue;
+          }
+
+          const isFriendlyBot = bot.team === this.team;
+          if (hitThroughCover && penIndex === 0 && !isFriendlyBot && this.onAwardXp) {
+            this.onAwardXp(25, '🧱 COVER PENETRATION WALLBANG!');
+          }
+
+          bullet.hitBots.add(bot);
+          bullet.collateralHits++;
+          impactPoint = bestBotHit.point.clone();
+
+          const impactColor =
+            res.hitType === 'armor'
+              ? new THREE.Color(0x48dbfb)
+              : isHeadshot
+              ? new THREE.Color(0xff2222)
+              : new THREE.Color(0xd63031);
+          this.world.spawnDebris(bestBotHit.point, impactColor, res.killed ? 6 : 3);
+          if (bot.mesh.userData.parts && bot.mesh.userData.parts.upperBody) {
+            bot.mesh.userData.parts.upperBody.rotation.x = -0.42;
+          }
+
+          const hmStyle = res.killed ? 'kill' : res.hitType;
+          sound.playHitmarker(hmStyle);
+          const colTag = penIndex > 0 ? ` [COLLATERAL x${penIndex + 1}]` : '';
+          const hmLabel = isFriendlyBot
+            ? res.killed
+              ? `⚠️ TEAMKILL! (-$0.10 / -10¢)`
+              : `⚠️ FRIENDLY FIRE -${dmg}`
+            : res.killed
+            ? isHeadshot
+              ? `HEADSHOT KILL!${colTag}`
+              : `ELIMINATED!${colTag}`
+            : isHeadshot
+            ? `HEADSHOT -${dmg}${colTag}`
+            : res.hitType === 'armor'
+            ? `ARMOR HIT -${dmg}${colTag}`
+            : `HIT -${dmg}${colTag}`;
+          if (this.onHitmarker) this.onHitmarker(hmStyle, hmLabel);
+
+          if (this.onFloatingDamage) {
+            this.onFloatingDamage(
+              bestBotHit.point.clone().add(new THREE.Vector3(0, 0.5 + penIndex * 0.25, 0)),
+              dmg,
+              isHeadshot
+            );
+          }
+
+          if (res.killed && !isFriendlyBot) {
+            bullet.collateralKills++;
+            this.kills++;
+            const pts = isHeadshot ? COMBAT.KILL_XP_HEADSHOT : COMBAT.KILL_XP_NORMAL;
+            this.score += pts;
+            if (this.onAwardXp) {
+              this.onAwardXp(
+                pts,
+                isHeadshot
+                  ? `ENEMY KILLED [HEADSHOT${colTag}] (${bot.name})`
+                  : `ENEMY KILLED${colTag} (${bot.name})`
+              );
+            }
+            if (bot.role === 'MEDIC') {
+              this.registerMedicWarCrime(bot.name, Boolean(res.wasRescuing));
+            }
+            const killInfo = this.registerKill(bot.name);
+            if (killInfo.announcement && this.onKillStreakAnnouncement) {
+              this.onKillStreakAnnouncement(killInfo.announcement);
+            }
+            if (killInfo.streakAnnouncement && this.onKillStreakAnnouncement) {
+              this.onKillStreakAnnouncement(killInfo.streakAnnouncement);
+            }
+          }
+
+          const stoppedByArmor =
+            !bullet.isRiflePenCaliber && !isHeadshot && res.hitType === 'armor';
+          if (bullet.hitBots.size >= bullet.maxCollateralTargets || stoppedByArmor) {
+            terminatedOnEntity = true;
+            break;
+          }
+        } else if (hit.object.userData.vehicle) {
+          const veh = hit.object.userData.vehicle;
+          if (!veh || veh === this.activeVehicle || veh.dead) {
+            continue;
+          }
+          impactPoint = hit.point.clone();
+          if (veh.team !== this.team && !veh.dead) {
+            this.world.spawnDebris(hit.point, new THREE.Color(0xf1c40f), 3);
+            sound.playHitmarker('armor');
+            const apDmg = Math.max(
+              1,
+              Math.round(bullet.voxelDamage * 0.45 * bullet.armorPenMult)
+            );
+            if (this.onHitmarker) {
+              this.onHitmarker(
+                'armor',
+                bullet.isMountedMg ? `AP ARMOR HIT -${apDmg}` : 'VEHICLE ARMOR'
+              );
+            }
+            const destroyed = this.vehicleManager.damageVehicle(
+              veh,
+              apDmg,
+              this.name,
+              this.team,
+              bullet.weaponLabel,
+              this.onKillEvent,
+              this.onAwardXp
+            );
+            if (destroyed) {
+              this.vehiclesDestroyed = (this.vehiclesDestroyed || 0) + 1;
+            }
+          }
+          terminatedOnEntity = true;
+          break;
+        } else if (hit.object.userData.remotePlayer) {
+          const rp = hit.object.userData.remotePlayer;
+          impactPoint = hit.point.clone();
+          if (rp.team !== this.team) {
+            const isHeadshot = Boolean(hit.object.userData.isHead);
+            const dmg = Math.round(
+              bullet.damage * (isHeadshot ? bullet.headshotMult : 1)
+            );
+            sound.playHitmarker(isHeadshot ? 'headshot' : 'normal');
+            if (this.onHitmarker) this.onHitmarker(isHeadshot ? 'headshot' : 'normal');
+            if (this.onBroadcast) {
+              this.onBroadcast({
+                type: 'player_hit',
+                targetId: rp.id,
+                damage: dmg,
+                attackerName: this.name,
+                attackerTeam: this.team,
+                weapon: bullet.weaponLabel
+              });
+            }
+          }
+          terminatedOnEntity = true;
+          break;
+        }
+      }
+    }
+
+    // 3b. Swept-Sphere Airborne Aircraft Hit Detection along `[prevPos, prevPos + stepDir * maxSegmentEntityDist]`:
+    // Ensures dogfight cannon rounds aimed at the HUD Lead Indicator hit moving aircraft wings/fuselage reliably!
+    if (
+      !terminatedOnEntity &&
+      this.vehicleManager &&
+      Array.isArray(this.vehicleManager.vehicles)
+    ) {
+      for (let vIdx = 0; vIdx < this.vehicleManager.vehicles.length; vIdx++) {
+        const airV = this.vehicleManager.vehicles[vIdx];
+        if (
+          !airV ||
+          !airV.isAircraft ||
+          airV.dead ||
+          airV === this.activeVehicle ||
+          airV.team === this.team
+        ) {
+          continue;
+        }
+        const vx = airV.pos.x - prevPos.x;
+        const vy = airV.pos.y - prevPos.y;
+        const vz = airV.pos.z - prevPos.z;
+        const proj = THREE.MathUtils.clamp(
+          vx * stepDir.x + vy * stepDir.y + vz * stepDir.z,
+          0,
+          maxSegmentEntityDist
+        );
+        const closestX = prevPos.x + stepDir.x * proj;
+        const closestY = prevPos.y + stepDir.y * proj;
+        const closestZ = prevPos.z + stepDir.z * proj;
+        const dx = airV.pos.x - closestX;
+        const dy = airV.pos.y - closestY;
+        const dz = airV.pos.z - closestZ;
+        const distSq = dx * dx + dy * dy + dz * dz;
+        const hitRadius =
+          airV.aircraftRole === 'gunship' || airV.aircraftRole === 'bomber' ? 10.5 : 7.4;
+
+        if (distSq <= hitRadius * hitRadius) {
+          impactPoint.set(closestX, closestY, closestZ);
+          this.world.spawnDebris(impactPoint, new THREE.Color(0xf1c40f), 4);
+          sound.playHitmarker('armor');
+          const apDmg = Math.max(
+            1,
+            Math.round(bullet.voxelDamage * 0.45 * bullet.armorPenMult)
+          );
+          if (this.onHitmarker) {
+            this.onHitmarker(
+              'armor',
+              bullet.isMountedMg ? `✈️ AIRFRAME HIT -${apDmg}` : 'AIRCRAFT HIT'
+            );
+          }
+          const destroyed = this.vehicleManager.damageVehicle(
+            airV,
+            apDmg,
+            this.name,
+            this.team,
+            bullet.weaponLabel,
+            this.onKillEvent,
+            this.onAwardXp
+          );
+          if (destroyed) {
+            this.vehiclesDestroyed = (this.vehiclesDestroyed || 0) + 1;
+          }
+          terminatedOnEntity = true;
+          break;
+        }
+      }
+    }
+
+    // 4. If stopped by a non-penetrated voxel (and didn't already terminate on an entity in front of it)
+    if (!terminatedOnEntity && stoppedByVoxel) {
+      impactPoint = stoppedByVoxel.point.clone();
+      if (stoppedByVoxel.voxel) {
+        if (stoppedByVoxel.voxel.isProp || stoppedByVoxel.voxel.type === 'wood') {
+          this.world.damageVoxel(
+            stoppedByVoxel.voxel.gx,
+            stoppedByVoxel.voxel.gy,
+            stoppedByVoxel.voxel.gz,
+            bullet.voxelDamage,
+            this.onBroadcast
+          );
+        } else if (stoppedByVoxel.voxel.type === 'sandbag') {
+          const sandbagChip = bullet.isMountedMg
+            ? Math.max(28, Math.round(bullet.voxelDamage * 0.75))
+            : Math.max(6, Math.round(bullet.voxelDamage * 0.45));
+          this.world.damageVoxel(
+            stoppedByVoxel.voxel.gx,
+            stoppedByVoxel.voxel.gy,
+            stoppedByVoxel.voxel.gz,
+            sandbagChip,
+            this.onBroadcast
+          );
+        } else if (
+          bullet.isMountedMg &&
+          (stoppedByVoxel.voxel.type === 'brick' ||
+            stoppedByVoxel.voxel.type === 'concrete')
+        ) {
+          const wallChip = Math.max(18, Math.round(bullet.voxelDamage * 0.48));
+          this.world.damageVoxel(
+            stoppedByVoxel.voxel.gx,
+            stoppedByVoxel.voxel.gy,
+            stoppedByVoxel.voxel.gz,
+            wallChip,
+            this.onBroadcast
+          );
+        }
+      }
+      const impactCol = stoppedByVoxel.voxel
+        ? stoppedByVoxel.voxel.baseColor
+        : new THREE.Color(0x6b7c59);
+      this.world.spawnBulletImpact(
+        stoppedByVoxel.point,
+        stoppedByVoxel.normal,
+        impactCol
+      );
+    }
+
+    const bulletTerminated = Boolean(
+      terminatedOnEntity || stoppedByVoxel || reachedMaxRange
+    );
+
+    // 5. Near-miss suppression along this frame's segment
+    if (this.botManager && this.botManager.bots) {
+      for (const bot of this.botManager.bots) {
+        if (bot.dead || bot.downed || bot.team === this.team) continue;
+        const distToBullet = bot.pos.distanceTo(impactPoint);
+        if (distToBullet < 5.2 && distToBullet > 0.1) {
+          bot.suppressionLevel = Math.min(1.0, (bot.suppressionLevel || 0) + 0.15);
+          bot.underFireTimer = 2.4;
+          if (!bot.lastShooterPos) bot.lastShooterPos = new THREE.Vector3();
+          bot.lastShooterPos.copy(this.pos);
+        }
+      }
+    }
+
+    // 6. If bullet terminated, award any multi-target collateral bonus and trigger explosive HEI splash (30mm GAU-8 / 25mm GAU-12)
+    if (bulletTerminated) {
+      if (bullet.collateralKills >= 2) {
+        const colBonus = bullet.collateralKills * 50;
+        this.score += colBonus;
+        if (this.onAwardXp) {
+          this.onAwardXp(
+            colBonus,
+            `💀 COLLATERAL PENETRATION KILL! (${bullet.collateralKills}x ALIGNED ENEMIES ONE-SHOT!)`
+          );
+        }
+        if (this.onKillStreakAnnouncement) {
+          this.onKillStreakAnnouncement(`🎯 COLLATERAL ${bullet.collateralKills}X KILL!`);
+        }
+      } else if (bullet.collateralHits >= 2 && this.onAwardXp) {
+        this.score += 45;
+        this.onAwardXp(
+          45,
+          `🎯 COLLATERAL PENETRATION HIT! (${bullet.collateralHits} ALIGNED TARGETS PIERCED)`
+        );
+      }
+
+      if (bullet.explosiveSplash && this.world && (terminatedOnEntity || stoppedByVoxel)) {
+        const sp = bullet.explosiveSplash;
+        this.world.explodeAt(
+          impactPoint,
+          sp.radius || 3.5,
+          sp.damage || 105,
+          (pos, r, d, broken) => {
+            if (this.onExplosionDamage) {
+              this.onExplosionDamage(
+                pos,
+                r,
+                d,
+                this,
+                broken,
+                sp.weaponName || bullet.weaponLabel
+              );
+            } else {
+              events.emit('explosion:damage', {
+                pos,
+                radius: r,
+                maxDamage: d,
+                owner: this,
+                brokenCount: broken,
+                weaponOverride: sp.weaponName || bullet.weaponLabel
+              });
+            }
+          },
+          this.onBroadcast
+        );
+      }
+
+      if (this.onBroadcast) {
+        this.onBroadcast({
+          type: 'shoot',
+          origin: bullet.tracerStart.toArray(),
+          end: impactPoint.toArray(),
+          weapon: bullet.weaponLabel,
+          weaponId: bullet.wepDef?.id || null,
+          soundType: bullet.wepDef?.soundType || 'rifle',
+          silenced: Boolean(bullet.wepDef?.silenced),
+          isTracer: bullet.isBrightTracer
+        });
+      }
+      return false;
+    }
+
+    // 7. Advance bullet position & update live 3D in-flight tracer streak / 3D arrow mesh
+    bullet.pos.addScaledVector(stepDir, stepDist);
+    bullet.traveledDist += stepDist;
+
+    if (bullet.arrowMesh) {
+      const blend = Math.max(0, 1 - bullet.traveledDist / 14.0);
+      const arrowHeadPos = bullet.pos
+        .clone()
+        .addScaledVector(bullet.muzzleOffset, blend);
+      bullet.arrowMesh.position.copy(arrowHeadPos);
+      bullet.arrowMesh.lookAt(arrowHeadPos.clone().add(stepDir));
+    }
+
+    if (bullet.tracerLine) {
+      const blend = Math.max(0, 1 - bullet.traveledDist / 14.0);
+      const headPos = bullet.pos
+        .clone()
+        .addScaledVector(bullet.muzzleOffset, blend);
+      const streakLen = Math.min(
+        bullet.traveledDist,
+        bullet.isMountedMg ? 22.0 : 14.0
+      );
+      const tailBlend = Math.max(
+        0,
+        1 - Math.max(0, bullet.traveledDist - streakLen) / 14.0
+      );
+      const tailPos = bullet.pos
+        .clone()
+        .addScaledVector(stepDir, -Math.max(0.45, streakLen))
+        .addScaledVector(bullet.muzzleOffset, tailBlend);
+      const posAttr = bullet.tracerLine.geometry.attributes.position;
+      if (posAttr) {
+        posAttr.setXYZ(0, tailPos.x, tailPos.y, tailPos.z);
+        posAttr.setXYZ(1, headPos.x, headPos.y, headPos.z);
+        posAttr.needsUpdate = true;
+      }
+    }
+
+    return true;
+  },
+
+  /**
+   * Computes the exact world-space position of the active weapon's 3D barrel muzzle (`muzzleFlash` mesh),
+   * or right-hand weapon barrel offset in hipfire/ADS, so bullet trails originate from the gun barrel
+   * instead of the center of the player's body.
+   */
+  getWeaponMuzzleWorldPosition(origin, dir) {
+    if (this.activeVehicle) {
+      return origin.clone();
+    }
+    const cur = this.currentWeapon;
+    if (cur && cur.mesh) {
+      const flashObj = cur.mesh.getObjectByName('muzzleFlash');
+      if (flashObj) {
+        this.camera.updateMatrixWorld(true);
+        const worldMuzzle = new THREE.Vector3();
+        flashObj.getWorldPosition(worldMuzzle);
+        if (Number.isFinite(worldMuzzle.x)) {
+          return worldMuzzle;
+        }
+      }
+    }
+    const camQuat = this.camera.getWorldQuaternion(new THREE.Quaternion());
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camQuat);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camQuat);
+    const lateralOffset = this.isAds ? 0.01 : 0.24;
+    const verticalOffset = this.isAds ? -0.05 : -0.13;
+    return origin
+      .clone()
+      .addScaledVector(right, lateralOffset)
+      .addScaledVector(up, verticalOffset)
+      .addScaledVector(dir, 0.85);
+  },
+
+  ejectBrassCasing() {
+    if (this.world.debrisParticles.length > 120) return;
+    const camPos = this.camera.getWorldPosition(new THREE.Vector3());
+    const camQuat = this.camera.getWorldQuaternion(new THREE.Quaternion());
+    const offset = new THREE.Vector3(0.18, -0.1, -0.25).applyQuaternion(camQuat);
+    const vel = new THREE.Vector3(2.2 + Math.random(), 2.4 + Math.random(), 0.5).applyQuaternion(
+      camQuat
+    );
+
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.018, 0.018, 0.045),
+      new THREE.MeshBasicMaterial({ color: 0xf1c40f })
+    );
+    mesh.position.copy(camPos).add(offset);
+    this.scene.add(mesh);
+
+    this.world.debrisParticles.push({
+      mesh,
+      vel,
+      rotVel: new THREE.Vector3(14, 18, 12),
+      life: 0.75
+    });
+  },
+
+  launchRocket() {
+    const origin = this.camera.getWorldPosition(new THREE.Vector3());
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(
+      this.camera.getWorldQuaternion(new THREE.Quaternion())
+    );
+
+    const rocketMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.18, 0.68),
+      new THREE.MeshBasicMaterial({ color: 0xe67e22 })
+    );
+    rocketMesh.position.copy(origin).addScaledVector(dir, 1.1);
+    rocketMesh.lookAt(origin.clone().addScaledVector(dir, 10));
+    this.scene.add(rocketMesh);
+
+    this.world.projectiles.push({
+      type: 'rpg',
+      mesh: rocketMesh,
+      vel: dir.multiplyScalar(PROJECTILES.RPG.speed),
+      gravity: PROJECTILES.RPG.gravity,
+      life: PROJECTILES.RPG.life,
+      owner: this
+    });
+  },
+
+  /**
+   * Launches a FIM-92 Stinger / 9K38 Igla Surface-to-Air Homing Missile (MANPADS).
+   * If locked onto an enemy aircraft or vehicle, uses proportional navigation homing;
+   * otherwise fires along the sightline and automatically locks onto any enemy aircraft in front!
+   */
+  launchStingerMissile() {
+    const origin = this.camera.getWorldPosition(new THREE.Vector3());
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(
+      this.camera.getWorldQuaternion(new THREE.Quaternion())
+    );
+
+    let lockedTarget = this.stingerLockedTarget;
+    if (!lockedTarget && this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+      let bestCos = 0.78;
+      for (const v of this.vehicleManager.vehicles) {
+        if (v.dead || v.team === this.team) continue;
+        if (v.isAircraft) {
+          if (!v.driver && !v.aiPilotActive) continue;
+          const vGroundH = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
+          const vAltAgl = Math.max(0, v.pos.y - vGroundH);
+          // Low-altitude ground-effect clutter masking (< 28m AGL or < 4.0s post-takeoff) prevents Stinger lock-on!
+          if (vAltAgl < 28.0 || (v.airborneRadarTimer || 0) < 4.0 || v.isLowAltRadarMasked) continue;
+        }
+        const toV = v.pos.clone().sub(origin);
+        const dist = toV.length();
+        const maxDist = v.isAircraft ? 1250 : 420;
+        if (dist > maxDist || dist < 10) continue;
+        toV.normalize();
+        const cosA = dir.dot(toV);
+        if (cosA > bestCos) {
+          bestCos = cosA;
+          lockedTarget = v;
+        }
+      }
+    }
+
+    const samMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 0.2, 1.15),
+      new THREE.MeshBasicMaterial({ color: 0x00d2d3 })
+    );
+    samMesh.position.copy(origin).addScaledVector(dir, 1.2);
+    samMesh.lookAt(origin.clone().addScaledVector(dir, 12));
+    this.scene.add(samMesh);
+
+    const samCfg = PROJECTILES.STINGER_SAM || {
+      speed: 265,
+      gravity: 0,
+      life: 6.5,
+      turnRate: 5.2,
+      blastRadius: 10.5,
+      blastDamage: 560
+    };
+
+    this.world.projectiles.push({
+      type: 'a2a_missile',
+      mesh: samMesh,
+      vel: dir.multiplyScalar(samCfg.speed),
+      gravity: samCfg.gravity,
+      life: samCfg.life,
+      turnRate: samCfg.turnRate,
+      targetVehicle: lockedTarget || null,
+      blastRadius: samCfg.blastRadius,
+      blastDamage: samCfg.blastDamage,
+      weaponName: this.team === 'RU' ? '9K38 IGLA AA SAM' : 'FIM-92 STINGER AA SAM',
+      owner: this
+    });
+
+    if (typeof this.onActionPopup === 'function') {
+      this.onActionPopup(
+        lockedTarget
+          ? `🚀 FIM-92 STINGER SAM LAUNCHED — IR LOCK ON ${lockedTarget.name}!`
+          : '🚀 FIM-92 STINGER SAM LAUNCHED (ACTIVE SEEKER)'
+      );
+    }
+  },
+
+  /**
+   * Updates the FIM-92 Stinger / 9K38 Igla Infrared Seeker Lock-On when the player holds the Stinger MANPADS.
+   */
+  updateStingerLockOn(dt) {
+    const cur = this.currentWeapon ? this.currentWeapon() : null;
+    if (!cur || !cur.def || cur.def.type !== 'stinger' || this.activeVehicle || this.dead || this.downed) {
+      this.stingerLockedTarget = null;
+      this.stingerTrackingTarget = null;
+      this.stingerLockProgress = 0;
+      return;
+    }
+
+    const origin = this.camera.getWorldPosition(new THREE.Vector3());
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(
+      this.camera.getWorldQuaternion(new THREE.Quaternion())
+    );
+
+    let bestCandidate = null;
+    let bestScore = 0.86; // ~30 deg seeker cone
+    if (this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+      for (const v of this.vehicleManager.vehicles) {
+        if (v.dead || v.team === this.team) continue;
+        if (v.isAircraft) {
+          if (!v.driver && !v.aiPilotActive) continue;
+          const vGroundH = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
+          const vAltAgl = Math.max(0, v.pos.y - vGroundH);
+          // Low-altitude ground-effect clutter masking (< 28m AGL or < 4.0s post-takeoff) prevents Stinger lock-on!
+          if (vAltAgl < 28.0 || (v.airborneRadarTimer || 0) < 4.0 || v.isLowAltRadarMasked) continue;
+        }
+        const toV = v.pos.clone().sub(origin);
+        const dist = toV.length();
+        const maxDist = v.isAircraft ? 1280 : 420;
+        if (dist > maxDist || dist < 8) continue;
+        toV.normalize();
+        const cosA = dir.dot(toV);
+        const score = cosA + (v.isAircraft ? 0.04 : 0);
+        if (score > bestScore) {
+          bestScore = score;
+          bestCandidate = v;
+        }
+      }
+    }
+
+    if (bestCandidate) {
+      if (this.stingerTrackingTarget === bestCandidate) {
+        this.stingerLockProgress = Math.min(1.0, (this.stingerLockProgress || 0) + dt * 1.45);
+      } else {
+        this.stingerTrackingTarget = bestCandidate;
+        this.stingerLockProgress = Math.min(1.0, dt * 1.45);
+      }
+      this.stingerLockedTarget = this.stingerLockProgress >= 0.85 ? bestCandidate : null;
+    } else {
+      this.stingerTrackingTarget = null;
+      this.stingerLockedTarget = null;
+      this.stingerLockProgress = Math.max(0, (this.stingerLockProgress || 0) - dt * 2.0);
+    }
+  },
+
+  /**
+   * Combined Anti-Armor / Anti-Air Engineer Specialist Toggle:
+   * Swaps Slot 3 live between `RPG-7V2 HEAT (Anti-Armor)` and `FIM-92 Stinger / 9K38 Igla (Anti-Air SAM)`!
+   */
+  toggleEngineerLauncherMode() {
+    if (!this.slots || !this.slots[2]) return false;
+    const slot3 = this.slots[2];
+    const curId = slot3.def?.id;
+    if (curId !== 'rpg7' && curId !== 'stinger') return false;
+
+    const targetId = curId === 'rpg7' ? 'stinger' : 'rpg7';
+    const newDef = WEAPON_DEFS[targetId];
+    if (!newDef) return false;
+
+    const prevClip = slot3.clip;
+    const prevReserve = slot3.reserve;
+    if (slot3.mesh && this.viewModelGroup) {
+      this.viewModelGroup.remove(slot3.mesh);
+    }
+
+    const custom = (this.weaponCustomizations && this.weaponCustomizations[targetId]) || {};
+    const newMesh = createWeaponViewModel(newDef, this.team, custom);
+    newMesh.visible = this.activeSlot === 2 && !this.activeVehicle;
+    if (this.viewModelGroup) {
+      this.viewModelGroup.add(newMesh);
+    }
+
+    slot3.def = { ...newDef };
+    slot3.mesh = newMesh;
+    slot3.clip = Math.min(newDef.clipSize, Math.max(1, prevClip));
+    slot3.reserve = Math.min(newDef.reserveAmmo, Math.max(2, prevReserve));
+    this.loadoutIds[2] = targetId;
+
+    if (typeof this.onActionPopup === 'function') {
+      this.onActionPopup(
+        targetId === 'stinger'
+          ? '🚀 SLOT [3] SWAPPED: FIM-92 STINGER AA MANPADS (IR LOCK-ON SURFACE-TO-AIR SAM)'
+          : '🚀 SLOT [3] SWAPPED: RPG-7V2 HEAT LAUNCHER (85MM ANTI-ARMOR)'
+      );
+    }
+    return true;
+  },
+
+  throwFragGrenade() {
+    if (this.grenades <= 0) return;
+    this.grenades--;
+
+    const origin = this.camera.getWorldPosition(new THREE.Vector3());
+    const dir = new THREE.Vector3(0, 0.22, -1)
+      .normalize()
+      .applyQuaternion(this.camera.getWorldQuaternion(new THREE.Quaternion()));
+
+    const grenMesh = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.14, 0),
+      new THREE.MeshStandardMaterial({ color: 0x3b5323, roughness: 0.7 })
+    );
+    grenMesh.position.copy(origin).addScaledVector(dir, 0.9);
+    this.scene.add(grenMesh);
+
+    this.world.projectiles.push({
+      type: 'grenade',
+      mesh: grenMesh,
+      vel: dir.multiplyScalar(PROJECTILES.GRENADE.speed),
+      gravity: PROJECTILES.GRENADE.gravity,
+      life: PROJECTILES.GRENADE.life, // 2.6-second fuse
+      owner: this
+    });
+  },
+
+  throwC4() {
+    const origin = this.camera.getWorldPosition(new THREE.Vector3());
+    const dir = new THREE.Vector3(0, 0.16, -1)
+      .normalize()
+      .applyQuaternion(this.camera.getWorldQuaternion(new THREE.Quaternion()));
+
+    const c4Mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.26, 0.15, 0.34),
+      new THREE.MeshStandardMaterial({ color: 0x5c6650 })
+    );
+    c4Mesh.position.copy(origin).addScaledVector(dir, 0.9);
+    this.scene.add(c4Mesh);
+
+    const proj = {
+      type: 'c4',
+      mesh: c4Mesh,
+      vel: dir.multiplyScalar(PROJECTILES.C4.speed),
+      gravity: PROJECTILES.C4.gravity,
+      life: PROJECTILES.C4.life,
+      owner: this
+    };
+    this.world.projectiles.push(proj);
+    this.plantedC4.push(proj);
+  },
+
+  detonateC4() {
+    if (this.plantedC4.length === 0) return;
+    sound.playExplosion(0);
+    this.addShake(0.6);
+    for (const c4 of this.plantedC4) {
+      const idx = this.world.projectiles.indexOf(c4);
+      if (idx !== -1) {
+        const pos = c4.mesh.position.clone();
+        this.world.explodeAt(
+          pos,
+          PROJECTILES.C4_BLAST_RADIUS,
+          PROJECTILES.C4_BLAST_DAMAGE,
+          (blastPos, rad, dmg, broken) => {
+            if (this.onExplosionDamage) this.onExplosionDamage(blastPos, rad, dmg, this, broken);
+          },
+          this.onBroadcast
+        );
+        this.scene.remove(c4.mesh);
+        this.world.projectiles.splice(idx, 1);
+      }
+    }
+    this.plantedC4 = [];
+  },
+
+  // Squad-style suppression: call this when bullets land near the player (within ~4m)
+  applySuppression(intensity = 0.25) {
+    // Entrenched defenders inside a Friendly Forward Base take 50% less suppression!
+    const effIntensity = this.inFriendlyForwardBase ? intensity * 0.5 : intensity;
+    this.suppressionLevel = Math.min(1.0, this.suppressionLevel + effIntensity);
+    this.lastSuppressionHitTime = performance.now();
+  },
+
+  // Register a kill for streak/multi-kill tracking
+  registerKill(victimName) {
+    this.killStreak++;
+    this.multiKillCount++;
+    this.multiKillTimer = PLAYER.MULTI_KILL_TIMER; // 3.5s window for multi-kills
+
+    // Announce multi-kills
+    let announcement = null;
+    if (this.multiKillCount === 2) announcement = 'DOUBLE KILL';
+    else if (this.multiKillCount === 3) announcement = 'TRIPLE KILL';
+    else if (this.multiKillCount === 4) announcement = 'QUAD KILL';
+    else if (this.multiKillCount >= 5) announcement = 'RAMPAGE';
+
+    // Announce kill streaks
+    let streakAnnouncement = null;
+    if (this.killStreak === 5) streakAnnouncement = 'KILLING SPREE (5)';
+    else if (this.killStreak === 10) streakAnnouncement = 'UNSTOPPABLE (10)';
+    else if (this.killStreak === 15) streakAnnouncement = 'GODLIKE (15)';
+    else if (this.killStreak === 20) streakAnnouncement = 'LEGENDARY (20)';
+
+    if (this.botManager && this.botManager.notifyPlayerKill) {
+      this.botManager.notifyPlayerKill(this, victimName);
+    }
+
+    return { announcement, streakAnnouncement, streak: this.killStreak, multiKill: this.multiKillCount };
+  },
+
+  // Register a War Crime when eliminating a Field Medic (especially while rescuing!)
+  registerMedicWarCrime(medicName, wasRescuing = false) {
+    this.medicKills = (this.medicKills || 0) + 1;
+    if (this.onAwardXp) {
+      this.onAwardXp(
+        0,
+        wasRescuing
+          ? `⚠️ WAR CRIME! KILLED MEDIC DURING RESCUE (${medicName} • #${this.medicKills})`
+          : `⚠️ WAR CRIME: FIELD MEDIC ELIMINATED (${medicName} • #${this.medicKills})`
+      );
+    }
+    if (this.onKillStreakAnnouncement && (wasRescuing || this.medicKills === 1 || this.medicKills % 3 === 0)) {
+      this.onKillStreakAnnouncement(
+        wasRescuing
+          ? '⚠️ GENEVA VIOLATION: KILLED MEDIC ON RESCUE!'
+          : `⚠️ WAR CRIME #${this.medicKills}: MEDIC ELIMINATED`
+      );
+    }
+    if (this.botManager && this.botManager.notifyWarCrime) {
+      this.botManager.notifyWarCrime(this, medicName, wasRescuing, this.medicKills);
+    }
+    if (this.onWarCrimeCommitted) {
+      this.onWarCrimeCommitted(medicName, wasRescuing, this.medicKills);
+    } else {
+      events.emit('warcrime:committed', {
+        medicName,
+        wasRescuing,
+        totalCount: this.medicKills
+      });
+    }
+  },
+
+  useMeleeSword(def) {
+    const isHeavySwing = Boolean(def.isTwoHandedSword || def.isPolearm || def.isTwoHandedShield);
+    if (typeof sound.playMeleeSwing === 'function') {
+      sound.playMeleeSwing(0, 0, isHeavySwing);
+    } else {
+      sound.playWeaponSwitch?.();
+    }
+    this.swordSlung = false;
+
+    // Determine Mount & Blade 4-Directional Sword / Polearm / Shield Attack from Mouse/WASD Guard Direction!
+    // - Holding RMB with 1H Sword & Shield (`def.id === 'longsword'`) executes a Shield Bash + Under-Rim Riposte Thrust!
+    // - 2H Large Shield (`def.isTwoHandedShield`) performs a heavy forward Shield Bash Slam (with knockback + stagger)
+    // - Polearm (`def.isPolearm`) defaults to long 'THRUST_LUNGE' unless guard direction is 'UP' ('OVERHEAD_CLEAVE')
+    // - Zweihänder & 1H Sword follow `this.meleeGuardDir` ('UP' -> OVERHEAD_CLEAVE, 'DOWN' -> THRUST_LUNGE,
+    //   'LEFT' -> LEFT_SWEEP, 'RIGHT' -> RIGHT_SLASH), or chain a fluid 4-direction combo if no recent direction input!
+    let swingType = 'RIGHT_SLASH';
+    let facingSector = 'RIGHT';
+    const hasRecentDir = performance.now() - (this._meleeDirInputTime || 0) < 900;
+    const comboDirs = ['RIGHT', 'LEFT', 'UP', 'DOWN'];
+    const activeDir = hasRecentDir
+      ? this.meleeGuardDir || 'RIGHT'
+      : this.keys?.['KeyA']
+      ? 'LEFT'
+      : this.keys?.['KeyD']
+      ? 'RIGHT'
+      : (this.pitch || 0) > 0.18
+      ? 'UP'
+      : (this.pitch || 0) < -0.18
+      ? 'DOWN'
+      : comboDirs[(this.swordAttackCount || 0) % comboDirs.length];
+    this.meleeGuardDir = activeDir;
+
+    if (def.isTwoHandedShield) {
+      swingType = 'THRUST_LUNGE';
+      facingSector = 'SHIELD_BASH';
+    } else if (this.isAds && def.id === 'longsword') {
+      swingType = 'SHIELD_BASH_RIPOSTE';
+      facingSector = 'SHIELD_RIPOSTE';
+    } else if (def.isPolearm) {
+      if (activeDir === 'UP' || (this.pitch || 0) > 0.2) {
+        swingType = 'OVERHEAD_CLEAVE';
+        facingSector = 'HALBERD_CHOP';
+      } else {
+        swingType = 'THRUST_LUNGE';
+        facingSector = 'SPEAR_THRUST';
+      }
+    } else if (activeDir === 'UP') {
+      swingType = 'OVERHEAD_CLEAVE';
+      facingSector = 'UP';
+    } else if (activeDir === 'DOWN') {
+      swingType = 'THRUST_LUNGE';
+      facingSector = 'DOWN';
+    } else if (activeDir === 'LEFT') {
+      swingType = 'LEFT_SWEEP';
+      facingSector = 'LEFT';
+    } else {
+      swingType = 'RIGHT_SLASH';
+      facingSector = 'RIGHT';
+    }
+
+    this.swordSwingType = swingType;
+    this.swordFacingSector = facingSector;
+    const swingDur = def.isTwoHandedSword ? 0.56 : def.isPolearm ? 0.48 : 0.42;
+    this.swordSwingDuration = swingDur;
+    this.swordSwingTimer = swingDur;
+    this.swordAttackCount = (this.swordAttackCount || 0) + 1;
+
+    if (swingType === 'OVERHEAD_CLEAVE') {
+      this.recoilKickZ = -0.22;
+      this.recoilOffsetPitch = -0.24;
+    } else if (swingType === 'THRUST_LUNGE') {
+      this.recoilKickZ = def.isPolearm ? -0.42 : -0.32;
+      this.recoilOffsetPitch = 0.04;
+    } else if (swingType === 'LEFT_SWEEP') {
+      this.recoilKickZ = -0.18;
+      this.recoilOffsetPitch = -0.06;
+      this.swayX = -0.1;
+    } else {
+      this.recoilKickZ = -0.18;
+      this.recoilOffsetPitch = -0.08;
+      this.swayX = 0.1;
+    }
+    this.addShake(isHeavySwing ? 0.2 : 0.14);
+
+    const origin = this.camera.getWorldPosition(new THREE.Vector3());
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(
+      this.camera.getWorldQuaternion(new THREE.Quaternion())
+    );
+    const baseReach = def.meleeRange || 4.4;
+    const reach = swingType === 'THRUST_LUNGE' ? baseReach + 1.2 : baseReach;
+    const baseDmg = def.damage || 115;
+    const dmg = swingType === 'OVERHEAD_CLEAVE' ? Math.round(baseDmg * 1.2) : baseDmg;
+    const arcMinDot =
+      def.isTwoHandedSword && (swingType === 'LEFT_SWEEP' || swingType === 'RIGHT_SLASH')
+        ? 0.15
+        : swingType === 'LEFT_SWEEP' || swingType === 'RIGHT_SLASH'
+        ? 0.28
+        : 0.42;
+    const maxTargets = def.maxCleaveTargets || (def.isTwoHandedSword ? 3 : 1);
+
+    let hitCount = 0;
+    if (this.botManager && Array.isArray(this.botManager.bots)) {
+      for (const bot of this.botManager.bots) {
+        if (hitCount >= maxTargets) break;
+        if (!bot || bot.dead || bot.downed || bot.team === this.team) continue;
+        const toBot = bot.pos.clone().add(new THREE.Vector3(0, 0.9, 0)).sub(origin);
+        const dist = toBot.length();
+        if (dist <= reach) {
+          const dirToBot = toBot.clone().normalize();
+          if (forward.dot(dirToBot) >= arcMinDot || dist <= 2.2) {
+            const isHs = toBot.y > 0.35 || swingType === 'OVERHEAD_CLEAVE';
+            // Anti-Cavalry Bonus: Polearms deal 2.0x damage against mounted riders!
+            const antiCavMult = def.isPolearm && bot.isMountedKnight ? 1.85 : 1.0;
+            const finalDmg = Math.round(dmg * antiCavMult * (isHs ? def.headshotMult || 1.5 : 1));
+            const res = this.botManager.damageBot(
+              bot,
+              finalDmg,
+              this.name,
+              this.team,
+              def.shortName || 'BROADSWORD',
+              isHs,
+              this.onKillEvent,
+              this.onAwardXp
+            );
+            // 2H Large Shield Bash or 1H Shield Bash Riposte knocks enemy back & staggers their guard!
+            if ((def.isTwoHandedShield || swingType === 'SHIELD_BASH_RIPOSTE') && !bot.dead) {
+              const kbDist = def.isTwoHandedShield ? 3.1 : 2.2;
+              bot.pos.x += forward.x * kbDist;
+              bot.pos.z += forward.z * kbDist;
+              bot.pos.y = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
+              bot.flinchTimer = 0.65;
+              bot.shootCooldown = Math.max(bot.shootCooldown || 0, 1.25);
+              sound.playShieldBlock?.(false, 0, 0);
+            }
+            hitCount++;
+            this.world.spawnDebris(
+              bot.pos.clone().add(new THREE.Vector3(0, 1.1, 0)),
+              new THREE.Color(0xd63031),
+              5
+            );
+            sound.playHitmarker(res?.killed ? 'kill' : 'normal');
+            if (this.onHitmarker) {
+              const actionLbl = def.isTwoHandedShield
+                ? '🛡️ SHIELD BASH'
+                : def.isPolearm
+                ? '🔱 SPEAR THRUST'
+                : def.isTwoHandedSword && hitCount > 1
+                ? `🗡️ 2H MULTI-CLEAVE x${hitCount}`
+                : `⚔️ ${swingType.replace('_', ' ')}`;
+              this.onHitmarker(
+                res?.killed ? 'kill' : 'normal',
+                res?.killed ? `${actionLbl}! (${bot.name})` : `${actionLbl} -${finalDmg}`
+              );
+            }
+            if (res?.killed) {
+              this.kills++;
+              this.score += COMBAT.KILL_XP_NORMAL;
+              this.registerKill(bot.name);
+            }
+          }
+        }
+      }
+    }
+
+    // Polearms & Greatswords can also strike enemy Warhorses / Siege Engines in melee range!
+    if (hitCount === 0 && this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+      for (const veh of this.vehicleManager.vehicles) {
+        if (!veh || veh.dead || veh.team === this.team || veh === this.activeVehicle) continue;
+        const dVeh = veh.pos.distanceTo(origin);
+        if (dVeh <= reach + 1.5) {
+          const antiMountDmg =
+            def.isPolearm && veh.type === 'warhorse'
+              ? 240
+              : def.voxelDamage || 65;
+          this.vehicleManager.damageVehicle(
+            veh,
+            antiMountDmg,
+            this.name,
+            this.team,
+            def.shortName || 'POLEARM',
+            this.onKillEvent,
+            this.onAwardXp
+          );
+          sound.playHitmarker('armor');
+          hitCount++;
+          break;
+        }
+      }
+    }
+
+    if (hitCount === 0) {
+      const vHit = this.world.raycastVoxel(origin, forward, reach);
+      if (vHit && vHit.voxel) {
+        this.world.damageVoxel(
+          vHit.voxel.gx,
+          vHit.voxel.gy,
+          vHit.voxel.gz,
+          def.voxelDamage || 55,
+          this.onBroadcast
+        );
+        this.world.spawnBulletImpact(vHit.point, vHit.normal, vHit.voxel.baseColor);
+      }
+    }
+  },
+
+  takeDamage(amount, attackerName, attackerTeam, weaponName, onKillFn, attackerPos = null) {
+    if (this.dead || this.downed) return;
+
+    // Mount & Blade Shield Wall, Passive Off-Hand Shield Coverage & Directional Chamber Parry Mechanics:
+    // 1. Directional Frontal Arc Check: Shields & Parries protect your frontal/flank arc (dot >= -0.25)!
+    // 2. Passive Shield Coverage (Even while walking/swinging without holding RMB!):
+    //    - 2H Large Pavise Shield (`tower_shield_2h`): Passively blocks 35% of frontal arrows/bolts & melee!
+    //    - 1H Sword & Heater Shield (`longsword`): Off-hand Heater Shield passively blocks 30% of frontal arrows & melee!
+    // 3. Active Raised Shield / Directional Parry (`Hold RMB` / `this.isAds`):
+    //    - 2H Large Pavise Shield (`tower_shield_2h`): Blocks 92% of all frontal arrows, bolts & melee!
+    //    - 1H Sword & 1H Heater Shield (`longsword`): Blocks 75% of all frontal arrows, bolts & melee!
+    //    - Knight Polearm / Long Spear (`knight_lance`): Couched Spear Brace blocks 65% melee/cavalry & 30% arrows!
+    //    - 2H Double-Handed Greatsword (`greatsword_2h`): Crossguard & Ricasso Parry blocks 60% melee & 25% arrows!
+    const curWep = this.currentWeapon ? this.currentWeapon() : null;
+    if (
+      (!this.activeVehicle || this.activeVehicle.type === 'warhorse') &&
+      curWep &&
+      curWep.def &&
+      curWep.def.type === 'melee_sword' &&
+      weaponName !== 'BLEED'
+    ) {
+      let inFrontalGuardArc = true;
+      if (attackerPos) {
+        const toAttX = attackerPos.x - this.pos.x;
+        const toAttZ = attackerPos.z - this.pos.z;
+        const len = Math.hypot(toAttX, toAttZ) || 1;
+        const lookX = -Math.sin(this.yaw || 0);
+        const lookZ = -Math.cos(this.yaw || 0);
+        const dot = (toAttX * lookX + toAttZ * lookZ) / len;
+        inFrontalGuardArc = dot >= (curWep.def.isTwoHandedShield ? -0.35 : -0.22);
+      }
+
+      if (inFrontalGuardArc) {
+        const wDef = curWep.def;
+        const isRangedArrowOrBolt =
+          String(weaponName || '').includes('BOW') ||
+          String(weaponName || '').includes('CROSSBOW') ||
+          String(weaponName || '').includes('QUARREL') ||
+          String(weaponName || '').includes('ARROW');
+        let blockRatio = 0;
+        let blockLabel = '';
+        let isSwordParry = false;
+
+        if (this.isAds) {
+          if (wDef.isTwoHandedShield) {
+            blockRatio = 0.92;
+            blockLabel = '🛡️ PAVISE SHIELD WALL (-92%)';
+          } else if (wDef.id === 'longsword') {
+            blockRatio = 0.75;
+            blockLabel = '🛡️ HEATER SHIELD BLOCK (-75%)';
+          } else if (wDef.isPolearm) {
+            blockRatio = isRangedArrowOrBolt ? 0.30 : 0.65;
+            blockLabel = '🔱 POLEARM BRACE PARRY (-65%)';
+            isSwordParry = true;
+          } else if (wDef.isTwoHandedSword) {
+            blockRatio = isRangedArrowOrBolt ? 0.25 : 0.60;
+            blockLabel = `⚔️ ZWEIHÄNDER ${this.meleeGuardDir || 'CROSS'} PARRY (-${Math.round(blockRatio * 100)}%)`;
+            isSwordParry = true;
+          }
+        } else {
+          // Passive Off-Hand Shield Protection while moving or swinging!
+          if (wDef.isTwoHandedShield) {
+            blockRatio = 0.35;
+            blockLabel = '🛡️ PAVISE PASSIVE COVER (-35%)';
+          } else if (wDef.id === 'longsword') {
+            blockRatio = 0.30;
+            blockLabel = '🛡️ OFF-HAND SHIELD DEFLECT (-30%)';
+          }
+        }
+
+        if (blockRatio > 0) {
+          amount = Math.max(1, Math.round(amount * (1 - blockRatio)));
+          this.shieldBlockKick = this.isAds ? 0.16 : 0.08;
+          if (typeof sound.playShieldBlock === 'function') {
+            sound.playShieldBlock(isSwordParry, 0, 0);
+          } else {
+            sound.playHitmarker?.('armor');
+          }
+          if (this.onHitmarker && this.isAds) {
+            this.onHitmarker('armor', blockLabel);
+          }
+        }
+      }
+    }
+
+    // While inside an enclosed Tank, APC, or Armored Car, the armored hull protects the crew's personal HP!
+    // NOTE: On an open-saddle Warhorse (`type === 'warhorse'`), the Rider and the Horse have SEPARATE
+    // health and armor — so the rider CAN take personal damage and die on horseback while the horse survives!
+    if (this.activeVehicle && !this.activeVehicle.dead && this.activeVehicle.type !== 'warhorse') {
+      this.notifyVehicleHit(0, attackerName, weaponName || 'SMALL ARMS DEFLECTED', attackerPos);
+      return;
+    }
+
+    // Taking direct hits always triggers suppression
+    this.applySuppression(Math.min(COMBAT.SUPPRESSION_MAX_INTENSITY, amount * COMBAT.SUPPRESSION_INTENSITY_PER_DMG));
+
+    // Real-life & Tactical Shooter Entrenched Forward Base Defender Advantage:
+    // Fighting from prepared sandbag parapets, defilade, and built Point Defenses inside a Friendly Forward Base
+    // reduces incoming ballistic & explosive damage by 25% to 40% (based on Defense Stage 0-4)!
+    if (this.inFriendlyForwardBase && weaponName !== 'BLEED') {
+      const defStage = Math.min(4, this.defendedFlagStage || 0);
+      const dmgReduction = Math.min(0.42, 0.25 + defStage * 0.04);
+      amount = Math.max(1, Math.round(amount * (1 - dmgReduction)));
+    }
+
+    // Body armor absorbs 35%–55% of incoming gunfire (based on equipped Tactical Vest) until depleted
+    if (this.armor > 0 && weaponName !== 'BLEED') {
+      const ratio = this.armorAbsorbRatio || PLAYER.ARMOR_ABSORB_RATIO;
+      const absorbed = Math.min(this.armor, Math.round(amount * ratio));
+      this.armor -= absorbed;
+      amount -= absorbed;
+    }
+
+    this.hp -= amount;
+    if (amount >= PLAYER.BLEED_CHANCE_THRESHOLD && Math.random() < PLAYER.BLEED_CHANCE) {
+      this.bleeding = true;
+    }
+
+    if (this.onDamageTaken) {
+      this.onDamageTaken(amount, attackerPos, false, weaponName, attackerName);
+    } else {
+      events.emit('player:damaged', {
+        amount,
+        sourcePos: attackerPos,
+        inVehicle: false,
+        weaponName,
+        attackerName
+      });
+    }
+
+    if (this.hp <= 0) {
+      this.hp = 0;
+      this.isFiring = false;
+      this.isAds = false;
+      this.reloading = false;
+      if (this.activeVehicle) {
+        const exitedVehicle = this.activeVehicle;
+        this.activeVehicle.driver = null;
+        this.activeVehicle = null;
+        events.emit('player:exited-vehicle', { vehicle: exitedVehicle, reason: 'downed' });
+      }
+
+      if (onKillFn) {
+        onKillFn(attackerName, attackerTeam, this.name, this.team, weaponName, false);
+      } else {
+        events.emit('kill:event', {
+          killer: attackerName,
+          kTeam: attackerTeam,
+          victim: this.name,
+          vTeam: this.team,
+          weapon: weaponName,
+          isHs: false
+        });
+      }
+
+      events.emit('player:killed', {
+        killerName: attackerName,
+        killerTeam: attackerTeam,
+        weaponName,
+        pos: this.pos.clone()
+      });
+
+      // Enter BattleBit Downed State (waiting for Medic revive or Hold [Space] to Give Up)
+      this.downed = true;
+      this.downedTimer = PLAYER.DOWNED_TIMER;
+      this.giveUpProgress = 0;
+      this.downedKiller = attackerName;
+      this.downedWeapon = weaponName;
+      this.viewModelGroup.visible = false;
+    }
+  },
+
+  reviveFromDowned(
+    medicName = 'SQUAD MEDIC',
+    isMedicRescuer = true,
+    dressingsLeft = 8,
+    maxDressings = 9
+  ) {
+    if (!this.downed || this.dead) return;
+    this.downed = false;
+    this.downedTimer = 0;
+    this.giveUpProgress = 0;
+    // Squad 2-Stage Medical Treatment:
+    // Stage 1: Field Dressing stabilizes the downed soldier at 35 HP and stops bleeding (-1 Field Dressing).
+    // Stage 2: If rescued by a Medic, they immediately follow up with their Medic Bag to heal injuries to 100/100 HP!
+    this.hp = PLAYER.REVIVE_HP || 35;
+    this.bleeding = false;
+    this.viewModelGroup.visible = true;
+    sound.playReload();
+    if (this.onAwardXp) {
+      this.onAwardXp(
+        COMBAT.REVIVE_XP,
+        isMedicRescuer
+          ? `🩹 REVIVED BY MEDIC ${medicName} (${dressingsLeft}/${maxDressings} DRESSINGS LEFT) — APPLYING MEDIC BAG TO 100 HP!`
+          : `🩹 REVIVED BY ${medicName} (${dressingsLeft}/2 DRESSINGS LEFT • ${this.hp}/100 HP — FIND MEDIC FOR FULL HEAL!)`
+      );
+    }
+  },
+
+  finalizeDeath() {
+    this.downed = false;
+    this.dead = true;
+    this.deaths++;
+    this.killStreak = 0;
+    this.multiKillCount = 0;
+    this.multiKillTimer = 0;
+    this.suppressionLevel = 0;
+    this.respawnTimer = this.respawnDelay; // Start respawn countdown
+    if (document.pointerLockElement === document.body) {
+      document.exitPointerLock();
+    }
+    if (this.onPlayerDied) {
+      this.onPlayerDied(this.downedKiller, this.downedWeapon);
+    } else {
+      events.emit('player:died', {
+        killerName: this.downedKiller,
+        weaponName: this.downedWeapon
+      });
+    }
+  }
+};

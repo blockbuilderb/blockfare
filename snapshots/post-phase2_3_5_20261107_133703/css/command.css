@@ -1,0 +1,244 @@
+/* Squad-Style Chain of Command: Rank Selector & HUD Command Order Panel */
+.rank-btn {
+  flex: 1;
+  padding: 6px 6px;
+  font-size: 9.5px;
+  font-weight: 900;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  color: #ecf0f1;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+}
+
+.rank-btn.active {
+  background: rgba(241, 196, 15, 0.25);
+  border-color: #f1c40f;
+  color: #f1c40f;
+  box-shadow: 0 0 10px rgba(241, 196, 15, 0.28);
+}
+
+#command-order-panel {
+  position: fixed;
+  bottom: 224px;
+  left: 16px;
+  background: rgba(10, 16, 22, 0.92);
+  border: 1px solid rgba(241, 196, 15, 0.55);
+  border-left: 3px solid #f1c40f;
+  border-radius: 4px;
+  padding: 6px 8px;
+  width: 262px;
+  pointer-events: auto;
+  z-index: 30;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.72);
+}
+
+.cmd-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+#cmd-rank-badge {
+  font-size: 10px;
+  font-weight: 900;
+  color: #f1c40f;
+  letter-spacing: 0.8px;
+}
+
+#cmd-open-modal-btn {
+  background: rgba(241, 196, 15, 0.2);
+  border: 1px solid #f1c40f;
+  color: #f1c40f;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+#cmd-open-modal-btn:hover {
+  background: rgba(241, 196, 15, 0.38);
+}
+
+.cmd-scope-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.cmd-scope-btn {
+  padding: 3px 4px;
+  font-size: 9px;
+  font-weight: 900;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #bdc3c7;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.cmd-scope-btn.active {
+  background: rgba(46, 204, 113, 0.24);
+  border-color: #2ecc71;
+  color: #2ecc71;
+}
+
+.cmd-tactical-row {
+  display: grid;
+  grid-template-columns: 1.25fr 1.35fr 0.55fr;
+  gap: 3px;
+  margin-bottom: 4px;
+}
+
+.cmd-spacing-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.cmd-spacing-btn {
+  padding: 3px 2px;
+  font-size: 9px;
+  font-weight: 900;
+  background: rgba(155, 89, 182, 0.22);
+  border: 1px solid rgba(155, 89, 182, 0.55);
+  color: #ecf0f1;
+  border-radius: 2px;
+  cursor: pointer;
+  text-align: center;
+  line-height: 1.15;
+}
+
+.cmd-spacing-btn:hover,
+.cmd-spacing-btn.active {
+  background: #2ecc71;
+  border-color: #7bed9f;
+  color: #111;
+}
+
+.cmd-spacing-btn.active .cmd-hk,
+.cmd-spacing-btn:hover .cmd-hk {
+  color: #111;
+}
+
+.cmd-obj-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 3px;
+  margin-bottom: 4px;
+}
+
+.cmd-order-btn {
+  padding: 3px 2px;
+  font-size: 9px;
+  font-weight: 900;
+  background: rgba(52, 152, 219, 0.18);
+  border: 1px solid rgba(52, 152, 219, 0.45);
+  color: #ecf0f1;
+  border-radius: 2px;
+  cursor: pointer;
+  text-align: center;
+  line-height: 1.15;
+}
+
+.cmd-hk {
+  display: block;
+  font-size: 7.5px;
+  font-weight: 800;
+  color: #95a5a6;
+}
+
+.cmd-order-btn.active .cmd-hk,
+.cmd-order-btn:hover .cmd-hk {
+  color: #222;
+}
+
+.cmd-order-btn:hover,
+.cmd-order-btn.active {
+  background: #f39c12;
+  border-color: #f1c40f;
+  color: #111;
+}
+
+#cmd-hud-status-line {
+  font-size: 8.5px;
+  font-weight: 800;
+  color: #7bed9f;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#cmd-active-order-text {
+  font-size: 9px;
+  font-weight: 800;
+  color: #7bed9f;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#command-order-panel.hidden,
+#squad-panel.hidden {
+  display: none !important;
+}
+
+.cmd-support-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 3px;
+  margin-top: 3px;
+}
+
+.cmd-support-btn {
+  background: rgba(25, 38, 52, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #ecf0f1;
+  border-radius: 3px;
+  padding: 3px 4px;
+  font-size: 9px;
+  font-weight: 900;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.15;
+}
+
+.cmd-support-btn.uav {
+  border-color: rgba(0, 210, 211, 0.65);
+  background: rgba(0, 168, 255, 0.18);
+  color: #74b9ff;
+}
+
+.cmd-support-btn.uav.active {
+  background: rgba(0, 210, 211, 0.36);
+  border-color: #00d2d3;
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(0, 210, 211, 0.45);
+}
+
+.cmd-support-btn.strike {
+  border-color: rgba(231, 76, 60, 0.72);
+  background: rgba(192, 57, 43, 0.28);
+  color: #ff7675;
+}
+
+.cmd-support-btn.strike:hover {
+  background: rgba(231, 76, 60, 0.48);
+  color: #ffffff;
+}
+
+.cmd-support-btn.pattern {
+  border-color: rgba(241, 196, 15, 0.55);
+  background: rgba(243, 156, 18, 0.18);
+  color: #f1c40f;
+}

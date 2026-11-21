@@ -1,0 +1,2952 @@
+import * as THREE from '../../vendor/three.module.js';
+import { VOXEL_SIZE } from '../world.js?v=90';
+import { sound } from '../audio.js?v=90';
+import { PLAYER, DISTANCES, CLASS_TRAITS, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=90';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=90';
+import { events, makeEventBridge } from '../events.js?v=90';
+import { GunsmithMethods } from './GunsmithState.js?v=90';
+import { FortificationMethods } from './FortificationBuilder.js?v=90';
+import { CommanderMethods } from './CommanderAbilities.js?v=90';
+import { VehicleControlMethods } from './VehicleControl.js?v=90';
+import { CombatMethods } from './PlayerCombat.js?v=90';
+import {
+  PLAYER_PARACHUTE_EVENTS,
+  createPlayerParachuteFSM,
+  createCommanderUavFSM,
+  createCommanderAirstrikeFSM,
+  createTargetLockScannerFSM,
+  createSquadDeployablesFSM
+} from '../core/StateMachines.js?v=90';
+
+export class PlayerController {
+  constructor(camera, scene, world, botManager, vehicleManager) {
+    this.camera = camera;
+    this.scene = scene;
+    this.world = world;
+    this.botManager = botManager;
+    this.vehicleManager = vehicleManager;
+
+    this.name = 'YOU (SQUAD LEADER)';
+    this.team = 'US';
+    this.role = 'engineer';
+
+    this.pos = new THREE.Vector3(-90, 0, 0);
+    this.vel = new THREE.Vector3();
+    this.yaw = -Math.PI / 2;
+    this.pitch = 0;
+
+    this.hp = PLAYER.HP;
+    this.maxHp = PLAYER.MAX_HP;
+    this.armor = PLAYER.ARMOR;
+    this.maxArmor = PLAYER.MAX_ARMOR;
+    this.armorAbsorbRatio = PLAYER.ARMOR_ABSORB_RATIO;
+    this.bleeding = false;
+    this.bleedTickTimer = 0;
+    this.bandages = PLAYER.STARTING_BANDAGES;
+    this.bandageProgress = 0;
+    this.grenades = PLAYER.STARTING_GRENADES;
+
+    // Two-Tier Economy: Persistent Warehouse Bank ($) & In-Match Tactical Cash ($)
+    this.warehouseCash = 350;
+    this.matchCash = PLAYER.STARTING_CASH;
+    this.cash = this.matchCash + this.warehouseCash;
+    this.ownedWeapons = new Set(['m4a1', 'ak15', 'vector', 'm249', 'sv98', 'mp443']);
+    this.classLoadoutSelections = {
+      engineer: { primary: 'm4a1', secondary: 'mp443' },
+      assault: { primary: 'ak15', secondary: 'mp443' },
+      medic: { primary: 'vector', secondary: 'mp443' },
+      support: { primary: 'm249', secondary: 'mp443' },
+      recon: { primary: 'sv98', secondary: 'mp443' }
+    };
+    this.weaponAttachments = {};
+    this.warehouseStock = { armorPlates: 2, medStims: 2, ammoPacks: 2 };
+    this.careerStats = { matchesPlayed: 0, matchesWon: 0, totalExtractedCash: 0 };
+    this.lastMatchExtraction = null;
+    this.ownedUpgrades = new Set([
+      'stock',
+      'std_mag',
+      'factory',
+      'std_grip',
+      'fmj',
+      'std_vest',
+      'no_pack'
+    ]);
+    this.equippedUpgrades = {
+      muzzle: 'stock',
+      magazine: 'std_mag',
+      optic: 'factory',
+      grip: 'std_grip',
+      ammoType: 'fmj',
+      vest: 'std_vest',
+      backpack: 'no_pack'
+    };
+    this.loadGunsmithState();
+
+    // Downed / Revive / Drag state
+    this.dead = true;
+    this.downed = false;
+    this.downedTimer = 0;
+    this.downedKiller = '';
+    this.downedWeapon = '';
+    this.giveUpProgress = 0;
+    this.reviveProgress = 0;
+    this.reviveTargetBot = null;
+    this.draggedBot = null;
+    this.isDraggingAlly = false;
+    this.keyFHoldTime = 0;
+    this.dragStartedOnCurrentPress = false;
+    this.dragDistAccum = 0;
+
+    this.kills = 0;
+    this.deaths = 0;
+    this.revives = 0;
+    this.vehiclesDestroyed = 0;
+    this.captures = 0;
+    this.medicKills = 0; // War Crimes (Geneva Convention: Killing Field Medics)
+    this.score = 0;
+    this.squad = 'ALPHA';
+    this.squadShort = 'ALP';
+    this.commandRank = 'COMMANDER'; // 'COMMANDER' | 'SQUAD_LEADER' | 'MEMBER'
+    this.commandScope = 'ALL';      // 'ALL' (Force Commander: all 5 squads / 40 NPCs) | 'SQUAD' (Squad Leader: 8 NPCs)
+
+    // Vehicle & Combat Aviation state
+    this.activeVehicle = null;
+    this.thirdPersonVehicle = false;
+    this.preferredAircraftRole = 'cas'; // 'cas' (A-10C / Su-25) | 'bomber' (F-15E / Su-34) | 'fighter' (F-22A / Su-57)
+    this.parachuting = false;
+    this.parachuteCut = false;
+    this.parachuteMesh = null;
+    createPlayerParachuteFSM(this);
+    this.aircraftLockTarget = null;
+    this.aircraftLockProgress = 0;
+    createTargetLockScannerFSM(this);
+    this.aircraftCcipPoint = null;
+
+    // Movement & Stance (Standing / Crouched / Prone + Vaulting + Optional Quake Bhop & Air-Strafing)
+    this.keys = {};
+    this.isGrounded = false;
+    this.crouching = false;
+    this.prone = false;
+    this.vaultTimer = 0;
+    this.leanTarget = 0;
+    this.leanAmount = 0;
+    this.bhopEnabled = false;
+    this._spaceJumpConsumed = false;
+    try {
+      const savedBhop = localStorage.getItem('bb_bhop_enabled_v1');
+      if (savedBhop !== null) {
+        this.bhopEnabled = savedBhop === 'true' || savedBhop === '1';
+      }
+    } catch (_) {}
+
+    // Aircraft Collision Avoidance (Default: AUTO ON = true so planes auto-pull-up and don't crash into ground/mountains/buildings;
+    // when turned OFF = false, planes use Realistic Crash Mode and explode on impact with ground, mountains, or buildings!)
+    this.aircraftCollisionAvoidance = true;
+    try {
+      const savedAirAvoid = localStorage.getItem('bb_aircraft_collision_avoidance_v1');
+      if (savedAirAvoid !== null) {
+        this.aircraftCollisionAvoidance = savedAirAvoid === 'true' || savedAirAvoid === '1';
+      }
+    } catch (_) {}
+    this.walkBobPhase = 0;
+    this.swayX = 0;
+    this.swayY = 0;
+    this.shakeTrauma = 0;
+
+    // Suppression System (Squad-style: incoming fire causes screen blur + sway)
+    this.suppressionLevel = 0;       // 0–1 intensity
+    this.suppressionDecayRate = PLAYER.SUPPRESSION_DECAY_RATE; // per second
+    this.lastSuppressionHitTime = 0;
+
+    // Kill Streak / Multi-Kill Tracking
+    this.killStreak = 0;
+    this.multiKillTimer = 0;
+    this.multiKillCount = 0;
+
+    // Respawn Timer
+    this.respawnTimer = 0;
+    this.respawnDelay = PLAYER.RESPAWN_DELAY; // seconds
+
+    // Rally Point
+    this.rallyPoint = null;       // { pos: Vector3, mesh: Group, timer: 90 }
+    this.rallyCooldown = 0;
+
+    // Commander UAV Scan & Airstrike
+    this.uavActive = false;
+    this.uavTimer = 0;           // seconds remaining on UAV scan
+    this.uavCooldown = 0;        // cooldown until next UAV
+    this.uavRevealedBots = [];   // bots revealed by UAV
+    this.uavRevealedVehicles = []; // enemy vehicles revealed by UAV
+    this.uavHotspotText = '';    // highest-threat objective sector
+    this.uavAssists = 0;         // recon assists earned during UAV
+    this.uavDroneMesh = null;
+    this.uavSweepRingMesh = null;
+    this.uavOrbitAngle = 0;
+
+    this.airstrikePattern = 'CARPET'; // 'CARPET' | 'BUNKER_BUSTER' | 'ARTILLERY'
+    this.airstrikeCooldown = 0;  // cooldown until next airstrike
+    this.airstrikeTarget = null; // { pos: Vector3, timer: Number, maxTimer: Number, pattern: String, strikeDir: Vector3, markers: Group }
+    this.pendingAirstrikeBombs = []; // staggered physical falling bombs
+    this.activeAirstrikeJets = [];   // 3D strike fighter jets flying overhead
+    createCommanderUavFSM(this);
+    createCommanderAirstrikeFSM(this);
+
+    // Insertion Beacon (Recon Class only)
+    this.insertionBeacon = null;  // { pos: Vector3, mesh: Group, spawnsLeft: 2, timer: 180 }
+    this.beaconCooldown = 0;
+    createSquadDeployablesFSM(this);
+
+    // Commo Rose / Quick Chat Wheel State
+    this.commoRoseActive = false;
+    this.lastCommoCommand = null;
+    this.commoRoseCooldown = 0;
+
+    // Combat, Optics, Zeroing, Mag Packing & Fortification Blueprints
+    this.isFiring = false;
+    this.isAds = false;
+    this.adsAmount = 0;
+    this.useCantedSight = false;
+    this.fireArrowsActive = false; // [V] toggles Regular Bodkin Arrows vs. Fire Arrows on Bows & Crossbows!
+    this.zeroDistance = PLAYER.ZERO_DISTANCE_DEFAULT;
+    this.fireTimer = 0;
+    this.reloading = false;
+    this.fastReload = false;
+    this.slowReloading = false;
+    this.reloadTimer = 0;
+    this.reloadTotalTime = 1.8;
+    this.magPackProgress = 0;
+    this.magPackBulletTimer = 0;
+    this.magPackBulletDuration = 0.22;
+    this.slowReloadRoundsPacked = 0;
+    this.keyRHoldTime = 0;
+    this.recoilOffsetPitch = 0;
+    this.recoilKickZ = 0;
+    this.muzzleFlashTimer = 0;
+    this.shotsFired = 0;
+
+    this.buildBlueprints = [
+      'CHEST WALL',
+      'COVERED BUNKER ($350)',
+      'HMG NEST ($450)',
+      'MORTAR PIT ($600)',
+      'AA EMPLACEMENT ($650)',
+      'COMMAND BUNKER ($1000)',
+      'TACTICAL HOUSE ($1000)'
+    ];
+    this.buildBlueprintIndex = 0;
+    this.activePing = null;
+    this.nvgActive = false;
+
+    this.slots = [];
+    this.currentSlotIndex = 0;
+    this.viewModelGroup = new THREE.Group();
+    this.viewModelGroup.visible = false;
+    this.camera.add(this.viewModelGroup);
+
+    this.raycaster = new THREE.Raycaster();
+    this.plantedC4 = [];
+    this.activeBullets = [];
+
+    // Default event bridges for backwards compatibility with legacy callback properties
+    this.onHitmarker = makeEventBridge('hitmarker:show', (type, label) => ({ type, label }));
+    this.onHitMarker = this.onHitmarker;
+    this.onDamageTaken = makeEventBridge(
+      'player:damaged',
+      (amount, sourcePos, inVehicle, weaponName, attackerName) => ({
+        amount,
+        sourcePos,
+        inVehicle,
+        weaponName,
+        attackerName
+      })
+    );
+    this.onAwardXp = makeEventBridge('xp:awarded', (amount, reason) => ({ amount, reason }));
+    this.onCashChanged = makeEventBridge('cash:changed', (balance, delta, reason) => ({
+      balance,
+      delta,
+      reason
+    }));
+    this.onKillEvent = makeEventBridge(
+      'kill:event',
+      (killer, kTeam, victim, vTeam, weapon, isHs) => ({
+        killer,
+        kTeam,
+        victim,
+        vTeam,
+        weapon,
+        isHs
+      })
+    );
+    this.onKillStreakAnnouncement = makeEventBridge('killstreak:announced', (text) => ({ text }));
+    this.onFloatingDamage = makeEventBridge(
+      'damage:floating',
+      (worldPos, damage, isHeadshot) => ({ worldPos, damage, isHeadshot })
+    );
+    this.onCommoRoseOpen = makeEventBridge('commo:open', () => ({}));
+    this.onCommoRoseClose = makeEventBridge('commo:close', () => ({}));
+    this.onCommoCommand = makeEventBridge('commo:command', (cmdId, text, icon) => ({
+      cmdId,
+      text,
+      icon
+    }));
+    this.onPlayerDied = makeEventBridge('player:died', (killerName, weaponName) => ({
+      killerName,
+      weaponName
+    }));
+    this.onExplosionDamage = makeEventBridge(
+      'explosion:damage',
+      (pos, radius, maxDamage, owner, brokenCount) => ({
+        pos,
+        radius,
+        maxDamage,
+        owner,
+        brokenCount
+      })
+    );
+    this.onWarCrimeCommitted = makeEventBridge(
+      'warcrime:committed',
+      (medicName, wasRescuing, totalCount) => ({
+        medicName,
+        wasRescuing,
+        totalCount
+      })
+    );
+
+    this.setupInputs();
+    this.equipLoadout('engineer');
+  }
+
+  setBhopEnabled(enabled) {
+    this.bhopEnabled = Boolean(enabled);
+    if (!this.bhopEnabled) {
+      this.bhopCount = 0;
+    }
+    try {
+      localStorage.setItem('bb_bhop_enabled_v1', this.bhopEnabled ? 'true' : 'false');
+    } catch (_) {}
+    return this.bhopEnabled;
+  }
+
+  toggleBhopEnabled() {
+    return this.setBhopEnabled(!this.bhopEnabled);
+  }
+
+  startWeaponInspect() {
+    if (this.dead || this.downed || this.activeVehicle || this.reloading || this.slowReloading) {
+      return false;
+    }
+    this.isAds = false;
+    this.inspectTotalTime = 3.2;
+    this.inspectTimer = 3.2;
+    sound.playWeaponSwitch?.();
+    return true;
+  }
+
+  isModalOpen() {
+    const ids = [
+      'gunsmith-modal',
+      'command-modal',
+      'multiplayer-modal',
+      'settings-modal',
+      'deploy-screen',
+      'victory-screen'
+    ];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el && !el.classList.contains('hidden') && el.style.display !== 'none') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  isPopoutModalOpen() {
+    const ids = ['gunsmith-modal', 'command-modal', 'multiplayer-modal', 'settings-modal'];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el && !el.classList.contains('hidden') && el.style.display !== 'none') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  callMenToSetupTrebuchet(preferredTreb = null) {
+    if (!this.vehicleManager || typeof this.vehicleManager.callMenToSetupTrebuchet !== 'function') {
+      return null;
+    }
+    return this.vehicleManager.callMenToSetupTrebuchet(this, this.botManager, preferredTreb);
+  }
+
+  setupInputs() {
+    window.addEventListener('keydown', (e) => {
+      this.keys[e.code] = true;
+      if (!e.repeat) {
+        if (this._konamiReadyForA && e.code === 'KeyA') {
+          this._konamiReadyForB = false;
+          this._konamiReadyForA = false;
+          this.launchSilentSecretB2Bomber?.();
+          return;
+        }
+        if (this._konamiReadyForB && e.code === 'KeyB') {
+          this._konamiReadyForA = true;
+          this._konamiReadyForB = false;
+          return;
+        }
+        if (e.code !== 'KeyB') {
+          this._konamiReadyForA = false;
+        }
+
+        const arrowDir = {
+          ArrowUp: 'U',
+          ArrowDown: 'D',
+          ArrowLeft: 'L',
+          ArrowRight: 'R'
+        }[e.code];
+        if (arrowDir) {
+          if (!this._secretArrowSeq) this._secretArrowSeq = [];
+          this._secretArrowSeq.push(arrowDir);
+          if (this._secretArrowSeq.length > 8) this._secretArrowSeq.shift();
+          if (this._secretArrowSeq.slice(-4).join('') === 'DDUU') {
+            this._secretArrowSeq = [];
+            this._konamiReadyForB = false;
+            this._konamiReadyForA = false;
+            this.launchSilentSecretWrightFlyer?.();
+            return;
+          }
+          if (this._secretArrowSeq.join('') === 'UUDDLRLR') {
+            this._secretHorseTurbo = true;
+            this._konamiReadyForB = true;
+            if (this.activeVehicle && this.activeVehicle.type === 'warhorse') {
+              this.activeVehicle.speed = 78.0;
+            }
+          } else {
+            this._konamiReadyForB = false;
+          }
+        }
+        const wasdDir = {
+          KeyW: 'U',
+          KeyS: 'D',
+          KeyA: 'L',
+          KeyD: 'R'
+        }[e.code];
+        if (wasdDir) {
+          if (!this._secretWasdSeq) this._secretWasdSeq = [];
+          this._secretWasdSeq.push(wasdDir);
+          if (this._secretWasdSeq.length > 8) this._secretWasdSeq.shift();
+          if (this._secretWasdSeq.join('') === 'UUDDLRLR') {
+            this._secretHorseTurbo = true;
+            this._konamiReadyForB = true;
+            if (this.activeVehicle && this.activeVehicle.type === 'warhorse') {
+              this.activeVehicle.speed = 78.0;
+            }
+          }
+        }
+      }
+      if (this.dead) return;
+
+      // Handle Escape / [F] / [Space] while a pop-out modal (Loot / Backpack / Gunsmith / Map / Settings) is open
+      if (this.isPopoutModalOpen()) {
+        if (e.code === 'Escape' && !e.repeat) {
+          e.preventDefault();
+          if (window.game?.ui) {
+            const gsEl = document.getElementById('gunsmith-modal');
+            if (gsEl && !gsEl.classList.contains('hidden')) {
+              window.game.ui.toggleGunsmithModal(false);
+              return;
+            }
+            ['command-modal', 'multiplayer-modal', 'settings-modal'].forEach((id) => {
+              const el = document.getElementById(id);
+              if (el && !el.classList.contains('hidden')) el.classList.add('hidden');
+            });
+            try {
+              const p = document.body.requestPointerLock();
+              if (p && typeof p.catch === 'function') p.catch(() => {});
+            } catch (_) {}
+          }
+          return;
+        }
+        const gsEl = document.getElementById('gunsmith-modal');
+        const gsOpen = Boolean(gsEl && !gsEl.classList.contains('hidden'));
+        if (gsOpen) {
+          // Pressing [F] again while the Manual Loot / Backpack modal is open closes it cleanly
+          if (e.code === 'KeyF' && !e.repeat && !this._justOpenedLootByHold) {
+            e.preventDefault();
+            window.game?.ui?.toggleGunsmithModal?.(false);
+            return;
+          }
+          // Pressing [Space] in the Manual Loot view triggers Quick-Loot All Gear & 50% Cash (Tarkov / ABI style)
+          if (e.code === 'Space' && !e.repeat && window.game?.ui?._gunsmithActiveTab === 'backpack') {
+            e.preventDefault();
+            const packId = window.game.ui._activeLootPackId;
+            const pack = (this.world?.lootPacks || []).find((p) => p.id === packId);
+            if (pack && typeof this.lootAllFromPack === 'function') {
+              this.lootAllFromPack(pack, false, true);
+              window.game.ui._lastMagSignature = '';
+              window.game.ui.updateCashAndGunsmithHud?.();
+            }
+            return;
+          }
+          if (e.code === 'KeyL' && !e.shiftKey && !e.repeat) {
+            e.preventDefault();
+            window.game?.ui?.toggleGunsmithModal?.(false);
+            return;
+          }
+        }
+        return;
+      }
+
+      if (this.isModalOpen()) return;
+
+      if (e.code === 'KeyN') {
+        this.nvgActive = !this.nvgActive;
+      }
+      if (this.downed) return;
+
+      // [E] Enter / Exit Car or Armor, or Drag Downed Friendly Soldier to cover
+      if (e.code === 'KeyE' && !e.repeat) {
+        this.handleVehicleAndDragKey();
+      }
+      // [F] Revive / Heal Ally, Pick Up Ammo from Crate, Quick-Loot (Tap) or Manual Side-by-Side Loot (Hold)
+      if (e.code === 'KeyF' && !e.repeat && !this.activeVehicle) {
+        this.keyFHoldTime = 0;
+        this._justOpenedLootByHold = false;
+        this.handleInteractKey();
+      }
+      if (e.code === 'KeyG' && !e.repeat) {
+        if (this.activeVehicle && this.activeVehicle.isAircraft) {
+          const avoidOn = this.toggleAircraftCollisionAvoidance();
+          sound.playRadioBeep?.(true);
+          if (this.onAwardXp) {
+            this.onAwardXp(
+              0,
+              avoidOn
+                ? '🛡️ COLLISION AVOIDANCE: AUTO ON (AUTO PULL-UP OVER GROUND, MOUNTAINS & BUILDINGS)'
+                : '💥 COLLISION AVOIDANCE: OFF (REALISTIC MODE — PLANE WILL CRASH & EXPLODE ON GROUND/BUILDING IMPACT!)'
+            );
+          }
+        } else if (!this.activeVehicle) {
+          if (this.world?.era === 'medieval') {
+            this.callMenToSetupTrebuchet();
+          } else {
+            this.throwFragGrenade();
+          }
+        }
+      }
+      if (e.code === 'Digit1') {
+        if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
+          this.switchVehicleWeaponSlot(0);
+        } else if (!this.activeVehicle) {
+          this.switchSlot(0);
+        }
+      }
+      if (e.code === 'Digit2') {
+        if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
+          this.switchVehicleWeaponSlot(1);
+        } else if (!this.activeVehicle) {
+          this.switchSlot(1);
+        }
+      }
+      if (e.code === 'KeyQ' && !e.repeat && this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
+        const maxSlots =
+          this.activeVehicle.isAircraft &&
+          (this.activeVehicle.aircraftRole === 'gunship' || this.activeVehicle.aircraftRole === 'fighter')
+            ? 3
+            : 2;
+        const nextSlot = ((this.activeVehicle.activeWeaponSlot || 0) + 1) % maxSlots;
+        this.switchVehicleWeaponSlot(nextSlot);
+      }
+      if (e.code === 'Digit3' && !e.repeat) {
+        if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
+          this.switchVehicleWeaponSlot(2);
+        } else if (!this.activeVehicle) {
+          if (
+            this.currentSlotIndex === 2 &&
+            this.slots &&
+            this.slots[2] &&
+            (this.slots[2].def?.id === 'rpg7' || this.slots[2].def?.id === 'stinger') &&
+            typeof this.toggleEngineerLauncherMode === 'function'
+          ) {
+            this.toggleEngineerLauncherMode();
+          } else {
+            this.switchSlot(2);
+          }
+        }
+      }
+      if (e.code === 'Digit4' && !this.activeVehicle) this.switchSlot(3);
+      if (e.code === 'KeyR' && !e.repeat && !this.activeVehicle) {
+        this.keyRHoldTime = 0;
+        this.startReload(false);
+      }
+      if (e.code === 'KeyP' && !e.repeat && !this.activeVehicle) {
+        if (this.slowReloading) {
+          this.slowReloading = false;
+          this.magPackProgress = 0;
+        } else {
+          this.startSlowReload();
+        }
+      }
+      if (e.code === 'KeyV' && !e.repeat) {
+        const cur = this.currentWeapon();
+        const isMountedBow = Boolean(this.activeVehicle && this.activeVehicle.type === 'warhorse');
+        if (isMountedBow || (cur && cur.def && (cur.def.isBow || cur.def.isCrossbow))) {
+          this.fireArrowsActive = !this.fireArrowsActive;
+          sound.playRadioBeep?.(true);
+          if (this.onAwardXp) {
+            this.onAwardXp(
+              0,
+              this.fireArrowsActive
+                ? '🔥 FIRE ARROWS LIT (+22 INCENDIARY BURN & EMBER SPLASH) — PRESS [V] FOR REGULAR ARROWS'
+                : '🏹 REGULAR BODKIN ARROWS EQUIPPED (CLEAN FLIGHT • NO FIRE FLASH) — PRESS [V] FOR FIRE ARROWS'
+            );
+          }
+        } else if (!this.activeVehicle) {
+          if (cur && cur.def && cur.def.type === 'melee_sword') {
+            this.toggleSwordSlung?.();
+          } else if (this.isAds && cur && cur.def.hasCantedSight) {
+            this.useCantedSight = !this.useCantedSight;
+          } else {
+            this.startWeaponInspect();
+          }
+        }
+      }
+      if (e.code === 'KeyX' && !e.repeat) {
+        const cur = !this.activeVehicle ? this.currentWeapon() : null;
+        if (this.parachuting && typeof this.cutParachute === 'function') {
+          this.cutParachute();
+        } else if (this.activeVehicle && typeof this.activateVehicleCountermeasure === 'function') {
+          this.activateVehicleCountermeasure();
+        } else if (!this.activeVehicle && cur && cur.def && cur.def.type === 'melee_sword') {
+          this.toggleSwordSlung?.();
+        } else if (!this.activeVehicle) {
+          const zeros = PLAYER.ZEROING_OPTIONS;
+          const idx = (zeros.indexOf(this.zeroDistance) + 1) % zeros.length;
+          this.zeroDistance = zeros[idx];
+        }
+      }
+      if (e.code === 'KeyB' && !this.activeVehicle) {
+        this.buildBlueprintIndex = (this.buildBlueprintIndex + 1) % this.buildBlueprints.length;
+      }
+      // [5] Place Squad Leader Rally Point (mobile squad spawn)
+      if (e.code === 'Digit5' && !this.activeVehicle) {
+        this.placeRallyPoint();
+      }
+      // [6] Place Insertion Beacon (Recon class only)
+      if (e.code === 'Digit6' && !this.activeVehicle) {
+        this.placeInsertionBeacon();
+      }
+      // [7] Deploy Squad Field Ammo & Kit Stash (resupplies squad + allows field role changing!)
+      if (e.code === 'Digit7' && !e.repeat && !this.activeVehicle) {
+        this.deployFieldAmmoStash();
+      }
+      // [8] Construct Fortified Command Bunker / 2-Story Tactical House ($1,000)
+      if (e.code === 'Digit8' && !e.repeat && !this.activeVehicle) {
+        this.buildPaidHouseOrBunker('AUTO');
+      }
+      // [9] Launch Combat Aircraft Sortie (A-10 CAS / F-15E Bomber / F-22 Fighter; Shift+9 cycles role)
+      if (e.code === 'Digit9' && !e.repeat) {
+        if (e.shiftKey) {
+          if (typeof this.cycleAircraftRole === 'function') {
+            this.cycleAircraftRole();
+          }
+        } else if (typeof this.launchAircraftSortie === 'function') {
+          this.launchAircraftSortie();
+        }
+      }
+      // [L] Open Unified Role Selection, Weapon Selection, Gunsmith Workbench & Visualized Backpack Pop-out!
+      if (e.code === 'KeyL' && !e.shiftKey && !e.repeat && !this.activeVehicle) {
+        if (window.game && window.game.ui && typeof window.game.ui.openLoadoutAndGunsmithModal === 'function') {
+          window.game.ui.openLoadoutAndGunsmithModal();
+        } else {
+          this.cycleFieldRole();
+        }
+      }
+      // [F5]–[F11] Direct Squad Role / Kit Swap when near an Ammo & Kit Stash / Base
+      if (
+        (e.code === 'F5' ||
+          e.code === 'F6' ||
+          e.code === 'F7' ||
+          e.code === 'F8' ||
+          e.code === 'F9' ||
+          e.code === 'F10' ||
+          e.code === 'F11') &&
+        !e.repeat &&
+        !this.activeVehicle
+      ) {
+        e.preventDefault();
+        const roleId = getRoleByHotkey(e.code, this.world?.era || 'modern', this.team);
+        if (roleId) {
+          this.changeRoleInField(roleId, true);
+        }
+      }
+      // [U] Commander UAV Scan (reveals all enemies & armor in 3D + minimap + AI datalink)
+      if (e.code === 'KeyU') {
+        this.activateUAV();
+      }
+      // [J] Commander Airstrike (Shift+J cycles pattern; J calls strike at crosshair anywhere on map)
+      if (e.code === 'KeyJ') {
+        if (e.shiftKey) {
+          this.cycleAirstrikePattern();
+        } else {
+          this.callAirstrike();
+        }
+      }
+      // [Y] Commo Rose / Quick Chat Wheel (BattleBit-style)
+      if (e.code === 'KeyY' && !e.repeat && !this.activeVehicle) {
+        this.commoRoseActive = true;
+        this.commoCursorX = 0;
+        this.commoCursorY = 0;
+        this.commoSelectedId = null;
+        events.emit('commo:open', {});
+        if (this.onCommoRoseOpen && !this.onCommoRoseOpen._isEventsBridge) {
+          this.onCommoRoseOpen();
+        }
+      }
+      if (e.code === 'KeyT' && !e.repeat && !this.activeVehicle) {
+        const nearTreb = this.vehicleManager?.findNearestTrebuchet?.(this.pos, 75.0, this.team);
+        if (this.world?.era === 'medieval' || nearTreb) {
+          this.callMenToSetupTrebuchet(nearTreb);
+        } else {
+          this.useHammer(false);
+        }
+      }
+      if (e.code === 'KeyZ' && !this.activeVehicle) {
+        this.prone = !this.prone;
+        if (this.prone) this.crouching = false;
+      }
+      if (e.code === 'KeyC' || e.code === 'ControlLeft') {
+        if (this.parachuting && e.code === 'KeyC' && typeof this.cutParachute === 'function') {
+          this.cutParachute();
+        } else if (this.activeVehicle && e.code === 'KeyC') {
+          this.thirdPersonVehicle = !this.thirdPersonVehicle;
+        } else if (!this.activeVehicle) {
+          this.crouching = !this.crouching;
+          if (this.crouching) this.prone = false;
+        }
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      this.keys[e.code] = false;
+      // Close Commo Rose when [Y] released and dispatch selected radial command
+      if (e.code === 'KeyY' && this.commoRoseActive) {
+        this.commoRoseActive = false;
+        if (this.commoSelectedId) {
+          this.sendCommoCommand(this.commoSelectedId);
+          this.commoSelectedId = null;
+        }
+        events.emit('commo:close', {});
+        if (this.onCommoRoseClose && !this.onCommoRoseClose._isEventsBridge) {
+          this.onCommoRoseClose();
+        }
+      }
+      if (e.code === 'KeyF') {
+        // Quick-Tap [F] (< 0.28s): Auto-Loot 50% Pocket Cash, Magazines, Loose Bullets, Dressings, Grenades & Armor Plates without opening modal!
+        if (
+          !this._fUsedForFriendlyAction &&
+          !this._enemyLootHoldTriggered &&
+          this._pendingEnemyLootPack &&
+          !this.isPopoutModalOpen() &&
+          typeof this.lootAllFromPack === 'function'
+        ) {
+          this.lootAllFromPack(this._pendingEnemyLootPack, false, true);
+        }
+        this.keyFHoldTime = 0;
+        this._pendingEnemyLootPack = null;
+        this._enemyLootHoldTriggered = false;
+        this._justOpenedLootByHold = false;
+        this._fUsedForFriendlyAction = false;
+      }
+      if (e.code === 'KeyR') {
+        this.keyRHoldTime = 0;
+      }
+      if (e.code === 'Space') {
+        this._spaceJumpConsumed = false;
+      }
+    });
+
+    window.addEventListener('wheel', (e) => {
+      if (this.dead || this.downed || this.isModalOpen()) return;
+      if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
+        if (this.activeVehicle.type === 'tank' || this.activeVehicle.type === 'apc') {
+          const nextSlot = (this.activeVehicle.activeWeaponSlot || 0) === 0 ? 1 : 0;
+          this.switchVehicleWeaponSlot(nextSlot);
+        }
+        return;
+      }
+      const cur = this.currentWeapon();
+      if (this.isAds && cur && cur.def.hasCantedSight) {
+        this.useCantedSight = e.deltaY < 0;
+      }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (this.dead) return;
+      if (this.isModalOpen()) {
+        this._lastMouseClientX = e.clientX;
+        this._lastMouseClientY = e.clientY;
+        return;
+      }
+      if (this.commoRoseActive) {
+        this.commoCursorX = THREE.MathUtils.clamp((this.commoCursorX || 0) + e.movementX, -140, 140);
+        this.commoCursorY = THREE.MathUtils.clamp((this.commoCursorY || 0) + e.movementY, -140, 140);
+        if (Math.hypot(this.commoCursorX, this.commoCursorY) > 20) {
+          const deg = ((Math.atan2(this.commoCursorY, this.commoCursorX) * 180) / Math.PI + 90 + 360) % 360;
+          const idx = Math.round(deg / 45) % 8;
+          const ids = [
+            'go_go_go',
+            'contact_east',
+            'need_ammo',
+            'negative',
+            'hold_position',
+            'enemy_vehicle',
+            'need_medic',
+            'affirmative'
+          ];
+          this.commoSelectedId = ids[idx];
+          const btns = document.querySelectorAll('.commo-rose-btn');
+          btns.forEach((b) => {
+            const active = b.dataset.cmd === this.commoSelectedId;
+            b.style.background = active ? 'rgba(46, 204, 113, 0.85)' : 'rgba(44, 62, 80, 0.85)';
+            b.style.borderColor = active ? '#2ecc71' : 'rgba(255,255,255,0.18)';
+          });
+        }
+        return;
+      }
+
+      // Compute mouse delta: use Pointer Lock movementX/Y when locked, OR smooth clientX/Y delta
+      // during browser pointer-lock cooldown right after closing a modal so mouse look NEVER feels unfocused!
+      let rawDx = e.movementX || 0;
+      let rawDy = e.movementY || 0;
+      if (document.pointerLockElement !== document.body) {
+        if (rawDx === 0 && rawDy === 0 && typeof this._lastMouseClientX === 'number') {
+          rawDx = e.clientX - this._lastMouseClientX;
+          rawDy = e.clientY - this._lastMouseClientY;
+        }
+        this._lastMouseClientX = e.clientX;
+        this._lastMouseClientY = e.clientY;
+        // Clamp large jumps when re-entering window
+        if (Math.abs(rawDx) > 85 || Math.abs(rawDy) > 85) {
+          return;
+        }
+      } else {
+        this._lastMouseClientX = e.clientX;
+        this._lastMouseClientY = e.clientY;
+      }
+
+      const sens = this.isAds ? PLAYER.SENSITIVITY_ADS : PLAYER.SENSITIVITY_HIP;
+      const dx = rawDx * sens;
+      const dy = rawDy * sens;
+      this.yaw -= dx;
+      this.pitch -= dy;
+      const maxPitch = Math.PI / 2 - PLAYER.MAX_PITCH_OFFSET;
+      this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch));
+
+      // Weapon procedural sway + Mount & Blade 4-Directional Melee Guard / Swing Sector tracking from mouse delta
+      this.swayX = THREE.MathUtils.clamp(this.swayX - dx * PLAYER.SWAY_MULT, -PLAYER.SWAY_LIMIT, PLAYER.SWAY_LIMIT);
+      this.swayY = THREE.MathUtils.clamp(this.swayY + dy * PLAYER.SWAY_MULT, -PLAYER.SWAY_LIMIT, PLAYER.SWAY_LIMIT);
+      if (Math.hypot(rawDx, rawDy) >= 4) {
+        if (Math.abs(rawDy) >= Math.abs(rawDx) * 1.15) {
+          this.meleeGuardDir = rawDy < 0 ? 'UP' : 'DOWN';
+        } else {
+          this.meleeGuardDir = rawDx < 0 ? 'LEFT' : 'RIGHT';
+        }
+        this._meleeDirInputTime = performance.now();
+      }
+    });
+
+    window.addEventListener('mousedown', (e) => {
+      if (this.dead) return;
+      const clickedModalOrUi =
+        e.target &&
+        typeof e.target.closest === 'function' &&
+        e.target.closest(
+          '#gunsmith-modal, #command-modal, #multiplayer-modal, #settings-modal, #deploy-screen, #victory-screen, button, input, select, label, .hud-clickable'
+        );
+
+      // Never steal pointer lock or fire weapon when clicking inside any UI modal or button!
+      if (clickedModalOrUi) {
+        this.isFiring = false;
+        return;
+      }
+
+      // If a pop-out modal (Loot / Backpack / Gunsmith / Map / Settings) is open and the player clicks
+      // outside the modal onto the 3D viewport, close the modal and restore Pointer Lock cleanly without firing!
+      if (this.isPopoutModalOpen()) {
+        this.isFiring = false;
+        this._suppressFireUntil = performance.now() + 200;
+        if (window.game?.ui) {
+          const gsEl = document.getElementById('gunsmith-modal');
+          if (gsEl && !gsEl.classList.contains('hidden')) {
+            window.game.ui.toggleGunsmithModal(false);
+          } else {
+            ['command-modal', 'multiplayer-modal', 'settings-modal'].forEach((id) => {
+              const el = document.getElementById(id);
+              if (el && !el.classList.contains('hidden')) el.classList.add('hidden');
+            });
+          }
+        }
+        try {
+          window.focus();
+          const p = document.body.requestPointerLock();
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        } catch (_) {}
+        return;
+      }
+
+      if (this.isModalOpen()) {
+        this.isFiring = false;
+        return;
+      }
+
+      if (document.pointerLockElement !== document.body) {
+        try {
+          window.focus();
+          const p = document.body.requestPointerLock();
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        } catch (_) {}
+      }
+      if (this.downed) return;
+      if (performance.now() < (this._suppressFireUntil || 0)) {
+        this.isFiring = false;
+        return;
+      }
+
+      if (e.button === 1) {
+        e.preventDefault();
+        this.triggerTacticalPing();
+        return;
+      }
+      if (e.button === 0) {
+        this.isFiring = true;
+        if (!this.activeVehicle) {
+          this.tryFireSingle();
+        }
+      } else if (e.button === 2) {
+        if (this.activeVehicle) {
+          this.isAds = true;
+          return;
+        }
+        const cur = this.currentWeapon();
+        if (cur && cur.def.type === 'c4') {
+          this.detonateC4();
+        } else if (cur && cur.def.type === 'hammer') {
+          this.useHammer(true);
+        } else {
+          this.isAds = true;
+        }
+      }
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.isFiring = false;
+      if (e.button === 2) this.isAds = false;
+    });
+
+    window.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  getActiveOpticType() {
+    const cur = this.currentWeapon();
+    if (!cur || !cur.def.opticType) return null;
+    if (this.useCantedSight && cur.def.hasCantedSight) {
+      return 'reddot';
+    }
+    return cur.def.opticType;
+  }
+
+  addShake(amount) {
+    this.shakeTrauma = Math.min(1.0, this.shakeTrauma + amount);
+  }
+
+  deploy(team, role, spawnPointVec) {
+    if (this.activeVehicle) {
+      this.activeVehicle.driver = null;
+      this.activeVehicle = null;
+    }
+    this.team = team;
+    const era = this.world?.era || 'modern';
+    role = resolveRoleForEra(role, era, this.team);
+    this.equipLoadout(role);
+    const vestDef = this.getEquippedItem('vest');
+    const backpackDef = this.getEquippedItem('backpack');
+    const classTrait = CLASS_TRAITS[this.role] || {};
+    const baseVestArmor = vestDef ? vestDef.maxArmor : PLAYER.MAX_ARMOR;
+    const vestDelta = baseVestArmor - PLAYER.MAX_ARMOR;
+    this.maxArmor = Math.max(15, (classTrait.maxArmor ?? PLAYER.MAX_ARMOR) + vestDelta);
+    this.armorAbsorbRatio = classTrait.armorAbsorbRatio ?? (vestDef ? vestDef.absorbRatio : PLAYER.ARMOR_ABSORB_RATIO);
+    this.classMoveSpeedMult = classTrait.moveSpeedMult || 1.0;
+    this.canFlyAircraft = Boolean(classTrait.canFlyAircraft);
+    const safeSpawn = this.world.findSafeSpawnPoint(spawnPointVec.x, spawnPointVec.z);
+    this.pos.copy(safeSpawn);
+    this.vel.set(0, 0, 0);
+    const isEastSpawn =
+      team === 'RU' || (era === 'jurassic' && team === 'US' && this.subFaction === 'RU' && safeSpawn.x > 400);
+    this.yaw = isEastSpawn ? Math.PI / 2 : -Math.PI / 2;
+    this.pitch = 0;
+    this.hp = PLAYER.HP;
+    this.armor = this.maxArmor;
+    this.bleeding = false;
+    this.bandages =
+      (this.role === 'medic' ? 9 : 2) +
+      (vestDef ? vestDef.bonusBandages : 0) +
+      (backpackDef ? backpackDef.bonusBandages : 0);
+    this.grenades = Math.max(
+      1,
+      2 +
+        (classTrait.bonusGrenades || 0) +
+        (vestDef ? vestDef.bonusGrenades : 0) +
+        (backpackDef ? backpackDef.bonusGrenades : 0)
+    );
+    this.bandageProgress = 0;
+    this.reviveProgress = 0;
+    this.slowReloading = false;
+    this.magPackProgress = 0;
+    this.crouching = false;
+    this.prone = false;
+    this.downed = false;
+    this.downedTimer = 0;
+    this.giveUpProgress = 0;
+    this.dead = false;
+    this.isGrounded = true;
+    this.parachuting = false;
+    this.parachuteCut = false;
+    this.parachuteFSM?.send(PLAYER_PARACHUTE_EVENTS.RESET_DEPLOY);
+    if (this.parachuteMesh) {
+      this.parachuteMesh.visible = false;
+    }
+    this.viewModelGroup.visible = true;
+    this.syncCameraTransform();
+
+    // In Medieval Era, ensure a friendly Counterweight Siege Trebuchet is positioned right in front
+    // of the player's deployment point (~11.5m ahead) so they can immediately see & operate it!
+    if (era === 'medieval' && this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+      const fwdX = -Math.sin(this.yaw);
+      const fwdZ = -Math.cos(this.yaw);
+      const rightX = Math.cos(this.yaw);
+      const rightZ = -Math.sin(this.yaw);
+      const trebX = this.pos.x + fwdX * 11.5 + rightX * 3.2;
+      const trebZ = this.pos.z + fwdZ * 11.5 + rightZ * 3.2;
+      const safeTreb = this.world?.pushOutOfBuildingFootprint
+        ? this.world.pushOutOfBuildingFootprint(trebX, trebZ, 4.2)
+        : { x: trebX, z: trebZ };
+      const trebY = this.world ? this.world.getGroundHeightAt(safeTreb.x, safeTreb.z) : this.pos.y;
+      const nearTreb = this.vehicleManager.findNearestTrebuchet(this.pos, 32.0, this.team);
+      if (!nearTreb) {
+        const teamTreb = this.vehicleManager.vehicles.find(
+          (v) => v && !v.dead && v.type === 'trebuchet' && v.team === this.team && !v.driver
+        );
+        if (teamTreb) {
+          teamTreb.pos.set(safeTreb.x, trebY, safeTreb.z);
+          teamTreb.yaw = this.yaw;
+          teamTreb.turretYaw = this.yaw;
+          if (teamTreb.mesh) {
+            teamTreb.mesh.position.copy(teamTreb.pos);
+            teamTreb.mesh.rotation.y = this.yaw;
+          }
+        }
+      }
+    }
+
+    // In Medieval Era, deploying as 'mounted_knight' ("Knight on Horse with Bow") automatically
+    // mounts the player atop a fresh Armored Warhorse with a Royal Yew Longbow!
+    if (
+      role === 'mounted_knight' &&
+      this.vehicleManager &&
+      typeof this.vehicleManager.spawnOrGetPersonalMount === 'function'
+    ) {
+      const horse = this.vehicleManager.spawnOrGetPersonalMount(
+        this.team,
+        this.pos,
+        this.yaw,
+        'warhorse'
+      );
+      if (horse && typeof this.enterVehicle === 'function') {
+        this.enterVehicle(horse);
+      }
+    }
+
+    try {
+      const p = document.body.requestPointerLock();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (_) {
+      // Ignore pointer lock rejection in automated webviews
+    }
+  }
+
+  syncCameraTransform() {
+    const eyeHeight = this.downed
+      ? PLAYER.EYE_HEIGHT_DOWNED
+      : this.prone
+      ? PLAYER.EYE_HEIGHT_PRONE
+      : this.crouching
+      ? PLAYER.EYE_HEIGHT_CROUCH
+      : PLAYER.EYE_HEIGHT_STAND;
+    const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    const leanOffset = right.multiplyScalar(this.leanAmount * PLAYER.LEAN_OFFSET);
+
+    const headPivot = new THREE.Vector3(
+      this.pos.x,
+      this.pos.y + eyeHeight + (this.lastBobY || 0),
+      this.pos.z
+    );
+    const desiredCamPos = new THREE.Vector3(
+      this.pos.x + leanOffset.x,
+      this.pos.y + eyeHeight + (this.lastBobY || 0),
+      this.pos.z + leanOffset.z
+    );
+    if (typeof this.resolveCameraWallCollision === 'function') {
+      const safeCam = this.resolveCameraWallCollision(headPivot, desiredCamPos, 0.34);
+      this.camera.position.copy(safeCam);
+    } else {
+      this.camera.position.copy(desiredCamPos);
+    }
+
+    const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+    euler.y = this.yaw + (this.lastShakeYaw || 0);
+    euler.x = Math.min(
+      Math.PI / 2 - 0.05,
+      this.pitch + this.recoilOffsetPitch + (this.lastShakePitch || 0)
+    );
+    euler.z = this.downed ? PLAYER.EYE_HEIGHT_DOWNED : -this.leanAmount * PLAYER.LEAN_TILT;
+    this.camera.quaternion.setFromEuler(euler);
+    this.camera.updateMatrixWorld();
+  }
+
+  update(dt) {
+    if (typeof this.updateBallisticBullets === 'function') {
+      this.updateBallisticBullets(dt);
+    }
+    if (this.dead) return;
+
+    if (this.activePing) {
+      this.activePing.timer -= dt;
+      if (this.activePing.timer <= 0) {
+        this.activePing = null;
+      }
+    }
+
+    // Handle Downed / Incapacitated State (awaiting friendly Medic revive or Hold [Space] to Give Up)
+    if (this.downed) {
+      this.downedTimer -= dt;
+      if (this.keys['Space']) {
+        this.giveUpProgress += dt / PLAYER.GIVE_UP_RATE;
+      } else {
+        this.giveUpProgress = Math.max(0, this.giveUpProgress - dt * 2);
+      }
+      this.syncCameraTransform();
+      if (this.downedTimer <= 0 || this.giveUpProgress >= 1) {
+        this.finalizeDeath();
+      }
+      return;
+    }
+
+    if (this.ammoStashCooldown > 0) {
+      this.ammoStashCooldown = Math.max(0, this.ammoStashCooldown - dt);
+    }
+
+    if (this.activeVehicle) {
+      this.updateVehicleControl(dt);
+      this.updateRallyPoint(dt);
+      this.updateUAV(dt);
+      return;
+    }
+
+    // Bleeding & Bandaging [Hold H]
+    if (this.bleeding) {
+      this.bleedTickTimer += dt;
+      if (this.bleedTickTimer >= PLAYER.BLEED_TICK_INTERVAL) {
+        this.bleedTickTimer = 0;
+        this.takeDamage(PLAYER.BLEED_DAMAGE, 'BLEEDING', 'RU', 'BLEED', this.onKillEvent);
+        if (this.dead || this.downed) return;
+      }
+    }
+
+    if (this.medicHealTimer > 0) {
+      this.medicHealTimer = Math.max(0, this.medicHealTimer - dt);
+      if (this.medicHealTimer <= 0) {
+        this.beingHealedByMedic = null;
+      }
+    }
+
+    // Real-life & Tactical Shooter Forward Base Defender Advantage (Entrenchment, Triage & Logistics Aura):
+    // When the Player is defending inside a Friendly Captured Forward Base (`flag.owner === this.team`),
+    // they gain:
+    //   1) -25% to -40% incoming damage reduction (based on built Defense Stage 0-4) & +50% suppression resistance
+    //   2) -30% weapon recoil & sway (resting rifle on prepared sandbags/parapets)
+    //   3) 1.35x to 1.65x objective hold weight (enforcing the 3:1 attacker-to-defender rule)
+    //   4) Passive FOB Medical Triage (+4 HP/s, +3 Armor/s) & Munitions Stockpile top-up (+15 loose rounds every 10s)
+    let activeFriendlyFlag = null;
+    if (this.world && Array.isArray(this.world.flags)) {
+      for (const fl of this.world.flags) {
+        if (fl.owner === this.team) {
+          const dFl = Math.hypot(this.pos.x - fl.pos.x, this.pos.z - fl.pos.z);
+          if (dFl <= (fl.radius || 28)) {
+            activeFriendlyFlag = fl;
+            break;
+          }
+        }
+      }
+    }
+    this.inFriendlyForwardBase = Boolean(activeFriendlyFlag);
+    this.defendedFlagId = activeFriendlyFlag ? activeFriendlyFlag.id : null;
+    this.defendedFlagStage = activeFriendlyFlag ? activeFriendlyFlag.defenseStage || 0 : 0;
+    this.defendedFlagGarrisonSquad =
+      activeFriendlyFlag && activeFriendlyFlag.garrisonSquad
+        ? activeFriendlyFlag.garrisonSquad[this.team]
+        : null;
+
+    if (activeFriendlyFlag && !this.downed && !this.dead) {
+      if (!this.bleeding && this.hp < PLAYER.MAX_HP) {
+        this.hp = Math.min(PLAYER.MAX_HP, this.hp + 4.0 * dt);
+      }
+      if (this.armor < (this.maxArmor || 50)) {
+        this.armor = Math.min(this.maxArmor || 50, this.armor + 3.0 * dt);
+      }
+      this._fobAmmoTimer = (this._fobAmmoTimer || 0) + dt;
+      if (this._fobAmmoTimer >= 10.0) {
+        this._fobAmmoTimer = 0;
+        const prim = this.slots[0];
+        if (prim && prim.def && prim.def.clipSize > 1) {
+          const maxLoose = prim.maxLooseAmmo || 120;
+          if ((prim.looseAmmo || 0) < maxLoose) {
+            prim.looseAmmo = Math.min(maxLoose, (prim.looseAmmo || 0) + 15);
+          }
+        }
+      }
+    } else {
+      this._fobAmmoTimer = 0;
+    }
+
+    if (this.keys['KeyH'] && (this.bleeding || this.hp < PLAYER.MAX_HP) && this.bandages > 0) {
+      this.bandageProgress += dt / (this.role === 'medic' ? PLAYER.BANDAGE_DURATION_MEDIC : PLAYER.BANDAGE_DURATION_OTHER);
+      if (this.bandageProgress >= 1) {
+        this.bandageProgress = 0;
+        this.bleeding = false;
+        this.bandages--;
+        this.hp = Math.min(PLAYER.MAX_HP, this.hp + (this.role === 'medic' ? PLAYER.BANDAGE_HEAL_MEDIC : PLAYER.BANDAGE_HEAL_OTHER));
+        if (this.onAwardXp) {
+          this.onAwardXp(
+            15,
+            this.hp >= PLAYER.MAX_HP
+              ? '🏥 INJURIES FULLY BANDAGED (100/100 MAX HP)'
+              : `BLEEDING STOPPED & HEALED (${Math.ceil(this.hp)}/100 HP)`
+          );
+        }
+      }
+    } else {
+      this.bandageProgress = 0;
+    }
+
+    // Separate [E] Drag & [F] Revive Downed Friendly Teammates:
+    // - Press [E] to toggle DRAGGING a fallen soldier to cover
+    // - Hold [F] to wrap a bandage and REVIVE them!
+    if (this.draggedBot && (this.draggedBot.dead || !this.draggedBot.downed)) {
+      this.draggedBot = null;
+      this.isDraggingAlly = false;
+    }
+
+    let nearDownedBot = null;
+    if (this.draggedBot) {
+      nearDownedBot = this.draggedBot;
+    } else if (
+      this.keys['KeyF'] &&
+      this.reviveTargetBot &&
+      this.reviveTargetBot.downed &&
+      !this.reviveTargetBot.dead
+    ) {
+      nearDownedBot = this.reviveTargetBot;
+    } else {
+      nearDownedBot = this.botManager.findNearestDownedFriendly(this.pos, this.team, DISTANCES.INTERACT_RANGE);
+    }
+    this.reviveTargetBot = nearDownedBot;
+    this.isDraggingAlly = Boolean(this.draggedBot);
+
+    const wantMove = Boolean(
+      this.keys['KeyW'] || this.keys['KeyS'] || this.keys['KeyA'] || this.keys['KeyD']
+    );
+    if (this.draggedBot && wantMove) {
+      this.dragDistAccum = (this.dragDistAccum || 0) + 4.8 * dt;
+    }
+
+    if (nearDownedBot && this.keys['KeyF'] && (this.bandages || 0) > 0) {
+      this._fUsedForFriendlyAction = true;
+      this._pendingEnemyLootPack = null;
+      this.keyFHoldTime = 0;
+      const revDuration = this.role === 'medic' ? PLAYER.REVIVE_DURATION_MEDIC : PLAYER.REVIVE_DURATION_OTHER;
+      const rateMult = wantMove ? 0.35 : 1.0;
+      this.reviveProgress += (dt / revDuration) * rateMult;
+      if (this.reviveProgress >= 1) {
+        const draggedFar = (this.dragDistAccum || 0) >= 1.5;
+        this.reviveProgress = 0;
+        this.dragDistAccum = 0;
+        this.draggedBot = null;
+        this.isDraggingAlly = false;
+        // Squad rule: Every revive consumes 1 Field Dressing!
+        this.bandages = Math.max(0, (this.bandages || 1) - 1);
+        this.botManager.reviveBot(nearDownedBot, false);
+        // If Player is a Medic with Medic Bag supply, also apply Medic Bag to heal revived ally to 100 HP!
+        if (this.role === 'medic' && (this.medicBagSupply ?? 600) > 0) {
+          const needed = Math.max(0, 100 - nearDownedBot.hp);
+          const healAmt = Math.min(needed, this.medicBagSupply ?? 600);
+          nearDownedBot.hp = Math.min(100, nearDownedBot.hp + healAmt);
+          this.medicBagSupply = Math.max(0, (this.medicBagSupply ?? 600) - healAmt);
+        }
+        this.revives = (this.revives || 0) + 1;
+        const xpPts = draggedFar ? PLAYER.REVIVE_DRAG_XP : PLAYER.REVIVE_XP;
+        this.score += xpPts;
+        if (this.onAwardXp) {
+          const maxD = this.maxBandages || (this.role === 'medic' ? 9 : 2);
+          this.onAwardXp(
+            xpPts,
+            draggedFar
+              ? `🩹 DRAGGED & REVIVED ${nearDownedBot.name} (-1 DRESSING • ${this.bandages}/${maxD} LEFT)`
+              : `🩹 REVIVED ${nearDownedBot.name} (-1 FIELD DRESSING • ${this.bandages}/${maxD} LEFT)`
+          );
+        }
+        if (this.onKillEvent) {
+          this.onKillEvent(
+            this.name,
+            this.team,
+            nearDownedBot.name,
+            nearDownedBot.team,
+            'REVIVED',
+            false
+          );
+        }
+        this.reviveTargetBot = null;
+      }
+    } else {
+      this.reviveProgress = 0;
+      // Long-Press [F] (0.30s) near a Fallen Enemy opens the Side-by-Side Tarkov / ABI Enemy Gear & Manual Loot UI!
+      // Never trigger if [F] was used to revive or heal a friendly teammate during this key hold!
+      if (this.keys['KeyF'] && !nearDownedBot && !this._fUsedForFriendlyAction && !this.isPopoutModalOpen()) {
+        this.keyFHoldTime = (this.keyFHoldTime || 0) + dt;
+        if (this.keyFHoldTime >= 0.30 && !this._enemyLootHoldTriggered) {
+          const targetLootPack =
+            this._pendingEnemyLootPack ||
+            (typeof this.findNearestEnemyLoot === 'function'
+              ? this.findNearestEnemyLoot(5.2)
+              : null);
+          if (targetLootPack) {
+            this._enemyLootHoldTriggered = true;
+            this._justOpenedLootByHold = true;
+            if (
+              window.game &&
+              window.game.ui &&
+              typeof window.game.ui.openBackpackLootView === 'function'
+            ) {
+              window.game.ui.openBackpackLootView(targetLootPack);
+            }
+          }
+        }
+      }
+    }
+
+    // Tarkov Slow Reload (Pressing Bullets One-by-One into Existing Mags via [P] or Hold [R])
+    const cur = this.currentWeapon();
+    if (this.keys['KeyR'] && cur && !this.activeVehicle) {
+      this.keyRHoldTime = (this.keyRHoldTime || 0) + dt;
+      if (this.keyRHoldTime >= 0.36 && !this.slowReloading) {
+        if (this.reloading) {
+          this.reloading = false;
+          this.fastReload = false;
+        }
+        this.startSlowReload();
+      }
+    }
+
+    if (this.slowReloading && cur && cur.mags && cur.def.clipSize > 1) {
+      if (this.isFiring && cur.clip > 0) {
+        this.slowReloading = false;
+        this.magPackProgress = 0;
+      } else {
+        const bulletDur = this.magPackBulletDuration || PLAYER.MAG_PACK_BULLET_TIME || 0.22;
+        this.magPackBulletTimer -= dt;
+        this.magPackProgress = Math.max(
+          0.02,
+          Math.min(1, 1 - this.magPackBulletTimer / bulletDur)
+        );
+
+        if (this.magPackBulletTimer <= 0) {
+          let gotBullet = false;
+          if ((cur.looseAmmo || 0) > 0) {
+            cur.looseAmmo--;
+            gotBullet = true;
+          } else {
+            // Consolidate from the lowest partial mag into a fuller mag
+            let donorIdx = -1;
+            let donorMin = Infinity;
+            for (let i = 0; i < cur.mags.length; i++) {
+              if (cur.mags[i] > 0 && cur.mags[i] < cur.def.clipSize && cur.mags[i] < donorMin) {
+                donorMin = cur.mags[i];
+                donorIdx = i;
+              }
+            }
+            if (donorIdx !== -1 && cur.mags.filter((m) => m > 0 && m < cur.def.clipSize).length >= 2) {
+              cur.mags[donorIdx]--;
+              gotBullet = true;
+            }
+          }
+
+          let pressedIntoMag = false;
+          if (gotBullet) {
+            if (cur.clip < cur.def.clipSize) {
+              cur.clip++;
+              pressedIntoMag = true;
+            } else {
+              // Find the fullest non-full magazine in Chest Rig to press the bullet into
+              let bestIdx = -1;
+              let bestCount = -1;
+              for (let i = 0; i < cur.mags.length; i++) {
+                if (cur.mags[i] < cur.def.clipSize && cur.mags[i] > bestCount) {
+                  bestCount = cur.mags[i];
+                  bestIdx = i;
+                }
+              }
+              if (bestIdx !== -1) {
+                cur.mags[bestIdx]++;
+                pressedIntoMag = true;
+              }
+            }
+          }
+
+          if (pressedIntoMag) {
+            this.slowReloadRoundsPacked = (this.slowReloadRoundsPacked || 0) + 1;
+            cur.mags.sort((a, b) => b - a);
+            this.syncReserveFromMags(cur);
+            sound.playHitmarker('normal');
+          }
+
+          const stillNeedsBullets =
+            cur.clip < cur.def.clipSize || cur.mags.some((m) => m < cur.def.clipSize);
+          const hasMoreSource =
+            (cur.looseAmmo || 0) > 0 ||
+            cur.mags.filter((m) => m > 0 && m < cur.def.clipSize).length >= 2;
+
+          if (pressedIntoMag && stillNeedsBullets && hasMoreSource) {
+            this.magPackBulletTimer = bulletDur;
+          } else {
+            this.slowReloading = false;
+            this.magPackProgress = 0;
+            sound.playReload();
+            if (this.onAwardXp && this.slowReloadRoundsPacked > 0) {
+              this.onAwardXp(
+                15,
+                `🎒 MAGAZINES PACKED (+${this.slowReloadRoundsPacked} RDS • ${cur.looseAmmo || 0} LOOSE LEFT)`
+              );
+            }
+          }
+        }
+      }
+    } else {
+      this.magPackProgress = 0;
+    }
+
+    // Fast Reloading timer (Change Mags from Chest Rig vs. Speed Drop Reload) & RPG warhead restore
+    if (this.reloading && cur) {
+      this.reloadTimer -= dt;
+      if (this.reloadTimer <= 0) {
+        if (cur.mags && cur.def.clipSize > 1) {
+          // Tarkov Fast Mag-Swap keeps old magazine (even if 0 rounds empty!) in Chest Rig pouches
+          // so you can Slow-Reload loose bullets into it later; Double-Tap [R] Speed Drop discards it!
+          const maxRigMagSlots = cur.def.spareMagSlots || Math.max(4, cur.mags.length + 1);
+          if (!this.fastReload && (cur.clip > 0 || cur.mags.length < maxRigMagSlots)) {
+            cur.mags.push(cur.clip);
+          }
+          cur.mags.sort((a, b) => b - a);
+          cur.clip = cur.mags.length > 0 ? cur.mags.shift() : 0;
+          this.syncReserveFromMags(cur);
+        } else {
+          const needed = cur.def.clipSize - cur.clip;
+          const take = Math.min(needed, cur.reserve);
+          cur.clip += take;
+          cur.reserve -= take;
+        }
+        this.reloading = false;
+        this.fastReload = false;
+        const warhead = cur.mesh.getObjectByName('rpgWarhead');
+        if (warhead) warhead.visible = true;
+        events.emit('player:reloaded', {
+          weapon: cur.def,
+          clip: cur.clip,
+          reserve: cur.reserve,
+          stage: 'complete'
+        });
+      }
+    }
+
+    if (this.fireTimer > 0) {
+      this.fireTimer -= dt;
+    }
+
+    // Tactical Leaning (Q / ADS+E so [E] Enter Vehicle / Drag never conflicts)
+    const leanRightActive = this.keys['KeyE'] && this.isAds && !this.draggedBot && !nearDownedBot;
+    this.leanTarget = (leanRightActive ? 1 : 0) - (this.keys['KeyQ'] ? 1 : 0);
+    this.leanAmount += (this.leanTarget - this.leanAmount) * Math.min(1, dt * 12);
+
+    // Movement vector (paused while any UI modal / Loot window is open)
+    const modalOpenNow = this.isModalOpen();
+    if (modalOpenNow) {
+      this.isFiring = false;
+      this.isAds = false;
+    }
+    const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+
+    const moveDir = new THREE.Vector3();
+    if (!modalOpenNow) {
+      if (this.keys['KeyW']) moveDir.add(forward);
+      if (this.keys['KeyS']) moveDir.sub(forward);
+      if (this.keys['KeyD']) moveDir.add(right);
+      if (this.keys['KeyA']) moveDir.sub(right);
+    }
+
+    const isMoving = moveDir.lengthSq() > 0.001;
+    if (isMoving) moveDir.normalize();
+
+    if (!modalOpenNow && this.keys['ShiftLeft'] && (this.keys['KeyW'] || isMoving) && (this.prone || this.crouching)) {
+      this.prone = false;
+      this.crouching = false;
+    }
+
+    const isDraggingBody = Boolean(this.draggedBot || (nearDownedBot && this.keys['KeyF']));
+    const sprinting =
+      !modalOpenNow &&
+      this.keys['ShiftLeft'] &&
+      !this.isAds &&
+      !this.crouching &&
+      !this.prone &&
+      !isDraggingBody &&
+      (this.keys['KeyW'] || isMoving) &&
+      !this.isFiring;
+    const classSpdMult = this.classMoveSpeedMult || (CLASS_TRAITS[this.role]?.moveSpeedMult ?? 1.0);
+    const rawBaseSpeed = this.parachuting
+      ? 12.5
+      : isDraggingBody
+      ? 4.6
+      : this.prone
+      ? 2.4
+      : this.crouching
+      ? 4.3
+      : sprinting
+      ? 9.8
+      : this.isAds
+      ? 4.6
+      : 7.0;
+    const baseSpeed = this.parachuting ? rawBaseSpeed : rawBaseSpeed * classSpdMult;
+
+    // [Space]: Stand up from Prone/Crouch, Vault over low wall/window, or Auto-Bunnyhop (when bhopEnabled is ON)!
+    const bodyHeightNow = this.prone ? 0.65 : this.crouching ? 1.15 : 1.7;
+    const overlappingNow = this.checkBodyOverlap(this.pos.x, this.pos.y, this.pos.z, 0.4, bodyHeightNow);
+    let jumpedThisFrame = false;
+    const canJumpPress = this.bhopEnabled ? Boolean(this.keys['Space']) : Boolean(this.keys['Space'] && !this._spaceJumpConsumed);
+
+    if (!modalOpenNow && canJumpPress && (this.isGrounded || overlappingNow)) {
+      if (this.prone || this.crouching) {
+        this.prone = false;
+        this.crouching = false;
+        this.keys['Space'] = false;
+        this._spaceJumpConsumed = true;
+      } else {
+        if (!this.bhopEnabled) {
+          this._spaceJumpConsumed = true;
+        }
+        // If overlapping a chest wall / low voxel when pressing Space, immediately pop above or out of it!
+        if (overlappingNow) {
+          const lowTopY = this.getHighestOverlappingVoxelTop(this.pos.x, this.pos.y, this.pos.z, 0.4, 1.45);
+          if (
+            lowTopY !== null &&
+            !this.checkBodyOverlap(this.pos.x, lowTopY + 0.03, this.pos.z, 0.38, bodyHeightNow)
+          ) {
+            this.pos.y = lowTopY + 0.03;
+          } else {
+            this.resolveHorizontalOverlap(0.4, bodyHeightNow);
+          }
+        }
+
+        // Check if facing a vaultable 1-1.5 block ledge/window
+        const vaultCheckX = this.pos.x + forward.x * 1.05;
+        const vaultCheckZ = this.pos.z + forward.z * 1.05;
+        const hasLowWall = this.checkBodyOverlap(vaultCheckX, this.pos.y, vaultCheckZ, 0.35, 1.3);
+        const clearAbove = !this.checkBodyOverlap(
+          vaultCheckX,
+          this.pos.y + VOXEL_SIZE * 1.45,
+          vaultCheckZ,
+          0.35,
+          1.5
+        );
+        this.vel.y = hasLowWall && clearAbove ? 9.8 : 9.4;
+        this.isGrounded = false;
+        this.parachuteFSM?.send(PLAYER_PARACHUTE_EVENTS.JUMP_OR_FALL);
+        jumpedThisFrame = true;
+        this.bhopCount = this.bhopEnabled ? (this.bhopCount || 0) + 1 : 0;
+      }
+    } else if (this.isGrounded && !this.keys['Space']) {
+      this.bhopCount = 0;
+    }
+
+    // Movement Physics: Progressive Human Stride Inertia (never snaps instantaneously to top speed!)
+    // + Optional Quake Bunnyhop + Air-Strafe (Uncapped Speed when airborne)
+    if (this.parachuting) {
+      this.vel.x = THREE.MathUtils.lerp(this.vel.x, moveDir.x * baseSpeed, Math.min(1, dt * 3.5));
+      this.vel.z = THREE.MathUtils.lerp(this.vel.z, moveDir.z * baseSpeed, Math.min(1, dt * 3.5));
+    } else if (!this.bhopEnabled) {
+      // Tactical Ground & Air Movement with Physical Human Mass & Stride Ramp-Up:
+      // Starting from a standstill builds momentum smoothly through walk -> jog -> sprint (~0.6s ramp),
+      // while releasing WASD applies natural boot-ground friction deceleration.
+      if (this.isGrounded) {
+        const curH = Math.hypot(this.vel.x, this.vel.z);
+        if (!isMoving) {
+          const decelMs2 = 18.5 + curH * 1.4;
+          if (curH <= decelMs2 * dt) {
+            this.vel.x = 0;
+            this.vel.z = 0;
+          } else {
+            const scale = (curH - decelMs2 * dt) / curH;
+            this.vel.x *= scale;
+            this.vel.z *= scale;
+          }
+          this._strideSpool = Math.max(0, (this._strideSpool || 0) - dt * 3.5);
+        } else {
+          this._strideSpool = Math.min(1.0, (this._strideSpool || 0) + dt * 2.1);
+          const spdFrac = THREE.MathUtils.clamp(curH / Math.max(1, baseSpeed), 0, 1.1);
+          // Progressive leg-drive curve: controlled initial push-off -> strong mid-stride -> smooth top-end taper
+          const strideAccelMs2 =
+            (sprinting ? 14.5 : 16.0) *
+            (0.45 + 0.55 * this._strideSpool) *
+            Math.max(0.18, 1.0 - 0.65 * spdFrac * spdFrac);
+          const targetVx = moveDir.x * baseSpeed;
+          const targetVz = moveDir.z * baseSpeed;
+          const dvx = targetVx - this.vel.x;
+          const dvz = targetVz - this.vel.z;
+          const dvLen = Math.hypot(dvx, dvz);
+          // pivoting against current momentum uses stronger braking traction
+          const dotAlign = curH > 0.2 ? (this.vel.x * moveDir.x + this.vel.z * moveDir.z) / curH : 1;
+          const maxStep = (dotAlign < 0.2 ? 24.0 : strideAccelMs2) * dt;
+          if (dvLen <= maxStep) {
+            this.vel.x = targetVx;
+            this.vel.z = targetVz;
+          } else {
+            this.vel.x += (dvx / dvLen) * maxStep;
+            this.vel.z += (dvz / dvLen) * maxStep;
+          }
+        }
+      } else {
+        this.vel.x = THREE.MathUtils.lerp(this.vel.x, moveDir.x * baseSpeed, Math.min(1, dt * 3.2));
+        this.vel.z = THREE.MathUtils.lerp(this.vel.z, moveDir.z * baseSpeed, Math.min(1, dt * 3.2));
+      }
+    } else if (this.isGrounded && !jumpedThisFrame) {
+      // 1) Ground Friction (`PM_Friction`)
+      const speedHoriz = Math.hypot(this.vel.x, this.vel.z);
+      if (speedHoriz > 0.001) {
+        const control = Math.max(speedHoriz, PLAYER.GROUND_STOP_SPEED || 2.8);
+        const drop = control * (PLAYER.GROUND_FRICTION || 5.2) * dt;
+        const newSpeed = Math.max(0, speedHoriz - drop);
+        const scale = newSpeed / speedHoriz;
+        this.vel.x *= scale;
+        this.vel.z *= scale;
+      } else {
+        this.vel.x = 0;
+        this.vel.z = 0;
+      }
+      // 2) Ground Acceleration (`PM_Accelerate`) with Progressive Human Stride Ramp (never reaches max speed in 1 frame!)
+      if (isMoving) {
+        this._strideSpool = Math.min(1.0, (this._strideSpool || 0) + dt * 2.2);
+        const currentProj = this.vel.x * moveDir.x + this.vel.z * moveDir.z;
+        const addSpeed = baseSpeed - currentProj;
+        if (addSpeed > 0) {
+          const humanGroundAccel = 3.2 + 2.4 * this._strideSpool;
+          const accelSpeed = Math.min(addSpeed, humanGroundAccel * baseSpeed * dt);
+          this.vel.x += accelSpeed * moveDir.x;
+          this.vel.z += accelSpeed * moveDir.z;
+        }
+      } else {
+        this._strideSpool = Math.max(0, (this._strideSpool || 0) - dt * 3.2);
+      }
+    } else {
+      // 3) Airborne Quake Air-Strafe Acceleration (`PM_AirAccelerate` + CPMA Air Control)
+      if (isMoving) {
+        const airWishCap = Math.min(baseSpeed, PLAYER.AIR_WISH_SPEED_CAP || 4.2);
+        const currentProj = this.vel.x * moveDir.x + this.vel.z * moveDir.z;
+        const addSpeed = airWishCap - currentProj;
+        if (addSpeed > 0) {
+          const accelSpeed = Math.min(
+            addSpeed,
+            (PLAYER.AIR_ACCEL || 14.0) * baseSpeed * dt
+          );
+          this.vel.x += accelSpeed * moveDir.x;
+          this.vel.z += accelSpeed * moveDir.z;
+        }
+
+        // CPMA Air Control: smoothly rotate horizontal velocity toward `moveDir` without losing momentum
+        const horizSpeed = Math.hypot(this.vel.x, this.vel.z);
+        if (horizSpeed > 0.1) {
+          const dirX = this.vel.x / horizSpeed;
+          const dirZ = this.vel.z / horizSpeed;
+          const dot = dirX * moveDir.x + dirZ * moveDir.z;
+          if (dot > 0) {
+            const k = 32.0 * (PLAYER.CPM_AIR_CONTROL || 155.0) * dot * dot * dt * 0.0012;
+            const steerX = dirX * horizSpeed + moveDir.x * k;
+            const steerZ = dirZ * horizSpeed + moveDir.z * k;
+            const steerLen = Math.hypot(steerX, steerZ);
+            if (steerLen > 0.001) {
+              this.vel.x = (steerX / steerLen) * horizSpeed;
+              this.vel.z = (steerZ / steerLen) * horizSpeed;
+            }
+          }
+        }
+      }
+      // Uncapped Quake / Source bunnyhop speed when bhopEnabled is ON!
+    }
+    this.horizSpeed = Math.hypot(this.vel.x, this.vel.z);
+
+    if (this.parachuting) {
+      // Parachute canopy drag caps descent speed to a smooth 5.5 m/s glide
+      this.vel.y = Math.max(this.vel.y - 8.5 * dt, -5.5);
+    } else {
+      // High-speed freefall when parachute is cut or not yet deployed
+      const freefallAccel = this.parachuteCut ? 32.0 : 24.0;
+      const maxTerminalVel = this.parachuteCut ? -58.0 : -46.0;
+      this.vel.y = Math.max(maxTerminalVel, this.vel.y - freefallAccel * dt);
+      // Manual [SPACE] parachute deploy when falling > 6.5m AGL (never auto-deploys so cutting your
+      // parachute or failing to deploy causes high-speed freefall and lethal fall damage!)
+      const gHCheck = this.world ? this.world.getGroundHeightAt(this.pos.x, this.pos.z) : 0;
+      const agl = this.pos.y - gHCheck;
+      if (
+        !this.isGrounded &&
+        this.keys['Space'] &&
+        agl > 6.5 &&
+        this.vel.y < -5.5 &&
+        typeof this.activateParachuteEject === 'function'
+      ) {
+        this.parachuteCut = false;
+        this.activateParachuteEject(this.pos, true);
+      }
+    }
+    this.moveWithVoxelCollision(dt);
+
+    if (typeof this.updateStingerLockOn === 'function') {
+      this.updateStingerLockOn(dt);
+    }
+
+    if (this.parachuting) {
+      if (this.parachuteMesh) {
+        this.parachuteMesh.visible = true;
+        this.parachuteMesh.position.copy(this.pos);
+        this.parachuteMesh.rotation.y = this.yaw;
+      }
+      const gH = this.world ? this.world.getGroundHeightAt(this.pos.x, this.pos.z) : 0;
+      if (this.isGrounded || this.pos.y <= gH + 0.35) {
+        this.parachuting = false;
+        this.parachuteCut = false;
+        this.isGrounded = true;
+        this.vel.y = 0;
+        this.parachuteFSM?.send(PLAYER_PARACHUTE_EVENTS.LAND_GROUND);
+        if (this.parachuteMesh) {
+          this.parachuteMesh.visible = false;
+        }
+        if (this.onAwardXp) {
+          this.onAwardXp(25, '🪂 SAFE PARACHUTE TOUCHDOWN!');
+        }
+      }
+    }
+
+    // If dragging a downed friendly soldier while holding [F], pull their body right in front of us
+    // so we can see them being dragged into safe cover!
+    if (isDraggingBody && nearDownedBot) {
+      const dragTarget = this.pos.clone().addScaledVector(forward, 1.15);
+      nearDownedBot.pos.x = THREE.MathUtils.lerp(nearDownedBot.pos.x, dragTarget.x, Math.min(1, dt * 14));
+      nearDownedBot.pos.z = THREE.MathUtils.lerp(nearDownedBot.pos.z, dragTarget.z, Math.min(1, dt * 14));
+      nearDownedBot.pos.y = this.world.getGroundHeightAt(nearDownedBot.pos.x, nearDownedBot.pos.z) + 0.22;
+      nearDownedBot.mesh.rotation.y = this.yaw;
+    }
+
+    // Decay recoil, weapon sway, suppression & explosion trauma
+    this.recoilOffsetPitch *= Math.pow(0.08, dt);
+    this.recoilKickZ *= Math.pow(0.02, dt);
+    this.swayX *= Math.pow(0.04, dt);
+    this.swayY *= Math.pow(0.04, dt);
+    this.shakeTrauma = Math.max(0, this.shakeTrauma - dt * 1.8);
+
+    // Suppression decay + micro-flinch when suppressed (Squad-style)
+    this.suppressionLevel = Math.max(0, this.suppressionLevel - this.suppressionDecayRate * dt);
+    if (this.suppressionLevel > 0.05) {
+      const flinchMag = this.suppressionLevel * 0.015;
+      this.swayX += (Math.random() - 0.5) * flinchMag;
+      this.swayY += (Math.random() - 0.5) * flinchMag;
+    }
+
+    // Multi-kill timer decay
+    if (this.multiKillTimer > 0) {
+      this.multiKillTimer -= dt;
+      if (this.multiKillTimer <= 0) {
+        this.multiKillCount = 0;
+      }
+    }
+
+    const shakeMag = this.shakeTrauma * this.shakeTrauma * 0.06;
+    const shakeYaw = (Math.random() - 0.5) * shakeMag;
+    const shakePitch = (Math.random() - 0.5) * shakeMag;
+
+    // Camera height, lean & headbob (heavily stabilized while in ADS)
+    if (isMoving && this.isGrounded) {
+      this.walkBobPhase += dt * (sprinting ? 14 : 9.5);
+    }
+    const bobAmpY = this.isAds ? 0.005 : 0.036;
+    const bobAmpX = this.isAds ? 0.004 : 0.026;
+    const bobY = isMoving && this.isGrounded ? Math.sin(this.walkBobPhase) * bobAmpY : 0;
+    const bobX = isMoving && this.isGrounded ? Math.cos(this.walkBobPhase * 0.5) * bobAmpX : 0;
+
+    this.lastBobY = bobY;
+    this.lastShakeYaw = shakeYaw;
+    this.lastShakePitch = shakePitch;
+    this.syncCameraTransform();
+
+    // Execute full-auto fire AFTER camera position & rotation are updated for this frame
+    if (this.isFiring && cur && cur.def.auto && !this.reloading && this.fireTimer <= 0) {
+      this.executeFire(cur);
+    }
+
+    // Update rally point beacon
+    this.updateRallyPoint(dt);
+
+    // Update commander abilities, insertion beacon, commo rose cooldowns
+    this.updateUAV(dt);
+
+    // Check for walk-over pickup of In-Building Armory Case Keys (or press [F] within 4.8m)
+    if (
+      !this.dead &&
+      !this.downed &&
+      !this.activeVehicle &&
+      typeof this.findNearestBuildingKey === 'function'
+    ) {
+      const walkOverKey = this.findNearestBuildingKey(2.1);
+      if (walkOverKey && typeof this.collectBuildingKeyObject === 'function') {
+        this.collectBuildingKeyObject(walkOverKey);
+      }
+    }
+
+    // ADS FOV & First-Person ViewModel Animation (supports 45° Canted Red-Dot Sight!)
+    const targetAds = this.isAds && !this.reloading ? 1 : 0;
+    this.adsAmount += (targetAds - this.adsAmount) * Math.min(1, dt * 15);
+
+    const activeAdsFov =
+      cur && this.useCantedSight && cur.def.hasCantedSight ? 50 : cur ? cur.def.adsFov || 55 : 75;
+    const targetFov = cur ? THREE.MathUtils.lerp(75, activeAdsFov, this.adsAmount) : 75;
+    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
+      this.camera.fov = targetFov;
+      this.camera.updateProjectionMatrix();
+    }
+
+    if (cur && cur.mesh) {
+      const hipPos = new THREE.Vector3(
+        0.22 + bobX + this.swayX,
+        -0.2 + bobY * 0.6 + this.swayY,
+        -0.31 + this.recoilKickZ
+      );
+      const isPistol =
+        cur.def.slot === 'secondary' ||
+        cur.def.id === 'mp443' ||
+        cur.def.id === 'usp45' ||
+        cur.def.id === 'g18' ||
+        cur.def.id === 'deagle';
+      const activeOptic =
+        typeof this.getActiveOpticType === 'function'
+          ? this.getActiveOpticType()
+          : cur.def.opticType;
+      const isBareIronSights = !activeOptic;
+      const isCantedActive = Boolean(this.useCantedSight && cur.def.hasCantedSight);
+      const isSniper8x = !isCantedActive && activeOptic === 'sniper8x';
+      const isAcog = !isCantedActive && activeOptic === 'acog';
+      const isHolo = !isCantedActive && activeOptic === 'holo';
+      const isKobra = !isCantedActive && activeOptic === 'kobra';
+      // Exact optical sight-over-bore heights so the bottom of every 2D scope/reflex frame
+      // sits directly on the 3D Picatinny rail / pistol slide mount (never floating in mid-air
+      // and never blocking the reticle window!):
+      //   - Kobra (240px tall, bottom at +120px) / Holo (230px tall, bottom at +115px)
+      //   - Red-Dot (250px tall, bottom at +125px)
+      //   - ACOG 3.4x (350px tall, FOV 28, bottom at +175px)
+      //   - Sniper 8x (56vh blackout scope)
+      const sightCenterY = isBareIronSights
+        ? isPistol
+          ? -0.052
+          : -0.060
+        : isCantedActive
+        ? -0.068
+        : isSniper8x
+        ? -0.118
+        : isAcog
+        ? isPistol
+          ? -0.072
+          : -0.076
+        : isHolo || isKobra
+        ? isPistol
+          ? -0.073
+          : -0.082
+        : isPistol
+        ? -0.076
+        : -0.085;
+      const baseAdsZ = isBareIronSights
+        ? isPistol
+          ? -0.22
+          : -0.18
+        : isCantedActive
+        ? -0.17
+        : isSniper8x
+        ? -0.14
+        : isAcog
+        ? isPistol
+          ? -0.21
+          : -0.17
+        : isPistol
+        ? -0.25
+        : -0.21;
+      const isBowWep = Boolean(cur.def && cur.def.isBow && !cur.def.isCrossbow);
+      const isXbowWep = Boolean(cur.def && cur.def.isCrossbow);
+      const isMeleeWep = Boolean(cur.def && cur.def.type === 'melee_sword');
+      const adsOffsetX = isMeleeWep ? 0.2 : isBowWep ? 0.14 : 0;
+      const adsOffsetY = isMeleeWep ? -0.19 : isBowWep ? -0.105 : isXbowWep ? -0.095 : sightCenterY;
+      const adsZ =
+        (isMeleeWep ? -0.3 : isBowWep ? -0.25 : isXbowWep ? -0.23 : baseAdsZ) +
+        this.recoilKickZ * 0.4;
+      const adsPos = new THREE.Vector3(
+        adsOffsetX + this.swayX * 0.12,
+        adsOffsetY + this.swayY * 0.12,
+        adsZ
+      );
+      cur.mesh.position.lerpVectors(hipPos, adsPos, this.adsAmount);
+
+      const magMesh = cur.mesh.getObjectByName('magazineMesh');
+      const magTopBrass = magMesh ? magMesh.getObjectByName('magTopBrass') : null;
+      if (magTopBrass) {
+        magTopBrass.visible = Boolean(this.reloading || this.slowReloading);
+      }
+      const leftArm = cur.mesh.getObjectByName('leftArmGroup');
+      const rightArm = cur.mesh.getObjectByName('rightArmGroup');
+      const boltMesh = cur.mesh.getObjectByName('boltCarrierMesh');
+      const packBulletMesh = cur.mesh.getObjectByName('packingBulletMesh');
+      const cantedRoll = isCantedActive ? -0.68 * this.adsAmount : 0;
+
+      const baseMagY = magMesh && magMesh.userData.baseY !== undefined ? magMesh.userData.baseY : isPistol ? -0.082 : -0.105;
+      const baseMagZ = magMesh && magMesh.userData.baseZ !== undefined ? magMesh.userData.baseZ : isPistol ? -0.195 : -0.29;
+      const baseMagRotX = magMesh && magMesh.userData.baseRotX !== undefined ? magMesh.userData.baseRotX : isPistol ? 0.10 : -0.18;
+      const baseBoltZ = boltMesh && boltMesh.userData.baseZ !== undefined ? boltMesh.userData.baseZ : isPistol ? -0.22 : -0.09;
+
+      if (this.reloading) {
+        const totalDur = Math.max(
+          0.25,
+          (this.reloadTotalTime || cur.def.reloadTime) *
+            (this.fastReload ? PLAYER.SPEED_RELOAD_MULT : 1.0)
+        );
+        const p = THREE.MathUtils.clamp(1 - Math.max(0, this.reloadTimer) / totalDur, 0, 1);
+        if (packBulletMesh) packBulletMesh.visible = false;
+
+        if (cur.def.isBow || cur.def.isCrossbow) {
+          // Bow / Crossbow Launch, Quiver Nock & String Draw Animation (keeps bow/crossbow aimed forward!)
+          const releaseKick = p < 0.18 ? Math.sin((p / 0.18) * Math.PI) : 0;
+          const nockTilt = p >= 0.18 ? Math.sin(((p - 0.18) / 0.82) * Math.PI) : 0;
+          cur.mesh.rotation.set(
+            -releaseKick * 0.06 + nockTilt * (cur.def.isCrossbow ? 0.14 : 0.05),
+            nockTilt * 0.06,
+            cantedRoll
+          );
+          animateBowOrCrossbowMesh(
+            cur.mesh,
+            p,
+            this.adsAmount,
+            Boolean(cur.def.isCrossbow),
+            Boolean(this.fireArrowsActive)
+          );
+        } else if (p < 0.36) {
+          const s = Math.sin(((p / 0.36) * Math.PI) * 0.5);
+          cur.mesh.rotation.set(0.26 * s, 0.34 * s, -0.32 * s);
+          if (magMesh) {
+            magMesh.position.set(0, baseMagY - s * 0.28, baseMagZ + s * 0.04);
+            magMesh.rotation.set(baseMagRotX + s * 0.35, 0, 0);
+          }
+          if (leftArm && leftArm.userData.basePos) {
+            leftArm.position.set(
+              leftArm.userData.basePos.x + 0.02 * s,
+              leftArm.userData.basePos.y - 0.19 * s,
+              baseMagZ + 0.04
+            );
+          }
+          if (boltMesh) boltMesh.position.z = baseBoltZ;
+        } else if (p < 0.74) {
+          const s = (p - 0.36) / 0.38;
+          const easeIn = 1 - Math.pow(1 - s, 2);
+          const seatSnap = s > 0.82 ? Math.sin(((s - 0.82) / 0.18) * Math.PI) : 0;
+          cur.mesh.rotation.set(0.26 - seatSnap * 0.12, 0.34 * (1 - s * 0.3), -0.32 * (1 - s * 0.25));
+          cur.mesh.position.y += seatSnap * 0.022;
+          if (magMesh) {
+            magMesh.position.set(0, baseMagY - (1 - easeIn) * 0.28, baseMagZ + (1 - easeIn) * 0.04);
+            magMesh.rotation.set(baseMagRotX + (1 - easeIn) * 0.3, 0, 0);
+          }
+          if (leftArm && leftArm.userData.basePos) {
+            leftArm.position.set(
+              leftArm.userData.basePos.x + 0.02 * (1 - easeIn),
+              baseMagY - (1 - easeIn) * 0.24 - 0.03,
+              baseMagZ + 0.04
+            );
+          }
+          if (boltMesh) boltMesh.position.z = baseBoltZ;
+        } else {
+          const s = (p - 0.74) / 0.26;
+          const rackWave = Math.sin(s * Math.PI);
+          cur.mesh.rotation.set(
+            0.18 * (1 - s) - rackWave * 0.08,
+            0.22 * (1 - s),
+            -0.22 * (1 - s) + rackWave * 0.12
+          );
+          cur.mesh.position.z -= rackWave * 0.024;
+          if (magMesh) {
+            magMesh.position.set(0, baseMagY, baseMagZ);
+            magMesh.rotation.set(baseMagRotX, 0, 0);
+          }
+          if (boltMesh) {
+            boltMesh.position.z = baseBoltZ + rackWave * 0.068;
+          }
+          if (leftArm && leftArm.userData.basePos) {
+            leftArm.position.set(
+              THREE.MathUtils.lerp(-0.02, leftArm.userData.basePos.x, s),
+              THREE.MathUtils.lerp(0.035, leftArm.userData.basePos.y, s),
+              THREE.MathUtils.lerp(baseBoltZ + rackWave * 0.06, leftArm.userData.basePos.z, s)
+            );
+          }
+        }
+      } else if (this.slowReloading && cur.mags && cur.def.clipSize > 1) {
+        // Tarkov Slow Reload Animation: Gun lowers & cants while Left Hand presses individual
+        // gleaming 3D brass cartridges down into the detached Magazine's top feed lips!
+        const bp = THREE.MathUtils.clamp(this.magPackProgress || 0, 0, 1);
+        const pressWave = Math.sin(bp * Math.PI);
+        cur.mesh.rotation.set(0.22 + pressWave * 0.04, -0.22, 0.36);
+        cur.mesh.position.x += 0.05;
+        cur.mesh.position.y -= 0.04 + pressWave * 0.01;
+
+        if (magMesh) {
+          magMesh.position.set(-0.075, -0.015 - pressWave * 0.016, -0.17);
+          magMesh.rotation.set(0.42, 0.28, -0.18);
+        }
+        if (packBulletMesh) {
+          packBulletMesh.visible = true;
+          packBulletMesh.position.set(
+            -0.075 + (1 - bp) * 0.028,
+            0.095 - bp * 0.038,
+            -0.165
+          );
+          packBulletMesh.rotation.set(0.35 - bp * 0.25, 0.22, 0);
+        }
+        if (leftArm) {
+          leftArm.position.set(-0.085, 0.055 - pressWave * 0.032, -0.15);
+          leftArm.rotation.set(0.55 + pressWave * 0.18, 0.35, -0.2);
+        }
+        if (boltMesh) boltMesh.position.z = baseBoltZ;
+      } else if (sprinting && this.adsAmount < 0.2 && !(this.inspectTimer > 0)) {
+        // Tactical Sprint High-Ready Pose
+        if (packBulletMesh) packBulletMesh.visible = false;
+        cur.mesh.rotation.set(-0.22 + bobY * 1.5, 0.48, 0.18);
+        if (magMesh) {
+          magMesh.position.set(0, baseMagY, baseMagZ);
+          magMesh.rotation.set(baseMagRotX, 0, 0);
+        }
+        if (boltMesh) boltMesh.position.z = baseBoltZ;
+        if (leftArm && leftArm.userData.basePos) {
+          leftArm.position.copy(leftArm.userData.basePos);
+          leftArm.rotation.copy(leftArm.userData.baseRot);
+        }
+        if (rightArm && rightArm.userData.basePos) {
+          rightArm.position.copy(rightArm.userData.basePos);
+          rightArm.rotation.copy(rightArm.userData.baseRot);
+        }
+        if (cur.def.isBow || cur.def.isCrossbow) {
+          animateBowOrCrossbowMesh(
+            cur.mesh,
+            0,
+            this.adsAmount,
+            Boolean(cur.def.isCrossbow),
+            Boolean(this.fireArrowsActive)
+          );
+        }
+      } else if (this.inspectTimer > 0 && !this.isFiring && this.adsAmount < 0.15) {
+        // ─── CS2 WEAPON & KNIFE INSPECT ANIMATION ([F] / [V]) ──────────────────
+        this.inspectTimer = Math.max(0, this.inspectTimer - dt);
+        if (packBulletMesh) packBulletMesh.visible = false;
+        const totalInsp = this.inspectTotalTime || 3.2;
+        const p = THREE.MathUtils.clamp(1 - this.inspectTimer / totalInsp, 0, 1);
+        const knifePivot = cur.mesh.getObjectByName('knifePivotGroup');
+
+        if (cur.def.type === 'hammer' && cur.def.skinFinish === 'karambit' && knifePivot) {
+          // CS2 Karambit Finger-Ring Spin Inspect (720° double spin around index finger ring!)
+          const env = Math.sin(p * Math.PI);
+          const spinAngle = Math.sin(p * Math.PI * 0.5) * Math.PI * 4.0;
+          cur.mesh.position.x -= 0.08 * env;
+          cur.mesh.position.y += 0.045 * env;
+          cur.mesh.rotation.set(0.15 * env, 0.28 * env, -0.18 * env);
+          const bRot = knifePivot.userData.baseRot || new THREE.Euler(-0.18, -0.24, 0.1);
+          knifePivot.rotation.set(bRot.x + spinAngle, bRot.y + 0.25 * env, bRot.z);
+        } else if (cur.def.type === 'hammer' && cur.def.skinFinish === 'butterfly' && knifePivot) {
+          // CS2 Butterfly Knife Balisong Fan-Flip Inspect (articulated Safe & Bite handles!)
+          const env = Math.sin(p * Math.PI);
+          const flipWave = Math.sin(p * Math.PI * 3.0);
+          cur.mesh.position.x -= 0.08 * env;
+          cur.mesh.position.y += 0.04 * env;
+          cur.mesh.rotation.set(0.18 * env, 0.35 * Math.sin(p * Math.PI * 2), -0.22 * env);
+          const bRot = knifePivot.userData.baseRot || new THREE.Euler(-0.28, -0.18, 0.06);
+          knifePivot.rotation.set(
+            bRot.x + Math.sin(p * Math.PI * 2) * 0.65,
+            bRot.y + p * Math.PI * 2,
+            bRot.z
+          );
+          const safeH = knifePivot.getObjectByName('baliSafeHandle');
+          const biteH = knifePivot.getObjectByName('baliBiteHandle');
+          if (safeH) safeH.rotation.x = Math.max(0, flipWave) * 2.2 * env;
+          if (biteH) biteH.rotation.x = -Math.max(0, -flipWave) * 2.4 * env;
+        } else {
+          // CS2 Firearm Inspect: Lift to center, tilt left side (0.0-0.48), roll to right side (0.48-0.86), settle (0.86-1.0)
+          let pitch = 0;
+          let yaw = 0;
+          let roll = 0;
+          let shiftX = 0;
+          let shiftY = 0;
+          if (p < 0.46) {
+            const s = Math.sin((p / 0.46) * Math.PI * 0.5);
+            pitch = 0.16 * s;
+            yaw = 0.62 * s;
+            roll = -0.48 * s;
+            shiftX = -0.095 * s;
+            shiftY = 0.045 * s;
+          } else if (p < 0.86) {
+            const u = (p - 0.46) / 0.4;
+            const s = 0.5 - 0.5 * Math.cos(u * Math.PI);
+            pitch = THREE.MathUtils.lerp(0.16, 0.22, s);
+            yaw = THREE.MathUtils.lerp(0.62, -0.52, s);
+            roll = THREE.MathUtils.lerp(-0.48, 0.54, s);
+            shiftX = THREE.MathUtils.lerp(-0.095, -0.055, s);
+            shiftY = THREE.MathUtils.lerp(0.045, 0.035, s);
+          } else {
+            const u = (p - 0.86) / 0.14;
+            const s = 1 - u * u;
+            pitch = 0.22 * s;
+            yaw = -0.52 * s;
+            roll = 0.54 * s;
+            shiftX = -0.055 * s;
+            shiftY = 0.035 * s;
+          }
+          cur.mesh.position.x += shiftX;
+          cur.mesh.position.y += shiftY;
+          cur.mesh.rotation.set(pitch + this.swayY, yaw + this.swayX, roll);
+        }
+      } else {
+        this.inspectTimer = 0;
+        const knifePivot = cur.mesh.getObjectByName('knifePivotGroup');
+        if (knifePivot && knifePivot.userData.baseRot) {
+          knifePivot.rotation.copy(knifePivot.userData.baseRot);
+          const safeH = knifePivot.getObjectByName('baliSafeHandle');
+          const biteH = knifePivot.getObjectByName('baliBiteHandle');
+          if (safeH) safeH.rotation.x = 0;
+          if (biteH) biteH.rotation.x = 0;
+        }
+        if (packBulletMesh) packBulletMesh.visible = false;
+        const adsPitchTilt = isBareIronSights
+          ? 0
+          : (isPistol ? -0.012 : -0.008) * this.adsAmount;
+        cur.mesh.rotation.set(
+          this.swayY * 1.5 + adsPitchTilt,
+          this.swayX * 1.5,
+          cantedRoll
+        );
+        if (magMesh) {
+          magMesh.position.set(0, baseMagY, baseMagZ);
+          magMesh.rotation.set(baseMagRotX, 0, 0);
+        }
+        if (boltMesh) boltMesh.position.z = baseBoltZ;
+        const armAdsDropY = (isPistol ? 0.058 : 0.036) * this.adsAmount;
+        const armAdsPushZ = (isPistol ? 0.035 : 0.02) * this.adsAmount;
+        if (leftArm && leftArm.userData.basePos) {
+          leftArm.position.set(
+            leftArm.userData.basePos.x,
+            leftArm.userData.basePos.y - armAdsDropY,
+            leftArm.userData.basePos.z - armAdsPushZ
+          );
+          leftArm.rotation.copy(leftArm.userData.baseRot);
+        }
+        if (rightArm && rightArm.userData.basePos) {
+          rightArm.position.set(
+            rightArm.userData.basePos.x,
+            rightArm.userData.basePos.y - armAdsDropY,
+            rightArm.userData.basePos.z - armAdsPushZ
+          );
+          rightArm.rotation.copy(rightArm.userData.baseRot);
+        }
+        if (cur.def.isBow || cur.def.isCrossbow) {
+          animateBowOrCrossbowMesh(
+            cur.mesh,
+            0,
+            this.adsAmount,
+            Boolean(cur.def.isCrossbow),
+            Boolean(this.fireArrowsActive)
+          );
+        }
+      }
+
+      // ─── MOUNT & BLADE ZWEIHÄNDER, LONGSWORD, POLEARM & SHIELD WALL KINEMATICS ───
+      if (cur.def && cur.def.type === 'melee_sword') {
+        const swordPivot = cur.mesh.getObjectByName('swordPivot');
+        const shieldPivot = cur.mesh.getObjectByName('shieldPivot');
+        const scabbardPivot = cur.mesh.getObjectByName('scabbardPivot');
+        const swingTrail = swordPivot ? swordPivot.getObjectByName('swordSwingTrail') : null;
+        const is2HSword = Boolean(cur.def.isTwoHandedSword);
+        const isPolearm = Boolean(cur.def.isPolearm);
+        const is2HShield = Boolean(cur.def.isTwoHandedShield);
+
+        // Update directional guard from WASD strafe if mouse hasn't overridden it in the last 450ms
+        if (performance.now() - (this._meleeDirInputTime || 0) > 450) {
+          if (this.keys['KeyA'] && !this.keys['KeyD']) this.meleeGuardDir = 'LEFT';
+          else if (this.keys['KeyD'] && !this.keys['KeyA']) this.meleeGuardDir = 'RIGHT';
+          else if ((this.pitch || 0) > 0.22) this.meleeGuardDir = 'UP';
+          else if ((this.pitch || 0) < -0.22) this.meleeGuardDir = 'DOWN';
+        }
+        const guardDir = this.meleeGuardDir || 'RIGHT';
+
+        if ((this.swordSwingTimer || 0) > 0) {
+          this.swordSwingTimer = Math.max(0, this.swordSwingTimer - dt);
+        }
+        if ((this.shieldBlockKick || 0) > 0) {
+          this.shieldBlockKick = Math.max(0, this.shieldBlockKick - dt * 3.8);
+        }
+        const blockKick = this.shieldBlockKick || 0;
+        const isSwinging = (this.swordSwingTimer || 0) > 0;
+        const targetSlung =
+          !isSwinging && !this.isAds && (this.swordSlung || (sprinting && !this.isFiring))
+            ? 1.0
+            : 0.0;
+        this.swordSlungBlend = THREE.MathUtils.lerp(
+          this.swordSlungBlend ?? 0,
+          targetSlung,
+          Math.min(1, dt * 10.5)
+        );
+
+        if (swordPivot && swordPivot.userData.basePos && swordPivot.userData.baseRot) {
+          const bPos = swordPivot.userData.basePos;
+          const bRot = swordPivot.userData.baseRot;
+
+          if (isSwinging) {
+            const dur = this.swordSwingDuration || (is2HSword ? 0.56 : 0.44);
+            const p = THREE.MathUtils.clamp(1.0 - this.swordSwingTimer / dur, 0, 1);
+            const swingType = this.swordSwingType || 'RIGHT_SLASH';
+            // Show metallic swing-arc trail ribbon during the power release phase (0.22..0.74)
+            if (swingTrail && swingTrail.material) {
+              const inRelease = p >= 0.22 && p <= 0.74;
+              swingTrail.material.opacity = inRelease
+                ? Math.sin(((p - 0.22) / 0.52) * Math.PI) * 0.46
+                : 0.0;
+            }
+
+            if (swingType === 'SHIELD_BASH_RIPOSTE') {
+              // Mount & Blade Shield Bash + Quick Under-Rim Sword Riposte Thrust (when attacking while holding RMB shield block!)
+              const lunge = Math.sin(p * Math.PI);
+              swordPivot.position.set(
+                THREE.MathUtils.lerp(bPos.x, 0.1, lunge),
+                THREE.MathUtils.lerp(bPos.y, -0.08, lunge),
+                THREE.MathUtils.lerp(bPos.z, -0.68, lunge)
+              );
+              swordPivot.rotation.set(
+                THREE.MathUtils.lerp(bRot.x, -1.52, lunge),
+                THREE.MathUtils.lerp(bRot.y, 0.08, lunge),
+                THREE.MathUtils.lerp(bRot.z, -0.15, lunge)
+              );
+            } else if (swingType === 'OVERHEAD_CLEAVE') {
+              // Mount & Blade High 'Vom Tag' Roof Chamber -> Explosive Two-Handed Vertical Oberhau Downward Cleave!
+              if (p < 0.26) {
+                const s = Math.sin(((p / 0.26) * Math.PI) * 0.5);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(bPos.x, is2HSword ? -0.02 : 0.04, s),
+                  THREE.MathUtils.lerp(bPos.y, is2HSword ? 0.28 : 0.24, s),
+                  THREE.MathUtils.lerp(bPos.z, -0.18, s)
+                );
+                swordPivot.rotation.set(
+                  THREE.MathUtils.lerp(bRot.x, is2HSword ? 1.08 : 0.92, s),
+                  THREE.MathUtils.lerp(bRot.y, is2HSword ? -0.12 : 0.0, s),
+                  THREE.MathUtils.lerp(bRot.z, is2HSword ? -0.14 : 0.04, s)
+                );
+              } else if (p < 0.68) {
+                const s = (p - 0.26) / 0.42;
+                const fast = 1 - Math.pow(1 - s, 3.2);
+                const forwardArc = Math.sin(s * Math.PI);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(is2HSword ? -0.02 : 0.04, -0.04, fast),
+                  THREE.MathUtils.lerp(is2HSword ? 0.28 : 0.24, -0.42, fast),
+                  THREE.MathUtils.lerp(-0.18, is2HSword ? -0.62 : -0.52, forwardArc)
+                );
+                swordPivot.rotation.set(
+                  THREE.MathUtils.lerp(is2HSword ? 1.08 : 0.92, -1.78, fast),
+                  THREE.MathUtils.lerp(is2HSword ? -0.12 : 0.0, 0.08, fast),
+                  THREE.MathUtils.lerp(is2HSword ? -0.14 : 0.04, 0.1, fast)
+                );
+              } else {
+                const s = (p - 0.68) / 0.32;
+                const easeOut = s * s * (3 - 2 * s);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(-0.04, bPos.x, easeOut),
+                  THREE.MathUtils.lerp(-0.42, bPos.y, easeOut),
+                  THREE.MathUtils.lerp(-0.36, bPos.z, easeOut)
+                );
+                swordPivot.rotation.set(
+                  THREE.MathUtils.lerp(-1.78, bRot.x, easeOut),
+                  THREE.MathUtils.lerp(0.08, bRot.y, easeOut),
+                  THREE.MathUtils.lerp(0.1, bRot.z, easeOut)
+                );
+              }
+            } else if (swingType === 'THRUST_LUNGE') {
+              // Mount & Blade Half-Sword / Ochs Point Chamber -> Deep Linear Estoc Piercing Thrust!
+              if (p < 0.24) {
+                const s = Math.sin(((p / 0.24) * Math.PI) * 0.5);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(bPos.x, is2HSword ? 0.14 : 0.19, s),
+                  THREE.MathUtils.lerp(bPos.y, -0.12, s),
+                  THREE.MathUtils.lerp(bPos.z, -0.1, s)
+                );
+                swordPivot.rotation.set(
+                  THREE.MathUtils.lerp(bRot.x, -1.5, s),
+                  THREE.MathUtils.lerp(bRot.y, -0.05, s),
+                  THREE.MathUtils.lerp(bRot.z, is2HSword ? -0.35 : 0.0, s)
+                );
+              } else if (p < 0.68) {
+                const s = (p - 0.24) / 0.44;
+                const lunge = Math.sin(s * Math.PI * 0.68);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(is2HSword ? 0.14 : 0.19, 0.0, lunge),
+                  THREE.MathUtils.lerp(-0.12, -0.05, lunge),
+                  THREE.MathUtils.lerp(-0.1, isPolearm ? -0.86 : is2HSword ? -0.78 : -0.7, lunge)
+                );
+                swordPivot.rotation.set(-1.57, 0.0, is2HSword ? -0.18 * (1 - lunge) : 0.0);
+              } else {
+                const s = (p - 0.68) / 0.32;
+                const easeOut = s * s * (3 - 2 * s);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(0.0, bPos.x, easeOut),
+                  THREE.MathUtils.lerp(-0.05, bPos.y, easeOut),
+                  THREE.MathUtils.lerp(is2HSword ? -0.78 : -0.7, bPos.z, easeOut)
+                );
+                swordPivot.rotation.set(
+                  THREE.MathUtils.lerp(-1.57, bRot.x, easeOut),
+                  THREE.MathUtils.lerp(0.0, bRot.y, easeOut),
+                  THREE.MathUtils.lerp(0.0, bRot.z, easeOut)
+                );
+              }
+            } else if (swingType === 'LEFT_SWEEP') {
+              // Mount & Blade Left Shoulder Chamber -> Wide Two-Handed Left-to-Right Horizontal Zornhau Cleave!
+              if (p < 0.25) {
+                const s = Math.sin(((p / 0.25) * Math.PI) * 0.5);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(bPos.x, is2HSword ? -0.34 : -0.26, s),
+                  THREE.MathUtils.lerp(bPos.y, 0.04, s),
+                  THREE.MathUtils.lerp(bPos.z, -0.2, s)
+                );
+                swordPivot.rotation.set(
+                  THREE.MathUtils.lerp(bRot.x, 0.18, s),
+                  THREE.MathUtils.lerp(bRot.y, is2HSword ? 0.96 : 0.75, s),
+                  THREE.MathUtils.lerp(bRot.z, is2HSword ? 1.42 : 1.24, s)
+                );
+              } else if (p < 0.68) {
+                const s = (p - 0.25) / 0.43;
+                const fast = 1 - Math.pow(1 - s, 3.2);
+                const reachOut = Math.sin(s * Math.PI);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(is2HSword ? -0.34 : -0.26, is2HSword ? 0.44 : 0.36, fast),
+                  THREE.MathUtils.lerp(0.04, -0.18, fast),
+                  THREE.MathUtils.lerp(-0.2, is2HSword ? -0.58 : -0.46, reachOut)
+                );
+                swordPivot.rotation.set(
+                  THREE.MathUtils.lerp(0.18, -0.85, fast),
+                  THREE.MathUtils.lerp(is2HSword ? 0.96 : 0.75, is2HSword ? -1.12 : -0.88, fast),
+                  THREE.MathUtils.lerp(is2HSword ? 1.42 : 1.24, is2HSword ? -1.48 : -1.32, fast)
+                );
+              } else {
+                const s = (p - 0.68) / 0.32;
+                const easeOut = s * s * (3 - 2 * s);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(is2HSword ? 0.44 : 0.36, bPos.x, easeOut),
+                  THREE.MathUtils.lerp(-0.18, bPos.y, easeOut),
+                  THREE.MathUtils.lerp(-0.34, bPos.z, easeOut)
+                );
+                swordPivot.rotation.set(
+                  THREE.MathUtils.lerp(-0.85, bRot.x, easeOut),
+                  THREE.MathUtils.lerp(is2HSword ? -1.12 : -0.88, bRot.y, easeOut),
+                  THREE.MathUtils.lerp(is2HSword ? -1.48 : -1.32, bRot.z, easeOut)
+                );
+              }
+            } else {
+              // Mount & Blade Right Shoulder Chamber -> Wide Two-Handed Right-to-Left Forehand Zornhau Cleave!
+              if (p < 0.25) {
+                const s = Math.sin(((p / 0.25) * Math.PI) * 0.5);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(bPos.x, is2HSword ? 0.38 : 0.32, s),
+                  THREE.MathUtils.lerp(bPos.y, 0.14, s),
+                  THREE.MathUtils.lerp(bPos.z, -0.2, s)
+                );
+                swordPivot.rotation.set(
+                  THREE.MathUtils.lerp(bRot.x, 0.42, s),
+                  THREE.MathUtils.lerp(bRot.y, is2HSword ? -0.92 : -0.68, s),
+                  THREE.MathUtils.lerp(bRot.z, is2HSword ? -1.24 : -0.98, s)
+                );
+              } else if (p < 0.68) {
+                const s = (p - 0.25) / 0.43;
+                const fast = 1 - Math.pow(1 - s, 3.2);
+                const reachOut = Math.sin(s * Math.PI);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(is2HSword ? 0.38 : 0.32, is2HSword ? -0.38 : -0.3, fast),
+                  THREE.MathUtils.lerp(0.14, -0.26, fast),
+                  THREE.MathUtils.lerp(-0.2, is2HSword ? -0.58 : -0.46, reachOut)
+                );
+                swordPivot.rotation.set(
+                  THREE.MathUtils.lerp(0.42, -1.02, fast),
+                  THREE.MathUtils.lerp(is2HSword ? -0.92 : -0.68, is2HSword ? 1.08 : 0.82, fast),
+                  THREE.MathUtils.lerp(is2HSword ? -1.24 : -0.98, is2HSword ? 1.42 : 1.22, fast)
+                );
+              } else {
+                const s = (p - 0.68) / 0.32;
+                const easeOut = s * s * (3 - 2 * s);
+                swordPivot.position.set(
+                  THREE.MathUtils.lerp(is2HSword ? -0.38 : -0.3, bPos.x, easeOut),
+                  THREE.MathUtils.lerp(-0.26, bPos.y, easeOut),
+                  THREE.MathUtils.lerp(-0.34, bPos.z, easeOut)
+                );
+                swordPivot.rotation.set(
+                  THREE.MathUtils.lerp(-1.02, bRot.x, easeOut),
+                  THREE.MathUtils.lerp(is2HSword ? 1.08 : 0.82, bRot.y, easeOut),
+                  THREE.MathUtils.lerp(is2HSword ? 1.42 : 1.22, bRot.z, easeOut)
+                );
+              }
+            }
+          } else {
+            if (swingTrail && swingTrail.material) {
+              swingTrail.material.opacity = 0.0;
+            }
+            // Non-Swinging Pose: Slung Scabbard vs. Active Mount & Blade Directional Parry / Guard (Hold RMB)!
+            const sb = this.swordSlungBlend || 0;
+            const guardAmt = this.adsAmount || 0;
+
+            if (guardAmt > 0.02 && is2HSword) {
+              // ─── ZWEIHÄNDER 4-DIRECTIONAL MOUNT & BLADE PARRY / GUARD STANCES (HOLD RMB) ───
+              // Left hand slides up onto the leather Ricasso above the crossguard to brace the blade!
+              let gx = -0.02;
+              let gy = -0.06;
+              let gz = -0.25 + blockKick * 0.25;
+              let grx = 0.22 - blockKick * 0.6;
+              let gry = 0.16;
+              let grz = -0.72;
+              if (guardDir === 'UP') {
+                // High Roof Guard ('Dach' / 'Kron' Overhead Parry): Crossguard raised horizontally across upper view!
+                gx = -0.08;
+                gy = 0.06;
+                gz = -0.25 + blockKick * 0.25;
+                grx = 0.32 - blockKick * 0.5;
+                gry = 0.22;
+                grz = -1.28;
+              } else if (guardDir === 'LEFT') {
+                // Left Hanging Guard ('Ochs Left' Flank Parry): Hilt shifted left, blade vertical/angled on left!
+                gx = -0.15;
+                gy = -0.07;
+                gz = -0.25 + blockKick * 0.25;
+                grx = 0.18 - blockKick * 0.5;
+                gry = 0.48;
+                grz = -0.34;
+              } else if (guardDir === 'RIGHT') {
+                // Right Hanging Guard ('Ochs Right' Flank Parry): Hilt braced right, crossguard & parry hooks vertical!
+                gx = 0.12;
+                gy = -0.07;
+                gz = -0.25 + blockKick * 0.25;
+                grx = 0.18 - blockKick * 0.5;
+                gry = -0.45;
+                grz = 0.38;
+              }
+              swordPivot.position.set(
+                THREE.MathUtils.lerp(bPos.x, gx, guardAmt),
+                THREE.MathUtils.lerp(bPos.y, gy, guardAmt),
+                THREE.MathUtils.lerp(bPos.z, gz, guardAmt)
+              );
+              swordPivot.rotation.set(
+                THREE.MathUtils.lerp(bRot.x, grx, guardAmt),
+                THREE.MathUtils.lerp(bRot.y, gry, guardAmt),
+                THREE.MathUtils.lerp(bRot.z, grz, guardAmt)
+              );
+            } else if (guardAmt > 0.02 && isPolearm) {
+              // ─── POLEARM / LANCE TWO-HANDED ANTI-CAVALRY COUCHED SPEAR BRACE (HOLD RMB) ───
+              swordPivot.position.set(
+                THREE.MathUtils.lerp(bPos.x, 0.05, guardAmt),
+                THREE.MathUtils.lerp(bPos.y, -0.09, guardAmt),
+                THREE.MathUtils.lerp(bPos.z, -0.28 + blockKick * 0.22, guardAmt)
+              );
+              swordPivot.rotation.set(
+                THREE.MathUtils.lerp(bRot.x, -1.42 - blockKick * 0.35, guardAmt),
+                THREE.MathUtils.lerp(bRot.y, 0.14, guardAmt),
+                THREE.MathUtils.lerp(bRot.z, -0.28, guardAmt)
+              );
+            } else if (guardAmt > 0.02 && shieldPivot) {
+              // ─── 1H SWORD & HEATER SHIELD: SIDE-RIM RIPOSTE GUARD WHILE SHIELD IS RAISED ───
+              // Sword cocks back along the right rim of the raised Heater Shield, poised to thrust around the shield!
+              swordPivot.position.set(
+                THREE.MathUtils.lerp(bPos.x, 0.19, guardAmt),
+                THREE.MathUtils.lerp(bPos.y, -0.09, guardAmt),
+                THREE.MathUtils.lerp(bPos.z, -0.22, guardAmt)
+              );
+              swordPivot.rotation.set(
+                THREE.MathUtils.lerp(bRot.x, -0.68, guardAmt),
+                THREE.MathUtils.lerp(bRot.y, -0.24, guardAmt),
+                THREE.MathUtils.lerp(bRot.z, -0.22, guardAmt)
+              );
+            } else {
+              // Default Idle / Slung Scabbard Pose
+              swordPivot.position.set(
+                THREE.MathUtils.lerp(bPos.x, -0.18, sb),
+                THREE.MathUtils.lerp(bPos.y, -0.22, sb),
+                THREE.MathUtils.lerp(bPos.z, -0.27, sb)
+              );
+              swordPivot.rotation.set(
+                THREE.MathUtils.lerp(bRot.x, 2.28, sb),
+                THREE.MathUtils.lerp(bRot.y, 0.32, sb),
+                THREE.MathUtils.lerp(bRot.z, -0.68, sb)
+              );
+            }
+          }
+
+          if (rightArm && rightArm.userData.basePos) {
+            rightArm.position.set(
+              swordPivot.position.x + (is2HSword ? 0.02 : 0),
+              swordPivot.position.y - 0.03,
+              swordPivot.position.z + 0.06
+            );
+            rightArm.rotation.set(
+              swordPivot.rotation.x * 0.35,
+              swordPivot.rotation.y * 0.35,
+              swordPivot.rotation.z * 0.35
+            );
+          }
+          // On 2H Zweihänder & Polearm, animate Left Hand along the lower Pommel OR up on the leather Ricasso when Parrying/Thrusting!
+          if ((is2HSword || isPolearm) && leftArm && leftArm.userData.basePos) {
+            const halfSwordGrip =
+              (this.adsAmount || 0) > 0.25 || (isSwinging && this.swordSwingType === 'THRUST_LUNGE');
+            const gripOffsetLocal = halfSwordGrip
+              ? new THREE.Vector3(0, 0.16, 0.02) // Left hand gripping the leather Ricasso above crossguard!
+              : new THREE.Vector3(0, -0.15, 0.03); // Left hand gripping the lower two-handed pommel!
+            gripOffsetLocal.applyEuler(swordPivot.rotation);
+            leftArm.position.set(
+              swordPivot.position.x + gripOffsetLocal.x - 0.03,
+              swordPivot.position.y + gripOffsetLocal.y - 0.02,
+              swordPivot.position.z + gripOffsetLocal.z + 0.05
+            );
+            leftArm.rotation.set(
+              swordPivot.rotation.x * 0.4,
+              swordPivot.rotation.y * 0.4,
+              swordPivot.rotation.z * 0.4
+            );
+          }
+        }
+
+        if (scabbardPivot && scabbardPivot.userData.basePos) {
+          const sb = this.swordSlungBlend || 0;
+          scabbardPivot.position.set(
+            THREE.MathUtils.lerp(-0.22, -0.16, sb),
+            THREE.MathUtils.lerp(-0.26, -0.18, sb),
+            -0.27
+          );
+        }
+
+        if (shieldPivot && shieldPivot.userData.basePos && shieldPivot.userData.baseRot) {
+          const sbPos = shieldPivot.userData.basePos;
+          const sbRot = shieldPivot.userData.baseRot;
+          const guardAmt = this.adsAmount || 0;
+          // When bashing with 2H Pavise Shield or 1H Shield Bash Riposte, thrust the shield boss forward!
+          const bashPulse =
+            isSwinging &&
+            (is2HShield || this.swordSwingType === 'SHIELD_BASH_RIPOSTE')
+              ? Math.sin(
+                  THREE.MathUtils.clamp(
+                    1.0 - (this.swordSwingTimer || 0) / (this.swordSwingDuration || 0.42),
+                    0,
+                    1
+                  ) * Math.PI
+                )
+              : 0;
+          // 1H Heater Shield tilts slightly down (-0.075 Y) when raised so you see clearly over the top brass rim;
+          // 2H Large Pavise Shield centers at (-0.085 Y) so your eye looks directly through the armored viewing slit!
+          const targetShieldX = is2HShield ? 0.0 : -0.075;
+          const targetShieldY = is2HShield ? -0.085 : -0.072;
+          const targetShieldZ = (is2HShield ? -0.26 : -0.25) - bashPulse * 0.24 + blockKick * 0.18;
+          shieldPivot.position.set(
+            THREE.MathUtils.lerp(sbPos.x, targetShieldX, guardAmt),
+            THREE.MathUtils.lerp(sbPos.y, targetShieldY, guardAmt),
+            THREE.MathUtils.lerp(sbPos.z, targetShieldZ, Math.max(guardAmt, bashPulse))
+          );
+          shieldPivot.rotation.set(
+            THREE.MathUtils.lerp(sbRot.x, 0.04 - blockKick * 0.35 + bashPulse * 0.18, guardAmt),
+            THREE.MathUtils.lerp(sbRot.y, is2HShield ? 0.0 : 0.08, guardAmt),
+            THREE.MathUtils.lerp(sbRot.z, 0.0, guardAmt)
+          );
+          if (leftArm && leftArm.userData.basePos && !is2HSword && !isPolearm) {
+            leftArm.position.set(
+              shieldPivot.position.x - 0.02,
+              shieldPivot.position.y - 0.03,
+              shieldPivot.position.z + 0.07
+            );
+          }
+        }
+      }
+
+      // Keep the 3D weapon body (receiver, Picatinny rail, handguard, barrel, iron sights & hands) visible
+      // in ADS view while hiding only the 3D sight box once a mounted 2D optic overlay takes over!
+      cur.mesh.visible = true;
+      const opticSight = cur.mesh.getObjectByName('opticSightGroup');
+      if (opticSight) {
+        opticSight.visible = !(cur.def.opticType && this.adsAmount > 0.55);
+      }
+
+      const flash = cur.mesh.getObjectByName('muzzleFlash');
+      if (flash) {
+        const fMult = cur.def.flashMult !== undefined ? cur.def.flashMult : 1.0;
+        if (this.muzzleFlashTimer > 0 && fMult > 0) {
+          this.muzzleFlashTimer -= dt;
+          const baseOp = this.isAds ? 0.24 : 0.65;
+          flash.material.opacity = baseOp * fMult;
+          const fScale = (this.isAds ? 0.52 : 0.92) * (0.4 + 0.6 * fMult);
+          flash.scale.setScalar(fScale);
+          flash.rotation.z = Math.random() * Math.PI;
+        } else {
+          flash.material.opacity = 0;
+        }
+      }
+    }
+  }
+
+  moveWithVoxelCollision(dt) {
+    const horizStepDist = Math.hypot(this.vel.x, this.vel.z) * dt;
+    if (horizStepDist > 0.35 && dt > 0.0005) {
+      const steps = Math.min(20, Math.ceil(horizStepDist / 0.35));
+      const subDt = dt / steps;
+      for (let i = 0; i < steps; i++) {
+        this._moveWithVoxelCollisionStep(subDt);
+      }
+      return;
+    }
+    this._moveWithVoxelCollisionStep(dt);
+  }
+
+  _moveWithVoxelCollisionStep(dt) {
+    const radius = 0.4;
+    const height = this.prone ? 0.65 : this.crouching ? 1.15 : 1.7;
+
+    // Self-unstuck guard if ever overlapping a voxel at current position:
+    // only lift vertically if inside a building staircase; otherwise push horizontally out of chest walls!
+    if (this.checkBodyOverlap(this.pos.x, this.pos.y, this.pos.z, radius, height)) {
+      if (this.isInteriorStairStep(this.pos.x, this.pos.y, this.pos.z, radius)) {
+        this.pos.y += VOXEL_SIZE * 0.55;
+      } else {
+        this.resolveHorizontalOverlap(radius, height);
+      }
+    }
+
+    // X Movement (never auto-jump/step onto Chest Walls or fortifications — only interior building stairs!)
+    const nextX = this.pos.x + this.vel.x * dt;
+    const terrainAtNextX = this.world.getGroundHeightAt(nextX, this.pos.z);
+    const supportAtNextX = this.getSupportSurfaceY(nextX, this.pos.y, this.pos.z, radius);
+    const stepTestY_X = Math.max(this.pos.y, terrainAtNextX);
+    if (!this.checkBodyOverlap(nextX, stepTestY_X, this.pos.z, radius, height)) {
+      this.pos.x = nextX;
+      if (this.isGrounded && Math.abs(supportAtNextX - this.pos.y) < 0.55) {
+        this.pos.y = supportAtNextX;
+      }
+    } else if (
+      this.isGrounded &&
+      this.isInteriorStairStep(nextX, this.pos.y, this.pos.z, radius) &&
+      !this.checkBodyOverlap(nextX, this.pos.y + VOXEL_SIZE + 0.1, this.pos.z, radius, height)
+    ) {
+      this.pos.x = nextX;
+      this.pos.y += VOXEL_SIZE + 0.1;
+    }
+
+    // Z Movement (never auto-jump/step onto Chest Walls or fortifications — only interior building stairs!)
+    const nextZ = this.pos.z + this.vel.z * dt;
+    const terrainAtNextZ = this.world.getGroundHeightAt(this.pos.x, nextZ);
+    const supportAtNextZ = this.getSupportSurfaceY(this.pos.x, this.pos.y, nextZ, radius);
+    const stepTestY_Z = Math.max(this.pos.y, terrainAtNextZ);
+    if (!this.checkBodyOverlap(this.pos.x, stepTestY_Z, nextZ, radius, height)) {
+      this.pos.z = nextZ;
+      if (this.isGrounded && Math.abs(supportAtNextZ - this.pos.y) < 0.55) {
+        this.pos.y = supportAtNextZ;
+      }
+    } else if (
+      this.isGrounded &&
+      this.isInteriorStairStep(this.pos.x, this.pos.y, nextZ, radius) &&
+      !this.checkBodyOverlap(this.pos.x, this.pos.y + VOXEL_SIZE + 0.1, nextZ, radius, height)
+    ) {
+      this.pos.z = nextZ;
+      this.pos.y += VOXEL_SIZE + 0.1;
+    }
+
+    // Y Movement (3D Terrain + Voxel Floors/Roofs/Chest-Wall Tops)
+    const supportY = this.getSupportSurfaceY(this.pos.x, this.pos.y, this.pos.z, radius);
+    const nextY = this.pos.y + this.vel.y * dt;
+
+    if (this.vel.y > 0) {
+      // Jumping UPWARD: only stop if hitting an overhead ceiling/roof above the player's waist/head!
+      // Never let a ground-level chest wall around the feet/legs cancel upward jump velocity!
+      if (!this.checkOverheadCeilingOverlap(this.pos.x, nextY, this.pos.z, radius, height)) {
+        this.pos.y = nextY;
+        this.isGrounded = false;
+      } else {
+        this.vel.y = 0;
+      }
+    } else if (nextY <= supportY) {
+      // Check high-velocity freefall impact for lethal/heavy Fall Damage if parachute was not deployed or was cut!
+      const impactVelY = -this.vel.y;
+      this.pos.y = supportY;
+      this.vel.y = 0;
+      this.isGrounded = true;
+      this.parachuteCut = false;
+      if (!this.parachuting) {
+        this.parachuteFSM?.send(PLAYER_PARACHUTE_EVENTS.LAND_GROUND);
+      }
+      if (!this.parachuting && impactVelY > 15.5 && !this.dead && !this.downed) {
+        const fallDmg = Math.round((impactVelY - 14.2) * 8.5);
+        this.addShake(Math.min(1.0, fallDmg / 90));
+        if (typeof this.takeDamage === 'function') {
+          this.takeDamage(fallDmg, 'FALL DAMAGE', this.team === 'US' ? 'RU' : 'US', false, null, 'GROUND IMPACT (NO PARACHUTE)');
+        }
+      }
+    } else if (!this.checkBodyOverlap(this.pos.x, nextY, this.pos.z, radius, height)) {
+      this.pos.y = nextY;
+      this.isGrounded = false;
+    } else {
+      const impactVelY = -this.vel.y;
+      const topY = this.getHighestOverlappingVoxelTop(this.pos.x, nextY, this.pos.z, radius, 1.35);
+      if (topY !== null && topY <= this.pos.y + 0.35) {
+        this.pos.y = topY;
+      }
+      this.isGrounded = true;
+      this.vel.y = 0;
+      this.parachuteCut = false;
+      if (!this.parachuting) {
+        this.parachuteFSM?.send(PLAYER_PARACHUTE_EVENTS.LAND_GROUND);
+      }
+      if (!this.parachuting && impactVelY > 15.5 && !this.dead && !this.downed) {
+        const fallDmg = Math.round((impactVelY - 14.2) * 8.5);
+        this.addShake(Math.min(1.0, fallDmg / 90));
+        if (typeof this.takeDamage === 'function') {
+          this.takeDamage(fallDmg, 'FALL DAMAGE', this.team === 'US' ? 'RU' : 'US', false, null, 'GROUND IMPACT (NO PARACHUTE)');
+        }
+      }
+    }
+
+    this.pos.x = Math.max(-1060, Math.min(1060, this.pos.x));
+    this.pos.z = Math.max(-620, Math.min(620, this.pos.z));
+  }
+
+  /**
+   * Returns the highest walkable surface height (terrain or top of a voxel below the player's knees)
+   * at (x, z) so standing on top of a Chest Wall keeps `pos.y` at `v.maxY` (1.25m) instead of sinking!
+   */
+  getSupportSurfaceY(x, y, z, r) {
+    let bestY = this.world.getGroundHeightAt(x, z);
+    const minCoord = this.world.worldToGrid(x - r, bestY - 0.5, z - r);
+    const maxCoord = this.world.worldToGrid(x + r, y + 0.35, z + r);
+    for (let gx = minCoord.gx; gx <= maxCoord.gx; gx++) {
+      for (let gy = minCoord.gy; gy <= maxCoord.gy; gy++) {
+        for (let gz = minCoord.gz; gz <= maxCoord.gz; gz++) {
+          const v = this.world.voxels.get(this.world.key(gx, gy, gz));
+          if (!v) continue;
+          if (x + r > v.minX && x - r < v.maxX && z + r > v.minZ && z - r < v.maxZ) {
+            if (v.maxY <= y + 0.32 && v.maxY > bestY) {
+              bestY = v.maxY;
+            }
+          }
+        }
+      }
+    }
+    return bestY;
+  }
+
+  /**
+   * Checks ONLY for overhead ceiling blocks (`v.minY >= this.pos.y + 0.85`) when jumping upward (`vel.y > 0`),
+   * so low chest walls at foot/waist level never block a player from jumping up and out!
+   */
+  checkOverheadCeilingOverlap(x, nextY, z, r, h) {
+    const minCeilingY = this.pos.y + 0.85;
+    const minCoord = this.world.worldToGrid(x - r, minCeilingY, z - r);
+    const maxCoord = this.world.worldToGrid(x + r, nextY + h, z + r);
+    for (let gx = minCoord.gx; gx <= maxCoord.gx; gx++) {
+      for (let gy = minCoord.gy; gy <= maxCoord.gy; gy++) {
+        for (let gz = minCoord.gz; gz <= maxCoord.gz; gz++) {
+          const v = this.world.voxels.get(this.world.key(gx, gy, gz));
+          if (!v) continue;
+          if (
+            v.minY >= minCeilingY &&
+            x + r > v.minX &&
+            x - r < v.maxX &&
+            nextY + h > v.minY &&
+            nextY + 0.2 < v.maxY &&
+            z + r > v.minZ &&
+            z - r < v.maxZ
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Returns the highest `v.maxY` among any low voxels overlapping the player's lower body (up to `maxCheckH`),
+   * or `null` if none.
+   */
+  getHighestOverlappingVoxelTop(x, y, z, r, maxCheckH = 1.45) {
+    const minCoord = this.world.worldToGrid(x - r, y + 0.05, z - r);
+    const maxCoord = this.world.worldToGrid(x + r, y + maxCheckH, z + r);
+    let highestTop = null;
+    for (let gx = minCoord.gx; gx <= maxCoord.gx; gx++) {
+      for (let gy = minCoord.gy; gy <= maxCoord.gy; gy++) {
+        for (let gz = minCoord.gz; gz <= maxCoord.gz; gz++) {
+          const v = this.world.voxels.get(this.world.key(gx, gy, gz));
+          if (!v) continue;
+          if (
+            x + r > v.minX &&
+            x - r < v.maxX &&
+            y + maxCheckH > v.minY &&
+            y + 0.05 < v.maxY &&
+            z + r > v.minZ &&
+            z - r < v.maxZ
+          ) {
+            if (highestTop === null || v.maxY > highestTop) {
+              highestTop = v.maxY;
+            }
+          }
+        }
+      }
+    }
+    return highestTop;
+  }
+
+  /**
+   * Returns true ONLY if the blocking voxel at (x, y, z) is an interior building staircase block
+   * (`type === 'wood'`, `!isProp`, `!isFortification`, and inside a building footprint).
+   * Prevents players from ever automatically jumping/stepping up onto Chest Walls, sandbags, or HESCO barriers!
+   */
+  isInteriorStairStep(x, y, z, r) {
+    if (
+      !this.world.isInsideBuildingOrContainer ||
+      !this.world.isInsideBuildingOrContainer(x, z, 0.25)
+    ) {
+      return false;
+    }
+    const minCoord = this.world.worldToGrid(x - r, y + 0.2, z - r);
+    const maxCoord = this.world.worldToGrid(x + r, y + VOXEL_SIZE + 0.05, z + r);
+    let foundWoodStair = false;
+    for (let gx = minCoord.gx; gx <= maxCoord.gx; gx++) {
+      for (let gy = minCoord.gy; gy <= maxCoord.gy; gy++) {
+        for (let gz = minCoord.gz; gz <= maxCoord.gz; gz++) {
+          const v = this.world.voxels.get(this.world.key(gx, gy, gz));
+          if (!v) continue;
+          if (
+            x + r > v.minX &&
+            x - r < v.maxX &&
+            y + VOXEL_SIZE + 0.05 > v.minY &&
+            y + 0.2 < v.maxY &&
+            z + r > v.minZ &&
+            z - r < v.maxZ
+          ) {
+            if (v.type !== 'wood' || v.isProp || v.isFortification) {
+              return false;
+            }
+            foundWoodStair = true;
+          }
+        }
+      }
+    }
+    return foundWoodStair;
+  }
+
+  resolveHorizontalOverlap(r, h) {
+    // 1. If the player's feet are already near the top of a low chest wall (within 0.35m of v.maxY),
+    // snap cleanly onto the top of that wall instead of letting them sink into it!
+    const lowTopY = this.getHighestOverlappingVoxelTop(this.pos.x, this.pos.y, this.pos.z, r, 1.45);
+    if (
+      lowTopY !== null &&
+      this.pos.y >= lowTopY - 0.35 &&
+      !this.checkBodyOverlap(this.pos.x, lowTopY + 0.02, this.pos.z, r, h)
+    ) {
+      this.pos.y = lowTopY + 0.02;
+      return;
+    }
+
+    // 2. Search radially from 0.18m out to 1.85m across 8 directions (prioritizing backward away from camera look)
+    const backX = Math.sin(this.yaw);
+    const backZ = Math.cos(this.yaw);
+    const unitDirs = [
+      [backX, backZ],
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+      [0.707, 0.707],
+      [-0.707, 0.707],
+      [0.707, -0.707],
+      [-0.707, -0.707]
+    ];
+    const dists = [0.2, 0.4, 0.65, 0.9, 1.15, 1.4, 1.65, 1.9];
+    for (const dist of dists) {
+      for (const [ux, uz] of unitDirs) {
+        const tx = this.pos.x + ux * dist;
+        const tz = this.pos.z + uz * dist;
+        const ty = this.world.getGroundHeightAt(tx, tz);
+        const testY = Math.max(this.pos.y, ty);
+        if (!this.checkBodyOverlap(tx, testY, tz, r, h)) {
+          this.pos.x = tx;
+          this.pos.z = tz;
+          this.pos.y = testY;
+          return;
+        }
+      }
+    }
+
+    // 3. Fallback: if completely surrounded horizontally, lift onto the top of the overlapping low voxel!
+    if (lowTopY !== null && !this.checkBodyOverlap(this.pos.x, lowTopY + 0.03, this.pos.z, r, h)) {
+      this.pos.y = lowTopY + 0.03;
+    }
+  }
+
+  checkBodyOverlap(x, y, z, r, h) {
+    const minCoord = this.world.worldToGrid(x - r, y + 0.25, z - r);
+    const maxCoord = this.world.worldToGrid(x + r, y + h, z + r);
+
+    for (let gx = minCoord.gx; gx <= maxCoord.gx; gx++) {
+      for (let gy = minCoord.gy; gy <= maxCoord.gy; gy++) {
+        for (let gz = minCoord.gz; gz <= maxCoord.gz; gz++) {
+          const v = this.world.voxels.get(this.world.key(gx, gy, gz));
+          if (!v) continue;
+          if (
+            x + r > v.minX &&
+            x - r < v.maxX &&
+            y + h > v.minY &&
+            y + 0.2 < v.maxY &&
+            z + r > v.minZ &&
+            z - r < v.maxZ
+          ) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+}
+
+Object.assign(
+  PlayerController.prototype,
+  GunsmithMethods,
+  FortificationMethods,
+  CommanderMethods,
+  VehicleControlMethods,
+  CombatMethods
+);

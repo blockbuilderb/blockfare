@@ -1,0 +1,17 @@
+{
+  "name": "modern-blockfare",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BLOCKFARE: Modern Blockfare, Medieval Blockfare & Jurassic Blockfare — Multi-Era Voxel Combined Arms FPS with 250 AI Bots & Multiplayer",
+  "scripts": {
+    "start": "python server.py",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

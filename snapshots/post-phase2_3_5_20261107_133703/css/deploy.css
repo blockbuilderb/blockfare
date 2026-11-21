@@ -1,0 +1,398 @@
+.squad-btn {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #bdc3c7;
+  font-size: 9.5px;
+  font-weight: 800;
+  padding: 5px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.squad-btn.active {
+  background: rgba(46, 204, 113, 0.22);
+  border-color: #2ecc71;
+  color: #ffffff;
+}
+
+/* Deploy Screen */
+#deploy-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: radial-gradient(circle at center, rgba(16, 24, 34, 0.72), rgba(8, 12, 18, 0.92));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  overflow-y: auto;
+  backdrop-filter: blur(4px);
+}
+
+.deploy-container {
+  width: 980px;
+  max-width: 96vw;
+  max-height: 96vh;
+  overflow-y: auto;
+  background: rgba(15, 22, 30, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-top: 4px solid #f1c40f;
+  border-radius: 6px;
+  padding: 14px 20px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75);
+}
+
+.deploy-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  gap: 12px;
+}
+
+.game-tag {
+  font-size: 11px;
+  font-weight: 800;
+  color: #f1c40f;
+  letter-spacing: 1.5px;
+}
+
+.deploy-header h1 {
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  color: #ffffff;
+}
+
+.match-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 10.5px;
+  color: #bdc3c7;
+  gap: 2px;
+}
+
+.deploy-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 14px;
+}
+
+.deploy-card h2 {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #95a5a6;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+.class-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.class-btn {
+  text-align: left;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 4px solid transparent;
+  padding: 5px 10px;
+  border-radius: 4px;
+  color: #ecf0f1;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.class-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.class-btn.active {
+  background: rgba(241, 196, 15, 0.14);
+  border-color: rgba(241, 196, 15, 0.5);
+  border-left-color: #f1c40f;
+}
+
+.class-title {
+  font-size: 11.5px;
+  font-weight: 900;
+  color: #f1c40f;
+}
+
+.class-loadout {
+  font-size: 10.5px;
+  color: #dfe6e9;
+  margin: 1px 0;
+}
+
+.class-desc {
+  font-size: 9.5px;
+  color: #95a5a6;
+}
+
+.team-select-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.team-btn {
+  padding: 6px;
+  font-size: 11.5px;
+  font-weight: 800;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #ecf0f1;
+  cursor: pointer;
+}
+
+.team-btn[data-team="US"].active {
+  background: rgba(41, 128, 185, 0.35);
+  border-color: #3498db;
+  color: #70bdff;
+}
+
+.team-btn[data-team="RU"].active {
+  background: rgba(192, 57, 43, 0.35);
+  border-color: #e74c3c;
+  color: #ff7878;
+}
+
+.tactical-map-box {
+  background: #141e28;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+#deploy-map-canvas {
+  display: block;
+  cursor: crosshair;
+}
+
+.spawn-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.spawn-btn {
+  padding: 6px 8px;
+  font-size: 10.5px;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+  color: #dfe6e9;
+  cursor: pointer;
+}
+
+.spawn-btn.active {
+  background: rgba(46, 204, 113, 0.22);
+  border-color: #2ecc71;
+  color: #2ecc71;
+}
+
+.spawn-btn.locked-spawn {
+  opacity: 0.36;
+  cursor: not-allowed;
+  border-color: rgba(231, 76, 60, 0.35) !important;
+}
+
+.deploy-footer {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+}
+
+.control-tips {
+  font-size: 10.5px;
+  color: #bdc3c7;
+  line-height: 1.4;
+}
+
+.control-tips b {
+  color: #f1c40f;
+}
+
+#deploy-btn,
+#deploy-top-btn,
+.deploy-cta-btn {
+  padding: 11px 22px;
+  font-size: 13.5px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  background: linear-gradient(135deg, #f39c12, #e67e22);
+  color: #111;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 4px 15px rgba(243, 156, 18, 0.4);
+  transition: transform 0.1s, filter 0.15s;
+}
+
+#deploy-btn:hover,
+#deploy-top-btn:hover,
+.deploy-cta-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.atmos-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 10.5px;
+  font-weight: 800;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.05);
+  color: #ecf0f1;
+  cursor: pointer;
+}
+
+.atmos-btn.active {
+  background: rgba(243, 156, 18, 0.28);
+  border-color: #f39c12;
+  color: #f1c40f;
+}
+
+/* Singleplayer vs. Multiplayer Mode Selector & Banners */
+#game-mode-bar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.game-mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: 5px;
+  border: 1.5px solid rgba(255, 255, 255, 0.16);
+  background: rgba(14, 22, 30, 0.85);
+  color: #bdc3c7;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.game-mode-btn:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(22, 34, 46, 0.92);
+}
+
+.game-mode-btn[data-mode="SINGLEPLAYER"].active {
+  background: linear-gradient(135deg, rgba(41, 128, 185, 0.32), rgba(16, 28, 42, 0.95));
+  border-color: #3498db;
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(52, 152, 219, 0.35);
+}
+
+.game-mode-btn[data-mode="MULTIPLAYER"].active {
+  background: linear-gradient(135deg, rgba(39, 174, 96, 0.32), rgba(14, 30, 22, 0.95));
+  border-color: #2ecc71;
+  color: #ffffff;
+  box-shadow: 0 0 14px rgba(46, 204, 113, 0.35);
+}
+
+.gm-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.gm-title {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+}
+
+.game-mode-btn[data-mode="SINGLEPLAYER"].active .gm-title {
+  color: #74b9ff;
+}
+
+.game-mode-btn[data-mode="MULTIPLAYER"].active .gm-title {
+  color: #2ecc71;
+}
+
+.gm-sub {
+  font-size: 9.5px;
+  color: #95a5a6;
+  font-weight: 600;
+}
+
+#sp-mode-banner {
+  background: rgba(14, 24, 36, 0.92);
+  border: 1px solid rgba(52, 152, 219, 0.45);
+  border-radius: 4px;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#sp-mode-banner.hidden,
+#mp-lobby-bar.hidden {
+  display: none !important;
+}
+
+.sp-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #dfe6e9;
+}
+
+.sp-pill {
+  background: rgba(52, 152, 219, 0.25);
+  border: 1px solid #3498db;
+  color: #74b9ff;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+}
+
+.sp-banner-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bot-scale-btn {
+  padding: 3px 9px;
+  font-size: 10px;
+  font-weight: 900;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: #bdc3c7;
+  cursor: pointer;
+}
+
+.bot-scale-btn.active {
+  background: rgba(52, 152, 219, 0.32);
+  border-color: #74b9ff;
+  color: #ffffff;
+}

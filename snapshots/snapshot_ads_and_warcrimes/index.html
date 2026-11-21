@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BattleBit Clone — Low-Poly Combined Arms FPS</title>
+  <link rel="stylesheet" href="./style.css?v=46" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.js"
+      }
+    }
+  </script>
+  <script>
+    window._pendingDeployClick = false;
+    window.forceEnterGame = function () {
+      if (window.game && window.game.ui && typeof window.game.ui.triggerDeploy === 'function') {
+        window.game.ui.triggerDeploy();
+        return;
+      }
+      window._pendingDeployClick = true;
+      var topBtn = document.getElementById('deploy-top-btn');
+      var botBtn = document.getElementById('deploy-btn');
+      if (topBtn) topBtn.textContent = 'DEPLOYING TO BATTLEFIELD...';
+      if (botBtn) botBtn.textContent = 'DEPLOYING TO BATTLEFIELD...';
+    };
+
+    window.addEventListener('DOMContentLoaded', function () {
+      function bindInstantToggle(selector) {
+        var btns = document.querySelectorAll(selector);
+        btns.forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            btns.forEach(function (b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+          });
+        });
+      }
+      bindInstantToggle('.class-btn');
+      bindInstantToggle('.team-btn');
+      bindInstantToggle('.squad-btn');
+      bindInstantToggle('.atmos-btn');
+      bindInstantToggle('.spawn-btn');
+
+      window.addEventListener('keydown', function (e) {
+        if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') {
+          var ds = document.getElementById('deploy-screen');
+          if (ds && !ds.classList.contains('hidden')) {
+            e.preventDefault();
+            window.forceEnterGame();
+          }
+        }
+      });
+    });
+
+    window.addEventListener('error', function (ev) {
+      try {
+        var targetSrc = ev.target && (ev.target.src || ev.target.href) ? String(ev.target.src || ev.target.href) : '';
+        fetch('/api/telemetry', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            events: [{
+              ts: new Date().toISOString(),
+              type: 'CLIENT_JS_ERROR',
+              message: String(ev.message || (targetSrc ? 'Resource load error: ' + targetSrc : 'Unknown error')),
+              filename: String(ev.filename || targetSrc || ''),
+              lineno: ev.lineno || 0
+            }]
+          })
+        }).catch(function () {});
+      } catch (_) {}
+    }, true);
+  </script>
+</head>
+<body>
+  <!-- WebGL Canvas Container -->
+  <div id="game-container"></div>
+
+  <!-- ADS Optic & Sniper Scope Overlay (Holo / Kobra / Red-Dot / ACOG / 8x Sniper / RPG PGO-7) -->
+  <div id="scope-overlay" class="hidden">
+    <div id="optic-frame" class="optic-holo">
+      <div class="optic-lens">
+        <!-- EOTech Holo Ring + Dot -->
+        <div class="reticle ret-holo">
+          <div class="holo-ring">
+            <span class="holo-tick top"></span>
+            <span class="holo-tick bottom"></span>
+            <span class="holo-tick left"></span>
+            <span class="holo-tick right"></span>
+            <span class="holo-dot"></span>
+          </div>
+        </div>
+        <!-- Kobra Chevron + Bars -->
+        <div class="reticle ret-kobra">
+          <div class="kobra-chevron">^</div>
+          <div class="kobra-bar left"></div>
+          <div class="kobra-bar right"></div>
+          <div class="kobra-bar bottom"></div>
+        </div>
+        <!-- Aimpoint Red Dot -->
+        <div class="reticle ret-reddot">
+          <div class="aimpoint-dot"></div>
+        </div>
+        <!-- 3.4x ACOG Ballistic Crosshair -->
+        <div class="reticle ret-acog">
+          <div class="acog-line-h"></div>
+          <div class="acog-line-v"></div>
+          <div class="acog-chevron">^</div>
+          <div class="acog-stadia s1">4</div>
+          <div class="acog-stadia s2">6</div>
+        </div>
+        <!-- 8x Mil-Dot Sniper Scope -->
+        <div class="reticle ret-sniper8x">
+          <div class="scope-line-h"></div>
+          <div class="scope-line-v"></div>
+          <div class="scope-mil-dots"></div>
+          <div class="sniper-stadia st1">200m</div>
+          <div class="sniper-stadia st2">400m</div>
+        </div>
+        <!-- RPG-7 PGO-7 Optical Range Ladder -->
+        <div class="reticle ret-rpgSight">
+          <div class="rpg-grid-v"></div>
+          <div class="rpg-rung r1"><span>100</span></div>
+          <div class="rpg-rung r2"><span>200</span></div>
+          <div class="rpg-rung r3"><span>300</span></div>
+        </div>
+        <!-- Pistol Tritium 3-Dot Iron Sight -->
+        <div class="reticle ret-iron">
+          <div class="tritium-row">
+            <span class="trit-dot rear"></span>
+            <span class="trit-dot front"></span>
+            <span class="trit-dot rear"></span>
+          </div>
+        </div>
+      </div>
+      <div id="optic-label">EOTECH EXPS3 • 1.0X HOLO</div>
+    </div>
+  </div>
+
+  <!-- Vehicle Turret Tactical Overlay -->
+  <div id="vehicle-overlay" class="hidden">
+    <div class="turret-reticle">
+      <div class="tr-corner tl"></div>
+      <div class="tr-corner tr"></div>
+      <div class="tr-corner bl"></div>
+      <div class="tr-corner br"></div>
+      <div class="tr-center">+</div>
+    </div>
+    <div id="vehicle-hud-banner">
+      <span id="veh-name-label">LAV-25 IFV (30MM HE)</span> &bull;
+      <span id="veh-hp-label">HP: 750 / 750</span> &bull;
+      <span>[WASD] DRIVE &bull; [LMB] FIRE TURRET &bull; [C] CAMERA &bull; [F] EXIT</span>
+    </div>
+  </div>
+
+  <!-- Damage / Bleed Vignette & Night-Vision Goggles Overlay -->
+  <div id="damage-vignette"></div>
+  <div id="nvg-overlay" class="hidden">
+    <div class="nvg-scanlines"></div>
+    <div class="nvg-tag">AN/PVS-14 NIGHT VISION ACTIVE [N]</div>
+  </div>
+
+  <!-- In-Game Tactical HUD -->
+  <div id="hud" class="hidden">
+    <!-- 3D World-Space Projected Markers (Flags A-E, Friendly Chevrons, Revive Crosses, Pings) -->
+    <div id="world-markers"></div>
+
+    <!-- BattleBit Downed / Incapacitated Overlay (Wait for Medic Revive or Hold Space) -->
+    <div id="downed-overlay" class="hidden">
+      <div class="downed-card">
+        <div class="downed-title">INCAPACITATED — CALLING FOR MEDIC</div>
+        <div id="downed-killer-text" class="downed-sub">DOWNED BY ENEMY FIRE</div>
+        <div id="downed-medic-dist" class="downed-medic">NEAREST FRIENDLY MEDIC: 14m (APPROACHING...)</div>
+        <div class="downed-timers">
+          <span>BLEED OUT IN: <strong id="downed-timer-val">15s</strong></span>
+          <span>OR HOLD <strong>[SPACE]</strong> TO GIVE UP</span>
+        </div>
+        <div class="giveup-bar-bg">
+          <div id="giveup-bar-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top Conquest Bar: Tickets, 5 Capture Flags, Match Timer & Momentum -->
+    <div id="top-bar">
+      <div class="top-bar-main">
+        <div class="team-score us-team">
+          <span class="team-label">US FORCES</span>
+          <span id="tickets-us" class="ticket-count">400</span>
+        </div>
+
+        <div id="flags-hud">
+          <div class="flag-badge" id="flag-ui-A">
+            <div class="flag-fill" id="flag-fill-A"></div>
+            <span class="flag-letter">A</span>
+          </div>
+          <div class="flag-badge" id="flag-ui-B">
+            <div class="flag-fill" id="flag-fill-B"></div>
+            <span class="flag-letter">B</span>
+          </div>
+          <div class="flag-badge" id="flag-ui-C">
+            <div class="flag-fill" id="flag-fill-C"></div>
+            <span class="flag-letter">C</span>
+          </div>
+          <div class="flag-badge" id="flag-ui-D">
+            <div class="flag-fill" id="flag-fill-D"></div>
+            <span class="flag-letter">D</span>
+          </div>
+          <div class="flag-badge" id="flag-ui-E">
+            <div class="flag-fill" id="flag-fill-E"></div>
+            <span class="flag-letter">E</span>
+          </div>
+        </div>
+
+        <div class="team-score ru-team">
+          <span id="tickets-ru" class="ticket-count">400</span>
+          <span class="team-label">RU FORCES</span>
+        </div>
+      </div>
+
+      <div id="match-status-strip">
+        <span id="match-clock">15:00</span>
+        <span class="strip-dot">&bull;</span>
+        <span id="match-lead-text">EVEN MATCH (400 - 400)</span>
+        <span class="strip-dot">&bull;</span>
+        <span class="tab-hint">[TAB] BATTLE STATS</span>
+      </div>
+      <div class="momentum-bar-track">
+        <div id="momentum-bar-us" style="width: 50%"></div>
+      </div>
+    </div>
+
+    <!-- Compass Bar -->
+    <div id="compass-bar">
+      <div id="compass-strip">N &bull; NE &bull; E &bull; SE &bull; S &bull; SW &bull; W &bull; NW</div>
+      <div id="compass-heading">000° N</div>
+    </div>
+
+    <!-- Active Flag Capture Banner -->
+    <div id="capture-status" class="hidden">
+      <div id="capture-title">CAPTURING OBJECTIVE ALPHA</div>
+      <div class="capture-progress-bg">
+        <div id="capture-progress-bar"></div>
+      </div>
+    </div>
+
+    <!-- Killfeed (Top Right) -->
+    <div id="killfeed"></div>
+
+    <!-- Network & Controls Status (Top Left) -->
+    <div id="net-status-panel">
+      <div class="net-indicator">
+        <span id="net-dot" class="dot online"></span>
+        <span id="net-label">60 SOLDIERS + 4 ARMORED VEHICLES</span>
+      </div>
+      <div class="controls-mini">
+        <span>[WASD] Move / [Space] Vault</span>
+        <span>[C] Crouch / [Z] Prone</span>
+        <span>[Q/E] Lean</span>
+        <span>[MMB] 3D Ping/Spot</span>
+        <span>[V] Canted Sight / [X] Zero</span>
+        <span>[R] Reload (2x Fast) / [P] Pack Mags</span>
+        <span>[F] Revive+Drag / Vehicle</span>
+        <span>[B] Build Type / [N] NVG</span>
+        <span>[L] Time-of-Day / [M] Redeploy</span>
+        <span>[F3] Telemetry Diagnostics</span>
+      </div>
+    </div>
+
+    <!-- 360° Directional Incoming Fire & Armor Impact Indicator Ring -->
+    <div id="damage-indicator-ring"></div>
+
+    <!-- Live Battle Telemetry & Diagnostic Audit Overlay [F3] -->
+    <div id="telemetry-panel" class="hidden">
+      <div class="telem-header">
+        <span>&#9881; LIVE BATTLE TELEMETRY &amp; DIAGNOSTICS</span>
+        <span class="telem-sub">[F3] TOGGLE &bull; LOGGING TO logs/battle_telemetry.jsonl</span>
+      </div>
+      <div id="telemetry-summary-grid"></div>
+      <div class="telem-sec-title">BASE MOTOR POOL &amp; ACTIVE ARMOR CREWS</div>
+      <div id="telemetry-vehicles-list"></div>
+      <div class="telem-sec-title">LIVE TELEMETRY EVENT STREAM</div>
+      <div id="telemetry-events-list"></div>
+    </div>
+
+    <!-- Hipfire Crosshair -->
+    <div id="crosshair">
+      <div class="ch-line ch-top"></div>
+      <div class="ch-line ch-bottom"></div>
+      <div class="ch-line ch-left"></div>
+      <div class="ch-line ch-right"></div>
+    </div>
+
+    <!-- Always-Visible Hitmarker & Shot Confirmation (Works in both Hipfire & ADS!) -->
+    <div id="hitmarker" class="hidden">
+      <span class="hm-line hm-1"></span>
+      <span class="hm-line hm-2"></span>
+      <span class="hm-line hm-3"></span>
+      <span class="hm-line hm-4"></span>
+      <div id="hit-confirm-tag"></div>
+    </div>
+
+    <!-- Interactive Prompt ([F] Revive & Drag / Enter Vehicle / Resupply) -->
+    <div id="interact-prompt" class="hidden">PRESS [F] TO ENTER VEHICLE</div>
+
+    <!-- BattleBit Bottom-Center XP Score Feed -->
+    <div id="xp-feed"></div>
+
+    <!-- Bandaging / Reviving / Mag-Packing Progress -->
+    <div id="action-progress" class="hidden">
+      <div id="action-label">APPLYING BANDAGE...</div>
+      <div class="action-bar-bg">
+        <div id="action-bar-fill"></div>
+      </div>
+    </div>
+
+    <!-- Bottom Left: Minimap, Squad Roster & Player Vitals -->
+    <div id="bottom-left-hud">
+      <div id="minimap-wrapper">
+        <canvas id="minimap-canvas" width="180" height="180"></canvas>
+        <div class="minimap-footer">SECTOR: FRUGIS RIVER VALLEY</div>
+      </div>
+
+      <div class="left-hud-stack">
+        <!-- BattleBit Tactical Squad Roster -->
+        <div id="squad-panel">
+          <div class="squad-header" id="squad-header-title">&#9733; ALPHA SQUAD (#1)</div>
+          <div id="squad-list-body"></div>
+        </div>
+
+        <div id="vitals-panel">
+          <!-- Vehicle Hull Armor Integrity Row (Shown when driving a Tank, APC, or Humvee) -->
+          <div id="vehicle-vitals-row" class="health-row veh-hull-row hidden">
+            <span class="hp-label veh-hull-label" id="veh-hull-tag">HULL</span>
+            <div class="hp-bar-bg veh-hull-bg">
+              <div id="veh-hull-bar-fill" style="width: 100%"></div>
+            </div>
+            <span id="veh-hull-value">1600</span>
+          </div>
+          <div class="health-row">
+            <span class="hp-label" id="crew-hp-label">HP</span>
+            <div class="hp-bar-bg">
+              <div id="hp-bar-fill" style="width: 100%"></div>
+            </div>
+            <span id="hp-value">100</span>
+          </div>
+          <div class="status-badges">
+            <span id="bleed-badge" class="badge bleed hidden">BLEEDING [HOLD H]</span>
+            <span id="armor-badge" class="badge armor-tag">ARMOR: 50</span>
+            <span id="stance-badge" class="badge">STANDING</span>
+            <span id="bandage-count-badge" class="badge">BANDAGES: 3</span>
+            <span id="grenade-count-badge" class="badge">FRAGS [G]: 2</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Right: Magazine Pool, Zeroing, Canted Optic & Loadout Slots -->
+    <div id="bottom-right-hud">
+      <div id="ammo-panel">
+        <div id="weapon-name">M4A1 TACTICAL</div>
+        <div class="ammo-numbers">
+          <span id="ammo-clip">30</span>
+          <span class="ammo-sep">/</span>
+          <span id="ammo-reserve">180</span>
+        </div>
+        <!-- Visual Magazine Bars (Shows fullness of each spare magazine + [P] Consolidate) -->
+        <div id="mag-bars-row"></div>
+        <div id="fire-mode">AUTO &bull; 5.56x45MM</div>
+        <div class="tactical-gun-tags">
+          <span id="zero-badge" class="gun-tag">[X] ZERO: 100M</span>
+          <span id="canted-badge" class="gun-tag">[V] OPTIC: PRIMARY</span>
+          <span id="blueprint-badge" class="gun-tag">[B] BUILD: SANDBAG WALL</span>
+        </div>
+      </div>
+
+      <div id="slot-list">
+        <div class="weapon-slot active" id="slot-1">
+          <span class="slot-key">1</span>
+          <span class="slot-title" id="slot-1-name">M4A1</span>
+        </div>
+        <div class="weapon-slot" id="slot-2">
+          <span class="slot-key">2</span>
+          <span class="slot-title" id="slot-2-name">MP443</span>
+        </div>
+        <div class="weapon-slot" id="slot-3">
+          <span class="slot-key">3</span>
+          <span class="slot-title" id="slot-3-name">RPG-7</span>
+        </div>
+        <div class="weapon-slot" id="slot-4">
+          <span class="slot-key">4</span>
+          <span class="slot-title" id="slot-4-name">HAMMER</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3-Tier Tactical Battle Stats & Scoreboard Modal (Hold TAB) -->
+    <div id="scoreboard" class="hidden">
+      <div class="sb-header">
+        <div>
+          <h2>TACTICAL BATTLE STATS — FRUGIS RIVER VALLEY (CONQUEST)</h2>
+          <p id="sb-match-sub">WIN CONDITION: DEPLETE ENEMY TICKETS TO 0 OR LEAD AT 00:00 &bull; HOLD MAJORITY OF OBJECTIVES A–E TO INFLICT TICKET BLEED</p>
+        </div>
+        <div class="sb-clock-pill" id="sb-clock-pill">15:00 REMAINING</div>
+      </div>
+
+      <!-- TIER 1: WHICH SIDE IS DOING BETTER (FACTION COMPARISON) -->
+      <div class="sb-section-label">1. FACTION SUPREMACY &amp; TERRITORY CONTROL (WHICH SIDE IS WINNING)</div>
+      <div id="sb-side-comparison" class="sb-side-comparison"></div>
+
+      <!-- TIER 2: WHICH SQUAD IS DOING BETTER (TACTICAL SQUAD LEADERBOARD) -->
+      <div class="sb-section-label">2. TACTICAL SQUAD RANKINGS — COMBINED SQUAD SCORE, REVIVES &amp; ANTI-ARMOR (WHICH SQUAD IS DOING BETTER)</div>
+      <div id="sb-squad-leaderboard" class="sb-squad-grid"></div>
+
+      <!-- TIER 3: WHICH INDIVIDUAL SOLDIER IS DOING BETTER -->
+      <div class="sb-section-label">3. INDIVIDUAL SOLDIER LEADERBOARD (RANKED BY PERSONAL COMBAT &amp; SUPPORT SCORE)</div>
+      <div class="sb-columns">
+        <div class="sb-team-col">
+          <h3 class="us-title" id="sb-us-header">US FORCES — INDIVIDUAL RANKINGS</h3>
+          <div class="sb-scroll">
+            <table>
+              <thead>
+                <tr><th>#</th><th>SOLDIER</th><th>SQD</th><th>ROLE</th><th>K</th><th>D</th><th>REV</th><th>VEH</th><th title="War Crimes (Medics Killed)" style="color:#ff7675">CRM</th><th>SCORE</th></tr>
+              </thead>
+              <tbody id="sb-us-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="sb-team-col">
+          <h3 class="ru-title" id="sb-ru-header">RU FORCES — INDIVIDUAL RANKINGS</h3>
+          <div class="sb-scroll">
+            <table>
+              <thead>
+                <tr><th>#</th><th>SOLDIER</th><th>SQD</th><th>ROLE</th><th>K</th><th>D</th><th>REV</th><th>VEH</th><th title="War Crimes (Medics Killed)" style="color:#ff7675">CRM</th><th>SCORE</th></tr>
+              </thead>
+              <tbody id="sb-ru-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- End-of-Round Victory / Post-Match Commendations Screen -->
+  <div id="victory-screen" class="hidden">
+    <div class="victory-container">
+      <div class="victory-banner" id="victory-banner">
+        <div class="victory-tag" id="victory-reason-tag">CONQUEST VICTORY — ENEMY TICKETS DEPLETED</div>
+        <h1 id="victory-title">US FORCES VICTORY</h1>
+        <div class="victory-scoreline" id="victory-scoreline">US 148 TICKETS &mdash; RU 0 TICKETS</div>
+      </div>
+
+      <div class="victory-section-title">FACTION PERFORMANCE COMPARISON</div>
+      <div id="victory-side-summary" class="sb-side-comparison"></div>
+
+      <div class="victory-section-title">TOP TACTICAL SQUADS OF THE MATCH</div>
+      <div id="victory-squad-summary" class="sb-squad-grid"></div>
+
+      <div class="victory-section-title">INDIVIDUAL MATCH COMMENDATIONS &amp; MVPs</div>
+      <div id="victory-mvp-cards" class="victory-mvp-grid"></div>
+
+      <div class="victory-footer">
+        <button id="next-round-btn">DEPLOY NEXT CONQUEST ROUND</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Deploy / Class & Spawn Screen -->
+  <div id="deploy-screen">
+    <div class="deploy-container">
+      <div class="deploy-header">
+        <div>
+          <span class="game-tag">COMBINED ARMS VOXEL WARFARE</span>
+          <h1>BATTLEBIT: REMASTERED — FRUGIS RIVER</h1>
+        </div>
+        <div class="match-summary">
+          <span>80 SOLDIERS + 12 BASE ARMOR UNITS &bull; <strong>TANKS, IFVs &amp; HUMVEES</strong></span>
+          <span>SMARTER MEDICS &bull; <strong>CONTESTED BASE SPAWN LOCKOUT</strong></span>
+        </div>
+        <button id="deploy-top-btn" type="button" class="deploy-cta-btn" onclick="window.forceEnterGame && window.forceEnterGame()">DEPLOY TO BATTLEFIELD [ENTER / SPACE]</button>
+      </div>
+
+      <div class="deploy-grid">
+        <!-- Class Selection -->
+        <div class="deploy-card">
+          <h2>1. SELECT COMBAT ROLE</h2>
+          <div class="class-list" id="class-list">
+            <button class="class-btn active" data-class="engineer">
+              <div class="class-title">ENGINEER (ANTI-ARMOR &amp; BREACHER)</div>
+              <div class="class-loadout">M4A1 Tactical &bull; MP443 &bull; <strong>RPG-7V2 HEAT</strong> &bull; <strong>Build Hammer</strong></div>
+              <div class="class-desc">Blow craters through multi-story apartments &amp; destroy enemy BTRs/LAVs.</div>
+            </button>
+            <button class="class-btn" data-class="medic">
+              <div class="class-title">MEDIC (FAST REVIVE + CQB SHREDDER)</div>
+              <div class="class-loadout">Kriss Vector .45 (1100 RPM) &bull; MP443 &bull; <strong>Combat Medkit</strong> &bull; <strong>Hammer</strong></div>
+              <div class="class-desc">Fastest teammate revive &amp; body-dragging speed + unlimited Medkit healing.</div>
+            </button>
+            <button class="class-btn" data-class="assault">
+              <div class="class-title">ASSAULT (DEMOLITIONS)</div>
+              <div class="class-loadout">AK-15 7.62mm &bull; MP443 &bull; <strong>C4 Breach Charges</strong> &bull; <strong>Build Hammer</strong></div>
+              <div class="class-desc">Hard-hitting AK-15 and throwable C4 charges to level entire buildings.</div>
+            </button>
+            <button class="class-btn" data-class="support">
+              <div class="class-title">SUPPORT (HEAVY GUNNER + ACOG/CANTED)</div>
+              <div class="class-loadout">M249 SAW (100-Rd Box) &bull; MP443 &bull; <strong>Ammo Supply Crate</strong> &bull; <strong>Build Hammer</strong></div>
+              <div class="class-desc">100-round LMG with 3.4x ACOG + [V] 45° Canted Red Dot. Drops ammo crates to resupply the team.</div>
+            </button>
+            <button class="class-btn" data-class="recon">
+              <div class="class-title">RECON (SNIPER SPEC-OPS + SPAWN BEACON)</div>
+              <div class="class-loadout">SV-98M Sniper (8x + Canted) &bull; MP443 &bull; <strong>C4 Charge</strong> &bull; <strong>[6] Insertion Beacon</strong></div>
+              <div class="class-desc">Long-range marksman rifle with 8x Mil-Dot scope, [V] Canted Red Dot, [X] Zeroing &amp; stealth Insertion Beacon.</div>
+            </button>
+          </div>
+
+          <h2 style="margin-top: 10px;">2. FACTION, TACTICAL SQUAD &amp; TIME OF DAY</h2>
+          <div class="team-select-row">
+            <button class="team-btn active" data-team="US">US FORCES (BLUE)</button>
+            <button class="team-btn" data-team="RU">RU FORCES (RED)</button>
+          </div>
+          <div class="squad-select-row" id="squad-select-row" style="margin-top: 6px; display: flex; gap: 5px;">
+            <button class="squad-btn active" data-squad="ALPHA">ALPHA (ASSAULT)</button>
+            <button class="squad-btn" data-squad="BRAVO">BRAVO (ARMOR)</button>
+            <button class="squad-btn" data-squad="CHARLIE">CHARLIE (AT-RPG)</button>
+            <button class="squad-btn" data-squad="DELTA">DELTA (MEDICS)</button>
+            <button class="squad-btn" data-squad="ECHO">ECHO (RECON)</button>
+          </div>
+          <div class="atmos-select-row" style="margin-top: 6px; display: flex; gap: 6px;">
+            <button class="atmos-btn active" data-atmos="DAY">DAYLIGHT</button>
+            <button class="atmos-btn" data-atmos="SUNSET">GOLDEN SUNSET</button>
+            <button class="atmos-btn" data-atmos="NIGHT">NIGHT OPS [NVG]</button>
+          </div>
+        </div>
+
+        <!-- Tactical Map & Spawn Point Selection -->
+        <div class="deploy-card map-card">
+          <h2>3. CLICK MAP OR SELECT DEPLOYMENT POINT</h2>
+          <div class="tactical-map-box">
+            <canvas id="deploy-map-canvas" width="400" height="265"></canvas>
+          </div>
+          <div class="spawn-buttons" id="spawn-buttons">
+            <button class="spawn-btn" data-spawn="SQUAD">SQUADMATE (FRONTLINE)</button>
+            <button class="spawn-btn" data-spawn="RALLY">🟢 RALLY POINT [5]</button>
+            <button class="spawn-btn" data-spawn="BEACON">🔵 RECON BEACON [6]</button>
+            <button class="spawn-btn" data-spawn="BASE">MAIN BASE (+VEHICLES)</button>
+            <button class="spawn-btn active" data-spawn="A">OBJ A (WEST TOWN)</button>
+            <button class="spawn-btn" data-spawn="B">OBJ B (CONTAINERS)</button>
+            <button class="spawn-btn" data-spawn="C">OBJ C (RIVER CITY)</button>
+            <button class="spawn-btn" data-spawn="D">OBJ D (RADAR HILL)</button>
+            <button class="spawn-btn" data-spawn="E">OBJ E (INDUSTRIAL)</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="deploy-footer">
+        <div class="control-tips">
+          <strong>BATTLEBIT CONTROLS:</strong>
+          <span><b>WASD</b> Move + <b>Space</b> Vault</span> &bull;
+          <span><b>C</b> Crouch / <b>Z</b> Prone</span> &bull;
+          <span><b>Q/E</b> Lean</span> &bull;
+          <span><b>MMB</b> 3D Ping/Spot</span> &bull;
+          <span><b>V</b> Canted Sight</span> &bull;
+          <span><b>R</b> Reload (2x Fast) / <b>P</b> Pack Mags</span> &bull;
+          <span><b>Hold F</b> Revive &amp; Drag Ally</span> &bull;
+          <span><b>5/6</b> Rally/Beacon</span> &bull;
+          <span><b>U/J</b> UAV/Airstrike</span> &bull;
+          <span><b>Hold Y</b> Commo Rose</span> &bull;
+          <span><b>B</b> Build Blueprint / <b>N</b> NVG</span>
+        </div>
+        <button id="deploy-btn" type="button" class="deploy-cta-btn" onclick="window.forceEnterGame && window.forceEnterGame()">DEPLOY TO BATTLEFIELD [ENTER / SPACE]</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js?v=46"></script>
+</body>
+</html>

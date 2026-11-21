@@ -1,0 +1,1249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MODERN BLOCKFARE — Multi-Era Voxel Combined Arms FPS</title>
+  <link rel="stylesheet" href="./style.css?v=91" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.js"
+      }
+    }
+  </script>
+  <script>
+    window._pendingDeployClick = false;
+    window.forceEnterGame = function () {
+      var mm = document.getElementById('main-menu-screen');
+      if (mm) {
+        mm.classList.add('hidden');
+        mm.style.display = 'none';
+      }
+      if (window.game && window.game.ui && typeof window.game.ui.triggerDeploy === 'function') {
+        window.game.ui.triggerDeploy();
+        return;
+      }
+      window._pendingDeployClick = true;
+      var topBtn = document.getElementById('deploy-top-btn');
+      var botBtn = document.getElementById('deploy-btn');
+      if (topBtn) topBtn.textContent = 'DEPLOYING TO BATTLEFIELD...';
+      if (botBtn) botBtn.textContent = 'DEPLOYING TO BATTLEFIELD...';
+    };
+
+    window.addEventListener('DOMContentLoaded', function () {
+      function bindInstantToggle(selector) {
+        var btns = document.querySelectorAll(selector);
+        btns.forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            btns.forEach(function (b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+          });
+        });
+      }
+      bindInstantToggle('.class-btn');
+      bindInstantToggle('.team-btn');
+      bindInstantToggle('.rank-btn');
+      bindInstantToggle('.squad-btn');
+      bindInstantToggle('.atmos-btn');
+      bindInstantToggle('.spawn-btn');
+
+      window.addEventListener('keydown', function (e) {
+        if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') {
+          var tag = document.activeElement ? document.activeElement.tagName : '';
+          if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+          var mm = document.getElementById('main-menu-screen');
+          if (mm && !mm.classList.contains('hidden') && mm.style.display !== 'none') {
+            e.preventDefault();
+            var activeCard = document.querySelector('.main-menu-era-card.active');
+            var era = (activeCard && activeCard.dataset.eraCard) || 'modern';
+            if (window.game && typeof window.game.switchEra === 'function') {
+              window.game.switchEra(era, true);
+            } else {
+              mm.classList.add('hidden');
+              mm.style.display = 'none';
+            }
+            return;
+          }
+          if (
+            document.getElementById('gunsmith-modal') ||
+            document.getElementById('settings-modal') ||
+            document.getElementById('mp-invite-modal')
+          ) {
+            return;
+          }
+          var ds = document.getElementById('deploy-screen');
+          if (ds && !ds.classList.contains('hidden')) {
+            e.preventDefault();
+            window.forceEnterGame();
+          }
+        }
+      });
+    });
+
+    window.addEventListener('error', function (ev) {
+      try {
+        var targetSrc = ev.target && (ev.target.src || ev.target.href) ? String(ev.target.src || ev.target.href) : '';
+        fetch('/api/telemetry', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            events: [{
+              ts: new Date().toISOString(),
+              type: 'CLIENT_JS_ERROR',
+              message: String(ev.message || (targetSrc ? 'Resource load error: ' + targetSrc : 'Unknown error')),
+              filename: String(ev.filename || targetSrc || ''),
+              lineno: ev.lineno || 0
+            }]
+          })
+        }).catch(function () {});
+      } catch (_) {}
+    }, true);
+  </script>
+</head>
+<body>
+  <!-- WebGL Canvas Container -->
+  <div id="game-container"></div>
+
+  <!-- ADS Optic & Sniper Scope Overlay (Holo / Kobra / Red-Dot / ACOG / 8x Sniper / RPG PGO-7) -->
+  <div id="scope-overlay" class="hidden">
+    <div id="optic-frame" class="optic-holo">
+      <div class="optic-lens">
+        <!-- EOTech Holo Ring + Dot -->
+        <div class="reticle ret-holo">
+          <div class="holo-ring">
+            <span class="holo-tick top"></span>
+            <span class="holo-tick bottom"></span>
+            <span class="holo-tick left"></span>
+            <span class="holo-tick right"></span>
+            <span class="holo-dot"></span>
+          </div>
+        </div>
+        <!-- Kobra Chevron + Bars -->
+        <div class="reticle ret-kobra">
+          <div class="kobra-chevron">^</div>
+          <div class="kobra-bar left"></div>
+          <div class="kobra-bar right"></div>
+          <div class="kobra-bar bottom"></div>
+        </div>
+        <!-- Aimpoint Red Dot -->
+        <div class="reticle ret-reddot">
+          <div class="aimpoint-dot"></div>
+        </div>
+        <!-- 3.4x ACOG Ballistic Crosshair -->
+        <div class="reticle ret-acog">
+          <div class="acog-line-h"></div>
+          <div class="acog-line-v"></div>
+          <div class="acog-chevron">^</div>
+          <div class="acog-stadia s1">4</div>
+          <div class="acog-stadia s2">6</div>
+        </div>
+        <!-- 8x Mil-Dot Sniper Scope -->
+        <div class="reticle ret-sniper8x">
+          <div class="scope-line-h"></div>
+          <div class="scope-line-v"></div>
+          <div class="scope-mil-dots"></div>
+          <div class="sniper-stadia st1">200m</div>
+          <div class="sniper-stadia st2">400m</div>
+        </div>
+        <!-- RPG-7 PGO-7 Optical Range Ladder -->
+        <div class="reticle ret-rpgSight">
+          <div class="rpg-grid-v"></div>
+          <div class="rpg-rung r1"><span>100</span></div>
+          <div class="rpg-rung r2"><span>200</span></div>
+          <div class="rpg-rung r3"><span>300</span></div>
+        </div>
+        <!-- Pistol Tritium 3-Dot Iron Sight -->
+        <div class="reticle ret-iron">
+          <div class="tritium-row">
+            <span class="trit-dot rear"></span>
+            <span class="trit-dot front"></span>
+            <span class="trit-dot rear"></span>
+          </div>
+        </div>
+      </div>
+      <div id="optic-label">EOTECH EXPS3 • 1.0X HOLO</div>
+    </div>
+  </div>
+
+  <!-- Vehicle-Specific Tactical Overlay & Reticle -->
+  <div id="vehicle-overlay" class="hidden">
+    <div id="turret-reticle-box" class="turret-reticle">
+      <div class="tr-corner tl"></div>
+      <div class="tr-corner tr"></div>
+      <div class="tr-corner bl"></div>
+      <div class="tr-corner br"></div>
+      <!-- Vehicle-Specific SVG Sight Layer (Radar ring, Moto speedo arc, Bow pins, Siege ladder, etc.) -->
+      <div id="tr-dynamic-layer"></div>
+      <!-- Peripheral Hull Direction Marker around the Gunner Reticle -->
+      <div id="reticle-hull-ring">
+        <div id="reticle-hull-chevron">▲ HULL</div>
+      </div>
+      <div id="tr-top-tag" class="tr-top-tag"></div>
+      <div id="tr-center-mark" class="tr-center">+</div>
+      <div id="tr-range-ladder" class="tr-range-ladder">
+        <span>200</span>
+        <span>400</span>
+        <span>600</span>
+      </div>
+      <div id="tr-bottom-tag" class="tr-bottom-tag"></div>
+    </div>
+
+    <!-- Tank Hull vs. Cannon Turret Orientation & Dual Weapon Fire-Control Panel (Docked at Bottom-Right) -->
+    <div id="veh-orientation-panel">
+      <div id="vehicle-hud-banner">
+        <span id="veh-name-label">LAV-25 IFV (30MM HE)</span> &bull;
+        <span id="veh-hp-label">HP: 750 / 750</span> &bull;
+        <span id="veh-speed-label" style="color:#7bed9f;font-weight:900;">SPEED: 0 KM/H</span> &bull;
+        <span id="veh-banner-controls">[WASD] DRIVE/FLY &bull; [LMB] MAIN &bull; [SPACE] COAX/BOMB &bull; [X] APS/FLARES &bull; [C] CAM &bull; [E] EXIT</span>
+      </div>
+      <div class="veh-orient-main-row">
+        <!-- Top-Down SVG Compass: Turret/View UP (12 o'clock) vs Rotating Tank Hull [W] -->
+        <div class="veh-orient-dial-wrap">
+          <svg id="veh-orient-svg" viewBox="0 0 120 120" width="98" height="98">
+            <!-- Outer bezel -->
+            <circle cx="60" cy="60" r="56" fill="rgba(6, 16, 12, 0.88)" stroke="rgba(46, 204, 113, 0.45)" stroke-width="1.5" />
+            <circle cx="60" cy="60" r="42" fill="none" stroke="rgba(46, 204, 113, 0.16)" stroke-dasharray="3 3" stroke-width="1" />
+
+            <!-- Rotating World Compass Ring (rotates by -turretDeg so View/Turret is always 12 o'clock UP) -->
+            <g id="veh-svg-compass" transform="rotate(0 60 60)">
+              <text x="60" y="13" text-anchor="middle" fill="#ff7675" font-size="9" font-weight="900">N</text>
+              <text x="110" y="63" text-anchor="middle" fill="#95a5a6" font-size="8" font-weight="800">E</text>
+              <text x="60" y="114" text-anchor="middle" fill="#95a5a6" font-size="8" font-weight="800">S</text>
+              <text x="10" y="63" text-anchor="middle" fill="#95a5a6" font-size="8" font-weight="800">W</text>
+              <line x1="60" y1="16" x2="60" y2="20" stroke="#ff7675" stroke-width="1.5" />
+              <line x1="104" y1="60" x2="100" y2="60" stroke="#7f8c8d" stroke-width="1.2" />
+              <line x1="60" y1="104" x2="60" y2="100" stroke="#7f8c8d" stroke-width="1.2" />
+              <line x1="16" y1="60" x2="20" y2="60" stroke="#7f8c8d" stroke-width="1.2" />
+            </g>
+
+            <!-- Rotating Tank Hull & Tracks (rotates by hullRelDeg = hullDeg - turretDeg) -->
+            <g id="veh-svg-hull" transform="rotate(0 60 60)">
+              <!-- Forward [W] Drive Vector Line -->
+              <line x1="60" y1="34" x2="60" y2="16" stroke="#f39c12" stroke-width="1.8" stroke-dasharray="2.5 2" />
+              <!-- Front Hull Direction Chevron (Which way W drives the tank!) -->
+              <polygon points="60,15 53,26 67,26" fill="#f1c40f" stroke="#111" stroke-width="0.8" />
+              <!-- Left & Right Armored Tracks -->
+              <rect x="41" y="34" width="6.5" height="50" rx="2" fill="#b7791f" stroke="#f39c12" stroke-width="1.1" />
+              <rect x="72.5" y="34" width="6.5" height="50" rx="2" fill="#b7791f" stroke="#f39c12" stroke-width="1.1" />
+              <!-- Main Armored Hull Body -->
+              <polygon points="47.5,35 72.5,35 72.5,83 47.5,83" fill="rgba(243, 156, 18, 0.28)" stroke="#f1c40f" stroke-width="1.5" />
+              <!-- Front Glacis Armor Slope -->
+              <polygon points="49,36 71,36 67,43 53,43" fill="rgba(241, 196, 15, 0.55)" />
+              <!-- Rear Engine Louvers -->
+              <rect x="51" y="74" width="18" height="6" fill="rgba(0, 0, 0, 0.55)" stroke="rgba(241, 196, 15, 0.45)" stroke-width="0.8" />
+            </g>
+
+            <!-- Fixed Turret & Main Cannon (Always UP at 12 o'clock = Our Camera Viewpoint!) -->
+            <g id="veh-svg-turret">
+              <!-- Viewpoint / Gunner Sight Cone -->
+              <polygon points="60,60 36,16 84,16" fill="rgba(46, 204, 113, 0.13)" />
+              <!-- Main 120mm/125mm Cannon Barrel -->
+              <rect x="57.5" y="16" width="5" height="34" rx="1.5" fill="#2ecc71" stroke="#082414" stroke-width="1" />
+              <!-- Coaxial 7.62mm MG Barrel beside main gun -->
+              <rect x="64" y="30" width="2.2" height="17" rx="0.8" fill="#7bed9f" />
+              <!-- Turret Bustle & Ring -->
+              <polygon points="50,47 70,47 73,69 47,69" rx="3" fill="rgba(16, 48, 32, 0.95)" stroke="#2ecc71" stroke-width="1.8" />
+              <circle cx="60" cy="58" r="4" fill="#2ecc71" />
+            </g>
+          </svg>
+          <div class="veh-dial-legend">
+            <span id="veh-leg-turret" class="leg-turret">▲ VIEW / CANNON</span>
+            <span id="veh-leg-hull" class="leg-hull">▲ HULL [W]</span>
+          </div>
+        </div>
+
+        <!-- Orientation Telemetry Readout Column -->
+        <div class="veh-orient-readouts">
+          <div id="veh-orient-title" class="veh-orient-title">ARMOR ORIENTATION &amp; FCS</div>
+          <div class="veh-orient-row">
+            <span id="vor-lbl-1" class="vor-label">VIEW / CANNON:</span>
+            <span id="veh-turret-hdg-val" class="vor-val turret">090° E</span>
+          </div>
+          <div class="veh-orient-row">
+            <span id="vor-lbl-2" class="vor-label">TANK HULL [W]:</span>
+            <span id="veh-hull-hdg-val" class="vor-val hull">090° E</span>
+          </div>
+          <div class="veh-orient-row">
+            <span id="vor-lbl-3" class="vor-label">TURRET OFFSET:</span>
+            <span id="veh-offset-val" class="vor-val aligned">ALIGNED (0°)</span>
+          </div>
+          <div class="veh-orient-row">
+            <span id="vor-lbl-4" class="vor-label">TRANSMISSION:</span>
+            <span id="veh-gear-val" class="vor-val gear">NEUTRAL • 0 KM/H</span>
+          </div>
+        </div>
+
+        <!-- Dual Weapon Fire-Control Bay (Separate Main Cannon vs. Coaxial Machine Gun) -->
+        <div class="veh-weapons-bay">
+          <div id="veh-wpn-card-primary" class="veh-wpn-card active">
+            <div class="vwc-header">
+              <span id="veh-wpn1-name" class="vwc-name">[1] 120MM CANNON</span>
+              <span id="veh-wpn1-key" class="vwc-key">LMB</span>
+            </div>
+            <div class="vwc-bar-bg">
+              <div id="veh-wpn1-bar" class="vwc-bar-fill primary" style="width: 100%"></div>
+            </div>
+            <div id="veh-wpn1-status" class="vwc-status">READY • APFSDS-T</div>
+          </div>
+
+          <div id="veh-wpn-card-coax" class="veh-wpn-card">
+            <div class="vwc-header">
+              <span id="veh-wpn2-name" class="vwc-name">[2] 7.62MM COAX MG</span>
+              <span id="veh-wpn2-key" class="vwc-key">SPACE / [2]</span>
+            </div>
+            <div class="vwc-bar-bg">
+              <div id="veh-wpn2-bar" class="vwc-bar-fill coax" style="width: 0%"></div>
+            </div>
+            <div id="veh-wpn2-status" class="vwc-status">READY • 950 RPM AP (FLAT AT +)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Real-Time FPS & Frame-Time Counter (Toggle with [F2] or HUD/Deploy Button) -->
+  <div id="fps-counter-pill" title="Click or press [F2] to toggle FPS Counter">
+    <span class="fps-main"><strong id="fps-val">60</strong> FPS</span>
+    <span class="fps-sep">&bull;</span>
+    <span id="fps-ms-val" class="fps-sub">16.7 ms</span>
+    <span class="fps-sep">&bull;</span>
+    <span id="fps-low-val" class="fps-sub">LOW: 58</span>
+  </div>
+
+  <!-- Damage / Bleed Vignette & Night-Vision Goggles Overlay -->
+  <div id="damage-vignette"></div>
+  <div id="nvg-overlay" class="hidden">
+    <div class="nvg-scanlines"></div>
+    <div class="nvg-tag">AN/PVS-14 NIGHT VISION ACTIVE [N]</div>
+  </div>
+
+  <!-- In-Game Tactical HUD -->
+  <div id="hud" class="hidden">
+    <!-- 3D World-Space Projected Markers (Flags A-E, Friendly Chevrons, Revive Crosses, Pings) -->
+    <div id="world-markers"></div>
+
+    <!-- BattleBit Downed / Incapacitated Overlay (Wait for Medic Revive or Hold Space) -->
+    <div id="downed-overlay" class="hidden">
+      <div class="downed-card">
+        <div class="downed-title">INCAPACITATED — CALLING FOR MEDIC</div>
+        <div id="downed-killer-text" class="downed-sub">DOWNED BY ENEMY FIRE</div>
+        <div id="downed-medic-dist" class="downed-medic">NEAREST FRIENDLY MEDIC: 14m (APPROACHING...)</div>
+        <div class="downed-timers">
+          <span>BLEED OUT IN: <strong id="downed-timer-val">15s</strong></span>
+          <span>OR HOLD <strong>[SPACE]</strong> TO GIVE UP</span>
+        </div>
+        <div class="giveup-bar-bg">
+          <div id="giveup-bar-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top Conquest Bar: Tickets, 5 Capture Flags, Match Timer & Momentum -->
+    <div id="top-bar">
+      <div class="top-bar-main">
+        <div class="team-score us-team">
+          <span class="team-label">US FORCES</span>
+          <span id="tickets-us" class="ticket-count">400</span>
+          <span id="ticket-rate-us" class="ticket-rate-badge">HOLD 2/5F</span>
+        </div>
+
+        <div id="flags-hud">
+          <div class="flag-badge" id="flag-ui-A" data-flag="A" style="cursor:pointer;pointer-events:auto;" title="Click or press [Alt+1] to order forces to Attack / Defend Objective A">
+            <div class="flag-fill" id="flag-fill-A"></div>
+            <span class="flag-letter">A</span>
+          </div>
+          <div class="flag-badge" id="flag-ui-B" data-flag="B" style="cursor:pointer;pointer-events:auto;" title="Click or press [Alt+2] to order forces to Attack / Defend Objective B">
+            <div class="flag-fill" id="flag-fill-B"></div>
+            <span class="flag-letter">B</span>
+          </div>
+          <div class="flag-badge" id="flag-ui-C" data-flag="C" style="cursor:pointer;pointer-events:auto;" title="Click or press [Alt+3] to order forces to Attack / Defend Objective C">
+            <div class="flag-fill" id="flag-fill-C"></div>
+            <span class="flag-letter">C</span>
+          </div>
+          <div class="flag-badge" id="flag-ui-D" data-flag="D" style="cursor:pointer;pointer-events:auto;" title="Click or press [Alt+4] to order forces to Attack / Defend Objective D">
+            <div class="flag-fill" id="flag-fill-D"></div>
+            <span class="flag-letter">D</span>
+          </div>
+          <div class="flag-badge" id="flag-ui-E" data-flag="E" style="cursor:pointer;pointer-events:auto;" title="Click or press [Alt+5] to order forces to Attack / Defend Objective E">
+            <div class="flag-fill" id="flag-fill-E"></div>
+            <span class="flag-letter">E</span>
+          </div>
+        </div>
+
+        <div class="team-score ru-team">
+          <span id="ticket-rate-ru" class="ticket-rate-badge">HOLD 2/5F</span>
+          <span id="tickets-ru" class="ticket-count">400</span>
+          <span class="team-label">RU FORCES</span>
+        </div>
+      </div>
+
+      <div id="match-status-strip">
+        <span id="match-clock">15:00</span>
+        <span class="strip-dot">&bull;</span>
+        <span id="match-lead-text">EVEN MATCH (400 - 400)</span>
+        <span class="strip-dot">&bull;</span>
+        <span class="tab-hint">[TAB] STATS &amp; CONTROLS &bull; [K] TACTICAL MAP</span>
+      </div>
+      <div class="momentum-bar-track">
+        <div id="momentum-bar-us" style="width: 50%"></div>
+      </div>
+      <div id="ticket-event-feed"></div>
+    </div>
+
+    <!-- Compass Bar -->
+    <div id="compass-bar">
+      <div id="compass-strip">N &bull; NE &bull; E &bull; SE &bull; S &bull; SW &bull; W &bull; NW</div>
+      <div id="compass-heading">000° N</div>
+    </div>
+
+    <!-- Active Flag Capture Banner -->
+    <div id="capture-status" class="hidden">
+      <div id="capture-title">CAPTURING OBJECTIVE ALPHA</div>
+      <div class="capture-progress-bg">
+        <div id="capture-progress-bar"></div>
+      </div>
+    </div>
+
+    <!-- Killfeed (Top Right) -->
+    <div id="killfeed"></div>
+
+    <!-- Compact Top-Left Status Pill (Full Controls & Ticket Rules moved to [TAB], Orders & Squad moved to [K] Map View) -->
+    <div id="net-status-panel">
+      <div class="net-indicator" id="net-indicator-btn" style="cursor:pointer;pointer-events:auto;" title="Click or press [O] to open Game Mode &amp; Multiplayer Lobby">
+        <span id="net-dot" class="dot online"></span>
+        <span id="net-label">SINGLEPLAYER • 250 AI</span>
+      </div>
+      <div class="controls-mini-compact">
+        <span id="hud-backpack-btn" style="color:#d6a2e8;font-weight:900;cursor:pointer;pointer-events:auto;" title="Press [I] or click to open Backpack &amp; Loot Inventory">🎒 <b>[I]</b> Backpack</span>
+        <span>&bull;</span>
+        <span id="hud-cash-btn" style="color:#f1c40f;font-weight:900;cursor:pointer;pointer-events:auto;" title="Press [L] or click to open Loadout, Gunsmith &amp; Armory Cases">💰 <span id="hud-cash-val">$600</span> &bull; <b>[L]</b> Armory</span>
+        <span>&bull;</span>
+        <span style="color:#74b9ff;font-weight:800;cursor:pointer;pointer-events:auto;" onclick="window.game && window.game.ui && window.game.ui.toggleCommandModal()"><b>[K]</b> Map</span>
+        <span>&bull;</span>
+        <span><b>[TAB]</b> Stats</span>
+        <span>&bull;</span>
+        <span id="hud-settings-btn" style="color:#81ecec;font-weight:800;cursor:pointer;pointer-events:auto;" title="Open Audio &amp; World Settings">⚙️ Settings</span>
+      </div>
+    </div>
+
+    <!-- 360° Directional Incoming Fire & Armor Impact Indicator Ring -->
+    <div id="damage-indicator-ring"></div>
+
+    <!-- Live Battle Telemetry & Diagnostic Audit Overlay [F3] -->
+    <div id="telemetry-panel" class="hidden">
+      <div class="telem-header">
+        <span>&#9881; LIVE BATTLE TELEMETRY &amp; DIAGNOSTICS</span>
+        <span class="telem-sub">[F3] TOGGLE &bull; LOGGING TO logs/battle_telemetry.jsonl</span>
+      </div>
+      <div id="telemetry-summary-grid"></div>
+      <div class="telem-sec-title">BASE MOTOR POOL &amp; ACTIVE ARMOR CREWS</div>
+      <div id="telemetry-vehicles-list"></div>
+      <div class="telem-sec-title">LIVE TELEMETRY EVENT STREAM</div>
+      <div id="telemetry-events-list"></div>
+    </div>
+
+    <!-- Hipfire Crosshair -->
+    <div id="crosshair">
+      <div class="ch-line ch-top"></div>
+      <div class="ch-line ch-bottom"></div>
+      <div class="ch-line ch-left"></div>
+      <div class="ch-line ch-right"></div>
+    </div>
+
+    <!-- Always-Visible Hitmarker & Shot Confirmation (Works in both Hipfire & ADS!) -->
+    <div id="hitmarker" class="hidden">
+      <span class="hm-line hm-1"></span>
+      <span class="hm-line hm-2"></span>
+      <span class="hm-line hm-3"></span>
+      <span class="hm-line hm-4"></span>
+      <div id="hit-confirm-tag"></div>
+    </div>
+
+    <!-- Interactive Prompt ([E] Enter Vehicle / Drag Ally • [F] Revive / Heal / Ammo / Build Chest Wall) -->
+    <div id="interact-prompt" class="hidden">PRESS [E] TO ENTER VEHICLE</div>
+
+    <!-- BattleBit Bottom-Center XP Score Feed -->
+    <div id="xp-feed"></div>
+
+    <!-- Bandaging / Reviving / Mag-Packing Progress -->
+    <div id="action-progress" class="hidden">
+      <div id="action-label">APPLYING BANDAGE...</div>
+      <div class="action-bar-bg">
+        <div id="action-bar-fill"></div>
+      </div>
+    </div>
+
+    <!-- Bottom Left: Minimap, Compact Tactical Map Bar & Player Vitals -->
+    <div id="bottom-left-hud">
+      <div id="minimap-wrapper">
+        <div id="hud-map-cmd-bar" title="Press [K] to open Interactive Tactical Map, Squad Roster &amp; Force Commander Orders">
+          <span id="cmd-rank-badge">★ CMD</span>
+          <span id="cmd-active-order-text" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">AI AUTO</span>
+          <button id="cmd-open-modal-btn" type="button">[K] MAP &amp; ORDERS</button>
+        </div>
+        <canvas id="minimap-canvas" width="180" height="180"></canvas>
+        <div class="minimap-footer">SECTOR: FRUGIS RIVER &bull; [K] FULL MAP</div>
+      </div>
+
+      <div class="left-hud-stack">
+        <!-- Always-Visible Commander & Squad Leader Order Panel on HUD -->
+        <div id="command-order-panel">
+          <div class="cmd-header-row">
+            <span id="cmd-panel-title" style="font-size:10px;font-weight:900;color:#f1c40f;letter-spacing:0.6px;">★ COMMANDER ORDERS</span>
+            <div style="display:flex;gap:4px;">
+              <button type="button" id="cmd-open-wheel-btn" style="background:rgba(46,204,113,0.2);border:1px solid #2ecc71;color:#7bed9f;border-radius:3px;padding:1px 5px;font-size:8.5px;font-weight:900;cursor:pointer;" title="Hold or press [Y] for Radial Command Wheel">[Y] WHEEL</button>
+              <button type="button" id="cmd-panel-map-btn" style="background:rgba(241,196,15,0.2);border:1px solid #f1c40f;color:#f1c40f;border-radius:3px;padding:1px 5px;font-size:8.5px;font-weight:900;cursor:pointer;" title="Press [K] for Full Tactical Map &amp; Per-Squad Orders">[K] MAP</button>
+            </div>
+          </div>
+          <div class="cmd-scope-row" title="Press [Alt+0] or click to switch between commanding All 5 Squads (125 NPCs) or Your Squad (25 NPCs)">
+            <button type="button" class="cmd-scope-btn active" id="cmd-scope-all" data-scope="ALL">★ ALL 5 SQUADS (125)</button>
+            <button type="button" class="cmd-scope-btn" id="cmd-scope-squad" data-scope="SQUAD">▲ MY SQUAD (25)</button>
+          </div>
+          <div class="cmd-tactical-row">
+            <button type="button" class="cmd-order-btn cmd-tac-btn" data-action="CHARGE" title="Mount &amp; Blade All-Out Charge: War horn + synchronized battle cries + full-speed shock assault into enemy lines! [Alt+C]">⚔️ CHARGE <span class="cmd-hk">[Alt+C]</span></button>
+            <button type="button" class="cmd-order-btn cmd-tac-btn" data-action="HOLD" title="Defend / Shield Wall: Lock shields &amp; hold defensive line (-35% incoming frontal damage in Medieval Era) [Alt+H]">🛡️ DEFEND <span class="cmd-hk">[Alt+H]</span></button>
+            <button type="button" class="cmd-order-btn cmd-tac-btn" data-action="RETREAT" title="Tactical Retreat / Fall Back: Sound retreat horn &amp; withdraw in order to nearest friendly Rear Base / Keep with covering fire [Alt+R]">🏳️ RETREAT <span class="cmd-hk">[Alt+R]</span></button>
+            <button type="button" class="cmd-order-btn cmd-tac-btn" data-action="FOLLOW" title="Order forces to Rally &amp; Follow You [Alt+F or Hold Y -> 6]">🏃 FOLLOW <span class="cmd-hk">[Alt+F]</span></button>
+            <button type="button" class="cmd-order-btn cmd-tac-btn active" data-action="GARRISON" title="Click or press [Alt+G] to toggle Garrison Doctrine ON/OFF: When ON, leaves 1 Squad at each Captured Forward Base as Defense; when OFF, all 5 Squads push the frontline!">🏰 GARRISON: ON <span class="cmd-hk">[Alt+G]</span></button>
+            <button type="button" class="cmd-order-btn cmd-tac-btn active" data-action="AUTO" title="Click or press [Alt+A] to toggle Autonomous AI Squad Leaders ON/OFF: When ON, AI Squad Leaders autonomously attack/defend objectives; when OFF, squads hold position and wait for your direct orders!">🤖 AI: ON <span class="cmd-hk">[Alt+A]</span></button>
+          </div>
+          <div class="cmd-spacing-row">
+            <button type="button" class="cmd-spacing-btn" data-spacing="STAY_CLOSE" title="Order Soldiers &amp; Armor to Stay Close Together (Tight 2-4m squad cluster, 11-19m squad standoff, 35m armor escort) [Numpad - or Minus]">🤝 STAY CLOSE <span class="cmd-hk">[Num -]</span></button>
+            <button type="button" class="cmd-spacing-btn active" data-spacing="FAN_OUT" title="Order Soldiers &amp; Armor to Fan Out Wide (Dispersed 7-12m squad spread, 25-39m squad standoff, 100m armor overwatch) [Numpad + or Plus]">↔️ FAN OUT <span class="cmd-hk">[Num +]</span></button>
+          </div>
+          <div class="cmd-obj-row">
+            <button type="button" class="cmd-order-btn" data-action="OBJECTIVE" data-flag="A" title="Attack / Capture Objective A [Alt+1 or Hold Y -> 1]">⚔️ A <span class="cmd-hk">Alt+1</span></button>
+            <button type="button" class="cmd-order-btn" data-action="OBJECTIVE" data-flag="B" title="Attack / Capture Objective B [Alt+2 or Hold Y -> 2]">⚔️ B <span class="cmd-hk">Alt+2</span></button>
+            <button type="button" class="cmd-order-btn" data-action="OBJECTIVE" data-flag="C" title="Attack / Capture Objective C [Alt+3 or Hold Y -> 3]">⚔️ C <span class="cmd-hk">Alt+3</span></button>
+            <button type="button" class="cmd-order-btn" data-action="OBJECTIVE" data-flag="D" title="Attack / Capture Objective D [Alt+4 or Hold Y -> 4]">⚔️ D <span class="cmd-hk">Alt+4</span></button>
+            <button type="button" class="cmd-order-btn" data-action="OBJECTIVE" data-flag="E" title="Attack / Capture Objective E [Alt+5 or Hold Y -> 5]">⚔️ E <span class="cmd-hk">Alt+5</span></button>
+          </div>
+          <div class="cmd-support-row">
+            <button type="button" id="hud-uav-btn" class="cmd-support-btn uav" title="Launch MQ-9 UAV Recon Datalink (Paints all enemies &amp; enemy armor in 3D + Minimap + AI Datalink + $35 Assist Bonus) [U]">📡 UAV <span class="cmd-hk">[U]</span></button>
+            <button type="button" id="hud-airstrike-btn" class="cmd-support-btn strike" title="Call Airstrike / Artillery at Crosshair (or click anywhere in [K] Tactical Map) [J]">💥 STRIKE <span class="cmd-hk">[J]</span></button>
+            <button type="button" id="hud-strike-pattern-btn" class="cmd-support-btn pattern" title="Cycle Strike Ordnance: Carpet Bombing (9x JDAM) / 2,000lb GBU Bunker-Buster / 155mm Artillery [Shift+J]">✈️ CARPET</button>
+            <button type="button" id="hud-build-bunker-btn" class="cmd-support-btn" style="background:rgba(241,196,15,0.22);border:1px solid #f1c40f;color:#f1c40f;" title="Build Selected Blueprint / Squad Emplacement (Covered Bunker $350, HMG $450, Mortar $600, AA $650, Command Bunker / House $1K) [8 / T]">🏰 BUILD <span class="cmd-hk">[B/8]</span></button>
+            <button type="button" id="hud-launch-plane-btn" class="cmd-support-btn" style="background:rgba(52,152,219,0.28);border:1px solid #48dbfb;color:#74b9ff;" title="Launch Combat Aircraft Sortie [9] • Shift+Click or Right-Click cycles: A-10C CAS / F-15EX Fighter+Bomber / AC-130J Gunship">✈️ JET/AC-130 <span class="cmd-hk">[9]</span></button>
+          </div>
+          <div id="cmd-hud-status-line">ORDER: AI AUTONOMOUS &bull; HOLD [Y] OR PRESS [ALT+1..5 / F / H]</div>
+        </div>
+
+        <div id="squad-panel" class="hidden">
+          <div class="squad-header" id="squad-header-title">&#9733; ALPHA SQUAD (#1)</div>
+          <div id="squad-list-body"></div>
+        </div>
+
+        <div id="vitals-panel">
+          <!-- Vehicle Hull Armor Integrity Row (Shown when driving a Tank, APC, or Humvee) -->
+          <div id="vehicle-vitals-row" class="health-row veh-hull-row hidden">
+            <span class="hp-label veh-hull-label" id="veh-hull-tag">HULL</span>
+            <div class="hp-bar-bg veh-hull-bg">
+              <div id="veh-hull-bar-fill" style="width: 100%"></div>
+            </div>
+            <span id="veh-hull-value">1600</span>
+          </div>
+          <div class="health-row">
+            <span class="hp-label" id="crew-hp-label">HP</span>
+            <div class="hp-bar-bg">
+              <div id="hp-bar-fill" style="width: 100%"></div>
+            </div>
+            <span id="hp-value">100</span>
+          </div>
+          <div class="status-badges">
+            <span id="bleed-badge" class="badge bleed hidden">BLEEDING [HOLD H]</span>
+            <span id="armor-badge" class="badge armor-tag">ARMOR: 50</span>
+            <span id="stance-badge" class="badge">STANDING</span>
+            <span id="bandage-count-badge" class="badge">BANDAGES: 3</span>
+            <span id="grenade-count-badge" class="badge">FRAGS [G]: 2</span>
+            <span id="backpack-hud-badge" class="badge" style="background:rgba(155,89,182,0.28);color:#d6a2e8;border:1px solid rgba(155,89,182,0.55);cursor:pointer;pointer-events:auto;" title="Press [I] or click to open Visualized 2D Backpack &amp; Enemy Loot Inventory">🎒 PACK [I]: 3/9</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Right: Magazine Pool, Zeroing, Canted Optic & Loadout Slots -->
+    <div id="bottom-right-hud">
+      <div id="ammo-panel">
+        <div id="weapon-name">M4A1 TACTICAL</div>
+        <div class="ammo-numbers">
+          <span id="ammo-clip">30</span>
+          <span class="ammo-sep">/</span>
+          <span id="ammo-reserve">180</span>
+        </div>
+        <!-- Visual Magazine Bars (Shows fullness of each spare magazine + [P] Consolidate) -->
+        <div id="mag-bars-row"></div>
+        <div id="fire-mode">AUTO &bull; 5.56x45MM</div>
+        <div class="tactical-gun-tags">
+          <span id="zero-badge" class="gun-tag">[X] ZERO: 100M</span>
+          <span id="canted-badge" class="gun-tag">[V] OPTIC: PRIMARY</span>
+          <span id="blueprint-badge" class="gun-tag">BUILD [F / B]: CHEST WALL</span>
+        </div>
+      </div>
+
+      <!-- Dedicated Visual Aircraft Cockpit Flight Instrument Cluster (Replaces Tank/Infantry HUD when Piloting a Plane) -->
+      <div id="aircraft-cockpit-hud" class="hidden">
+        <!-- Cockpit Glare-Shield Header Strip: Aircraft Model, Visual Airframe Bar & Heading/G-Force -->
+        <div class="air-cockpit-header">
+          <div class="air-cockpit-id">
+            <span id="air-hud-icon" class="air-id-icon">✈️</span>
+            <span id="air-hud-model">F-15EX EAGLE</span>
+          </div>
+          <div class="air-hull-strip" title="Airframe Structural Integrity">
+            <span class="air-hull-lbl">AIRFRAME</span>
+            <div class="air-hull-bar-bg">
+              <div id="air-hud-hp-fill" class="air-hull-bar-fill" style="width:100%"></div>
+            </div>
+            <span id="air-hud-hp-val" class="air-hull-val">100%</span>
+          </div>
+          <div id="air-hud-hdg-pill" class="air-hdg-pill">HDG 000° N &bull; 1.0G</div>
+        </div>
+
+        <!-- Primary Cockpit "Six-Pack" Visual Flight Gauges Row -->
+        <div class="air-gauges-row">
+          <!-- 1. VISUAL SPEEDOMETER (AIRSPEED INDICATOR DIAL) + VERTICAL THRUST BAR -->
+          <div class="air-gauge-card">
+            <div class="air-speedo-cluster">
+              <div class="air-dial-wrap">
+                <svg id="air-asi-svg" viewBox="0 0 130 130" width="124" height="124">
+                  <!-- Recessed Instrument Bezel & Mounting Screws -->
+                  <rect x="2" y="2" width="126" height="126" rx="16" fill="#0b1116" stroke="#2c3e50" stroke-width="1.8" />
+                  <circle cx="12" cy="12" r="2.2" fill="#34495e" />
+                  <circle cx="118" cy="12" r="2.2" fill="#34495e" />
+                  <circle cx="12" cy="118" r="2.2" fill="#34495e" />
+                  <circle cx="118" cy="118" r="2.2" fill="#34495e" />
+                  <circle cx="65" cy="65" r="56" fill="#070d12" stroke="rgba(0, 210, 211, 0.35)" stroke-width="1.5" />
+
+                  <!-- Color-Coded Airspeed Operating Arcs (240° Sweep from -120° to +120°, r=48) -->
+                  <!-- Red Stall Arc (-120° to -86°) -->
+                  <path d="M 23.4 89.0 A 48 48 0 0 1 17.1 61.6" fill="none" stroke="#ff4757" stroke-width="4.5" stroke-linecap="butt" opacity="0.9" />
+                  <!-- Green Normal Operating Arc (-86° to +48°, 134° sweep -> large-arc-flag=0 so it follows the inner rim) -->
+                  <path d="M 17.1 61.6 A 48 48 0 0 1 100.7 32.9" fill="none" stroke="#2ecc71" stroke-width="4.5" stroke-linecap="butt" opacity="0.88" />
+                  <!-- Yellow Caution High-Speed Arc (+48° to +88°) -->
+                  <path d="M 100.7 32.9 A 48 48 0 0 1 113.0 63.3" fill="none" stroke="#f1c40f" stroke-width="4.5" stroke-linecap="butt" opacity="0.9" />
+                  <!-- Cyan/Orange Afterburner Overdrive Arc (+88° to +120°) -->
+                  <path d="M 113.0 63.3 A 48 48 0 0 1 106.6 89.0" fill="none" stroke="#00d2d3" stroke-width="4.5" stroke-linecap="butt" opacity="0.95" />
+
+                  <!-- Radial Speedometer Tick Marks (Every 20° from -120° to +120°) -->
+                  <g stroke="#dfe6e9" stroke-width="1.5" opacity="0.85">
+                    <line x1="65" y1="13" x2="65" y2="20" transform="rotate(-120 65 65)" />
+                    <line x1="65" y1="13" x2="65" y2="18" transform="rotate(-100 65 65)" stroke-width="1" opacity="0.55" />
+                    <line x1="65" y1="13" x2="65" y2="20" transform="rotate(-80 65 65)" />
+                    <line x1="65" y1="13" x2="65" y2="18" transform="rotate(-60 65 65)" stroke-width="1" opacity="0.55" />
+                    <line x1="65" y1="13" x2="65" y2="20" transform="rotate(-40 65 65)" />
+                    <line x1="65" y1="13" x2="65" y2="18" transform="rotate(-20 65 65)" stroke-width="1" opacity="0.55" />
+                    <line x1="65" y1="13" x2="65" y2="20" transform="rotate(0 65 65)" />
+                    <line x1="65" y1="13" x2="65" y2="18" transform="rotate(20 65 65)" stroke-width="1" opacity="0.55" />
+                    <line x1="65" y1="13" x2="65" y2="20" transform="rotate(40 65 65)" />
+                    <line x1="65" y1="13" x2="65" y2="18" transform="rotate(60 65 65)" stroke-width="1" opacity="0.55" />
+                    <line x1="65" y1="13" x2="65" y2="20" transform="rotate(80 65 65)" />
+                    <line x1="65" y1="13" x2="65" y2="18" transform="rotate(100 65 65)" stroke-width="1" opacity="0.55" />
+                    <line x1="65" y1="13" x2="65" y2="20" transform="rotate(120 65 65)" />
+                  </g>
+
+                  <!-- Dynamic Speedometer Scale Numbers (Adapted to Aircraft Envelope) -->
+                  <g fill="#bdc3c7" font-family="Consolas, monospace" font-size="7.5" font-weight="900" text-anchor="middle">
+                    <text id="asi-lbl-0" x="34" y="85">0</text>
+                    <text id="asi-lbl-1" x="29" y="60">120</text>
+                    <text id="asi-lbl-2" x="41" y="38">240</text>
+                    <text id="asi-lbl-3" x="65" y="29">360</text>
+                    <text id="asi-lbl-4" x="89" y="38">480</text>
+                    <text id="asi-lbl-5" x="101" y="60">600</text>
+                    <text id="asi-lbl-6" x="96" y="85">720</text>
+                  </g>
+
+                  <text x="65" y="45" text-anchor="middle" fill="#00d2d3" font-size="6.8" font-weight="900" letter-spacing="0.8">AIRSPEED</text>
+
+                  <!-- Cruise Speed Bug (Green Triangle on Outer Rim) -->
+                  <g id="air-asi-cruise-bug" transform="rotate(0 65 65)">
+                    <polygon points="65,12 62,6 68,6" fill="#2ecc71" />
+                  </g>
+
+                  <!-- Rotating Speedometer Needle -->
+                  <g id="air-asi-needle" transform="rotate(-120 65 65)">
+                    <line x1="65" y1="74" x2="65" y2="20" stroke="rgba(0,0,0,0.75)" stroke-width="4" stroke-linecap="round" />
+                    <polygon points="65,16 62.2,65 67.8,65" fill="#ffffff" />
+                    <polygon points="65,16 63.3,42 66.7,42" fill="#7bed9f" />
+                    <rect x="63.2" y="65" width="3.6" height="11" rx="1.5" fill="#7f8c8d" />
+                  </g>
+                  <circle cx="65" cy="65" r="5.5" fill="#1e272e" stroke="#00d2d3" stroke-width="1.5" />
+                  <circle cx="65" cy="65" r="2" fill="#dfe6e9" />
+
+                  <!-- Digital Speedometer Drum Window inside Bottom of Dial -->
+                  <rect x="31" y="84" width="68" height="27" rx="4" fill="#04080c" stroke="rgba(0, 210, 211, 0.45)" stroke-width="1.1" />
+                  <text id="air-asi-kmh" x="56" y="99" text-anchor="end" fill="#7bed9f" font-family="Consolas, monospace" font-size="14" font-weight="900">000</text>
+                  <text x="59" y="94" fill="#95a5a6" font-size="5.8" font-weight="900">KM/H</text>
+                  <text id="air-asi-kts" x="59" y="101" fill="#00d2d3" font-family="Consolas, monospace" font-size="6.2" font-weight="900">000KT</text>
+                  <text id="air-asi-mach" x="65" y="109" text-anchor="middle" fill="#f1c40f" font-family="Consolas, monospace" font-size="6.5" font-weight="900">M 0.00 &bull; CRUISE</text>
+                </svg>
+                <div class="air-gauge-caption">SPEEDOMETER (ASI)</div>
+              </div>
+
+              <!-- Vertical Throttle / Afterburner Bar beside Speedometer -->
+              <div class="air-throttle-col" title="[W] Afterburner / Boost • [S] Airbrake / Loiter">
+                <span class="air-thr-top-lbl">AB</span>
+                <div class="air-thr-bar-track">
+                  <div class="air-thr-ab-zone"></div>
+                  <div id="air-thr-fill" class="air-thr-bar-fill" style="height: 60%"></div>
+                </div>
+                <span id="air-thr-val" class="air-thr-pct">65%</span>
+                <span class="air-thr-bot-lbl">THR</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. TURN COORDINATOR & SLIP/SKID INDICATOR ("STEP ON THE BALL" INCLINOMETER) -->
+          <div class="air-gauge-card">
+            <div class="air-dial-wrap">
+              <svg id="air-tc-svg" viewBox="0 0 130 130" width="124" height="124">
+                <!-- Recessed Instrument Bezel & Mounting Screws -->
+                <rect x="2" y="2" width="126" height="126" rx="16" fill="#0b1116" stroke="#2c3e50" stroke-width="1.8" />
+                <circle cx="12" cy="12" r="2.2" fill="#34495e" />
+                <circle cx="118" cy="12" r="2.2" fill="#34495e" />
+                <circle cx="12" cy="118" r="2.2" fill="#34495e" />
+                <circle cx="118" cy="118" r="2.2" fill="#34495e" />
+                <circle cx="65" cy="65" r="56" fill="#070d12" stroke="rgba(241, 196, 15, 0.35)" stroke-width="1.5" />
+
+                <!-- Turn Coordinator Upper Bezel Markings (Level Reference + L/R Standard-Rate Turn Marks) -->
+                <text x="65" y="23" text-anchor="middle" fill="#bdc3c7" font-size="6.3" font-weight="900" letter-spacing="0.7">TURN COORDINATOR</text>
+                <!-- Level Flight Reference Ticks (0°) -->
+                <line x1="16" y1="54" x2="24" y2="54" stroke="#ffffff" stroke-width="2.2" />
+                <line x1="106" y1="54" x2="114" y2="54" stroke="#ffffff" stroke-width="2.2" />
+                <!-- Standard-Rate Turn Index Marks (2-Min Turn at ±20° Bank) -->
+                <line x1="19" y1="70" x2="27" y2="67" stroke="#f1c40f" stroke-width="2.4" />
+                <line x1="111" y1="70" x2="103" y2="67" stroke="#f1c40f" stroke-width="2.4" />
+                <text x="19" y="79" text-anchor="middle" fill="#f1c40f" font-size="8.5" font-weight="900">L</text>
+                <text x="111" y="79" text-anchor="middle" fill="#f1c40f" font-size="8.5" font-weight="900">R</text>
+                <!-- 35° Steep Bank Ticks -->
+                <line x1="25" y1="36" x2="31" y2="40" stroke="#7f8c8d" stroke-width="1.4" />
+                <line x1="105" y1="36" x2="99" y2="40" stroke="#7f8c8d" stroke-width="1.4" />
+
+                <!-- Digital Turn Rate & Bank Readout above Miniature Plane -->
+                <text id="air-tc-rate-val" x="65" y="34" text-anchor="middle" fill="#7bed9f" font-family="Consolas, monospace" font-size="7.2" font-weight="900">0° BANK &bull; 0°/S</text>
+
+                <!-- Rotating Miniature Airplane Silhouette (Banks with Roll + Turn Rate) -->
+                <g id="air-tc-plane" transform="rotate(0 65 54)">
+                  <!-- Left & Right Wings with Upturned Wingtips -->
+                  <path d="M 25 50 L 29 54 L 101 54 L 105 50" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" />
+                  <!-- Horizontal Tailplane -->
+                  <line x1="52" y1="45" x2="78" y2="45" stroke="#dfe6e9" stroke-width="1.8" stroke-linecap="round" />
+                  <!-- Vertical Tail Fin -->
+                  <line x1="65" y1="37" x2="65" y2="54" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round" />
+                  <!-- Center Fuselage Hub -->
+                  <circle cx="65" cy="54" r="5.2" fill="#f1c40f" stroke="#111" stroke-width="1.4" />
+                  <circle cx="65" cy="54" r="1.8" fill="#111" />
+                </g>
+
+                <!-- SLIP / SKID INCLINOMETER ("BALL IN CURVED GLASS TUBE") -->
+                <text x="65" y="83" text-anchor="middle" fill="#95a5a6" font-size="5.8" font-weight="900" letter-spacing="0.8">SLIP / SKID INCLINOMETER</text>
+                <!-- Curved Liquid-Filled Glass Tube Background -->
+                <path d="M 29 90 Q 65 104 101 90" fill="none" stroke="#142029" stroke-width="13.5" stroke-linecap="round" />
+                <path d="M 29 90 Q 65 104 101 90" fill="none" stroke="rgba(255, 255, 255, 0.28)" stroke-width="11.5" stroke-linecap="round" />
+                <path d="M 30 90 Q 65 104 100 90" fill="none" stroke="#0b151c" stroke-width="9.5" stroke-linecap="round" />
+                <!-- Glass Highlight Reflection -->
+                <path d="M 33 87 Q 65 100 97 87" fill="none" stroke="rgba(255, 255, 255, 0.16)" stroke-width="1.5" stroke-linecap="round" />
+
+                <!-- Sliding Inclinometer Ball (Moves Left/Right along Tube Curve with Slip/Skid Forces) -->
+                <g id="air-slip-ball" transform="translate(0, 0)">
+                  <circle cx="65" cy="97" r="4.8" fill="#f1c40f" stroke="#111111" stroke-width="1.2" />
+                  <circle cx="63.5" cy="95.4" r="1.5" fill="#ffffff" opacity="0.85" />
+                </g>
+
+                <!-- Two Central Vertical Reference Lubber Wires (Ball Centered = Coordinated Flight) -->
+                <line x1="59" y1="90" x2="59" y2="104" stroke="#ffffff" stroke-width="1.7" />
+                <line x1="71" y1="90" x2="71" y2="104" stroke="#ffffff" stroke-width="1.7" />
+
+                <!-- Coordination Status Tag -->
+                <text id="air-slip-status" x="65" y="114" text-anchor="middle" fill="#2ecc71" font-family="Consolas, monospace" font-size="6.8" font-weight="900">● COORDINATED</text>
+              </svg>
+              <div class="air-gauge-caption">TURN &amp; SLIP / SKID</div>
+            </div>
+          </div>
+
+          <!-- 3. ARTIFICIAL HORIZON (ADI BALL) + VERTICAL ALTIMETER & VSI TAPES -->
+          <div class="air-gauge-card">
+            <div class="air-adi-cluster">
+              <div class="air-dial-wrap">
+                <svg id="air-adi-svg" viewBox="0 0 112 130" width="108" height="124">
+                  <defs>
+                    <clipPath id="adi-sphere-clip">
+                      <circle cx="56" cy="58" r="45" />
+                    </clipPath>
+                  </defs>
+                  <rect x="2" y="2" width="108" height="126" rx="14" fill="#0b1116" stroke="#2c3e50" stroke-width="1.8" />
+                  <circle cx="56" cy="58" r="46.5" fill="#070d12" stroke="rgba(116, 185, 255, 0.45)" stroke-width="1.5" />
+
+                  <!-- Pitching & Rolling Sky/Ground Horizon Sphere -->
+                  <g clip-path="url(#adi-sphere-clip)">
+                    <g id="air-adi-roll-group" transform="rotate(0 56 58)">
+                      <g id="air-adi-pitch-group" transform="translate(0, 0)">
+                        <!-- Sky Upper Half -->
+                        <rect x="-40" y="-80" width="192" height="138" fill="#1b6ca8" />
+                        <!-- Ground Lower Half -->
+                        <rect x="-40" y="58" width="192" height="138" fill="#6e4720" />
+                        <!-- Horizon Line -->
+                        <line x1="-30" y1="58" x2="142" y2="58" stroke="#ffffff" stroke-width="2" />
+                        <!-- Pitch Ladder Rungs (+20°, +10°, -10°, -20°) -->
+                        <line x1="42" y1="32" x2="70" y2="32" stroke="#ffffff" stroke-width="1.3" />
+                        <line x1="46" y1="45" x2="66" y2="45" stroke="#ffffff" stroke-width="1.3" />
+                        <line x1="46" y1="71" x2="66" y2="71" stroke="#ffffff" stroke-width="1.3" stroke-dasharray="3 2" />
+                        <line x1="42" y1="84" x2="70" y2="84" stroke="#ffffff" stroke-width="1.3" stroke-dasharray="3 2" />
+                      </g>
+                    </g>
+                  </g>
+
+                  <!-- Fixed Gull-Wing Aircraft Reference Symbol in Center of ADI -->
+                  <path d="M 32 58 L 46 58 L 50 62 L 54 58 M 58 58 L 62 62 L 66 58 L 80 58" fill="none" stroke="#f1c40f" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+                  <circle cx="56" cy="58" r="2.2" fill="#f1c40f" />
+
+                  <!-- Digital Pitch / Alt / VSI Footer inside ADI Card -->
+                  <rect x="10" y="106" width="92" height="16" rx="3" fill="#04080c" stroke="rgba(116, 185, 255, 0.35)" stroke-width="1" />
+                  <text id="air-adi-footer" x="56" y="117" text-anchor="middle" fill="#74b9ff" font-family="Consolas, monospace" font-size="7.2" font-weight="900">ALT 165M &bull; VSI +0M/S</text>
+                </svg>
+                <div class="air-gauge-caption">ATTITUDE &amp; ALT</div>
+              </div>
+
+              <!-- Vertical Altitude Bar (`ALT`) -->
+              <div class="air-alt-col" title="Altitude Above Ground Level (AGL)">
+                <span class="air-thr-top-lbl" style="color:#74b9ff;">ALT</span>
+                <div class="air-thr-bar-track">
+                  <div id="air-alt-fill" class="air-alt-bar-fill" style="height: 35%"></div>
+                </div>
+                <span id="air-alt-val" class="air-thr-pct" style="color:#74b9ff;">165M</span>
+                <span id="air-vsi-val" class="air-thr-bot-lbl" style="color:#7bed9f;">+0M/S</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Visual Weapon Bay Pylon & Countermeasure Strip (Minimal Text, Visual Icons & Bars) -->
+        <div class="air-pylons-row">
+          <div id="air-pylon-1" class="air-pylon-slot active">
+            <div class="air-pylon-top">
+              <span class="air-pylon-key">[1]</span>
+              <span id="air-pylon-1-icon" class="air-pylon-icon">💣</span>
+              <span id="air-pylon-1-lbl" class="air-pylon-lbl">PRIMARY</span>
+            </div>
+            <div class="air-pylon-bar-bg">
+              <div id="air-pylon-1-bar" class="air-pylon-bar-fill" style="width:100%"></div>
+            </div>
+          </div>
+
+          <div id="air-pylon-2" class="air-pylon-slot">
+            <div class="air-pylon-top">
+              <span class="air-pylon-key">[2/SPC]</span>
+              <span id="air-pylon-2-icon" class="air-pylon-icon">🚀</span>
+              <span id="air-pylon-2-lbl" class="air-pylon-lbl">ORDNANCE</span>
+            </div>
+            <div class="air-pylon-bar-bg">
+              <div id="air-pylon-2-bar" class="air-pylon-bar-fill" style="width:100%"></div>
+            </div>
+          </div>
+
+          <div id="air-pylon-3" class="air-pylon-slot">
+            <div class="air-pylon-top">
+              <span class="air-pylon-key">[3]</span>
+              <span id="air-pylon-3-icon" class="air-pylon-icon">🎯</span>
+              <span id="air-pylon-3-lbl" class="air-pylon-lbl">HEAVY BAY</span>
+            </div>
+            <div class="air-pylon-bar-bg">
+              <div id="air-pylon-3-bar" class="air-pylon-bar-fill" style="width:100%"></div>
+            </div>
+          </div>
+
+          <div id="air-pylon-cm" class="air-pylon-slot cm-slot">
+            <div class="air-pylon-top">
+              <span class="air-pylon-key">[X]</span>
+              <span id="air-pylon-cm-icon" class="air-pylon-icon">✨</span>
+              <span id="air-pylon-cm-lbl" class="air-pylon-lbl">ECM/FLARE</span>
+            </div>
+            <div class="air-pylon-bar-bg">
+              <div id="air-pylon-cm-bar" class="air-pylon-bar-fill cm" style="width:100%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Center: Selected Weapon Indicator + Weapon Hotbar + Big Case Roll Button -->
+    <div id="bottom-center-hud">
+      <div id="selected-weapon-indicator">
+        🎯 SELECTED WEAPON: <span id="selected-weapon-indicator-name">[1] M4A1 TACTICAL</span>
+      </div>
+      <div id="slot-list">
+        <div class="weapon-slot active" id="slot-1" data-slot-idx="0">
+          <span class="slot-key">1</span>
+          <span class="slot-title" id="slot-1-name">M4A1</span>
+          <span class="slot-active-pill">▲ SELECTED</span>
+        </div>
+        <div class="weapon-slot" id="slot-2" data-slot-idx="1">
+          <span class="slot-key">2</span>
+          <span class="slot-title" id="slot-2-name">MP443</span>
+          <span class="slot-active-pill">▲ SELECTED</span>
+        </div>
+        <div class="weapon-slot" id="slot-3" data-slot-idx="2">
+          <span class="slot-key">3</span>
+          <span class="slot-title" id="slot-3-name">RPG-7</span>
+          <span class="slot-active-pill">▲ SELECTED</span>
+        </div>
+        <div class="weapon-slot" id="slot-4" data-slot-idx="3">
+          <span class="slot-key">4</span>
+          <span class="slot-title" id="slot-4-name">HAMMER</span>
+          <span class="slot-active-pill">▲ SELECTED</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3-Tier Tactical Battle Stats & Scoreboard Modal (Hold TAB) -->
+    <div id="scoreboard" class="hidden">
+      <div class="sb-header">
+        <div>
+          <h2>TACTICAL BATTLE STATS, TICKET ECONOMY &amp; CONTROLS [TAB]</h2>
+          <p id="sb-match-sub">WIN CONDITION: DEPLETE ENEMY TICKETS TO 0 OR LEAD AT 00:00 &bull; HOLD MAJORITY OF OBJECTIVES A–E TO INFLICT TICKET BLEED</p>
+        </div>
+        <div class="sb-clock-pill" id="sb-clock-pill">15:00 REMAINING</div>
+      </div>
+
+      <!-- Ticket Economy & Quick Controls Reference Strip (Moved from main combat HUD into [TAB]) -->
+      <div id="ticket-economy-strip" style="background:rgba(16,26,36,0.9);border:1px solid rgba(241,196,15,0.35);border-radius:4px;padding:6px 12px;margin-bottom:8px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;">
+        <span>🎟️ <b>SQUAD AAS TICKET ECONOMY (400 START • NO PASSIVE PRINT):</b> INFANTRY <b>-1</b> (0 IF REVIVED) &bull; CAR <b>-5</b> &bull; IFV/APC <b>-10</b> &bull; TANK <b>-15</b> &bull; CAP NEUTRAL <b>+20 🎟️</b> / CAP ENEMY <b>+30 🎟️ (-10 DEF)</b> &bull; BLEED: 3F <b>-6/m</b>, 4F <b>-15/m</b>, 5F <b>-60/m MERCY</b></span>
+        <span style="color:#74b9ff;">⌨️ <b>CONTROLS:</b> [WASD] Move &bull; [C/Z] Crouch/Prone &bull; [E] Enter/Exit Vehicle + Drag Ally &bull; [F] Revive/Heal + Pick Up Ammo + Build Chest Wall &bull; [K] Tactical Map &bull; [F2] FPS</span>
+      </div>
+
+      <!-- TIER 1: WHICH SIDE IS DOING BETTER (FACTION COMPARISON) -->
+      <div class="sb-section-label">1. FACTION SUPREMACY &amp; TERRITORY CONTROL (WHICH SIDE IS WINNING)</div>
+      <div id="sb-side-comparison" class="sb-side-comparison"></div>
+
+      <!-- TIER 2: WHICH SQUAD IS DOING BETTER (TACTICAL SQUAD LEADERBOARD) -->
+      <div class="sb-section-label">2. TACTICAL SQUAD RANKINGS — COMBINED SQUAD SCORE, REVIVES &amp; ANTI-ARMOR (WHICH SQUAD IS DOING BETTER)</div>
+      <div id="sb-squad-leaderboard" class="sb-squad-grid"></div>
+
+      <!-- TIER 3: WHICH INDIVIDUAL SOLDIER IS DOING BETTER -->
+      <div class="sb-section-label">3. INDIVIDUAL SOLDIER LEADERBOARD (RANKED BY PERSONAL COMBAT &amp; SUPPORT SCORE)</div>
+      <div class="sb-columns">
+        <div class="sb-team-col">
+          <h3 class="us-title" id="sb-us-header">US FORCES — INDIVIDUAL RANKINGS</h3>
+          <div class="sb-scroll">
+            <table>
+              <thead>
+                <tr><th>#</th><th>SOLDIER</th><th>SQD</th><th>ROLE</th><th>K</th><th>D</th><th>REV</th><th>VEH</th><th title="War Crimes (Medics Killed)" style="color:#ff7675">CRM</th><th>SCORE</th></tr>
+              </thead>
+              <tbody id="sb-us-body"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="sb-team-col">
+          <h3 class="ru-title" id="sb-ru-header">RU FORCES — INDIVIDUAL RANKINGS</h3>
+          <div class="sb-scroll">
+            <table>
+              <thead>
+                <tr><th>#</th><th>SOLDIER</th><th>SQD</th><th>ROLE</th><th>K</th><th>D</th><th>REV</th><th>VEH</th><th title="War Crimes (Medics Killed)" style="color:#ff7675">CRM</th><th>SCORE</th></tr>
+              </thead>
+              <tbody id="sb-ru-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- End-of-Round Victory / Post-Match Commendations Screen -->
+  <div id="victory-screen" class="hidden">
+    <div class="victory-container">
+      <div class="victory-banner" id="victory-banner">
+        <div class="victory-tag" id="victory-reason-tag">CONQUEST VICTORY — ENEMY TICKETS DEPLETED</div>
+        <h1 id="victory-title">US FORCES VICTORY</h1>
+        <div class="victory-scoreline" id="victory-scoreline">US 148 TICKETS &mdash; RU 0 TICKETS</div>
+      </div>
+
+      <div class="victory-section-title">FACTION PERFORMANCE COMPARISON</div>
+      <div id="victory-side-summary" class="sb-side-comparison"></div>
+
+      <div class="victory-section-title">TOP TACTICAL SQUADS OF THE MATCH</div>
+      <div id="victory-squad-summary" class="sb-squad-grid"></div>
+
+      <div class="victory-section-title">INDIVIDUAL MATCH COMMENDATIONS &amp; MVPs</div>
+      <div id="victory-mvp-cards" class="victory-mvp-grid"></div>
+
+      <div class="victory-footer">
+        <button id="next-round-btn">DEPLOY NEXT CONQUEST ROUND</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Menu: Era & Map Theater Selection Screen -->
+  <div id="main-menu-screen" style="position:fixed;inset:0;z-index:9500;background:radial-gradient(circle at 50% 22%, rgba(18,30,46,0.95), rgba(6,10,16,0.99));display:flex;align-items:center;justify-content:center;padding:18px;font-family:'Rajdhani','Segoe UI',sans-serif;color:#ecf0f1;overflow-y:auto;">
+    <div style="width:1120px;max-width:96vw;background:rgba(10,16,24,0.97);border:1.5px solid rgba(241,196,15,0.45);border-radius:12px;padding:24px 28px;box-shadow:0 20px 65px rgba(0,0,0,0.9);">
+      <div style="border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:14px;margin-bottom:18px;">
+        <div style="font-size:11.5px;font-weight:900;color:#f1c40f;letter-spacing:2px;">BLOCKFARE &bull; MULTI-ERA COMBINED ARMS SANDBOX</div>
+        <h1 id="main-menu-title" style="margin:2px 0 0 0;font-size:28px;font-weight:900;letter-spacing:1px;color:#ffffff;">BLOCKFARE — SELECT YOUR ERA</h1>
+        <div style="font-size:13px;color:#94a3b8;margin-top:2px;">Choose between Modern Blockfare, Medieval Blockfare, and Jurassic Blockfare to configure your combat role, squad, and deployment point.</div>
+      </div>
+
+      <!-- 3 Era Selection Cards (Click card or button to open that Era's Configure & Deploy screen) -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:16px;">
+        <!-- 1. MODERN BLOCKFARE -->
+        <div class="main-menu-era-card active" data-era-card="modern" style="background:linear-gradient(180deg,rgba(18,34,52,0.95),rgba(10,18,28,0.98));border:2px solid #00d2d3;border-radius:10px;padding:18px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;transition:transform 0.14s ease, box-shadow 0.14s ease;box-shadow:0 0 22px rgba(0,210,211,0.22);">
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+              <span style="background:rgba(0,210,211,0.18);border:1px solid #00d2d3;color:#00d2d3;font-size:10.5px;font-weight:900;padding:2px 8px;border-radius:4px;letter-spacing:1px;">✈️ MODERN BLOCKFARE</span>
+              <span class="era-card-status-pill" style="font-size:11px;font-weight:900;color:#7bed9f;">✓ ACTIVE</span>
+            </div>
+            <h2 style="margin:0 0 6px 0;font-size:21px;color:#ffffff;font-weight:900;">FRUGIS RIVER VALLEY</h2>
+            <p style="font-size:12.5px;color:#cbd5e1;line-height:1.45;margin:0 0 12px 0;">
+              Combined-arms urban river valley with destructible apartments, radar hill, fortified airfields, and 5 conquest objectives.
+            </p>
+            <div style="background:rgba(0,0,0,0.38);border-left:3px solid #00d2d3;padding:8px 10px;border-radius:4px;font-size:11.5px;color:#dfe6e9;margin-bottom:14px;line-height:1.45;">
+              <div><strong>VEHICLES:</strong> B-2 Spirit Bomber, Jets, Tanks, IFVs &amp; Motorcycles</div>
+              <div style="margin-top:3px;"><strong>ROLES:</strong> 7 Spec-Ops Classes (Engineer, Medic, Assault, Support, Recon, Armor, Pilot)</div>
+            </div>
+          </div>
+          <button type="button" class="era-select-btn" data-era="modern" style="width:100%;background:#00d2d3;color:#06151a;border:none;border-radius:6px;padding:11px 14px;font-size:13.5px;font-weight:900;letter-spacing:0.6px;cursor:pointer;">ENTER MODERN BLOCKFARE ➔</button>
+        </div>
+
+        <!-- 2. MEDIEVAL BLOCKFARE -->
+        <div class="main-menu-era-card" data-era-card="medieval" style="background:linear-gradient(180deg,rgba(44,30,18,0.95),rgba(20,14,10,0.98));border:2px solid rgba(243,156,18,0.55);border-radius:10px;padding:18px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;transition:transform 0.14s ease, box-shadow 0.14s ease;">
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+              <span style="background:rgba(243,156,18,0.2);border:1px solid #f39c12;color:#ffd32a;font-size:10.5px;font-weight:900;padding:2px 8px;border-radius:4px;letter-spacing:1px;">🏰 MEDIEVAL BLOCKFARE</span>
+              <span class="era-card-status-pill" style="font-size:11px;font-weight:900;color:#95a5a6;">SELECT</span>
+            </div>
+            <h2 style="margin:0 0 6px 0;font-size:21px;color:#ffd32a;font-weight:900;">IRONKEEP CITADEL</h2>
+            <p style="font-size:12.5px;color:#e2d6c5;line-height:1.45;margin:0 0 12px 0;">
+              12th-century fortress valley with grand stone castles, crenellated curtain walls, iron portcullis gatehouses, and siege ridges.
+            </p>
+            <div style="background:rgba(0,0,0,0.42);border-left:3px solid #f39c12;padding:8px 10px;border-radius:4px;font-size:11.5px;color:#f5e6d3;margin-bottom:14px;line-height:1.45;">
+              <div><strong>SIEGE &amp; CAVALRY:</strong> Counterweight Trebuchets &amp; Armored Warhorses</div>
+              <div style="margin-top:3px;"><strong>ROLES:</strong> 6 Mount &amp; Blade Classes (Footman, Zweihänder, Lancer, Longbow, Arbalest, Horse Archer)</div>
+            </div>
+          </div>
+          <button type="button" class="era-select-btn" data-era="medieval" style="width:100%;background:#f39c12;color:#1a1005;border:none;border-radius:6px;padding:11px 14px;font-size:13.5px;font-weight:900;letter-spacing:0.6px;cursor:pointer;">ENTER MEDIEVAL BLOCKFARE ➔</button>
+        </div>
+
+        <!-- 3. JURASSIC BLOCKFARE -->
+        <div class="main-menu-era-card" data-era-card="jurassic" style="background:linear-gradient(180deg,rgba(18,42,24,0.95),rgba(10,22,14,0.98));border:2px solid rgba(46,204,113,0.55);border-radius:10px;padding:18px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;transition:transform 0.14s ease, box-shadow 0.14s ease;">
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+              <span style="background:rgba(46,204,113,0.2);border:1px solid #2ecc71;color:#7bed9f;font-size:10.5px;font-weight:900;padding:2px 8px;border-radius:4px;letter-spacing:1px;">🦖 JURASSIC BLOCKFARE</span>
+              <span class="era-card-status-pill" style="font-size:11px;font-weight:900;color:#95a5a6;">SELECT</span>
+            </div>
+            <h2 style="margin:0 0 6px 0;font-size:21px;color:#7bed9f;font-weight:900;">ISLA CARNIVORA</h2>
+            <p style="font-size:12.5px;color:#d1f2d9;line-height:1.45;margin:0 0 12px 0;">
+              Prehistoric volcanic jungle island with giant paddock gates, colossal skeleton ribcages, and 5 dinosaur nest territories.
+            </p>
+            <div style="background:rgba(0,0,0,0.42);border-left:3px solid #2ecc71;padding:8px 10px;border-radius:4px;font-size:11.5px;color:#e8f8f5;margin-bottom:14px;line-height:1.45;">
+              <div><strong>FACTIONS:</strong> Allied Human Hunters (USA + RUS) vs Giant Dinosaur Pack</div>
+              <div style="margin-top:3px;"><strong>CLASH:</strong> Bows, Crossbows, Long Spears &amp; Warhorses vs T-Rex, Triceratops &amp; Raptors</div>
+            </div>
+          </div>
+          <button type="button" class="era-select-btn" data-era="jurassic" style="width:100%;background:#2ecc71;color:#061f10;border:none;border-radius:6px;padding:11px 14px;font-size:13.5px;font-weight:900;letter-spacing:0.6px;cursor:pointer;">ENTER JURASSIC BLOCKFARE ➔</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Deploy / Class & Spawn Screen (Strictly Single-Screen Vertical Fit, Internal Role List Scroll) -->
+  <div id="deploy-screen">
+    <div class="deploy-container">
+      <div class="deploy-header">
+        <div class="deploy-title-row">
+          <span class="game-tag" id="deploy-era-tag">✈️ MODERN BLOCKFARE</span>
+          <span class="deploy-title-sep">&bull;</span>
+          <h1 id="deploy-map-title">FRUGIS RIVER VALLEY</h1>
+        </div>
+        <div class="deploy-header-actions">
+          <div class="mode-seg-group">
+            <button id="mode-btn-sp" type="button" class="mode-seg-btn active" data-mode="SINGLEPLAYER">🎮 Solo</button>
+            <button id="mode-btn-mp" type="button" class="mode-seg-btn" data-mode="MULTIPLAYER">🌐 Co-Op</button>
+          </div>
+          <label id="sp-ai-scale-wrap" class="ai-scale-label" title="AI Bot Count">
+            <span>AI:</span>
+            <select id="sp-bot-mode-select">
+              <option value="FULL_AI" selected>250 (125v125)</option>
+              <option value="LARGE_AI">160 (80v80)</option>
+              <option value="TACTICAL_AI">80 (40v40)</option>
+              <option value="SQUAD_AI">32 (16v16)</option>
+            </select>
+          </label>
+          <button type="button" id="deploy-gunsmith-btn" class="deploy-tool-btn armory" title="Customize Weapons, Attachments, Body Armor &amp; Armory Cases [L]">🔧 [L] Armory (<span id="deploy-cash-val">$600</span>)</button>
+          <button type="button" id="deploy-backpack-btn" class="deploy-tool-btn backpack" title="Open Backpack &amp; Extracted Loot Warehouse [I]">🎒 [I] Pack</button>
+          <button type="button" id="deploy-settings-btn" class="deploy-tool-btn settings" title="Audio Volume, Building Destruction, Friendly Fire &amp; FPS Settings">⚙️ Settings</button>
+          <button id="open-main-menu-btn" type="button" class="deploy-nav-btn" title="Return to Era Selection Menu">← Eras</button>
+        </div>
+      </div>
+
+      <!-- Multiplayer Server Lobby, Room Code & LAN/Browser Join Bar (Hidden in Solo) -->
+      <div id="mp-lobby-bar" class="hidden" style="background:rgba(16,28,38,0.92);border:1px solid rgba(46,204,113,0.45);border-radius:4px;padding:5px 10px;margin-bottom:6px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span style="font-size:10.5px;font-weight:900;color:#2ecc71;">🌐 LOBBY:</span>
+          <label style="font-size:10px;color:#bdc3c7;font-weight:700;">NAME
+            <input id="mp-callsign-input" type="text" maxlength="18" value="VIPER_1" style="background:#0d161e;color:#fff;border:1px solid rgba(255,255,255,0.22);border-radius:3px;padding:2px 6px;font-size:10.5px;font-weight:800;width:90px;margin-left:3px;" />
+          </label>
+          <label style="font-size:10px;color:#bdc3c7;font-weight:700;">ROOM
+            <input id="mp-room-input" type="text" maxlength="20" value="FRUGIS-1" style="background:#0d161e;color:#f1c40f;border:1px solid rgba(241,196,15,0.4);border-radius:3px;padding:2px 6px;font-size:10.5px;font-weight:900;width:78px;margin-left:3px;text-transform:uppercase;" />
+          </label>
+          <select id="mp-bot-mode-select" style="background:#0d161e;color:#7bed9f;border:1px solid rgba(46,204,113,0.4);border-radius:3px;padding:2px 5px;font-size:10px;font-weight:800;">
+            <option value="FULL_AI">250 AI</option>
+            <option value="LARGE_AI">160 AI</option>
+            <option value="TACTICAL_AI">80 AI</option>
+            <option value="SQUAD_AI">32 AI</option>
+            <option value="NO_AI">0 AI (PvP)</option>
+          </select>
+          <button id="mp-join-btn" type="button" style="background:#27ae60;color:#fff;border:none;border-radius:3px;padding:3px 8px;font-size:10px;font-weight:900;cursor:pointer;">JOIN</button>
+          <button id="mp-copy-invite-btn" type="button" style="background:#2980b9;color:#fff;border:none;border-radius:3px;padding:3px 8px;font-size:10px;font-weight:900;cursor:pointer;">📋 INVITE</button>
+          <button id="mp-open-coop-btn" type="button" style="background:#f39c12;color:#111;border:none;border-radius:3px;padding:3px 8px;font-size:10px;font-weight:900;cursor:pointer;" title="Open a 2nd player window to test Co-Op/PvP">🪟 +2P</button>
+        </div>
+        <div id="mp-live-status" style="font-size:10px;color:#dfe6e9;font-weight:700;">
+          🟢 ROOM <strong style="color:#f1c40f">FRUGIS-1</strong>
+        </div>
+      </div>
+
+      <div class="deploy-grid">
+        <!-- Left Column: Scrollable Combat Role List + Pinned Faction/Squad Selectors -->
+        <div class="deploy-card role-col-card">
+          <div class="deploy-sec-hdr">
+            <h2>1. SELECT COMBAT ROLE</h2>
+            <div id="deploy-air-economy-bar">
+              <span>💰 $5,000</span>
+              <span>🦇 B-2: 0/25 KILLS</span>
+            </div>
+          </div>
+
+          <div class="class-list" id="class-list">
+            <button class="class-btn active" data-class="engineer">
+              <div class="class-title">🛠️ ENGINEER (AT/AA LAUNCHER &amp; 2× REPAIR)</div>
+              <div class="class-loadout">M4A1 Tactical &bull; MP443 &bull; <strong>RPG-7V2 AT / Stinger AA [3]</strong> &bull; <strong>55 Armor (-6% Spd)</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> RPG-7 &amp; Stinger [3], 2× Repair, 55 Blast Armor &bull; <span style="color:#ff7675;">-</span> Cannot Fly Planes, -6% Spd</div>
+            </button>
+            <button class="class-btn" data-class="medic">
+              <div class="class-title">➕ MEDIC (2× REVIVE SPEED &amp; 9 DRESSINGS)</div>
+              <div class="class-loadout">Kriss Vector .45 &bull; MP443 &bull; <strong>600 HP Medic Bag</strong> &bull; <strong>38 Armor (+6% Spd)</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> 2× Revive/Bandage, 9 Dressings, +6% Spd &bull; <span style="color:#ff7675;">-</span> Cannot Fly Planes, Light Armor, No AT</div>
+            </button>
+            <button class="class-btn" data-class="assault">
+              <div class="class-title">💥 ASSAULT (FAST RELOAD + C4 BREACHER)</div>
+              <div class="class-loadout">AK-15 7.62mm &bull; MP443 &bull; <strong>C4 Breach Charges</strong> &bull; <strong>50 Armor (+8% Spd)</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> -24% Reload, -18% Recoil, +8% Spd, Extra Frag &amp; C4 &bull; <span style="color:#ff7675;">-</span> Cannot Fly Planes, No Ranged AT</div>
+            </button>
+            <button class="class-btn" data-class="support">
+              <div class="class-title">📦 SUPPORT (HEAVY 80 ARMOR + AMMO STASHES)</div>
+              <div class="class-loadout">M249 SAW (100-Rd) &bull; MP443 &bull; <strong>Ammo &amp; Kit Stash [7]</strong> &bull; <strong>80 Armor (-12% Spd)</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> 80 Plate Armor, +50% Ammo, Stash Drops [7] &bull; <span style="color:#ff7675;">-</span> Cannot Fly Planes, -12% Spd</div>
+            </button>
+            <button class="class-btn" data-class="recon">
+              <div class="class-title">🎯 RECON (STEALTH SNIPER + SPAWN BEACON)</div>
+              <div class="class-loadout">SV-98M 8× Sniper &bull; MP443 &bull; <strong>[6] Insertion Beacon</strong> &bull; <strong>25 Armor (+14% Spd)</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> +14% Sprint, 8× Sniper, Spawn Beacon [6] &bull; <span style="color:#ff7675;">-</span> Cannot Fly Planes, Light 25 Armor</div>
+            </button>
+            <button class="class-btn" data-class="armor">
+              <div class="class-title">🛡️ ARMOR CREWMAN (TANK / IFV MASTER + APS [X])</div>
+              <div class="class-loadout">HK MP7A2 PDW &bull; MP443 &bull; <strong>RPG-7V2 / Stinger [3]</strong> &bull; <strong>65 Armor (-8% Spd)</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> +22 HP/s Tank Auto-Repair, +22% Reload, APS [X] &bull; <span style="color:#ff7675;">-</span> Cannot Fly Planes, PDW Only</div>
+            </button>
+            <button class="class-btn" data-class="pilot">
+              <div class="class-title">✈️ COMBAT PILOT (CERTIFIED FOR JETS &amp; B-2!)</div>
+              <div class="class-loadout">HK MP7A2 / P90 PDW &bull; MP443 &bull; <strong>FIM-92 Stinger [3]</strong> &bull; <strong>25 Suit (+12% Spd)</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> <strong>EXCLUSIVE PLANE / B-2 LICENSE</strong>, +28% Turn, +25 HP/s Air Repair &bull; <span style="color:#ff7675;">-</span> 25 Armor, PDW Only</div>
+            </button>
+            <!-- MOUNT & BLADE MEDIEVAL ERA CLASSES -->
+            <button class="class-btn hidden" data-class="swordsman" data-era-only="medieval" style="border-color:#f39c12;">
+              <div class="class-title" style="color:#ffd32a;">⚔️ [F5] TEMPLAR FOOTMAN (1H SWORD &amp; 1H SHIELD)</div>
+              <div class="class-loadout">1H Arming Sword &amp; Heater Shield [1] &bull; Throwing Daggers [2] &bull; <strong>80 Mail &amp; Plate</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> 1H Shield Blocks 70% Arrows/Melee [RMB], 108 DMG Slash &bull; <span style="color:#ff7675;">-</span> Shorter 4.2m Reach</div>
+            </button>
+            <button class="class-btn hidden" data-class="greatsword_knight" data-era-only="medieval" style="border-color:#f39c12;">
+              <div class="class-title" style="color:#ffd32a;">🗡️ [F6] ZWEIHÄNDER CHAMPION (2H LONGSWORD)</div>
+              <div class="class-loadout">2H Double-Handed Greatsword [1] &bull; Throwing Daggers [2] &bull; <strong>90 Gothic Plate</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> 165 DMG Cleave (5.4m), 90 Armor, 45% Parry [RMB] &bull; <span style="color:#ff7675;">-</span> No Shield vs Arrows</div>
+            </button>
+            <button class="class-btn hidden" data-class="polearm_knight" data-era-only="medieval" style="border-color:#f39c12;">
+              <div class="class-title" style="color:#ffd32a;">🔱 [F7] LANCER &amp; HALBERDIER (LONG SPEAR + 1H SWORD)</div>
+              <div class="class-loadout">Long Spear / Couched Lance [1] &bull; 1H Sword &amp; Shield [2] &bull; <strong>75 Half-Plate</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> 5.8m Reach, Anti-Cavalry Brace [RMB] &amp; 280 DMG Charge &bull; <span style="color:#ff7675;">-</span> Slower Indoors</div>
+            </button>
+            <button class="class-btn hidden" data-class="archer" data-era-only="medieval" style="border-color:#f39c12;">
+              <div class="class-title" style="color:#ffd32a;">🏹 [F8] YEW LONGBOWMAN (ARCHER + 1H SWORD &amp; SHIELD)</div>
+              <div class="class-loadout">Royal Yew Longbow [1] &bull; 1H Sword &amp; Shield [2] &bull; <strong>35 Gambeson (+10% Spd)</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> Rapid 98 DMG Bodkin Arrows, +10% Spd, Backup Shield &bull; <span style="color:#ff7675;">-</span> Light 35 Armor</div>
+            </button>
+            <button class="class-btn hidden" data-class="crossbowman" data-era-only="medieval" style="border-color:#f39c12;">
+              <div class="class-title" style="color:#ffd32a;">🎯 [F9] SIEGE ARBALESTER (CROSSBOW + 2H PAVISE SHIELD)</div>
+              <div class="class-loadout">Heavy Siege Crossbow [1] &bull; <strong>2H Large Pavise Shield [2]</strong> &bull; <strong>65 Brigandine</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> 148 DMG Bolts, 2H Large Shield Blocks 92% [2] &bull; <span style="color:#ff7675;">-</span> 1.95s Reload</div>
+            </button>
+            <button class="class-btn hidden" data-class="mounted_knight" data-era-only="medieval" style="border-color:#f39c12;">
+              <div class="class-title" style="color:#ffd32a;">🐎 [F10] ROYAL HORSE ARCHER (WARHORSE + BOW + LANCE)</div>
+              <div class="class-loadout">Yew Longbow [1] &bull; Polearm Lance [2] &bull; <strong>Armored Warhorse (WASD Steers, Mouse Aims)</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> Separate Horse HP/Armor, 360° Bow Aim + 280 DMG Lance &bull; <span style="color:#ff7675;">-</span> Polearm Weakness</div>
+            </button>
+            <!-- JURASSIC ERA DINOSAUR FACTION CLASS -->
+            <button class="class-btn hidden" data-class="dino_raptor" data-era-only="jurassic" style="border-color:#2ecc71;">
+              <div class="class-title" style="color:#7bed9f;">🦖 VELOCIRAPTOR ALPHA PACK HUNTER (DINOSAUR)</div>
+              <div class="class-loadout">Razor Talons &amp; Jaws [1] &bull; Venomous Acid Spit [2] &bull; <strong>Mount Alpha T-Rex [E]</strong></div>
+              <div class="class-desc"><span style="color:#7bed9f;">+</span> +45% Predator Sprint, 110 DMG Talons + Acid Spit &bull; <span style="color:#ff7675;">-</span> Cannot Revive</div>
+            </button>
+          </div>
+
+          <div class="deploy-sub-controls">
+            <h2 style="margin: 6px 0 4px 0;">2. FACTION, RANK &amp; SQUAD</h2>
+            <div class="team-select-row">
+              <button class="team-btn active" id="us-team-btn" data-team="US" data-subfaction="US">US FORCES (BLUE)</button>
+              <button class="team-btn" id="ru-team-btn" data-team="RU" data-subfaction="RU">RU FORCES (RED)</button>
+              <button class="team-btn hidden" id="dino-team-btn" data-team="RU" data-subfaction="DINO" style="display:none;border-color:#e74c3c;color:#ff7675;">🦖 DINOSAURS</button>
+            </div>
+            <div class="rank-select-row" id="rank-select-row">
+              <button class="rank-btn active" data-rank="COMMANDER" title="Command all 5 Squads + Armor">★ Commander (All)</button>
+              <button class="rank-btn" data-rank="SQUAD_LEADER" title="Lead your selected tactical squad">▲ Squad Lead</button>
+              <button class="rank-btn" data-rank="MEMBER" title="Follow your AI Squad Leader">● Member</button>
+            </div>
+            <div class="squad-select-row" id="squad-select-row">
+              <button class="squad-btn active" data-squad="ALPHA">Alpha</button>
+              <button class="squad-btn" data-squad="BRAVO" title="Mechanized &amp; Armor Squad">🛡 Bravo</button>
+              <button class="squad-btn" data-squad="CHARLIE">Charlie</button>
+              <button class="squad-btn" data-squad="DELTA">Delta</button>
+              <button class="squad-btn" data-squad="ECHO">Echo</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column: Tactical Map, Spawn Points & Time of Day -->
+        <div class="deploy-card map-card">
+          <div class="deploy-sec-hdr">
+            <h2>3. DEPLOYMENT POINT</h2>
+            <div class="atmos-select-row">
+              <button class="atmos-btn active" data-atmos="DAY">☀ Day</button>
+              <button class="atmos-btn" data-atmos="SUNSET">🌅 Sunset</button>
+              <button class="atmos-btn" data-atmos="NIGHT">🌙 Night</button>
+            </div>
+          </div>
+          <div class="tactical-map-box">
+            <canvas id="deploy-map-canvas" width="400" height="235"></canvas>
+          </div>
+          <div class="spawn-buttons" id="spawn-buttons">
+            <button class="spawn-btn" data-spawn="BASE">MAIN BASE (+ARMOR &amp; AIR)</button>
+            <button class="spawn-btn" data-spawn="SQUAD">SQUADMATE (FRONTLINE)</button>
+            <button class="spawn-btn active" data-spawn="A">OBJ A (WEST TOWN)</button>
+            <button class="spawn-btn" data-spawn="B">OBJ B (CONTAINERS)</button>
+            <button class="spawn-btn" data-spawn="C">OBJ C (RIVER CITY)</button>
+            <button class="spawn-btn" data-spawn="D">OBJ D (RADAR HILL)</button>
+            <button class="spawn-btn" data-spawn="E">OBJ E (INDUSTRIAL)</button>
+            <button class="spawn-btn" data-spawn="B2_LANE" style="border-color:#00d2d3;color:#00d2d3;font-weight:900;" title="Deploy at HQ Runway Lane 2 next to your Northrop B-2A Spirit Stealth Bomber">🦇 B-2 SPIRIT LANE</button>
+            <button class="spawn-btn" data-spawn="RALLY">🟢 RALLY [5]</button>
+            <button class="spawn-btn" data-spawn="BEACON">🔵 BEACON [6]</button>
+            <button class="spawn-btn" data-spawn="FRIEND">🟢 CO-OP PEER</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="deploy-footer">
+        <div class="control-tips">
+          <b>WASD</b> Move &bull; <b>RMB</b> Aim/Block &bull; <b>E</b> Vehicle/Mount &bull; <b>F</b> Revive/Loot &bull; <b>L</b> Armory &bull; <b>I</b> Pack &bull; <b>K</b> Map &bull; <b>TAB</b> Full Controls
+        </div>
+        <button id="deploy-btn" type="button" class="deploy-cta-btn" onclick="window.forceEnterGame && window.forceEnterGame()">DEPLOY [ENTER / SPACE]</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js?v=90"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# Runtime telemetry & access logs
+logs/*.jsonl
+logs/*.log
+logs/latest_snapshot.json
+
+# Local snapshots & Python cache
+snapshots/
+__pycache__/
+*.pyc
+
+# Node / Editor directories
+node_modules/
+.DS_Store
+Thumbs.db

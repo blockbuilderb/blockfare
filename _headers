@@ -1,0 +1,11 @@
+# Cloudflare Pages Custom Headers for BattleBit Clone
+/*.js
+  Content-Type: application/javascript; charset=utf-8
+  Cache-Control: public, max-age=3600
+
+/*.css
+  Content-Type: text/css; charset=utf-8
+  Cache-Control: public, max-age=3600
+
+/assets/audio/*
+  Cache-Control: public, max-age=86400
