@@ -1,16 +1,17 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT, FORMATION } from '../config.js?v=90';
-import { sound } from '../audio.js?v=90';
-import { tmpVec3 } from '../utils/VectorPool.js?v=90';
-import { events, makeEventBridge } from '../events.js?v=90';
-import { createSoldierMesh } from './SoldierMeshFactory.js?v=90';
-import { SightlineMethods } from './SightlineSystem.js?v=90';
-import { MedicAIMethods } from './MedicAI.js?v=90';
-import { BotAIMethods } from './BotAI.js?v=90';
+import { BOT, FORMATION } from '../config.js?v=91';
+import { sound } from '../audio.js?v=91';
+import { tmpVec3 } from '../utils/VectorPool.js?v=91';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=91';
+import { events, makeEventBridge } from '../events.js?v=91';
+import { createSoldierMesh } from './SoldierMeshFactory.js?v=91';
+import { SightlineMethods } from './SightlineSystem.js?v=91';
+import { MedicAIMethods } from './MedicAI.js?v=91';
+import { BotAIMethods } from './BotAI.js?v=91';
 import {
   createBaseProtectionFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=90';
+} from '../core/StateMachines.js?v=91';
 
 const BOT_NAMES_US = [
   'SgtOkiDoki', 'WakistanVet', 'VoxelMedic', 'EagleOne', 'BlockBuster',
@@ -55,7 +56,14 @@ export class BotManager {
     this.hitMeshes = [];
     this.squadLeaders = { US: {}, RU: {} };
     this.downedByTeam = { US: [], RU: [] };
+    this.aliveByTeam = { US: [], RU: [] };
+    this.spatialGrid = new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 300);
+    this.teamGrid = {
+      US: new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 160),
+      RU: new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 160)
+    };
     this.tracers = [];
+    this._tracerPool = [];
     this.smokeClouds = [];
     this._contestedTimer = 0;
     this.baseState = {
@@ -1075,7 +1083,16 @@ export class BotManager {
       lastSpawnSource: spawnInfo.source,
       drivingVehicle: null,
       mesh,
+      parts: mesh.userData.parts,
       hitMeshes: botHitMeshes,
+      _enemyRef: {
+        isPlayer: false,
+        isVehicle: false,
+        pos: null,
+        unit: null,
+        bot: null,
+        vehicle: null
+      },
       targetFlagIndex: defaultFlagIdx,
       waypointOffset: new THREE.Vector3(safeOffset.x - fPos.x, 0, safeOffset.z - fPos.z),
       memberClusterOffset,
@@ -1179,13 +1196,28 @@ export class BotManager {
         }
       }
 
-      for (let i = 0; i < this.bots.length; i++) {
-        const b = this.bots[i];
-        if (b.dead || b.downed || (typeof b.hp === 'number' && b.hp <= 0) || (b.bleedOutTimer || 0) > 0) continue;
-        const d = Math.hypot(b.pos.x - basePos.x, b.pos.z - basePos.z);
-        if (d <= MAIN_BASE_RADIUS) {
+      if (this.spatialGrid && this.spatialGrid.count > 0) {
+        this.spatialGrid.forEachInRadius(basePos.x, basePos.z, MAIN_BASE_RADIUS, (b) => {
+          if (
+            b.dead ||
+            b.downed ||
+            (typeof b.hp === 'number' && b.hp <= 0) ||
+            (b.bleedOutTimer || 0) > 0
+          ) {
+            return;
+          }
           if (b.team === baseTeam) defenders++;
           else attackers++;
+        });
+      } else {
+        for (let i = 0; i < this.bots.length; i++) {
+          const b = this.bots[i];
+          if (b.dead || b.downed || (typeof b.hp === 'number' && b.hp <= 0) || (b.bleedOutTimer || 0) > 0) continue;
+          const d = Math.hypot(b.pos.x - basePos.x, b.pos.z - basePos.z);
+          if (d <= MAIN_BASE_RADIUS) {
+            if (b.team === baseTeam) defenders++;
+            else attackers++;
+          }
         }
       }
 
@@ -1245,13 +1277,28 @@ export class BotManager {
         }
       }
 
-      for (let i = 0; i < this.bots.length; i++) {
-        const b = this.bots[i];
-        if (b.dead || b.downed || (typeof b.hp === 'number' && b.hp <= 0) || (b.bleedOutTimer || 0) > 0) continue;
-        const d = Math.hypot(b.pos.x - flag.pos.x, b.pos.z - flag.pos.z);
-        if (d <= FLAG_CONTEST_RADIUS) {
+      if (this.spatialGrid && this.spatialGrid.count > 0) {
+        this.spatialGrid.forEachInRadius(flag.pos.x, flag.pos.z, FLAG_CONTEST_RADIUS, (b) => {
+          if (
+            b.dead ||
+            b.downed ||
+            (typeof b.hp === 'number' && b.hp <= 0) ||
+            (b.bleedOutTimer || 0) > 0
+          ) {
+            return;
+          }
           if (b.team === flag.owner) defenders++;
           else attackers++;
+        });
+      } else {
+        for (let i = 0; i < this.bots.length; i++) {
+          const b = this.bots[i];
+          if (b.dead || b.downed || (typeof b.hp === 'number' && b.hp <= 0) || (b.bleedOutTimer || 0) > 0) continue;
+          const d = Math.hypot(b.pos.x - flag.pos.x, b.pos.z - flag.pos.z);
+          if (d <= FLAG_CONTEST_RADIUS) {
+            if (b.team === flag.owner) defenders++;
+            else attackers++;
+          }
         }
       }
 
@@ -1287,8 +1334,24 @@ export class BotManager {
       }
     }
 
-    // 3. Update Forward Base Garrison Squad Assignments (1 dedicated Defense Squad per captured Forward Base)
-    this.updateForwardBaseGarrisons(player);
+    // 3. Update Forward Base Garrison Squad Assignments (gated on 1.0s timer or flag-owner change)
+    let flagOwnersChanged = false;
+    if (!this._lastFlagOwners || this._lastFlagOwners.length !== this.world.flags.length) {
+      this._lastFlagOwners = this.world.flags.map((f) => f.owner);
+      flagOwnersChanged = true;
+    } else {
+      for (let fi = 0; fi < this.world.flags.length; fi++) {
+        if (this._lastFlagOwners[fi] !== this.world.flags[fi].owner) {
+          this._lastFlagOwners[fi] = this.world.flags[fi].owner;
+          flagOwnersChanged = true;
+        }
+      }
+    }
+    this._garrisonSyncTimer = (this._garrisonSyncTimer || 0) - 0.25;
+    if (flagOwnersChanged || this._garrisonSyncTimer <= 0) {
+      this._garrisonSyncTimer = 1.0;
+      this.updateForwardBaseGarrisons(player);
+    }
   }
 
   /**
@@ -1579,6 +1642,9 @@ export class BotManager {
       );
       bot.hp = 0;
       bot.deaths++;
+      bot.muzzleFlashTimer = 0;
+      if (bot.parts?.muzzleFlash) bot.parts.muzzleFlash.visible = false;
+      bot._losCache?.clear();
       this.clearBotRescueLinks(bot);
 
       if (isFriendlyFireFromPlayer) {

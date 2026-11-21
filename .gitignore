@@ -8,7 +8,8 @@ snapshots/
 __pycache__/
 *.pyc
 
-# Node / Editor directories
+# Node / Editor directories & local batch launchers
 node_modules/
+*.bat
 .DS_Store
 Thumbs.db

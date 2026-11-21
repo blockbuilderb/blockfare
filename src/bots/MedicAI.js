@@ -1,13 +1,29 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT } from '../config.js?v=90';
-import { tmpVec3 } from '../utils/VectorPool.js?v=90';
-import { events } from '../events.js?v=90';
+import { BOT } from '../config.js?v=91';
+import { tmpVec3 } from '../utils/VectorPool.js?v=91';
+import { events } from '../events.js?v=91';
 import {
   MEDIC_RESCUE_EVENTS,
   createMedicRescueFSM
-} from '../core/StateMachines.js?v=90';
+} from '../core/StateMachines.js?v=91';
 
 const REVIVE_PARTICLE_COLOR = new THREE.Color(0x2ecc71);
+const SHARED_SMOKE_PUFF_GEO = new THREE.BoxGeometry(1.5, 1.3, 1.5);
+SHARED_SMOKE_PUFF_GEO.userData.shared = true;
+
+function setRescueThreatObj(bot, isPlayer, isVehicle, pos, unit, distSq) {
+  let obj = bot._rescueThreatObj;
+  if (!obj) {
+    obj = { isPlayer: false, isVehicle: false, pos: null, unit: null, distSq: 0 };
+    bot._rescueThreatObj = obj;
+  }
+  obj.isPlayer = Boolean(isPlayer);
+  obj.isVehicle = Boolean(isVehicle);
+  obj.pos = pos;
+  obj.unit = unit;
+  obj.distSq = distSq;
+  return obj;
+}
 
 export function clearBotRescueLinks(bot) {
   // If this bot was actively dragging or bandaging a casualty when the rescue ended/aborted,
@@ -27,7 +43,9 @@ export function clearBotRescueLinks(bot) {
   }
   bot.rescueTarget = null;
   bot.rescueState = null;
-  bot.medicRescueFSM?.send(MEDIC_RESCUE_EVENTS.ABORT_RESCUE);
+  if (bot.medicRescueFSM && bot.medicRescueFSM.state !== 'IDLE') {
+    bot.medicRescueFSM.send(MEDIC_RESCUE_EVENTS.ABORT_RESCUE);
+  }
   bot.rescueTimer = 0;
   bot.assessTimer = 0;
   bot.smokePoppedForRescue = false;
@@ -45,7 +63,9 @@ export function clearBotRescueLinks(bot) {
     }
     bot.rescuer.rescueTarget = null;
     bot.rescuer.rescueState = null;
-    bot.rescuer.medicRescueFSM?.send(MEDIC_RESCUE_EVENTS.ABORT_RESCUE);
+    if (bot.rescuer.medicRescueFSM && bot.rescuer.medicRescueFSM.state !== 'IDLE') {
+      bot.rescuer.medicRescueFSM.send(MEDIC_RESCUE_EVENTS.ABORT_RESCUE);
+    }
     bot.rescuer.assessThreatEnemy = null;
     bot.rescuer.builtRescueWall = false;
     bot.rescuer = null;
@@ -56,6 +76,7 @@ export function clearBotRescueLinks(bot) {
  * Scans for immediate enemy threats near either the rescuing Medic (`medicRange`)
  * or the downed casualty (`casualtyRange`). Medics use this to assess the situation
  * and neutralize/suppress nearby threats before rushing out to drag/revive.
+ * Throttled with a 0.15s cache on `bot` and ring-ordered spatial grid queries.
  */
 export function findImmediateRescueThreat(
   bot,
@@ -66,6 +87,35 @@ export function findImmediateRescueThreat(
 ) {
   const medicRangeSq = medicRange * medicRange;
   const casualtyRangeSq = casualtyRange * casualtyRange;
+  const now = performance.now();
+
+  if (now - (bot._rescueThreatAt || -999) < 150) {
+    const cached = bot._rescueThreatResult;
+    if (
+      cached === null &&
+      medicRange <= (bot._rescueThreatMRange || 0) &&
+      casualtyRange <= (bot._rescueThreatCRange || 0)
+    ) {
+      return null;
+    }
+    if (cached && cached.unit && !cached.unit.dead && !cached.unit.downed) {
+      const uPos = cached.unit.pos;
+      const dMedicSq = bot.pos.distanceToSquared(uPos);
+      const dCasSq = targetPos.distanceToSquared(uPos);
+      if (dMedicSq <= medicRangeSq || dCasSq <= casualtyRangeSq) {
+        cached.pos = uPos;
+        cached.distSq = dMedicSq;
+        return cached;
+      }
+      if (
+        medicRange <= (bot._rescueThreatMRange || 0) &&
+        casualtyRange <= (bot._rescueThreatCRange || 0)
+      ) {
+        return null;
+      }
+    }
+  }
+
   let bestThreat = null;
   let bestScoreSq = Infinity;
 
@@ -78,32 +128,60 @@ export function findImmediateRescueThreat(
     ) {
       bestScoreSq = Math.min(dMedicSq, dCasSq);
       if (player.activeVehicle && !player.activeVehicle.dead) {
-        bestThreat = {
-          isVehicle: true,
-          pos: player.activeVehicle.pos,
-          unit: player.activeVehicle,
-          distSq: dMedicSq
-        };
+        bestThreat = setRescueThreatObj(
+          bot,
+          false,
+          true,
+          player.activeVehicle.pos,
+          player.activeVehicle,
+          dMedicSq
+        );
       } else {
-        bestThreat = { isPlayer: true, pos: player.pos, unit: player, distSq: dMedicSq };
+        bestThreat = setRescueThreatObj(bot, true, false, player.pos, player, dMedicSq);
       }
     }
   }
 
-  for (let i = 0; i < this.bots.length; i++) {
-    const other = this.bots[i];
-    if (other.dead || other.downed || other.drivingVehicle || other.team === bot.team) continue;
-    const dMedicSq = bot.pos.distanceToSquared(other.pos);
-    const dCasSq = targetPos.distanceToSquared(other.pos);
-    if (dMedicSq <= medicRangeSq || dCasSq <= casualtyRangeSq) {
-      const minSq = Math.min(dMedicSq, dCasSq);
-      if (minSq < bestScoreSq && this.canBotSeeTarget(bot, other.id, other.pos, false)) {
-        bestScoreSq = minSq;
-        bestThreat = { isPlayer: false, pos: other.pos, unit: other, distSq: dMedicSq };
+  const enemyTeam = bot.team === 'US' ? 'RU' : 'US';
+  const enemyGrid = this.teamGrid && this.teamGrid[enemyTeam];
+  if (enemyGrid) {
+    const evalCandidate = (other) => {
+      if (other.dead || other.downed || other.drivingVehicle || other.team === bot.team) return;
+      if (bestThreat && bestThreat.unit === other) return;
+      const dMedicSq = bot.pos.distanceToSquared(other.pos);
+      const dCasSq = targetPos.distanceToSquared(other.pos);
+      if (dMedicSq <= medicRangeSq || dCasSq <= casualtyRangeSq) {
+        const minSq = Math.min(dMedicSq, dCasSq);
+        if (minSq < bestScoreSq && this.canBotSeeTarget(bot, other.id, other.pos, false)) {
+          bestScoreSq = minSq;
+          bestThreat = setRescueThreatObj(bot, false, false, other.pos, other, dMedicSq);
+        }
+      }
+    };
+    enemyGrid.forEachRingOrder(bot.pos.x, bot.pos.z, medicRange, evalCandidate);
+    if (casualtyRange > 0 && targetPos.distanceToSquared(bot.pos) > 4.0) {
+      enemyGrid.forEachRingOrder(targetPos.x, targetPos.z, casualtyRange, evalCandidate);
+    }
+  } else {
+    for (let i = 0; i < this.bots.length; i++) {
+      const other = this.bots[i];
+      if (other.dead || other.downed || other.drivingVehicle || other.team === bot.team) continue;
+      const dMedicSq = bot.pos.distanceToSquared(other.pos);
+      const dCasSq = targetPos.distanceToSquared(other.pos);
+      if (dMedicSq <= medicRangeSq || dCasSq <= casualtyRangeSq) {
+        const minSq = Math.min(dMedicSq, dCasSq);
+        if (minSq < bestScoreSq && this.canBotSeeTarget(bot, other.id, other.pos, false)) {
+          bestScoreSq = minSq;
+          bestThreat = setRescueThreatObj(bot, false, false, other.pos, other, dMedicSq);
+        }
       }
     }
   }
 
+  bot._rescueThreatAt = now;
+  bot._rescueThreatMRange = medicRange;
+  bot._rescueThreatCRange = casualtyRange;
+  bot._rescueThreatResult = bestThreat;
   return bestThreat;
 }
 
@@ -115,7 +193,6 @@ export function spawnRescueSmoke(pos) {
   if (this.smokeClouds.length > BOT.SMOKE_MAX_CLOUDS) return;
   const group = new THREE.Group();
   group.position.set(pos.x, this.world.getGroundHeightAt(pos.x, pos.z) + 0.4, pos.z);
-  const puffGeo = new THREE.BoxGeometry(1.5, 1.3, 1.5);
   const puffMat = new THREE.MeshLambertMaterial({
     color: 0xdce3e8,
     transparent: true,
@@ -124,7 +201,7 @@ export function spawnRescueSmoke(pos) {
 
   const puffs = [];
   for (let i = 0; i < 7; i++) {
-    const mesh = new THREE.Mesh(puffGeo, puffMat.clone());
+    const mesh = new THREE.Mesh(SHARED_SMOKE_PUFF_GEO, i === 0 ? puffMat : puffMat.clone());
     const angle = (i / 7) * Math.PI * 2;
     const r = i === 0 ? 0 : 0.9 + (i % 2) * 0.55;
     mesh.position.set(Math.cos(angle) * r, 0.4 + (i % 3) * 0.45, Math.sin(angle) * r);
@@ -444,19 +521,43 @@ export function isRescuerUnderEnemyFire(bot, targetPos, player) {
   }
 
   // Check if any enemy bot within 42m has clear line of sight and is actively firing at this bot
-  for (let i = 0; i < this.bots.length; i++) {
-    const other = this.bots[i];
-    if (other.dead || other.downed || other.team === bot.team) continue;
-    const dSq = bot.pos.distanceToSquared(other.pos);
-    if (dSq <= 42 * 42 && (other.muzzleFlashTimer > 0 || (other.shootCooldown || 1) < 0.28)) {
-      const targetingRescuer =
-        other._cachedEnemy &&
-        (other._cachedEnemy.unit === bot || other._cachedEnemy.unit === bot.rescueTarget);
-      if (targetingRescuer && this.canBotSeeTarget(other, bot.id, bot.pos, false)) {
-        bot.underFireTimer = 1.6;
-        if (!bot.lastShooterPos) bot.lastShooterPos = new THREE.Vector3();
-        bot.lastShooterPos.copy(other.pos);
-        return true;
+  const enemyTeam = bot.team === 'US' ? 'RU' : 'US';
+  const enemyGrid = this.teamGrid && this.teamGrid[enemyTeam];
+  let underBotFire = false;
+  if (enemyGrid) {
+    enemyGrid.forEachInRadius(bot.pos.x, bot.pos.z, 42, (other, dSq2D) => {
+      if (other.dead || other.downed || other.team === bot.team) return;
+      const dy = other.pos.y - bot.pos.y;
+      if (dSq2D + dy * dy > 42 * 42) return;
+      if (other.muzzleFlashTimer > 0 || (other.shootCooldown || 1) < 0.28) {
+        const targetingRescuer =
+          other._cachedEnemy &&
+          (other._cachedEnemy.unit === bot || other._cachedEnemy.unit === bot.rescueTarget);
+        if (targetingRescuer && this.canBotSeeTarget(other, bot.id, bot.pos, false)) {
+          bot.underFireTimer = 1.6;
+          if (!bot.lastShooterPos) bot.lastShooterPos = new THREE.Vector3();
+          bot.lastShooterPos.copy(other.pos);
+          underBotFire = true;
+          return false;
+        }
+      }
+    });
+    if (underBotFire) return true;
+  } else {
+    for (let i = 0; i < this.bots.length; i++) {
+      const other = this.bots[i];
+      if (other.dead || other.downed || other.team === bot.team) continue;
+      const dSq = bot.pos.distanceToSquared(other.pos);
+      if (dSq <= 42 * 42 && (other.muzzleFlashTimer > 0 || (other.shootCooldown || 1) < 0.28)) {
+        const targetingRescuer =
+          other._cachedEnemy &&
+          (other._cachedEnemy.unit === bot || other._cachedEnemy.unit === bot.rescueTarget);
+        if (targetingRescuer && this.canBotSeeTarget(other, bot.id, bot.pos, false)) {
+          bot.underFireTimer = 1.6;
+          if (!bot.lastShooterPos) bot.lastShooterPos = new THREE.Vector3();
+          bot.lastShooterPos.copy(other.pos);
+          return true;
+        }
       }
     }
   }
@@ -467,7 +568,10 @@ export function isRescuerUnderEnemyFire(bot, targetPos, player) {
 export function findNearestDownedFriendly(pos, team, maxDist = 3.8) {
   let best = null;
   let bestDistSq = maxDist * maxDist;
-  for (const b of this.bots) {
+  const downedList =
+    this.downedByTeam && this.downedByTeam[team] ? this.downedByTeam[team] : this.bots;
+  for (let i = 0; i < downedList.length; i++) {
+    const b = downedList[i];
     if (b.team !== team || b.isDinosaur || !b.downed || b.dead) continue;
     const dSq = b.pos.distanceToSquared(pos);
     if (dSq < bestDistSq) {
@@ -984,84 +1088,120 @@ export function updateMedicInjuryHeal(bot, dt, player) {
     return false;
   }
 
-  // 1. Continuous 7.5m Medic Bag Aura — heal Player & nearby injured friendly soldiers to 100/100 Max HP
-  let activelyTreatingClose = false;
-  if (
-    player &&
-    !player.dead &&
-    !player.downed &&
-    player.team === bot.team &&
-    (player.hp < 100 || player.bleeding)
-  ) {
-    const dpSq = bot.pos.distanceToSquared(player.pos);
-    if (dpSq <= auraRadiusSq) {
-      const prevHp = player.hp;
-      // If player is bleeding and Medic has a Field Dressing, use 1 Field Dressing to stop bleeding
-      if (player.bleeding && (bot.fieldDressings ?? 9) > 0) {
-        player.bleeding = false;
-        bot.fieldDressings = Math.max(0, (bot.fieldDressings ?? 9) - 1);
-      } else {
-        player.bleeding = false;
-      }
-      const healDelta = Math.min(100 - player.hp, healRate * dt, bot.medicBagSupply ?? 600);
-      player.hp = Math.min(100, player.hp + healDelta);
-      bot.medicBagSupply = Math.max(0, (bot.medicBagSupply ?? 600) - healDelta);
-      player.beingHealedByMedic = `${bot.name} [${bot.fieldDressings ?? 9}/9 DRESSINGS]`;
-      player.medicHealTimer = 0.65;
-      bot.score = (bot.score || 0) + 12 * dt;
-      activelyTreatingClose = dpSq <= 4.6 * 4.6;
+  // 1. Throttled 5 Hz (0.2s) 7.5m Medic Bag Aura — scales heal by elapsed `auraDt` so exact 34 HP/sec rate is 100% preserved
+  bot._medicAuraAccum = (bot._medicAuraAccum || 0) + dt;
+  if (bot._medicAuraTimer === undefined) {
+    bot._medicAuraTimer = Math.random() * 0.2;
+  }
+  bot._medicAuraTimer -= dt;
 
-      if (Math.random() < 0.28) {
-        this.world.spawnDebris(
-          tmpVec3(player.pos.x, player.pos.y + 0.95, player.pos.z),
-          REVIVE_PARTICLE_COLOR,
-          1
-        );
-      }
+  if (bot._medicAuraTimer <= 0) {
+    const auraDt = Math.min(0.5, bot._medicAuraAccum || dt);
+    bot._medicAuraAccum = 0;
+    bot._medicAuraTimer = 0.2;
+    bot._activelyTreatingClose = false;
 
-      if (prevHp < 100 && player.hp >= 100) {
-        player.hp = 100;
-        if (player.onAwardXp) {
-          player.onAwardXp(
-            25,
-            `🏥 MEDIC BAG (${bot.name}): INJURIES HEALED TO 100/100 MAX HP! (${bot.fieldDressings ?? 9}/9 DRESSINGS LEFT)`
+    if (
+      player &&
+      !player.dead &&
+      !player.downed &&
+      player.team === bot.team &&
+      (player.hp < 100 || player.bleeding)
+    ) {
+      const dpSq = bot.pos.distanceToSquared(player.pos);
+      if (dpSq <= auraRadiusSq) {
+        const prevHp = player.hp;
+        if (player.bleeding && (bot.fieldDressings ?? 9) > 0) {
+          player.bleeding = false;
+          bot.fieldDressings = Math.max(0, (bot.fieldDressings ?? 9) - 1);
+        } else {
+          player.bleeding = false;
+        }
+        const healDelta = Math.min(100 - player.hp, healRate * auraDt, bot.medicBagSupply ?? 600);
+        player.hp = Math.min(100, player.hp + healDelta);
+        bot.medicBagSupply = Math.max(0, (bot.medicBagSupply ?? 600) - healDelta);
+        player.beingHealedByMedic = `${bot.name} [${bot.fieldDressings ?? 9}/9 DRESSINGS]`;
+        player.medicHealTimer = 0.65;
+        bot.score = (bot.score || 0) + 12 * auraDt;
+        bot._activelyTreatingClose = dpSq <= 4.6 * 4.6;
+
+        if (Math.random() < 0.75) {
+          this.world.spawnDebris(
+            tmpVec3(player.pos.x, player.pos.y + 0.95, player.pos.z),
+            REVIVE_PARTICLE_COLOR,
+            1
           );
         }
-        this.emitBotComms(
-          bot,
-          player,
-          `Medic Bag treatment complete ${player.name}! Health maxed at 100/100 HP (${bot.fieldDressings ?? 9}/9 Field Dressings left)!`,
-          'MEDIC',
-          false
-        );
-      }
-    }
-  }
 
-  // Also heal nearby injured friendly bots within 7.5m Medic Bag aura
-  const friendlyList =
-    this.aliveByTeam && this.aliveByTeam[bot.team] ? this.aliveByTeam[bot.team] : this.bots;
-  for (let i = 0; i < friendlyList.length; i++) {
-    if ((bot.medicBagSupply ?? 600) <= 0) break;
-    const ally = friendlyList[i];
-    if (ally === bot || ally.dead || ally.downed || ally.team !== bot.team || ally.hp >= BOT.HP) {
-      continue;
+        if (prevHp < 100 && player.hp >= 100) {
+          player.hp = 100;
+          if (player.onAwardXp) {
+            player.onAwardXp(
+              25,
+              `🏥 MEDIC BAG (${bot.name}): INJURIES HEALED TO 100/100 MAX HP! (${bot.fieldDressings ?? 9}/9 DRESSINGS LEFT)`
+            );
+          }
+          this.emitBotComms(
+            bot,
+            player,
+            `Medic Bag treatment complete ${player.name}! Health maxed at 100/100 HP (${bot.fieldDressings ?? 9}/9 Field Dressings left)!`,
+            'MEDIC',
+            false
+          );
+        }
+      }
     }
-    const dSq = bot.pos.distanceToSquared(ally.pos);
-    if (dSq <= auraRadiusSq) {
-      const healDelta = Math.min(BOT.HP - ally.hp, healRate * dt, bot.medicBagSupply ?? 600);
-      ally.hp = Math.min(BOT.HP, ally.hp + healDelta);
-      bot.medicBagSupply = Math.max(0, (bot.medicBagSupply ?? 600) - healDelta);
-      bot.score = (bot.score || 0) + 6 * dt;
-      if (Math.random() < 0.12) {
-        this.world.spawnDebris(
-          tmpVec3(ally.pos.x, ally.pos.y + 0.95, ally.pos.z),
-          REVIVE_PARTICLE_COLOR,
-          1
-        );
+
+    // Heal nearby injured friendly bots within 7.5m Medic Bag aura via teamGrid spatial query
+    const friendlyGrid = this.teamGrid && this.teamGrid[bot.team];
+    if (friendlyGrid && (bot.medicBagSupply ?? 600) > 0) {
+      friendlyGrid.forEachInRadius(bot.pos.x, bot.pos.z, auraRadius, (ally, dSq2D) => {
+        if ((bot.medicBagSupply ?? 600) <= 0) return false;
+        if (
+          ally === bot ||
+          ally.dead ||
+          ally.downed ||
+          ally.drivingVehicle ||
+          ally.team !== bot.team ||
+          ally.hp >= BOT.HP
+        ) {
+          return;
+        }
+        const dy = ally.pos.y - bot.pos.y;
+        if (dSq2D + dy * dy <= auraRadiusSq) {
+          const healDelta = Math.min(BOT.HP - ally.hp, healRate * auraDt, bot.medicBagSupply ?? 600);
+          ally.hp = Math.min(BOT.HP, ally.hp + healDelta);
+          bot.medicBagSupply = Math.max(0, (bot.medicBagSupply ?? 600) - healDelta);
+          bot.score = (bot.score || 0) + 6 * auraDt;
+          if (Math.random() < 0.45) {
+            this.world.spawnDebris(
+              tmpVec3(ally.pos.x, ally.pos.y + 0.95, ally.pos.z),
+              REVIVE_PARTICLE_COLOR,
+              1
+            );
+          }
+        }
+      });
+    } else if ((bot.medicBagSupply ?? 600) > 0) {
+      const friendlyList =
+        this.aliveByTeam && this.aliveByTeam[bot.team] ? this.aliveByTeam[bot.team] : this.bots;
+      for (let i = 0; i < friendlyList.length; i++) {
+        if ((bot.medicBagSupply ?? 600) <= 0) break;
+        const ally = friendlyList[i];
+        if (ally === bot || ally.dead || ally.downed || ally.team !== bot.team || ally.hp >= BOT.HP) {
+          continue;
+        }
+        const dSq = bot.pos.distanceToSquared(ally.pos);
+        if (dSq <= auraRadiusSq) {
+          const healDelta = Math.min(BOT.HP - ally.hp, healRate * auraDt, bot.medicBagSupply ?? 600);
+          ally.hp = Math.min(BOT.HP, ally.hp + healDelta);
+          bot.medicBagSupply = Math.max(0, (bot.medicBagSupply ?? 600) - healDelta);
+          bot.score = (bot.score || 0) + 6 * auraDt;
+        }
       }
     }
   }
+  const activelyTreatingClose = Boolean(bot._activelyTreatingClose);
 
   // 2. Validate existing active injury heal target (`bot.healTarget`)
   if (bot.healTarget) {
@@ -1107,15 +1247,39 @@ export function updateMedicInjuryHeal(bot, dt, player) {
     if (!bot.healTarget) {
       let bestAlly = null;
       let bestDistSq = 38 * 38;
-      for (let i = 0; i < friendlyList.length; i++) {
-        const ally = friendlyList[i];
-        if (ally === bot || ally.dead || ally.downed || ally.team !== bot.team || ally.hp >= 88) {
-          continue;
-        }
-        const dSq = bot.pos.distanceToSquared(ally.pos);
-        if (dSq < bestDistSq) {
-          bestDistSq = dSq;
-          bestAlly = ally;
+      const friendlyGrid = this.teamGrid && this.teamGrid[bot.team];
+      if (friendlyGrid) {
+        friendlyGrid.forEachRingOrder(bot.pos.x, bot.pos.z, 38, (ally, dSq2D) => {
+          if (
+            ally === bot ||
+            ally.dead ||
+            ally.downed ||
+            ally.drivingVehicle ||
+            ally.team !== bot.team ||
+            ally.hp >= 88
+          ) {
+            return;
+          }
+          const dy = ally.pos.y - bot.pos.y;
+          const dSq = dSq2D + dy * dy;
+          if (dSq < bestDistSq) {
+            bestDistSq = dSq;
+            bestAlly = ally;
+          }
+        });
+      } else {
+        const friendlyList =
+          this.aliveByTeam && this.aliveByTeam[bot.team] ? this.aliveByTeam[bot.team] : this.bots;
+        for (let i = 0; i < friendlyList.length; i++) {
+          const ally = friendlyList[i];
+          if (ally === bot || ally.dead || ally.downed || ally.team !== bot.team || ally.hp >= 88) {
+            continue;
+          }
+          const dSq = bot.pos.distanceToSquared(ally.pos);
+          if (dSq < bestDistSq) {
+            bestDistSq = dSq;
+            bestAlly = ally;
+          }
         }
       }
       if (bestAlly) {

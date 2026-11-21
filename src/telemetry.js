@@ -5,8 +5,8 @@
  * state snapshots. Streams structured JSON logs to `/api/telemetry` -> `logs/battle_telemetry.jsonl`
  * and `logs/latest_snapshot.json` for automated inspection and gameplay tuning.
  */
-import { TELEMETRY, MATCH } from './config.js?v=90';
-import { events } from './events.js?v=90';
+import { TELEMETRY, MATCH } from './config.js?v=91';
+import { events } from './events.js?v=91';
 
 export class TelemetryLogger {
   constructor(game) {
@@ -16,6 +16,8 @@ export class TelemetryLogger {
     this.snapshotTimer = 1.5;
     this.flushTimer = 1.2;
     const host = (typeof window !== 'undefined' && window.location && window.location.hostname) || '';
+    const search = (typeof window !== 'undefined' && window.location && window.location.search) || '';
+    this.debugConsole = new URLSearchParams(search).get('debug') === '1';
     this.remoteApiDisabled =
       host.endsWith('.github.io') ||
       host.endsWith('.pages.dev') ||
@@ -107,8 +109,13 @@ export class TelemetryLogger {
       this.events.length = TELEMETRY.MAX_EVENTS;
     }
 
-    this.pendingBatch.push(entry);
-    if (type !== 'NPC_SPAWN') {
+    if (!this.remoteApiDisabled) {
+      this.pendingBatch.push(entry);
+      if (this.pendingBatch.length > TELEMETRY.MAX_EVENTS) {
+        this.pendingBatch.shift();
+      }
+    }
+    if (this.debugConsole && type !== 'NPC_SPAWN') {
       console.log(`[TELEMETRY:${type}]`, JSON.stringify(payload));
     }
   }
@@ -118,7 +125,12 @@ export class TelemetryLogger {
     if (!g || !g.world || !g.botManager || !g.vehicleManager || !g.player) return null;
 
     const p = g.player;
-    const vehSummary = g.vehicleManager.vehicles.map((v) => {
+    const vehicles = g.vehicleManager.vehicles;
+    const vehSummary = new Array(vehicles.length);
+    let ghostCrewedCount = 0;
+
+    for (let i = 0; i < vehicles.length; i++) {
+      const v = vehicles[i];
       const basePos = v.team === 'US' ? g.world.spawns.US_BASE : g.world.spawns.RU_BASE;
       const distFromBase = Math.round(v.pos.distanceTo(basePos));
       let status = 'PARKED_AT_BASE';
@@ -127,7 +139,11 @@ export class TelemetryLogger {
       else if (v.npcDriver) status = `NPC_DRIVEN (${v.npcDriver.name} [${v.npcDriver.squad}])`;
       else if (v.claimedByBot) status = `NPC_APPROACHING (${v.claimedByBot.name})`;
 
-      return {
+      if (!v.dead && Math.abs(v.forwardSpeed) > 0.5 && !v.driver && !v.npcDriver) {
+        ghostCrewedCount++;
+      }
+
+      vehSummary[i] = {
         id: v.id,
         name: v.name,
         team: v.team,
@@ -138,14 +154,36 @@ export class TelemetryLogger {
         distFromBaseM: distFromBase,
         status
       };
-    });
+    }
 
-    const ghostCrewedCount = g.vehicleManager.vehicles.filter(
-      (v) => !v.dead && Math.abs(v.forwardSpeed) > 0.5 && !v.driver && !v.npcDriver
-    ).length;
+    let usAlive = 0;
+    let usDowned = 0;
+    let usDriving = 0;
+    let usRescuing = 0;
+    let usAssessing = 0;
+    let ruAlive = 0;
+    let ruDowned = 0;
+    let ruDriving = 0;
+    let ruRescuing = 0;
+    let ruAssessing = 0;
 
-    const usBots = g.botManager.bots.filter((b) => b.team === 'US');
-    const ruBots = g.botManager.bots.filter((b) => b.team === 'RU');
+    const bots = g.botManager.bots;
+    for (let i = 0; i < bots.length; i++) {
+      const b = bots[i];
+      if (b.team === 'US') {
+        if (!b.dead && !b.downed) usAlive++;
+        if (b.downed) usDowned++;
+        if (b.drivingVehicle) usDriving++;
+        if (b.rescueTarget) usRescuing++;
+        if (b.rescueState === 'ASSESS_THREAT') usAssessing++;
+      } else if (b.team === 'RU') {
+        if (!b.dead && !b.downed) ruAlive++;
+        if (b.downed) ruDowned++;
+        if (b.drivingVehicle) ruDriving++;
+        if (b.rescueTarget) ruRescuing++;
+        if (b.rescueState === 'ASSESS_THREAT') ruAssessing++;
+      }
+    }
 
     return {
       ts: new Date().toISOString(),
@@ -184,18 +222,18 @@ export class TelemetryLogger {
       },
       factions: {
         US: {
-          alive: usBots.filter((b) => !b.dead && !b.downed).length,
-          downed: usBots.filter((b) => b.downed).length,
-          drivingVehicles: usBots.filter((b) => Boolean(b.drivingVehicle)).length,
-          medicsRescuing: usBots.filter((b) => Boolean(b.rescueTarget)).length,
-          medicsAssessingThreat: usBots.filter((b) => b.rescueState === 'ASSESS_THREAT').length
+          alive: usAlive,
+          downed: usDowned,
+          drivingVehicles: usDriving,
+          medicsRescuing: usRescuing,
+          medicsAssessingThreat: usAssessing
         },
         RU: {
-          alive: ruBots.filter((b) => !b.dead && !b.downed).length,
-          downed: ruBots.filter((b) => b.downed).length,
-          drivingVehicles: ruBots.filter((b) => Boolean(b.drivingVehicle)).length,
-          medicsRescuing: ruBots.filter((b) => Boolean(b.rescueTarget)).length,
-          medicsAssessingThreat: ruBots.filter((b) => b.rescueState === 'ASSESS_THREAT').length
+          alive: ruAlive,
+          downed: ruDowned,
+          drivingVehicles: ruDriving,
+          medicsRescuing: ruRescuing,
+          medicsAssessingThreat: ruAssessing
         }
       },
       vehicles: vehSummary,
@@ -204,6 +242,18 @@ export class TelemetryLogger {
   }
 
   update(dt) {
+    const panelEl =
+      typeof document !== 'undefined' ? document.getElementById('telemetry-panel') : null;
+    const panelVisible =
+      panelEl && panelEl.style.display !== 'none' && !panelEl.classList.contains('hidden');
+    if (this.remoteApiDisabled && !panelVisible) {
+      this.snapshotTimer = 0;
+      if (this.pendingBatch.length > 0) {
+        this.pendingBatch.length = 0;
+      }
+      return;
+    }
+
     this.snapshotTimer -= dt;
     this.flushTimer -= dt;
 

@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { createRadarTowerMesh } from '../models/prop-models.js?v=90';
+import { createRadarTowerMesh } from '../models/prop-models.js?v=91';
 
 const VOXEL_SIZE = 1.25;
 const SPATIAL_MIN_X = -1280;
@@ -8,6 +8,54 @@ const SPATIAL_CELL_SHIFT = 5; // 32m cells (1 << 5)
 const SPATIAL_COLS = 80; // 2560m / 32m
 const SPATIAL_ROWS = 50; // 1600m / 32m
 const SPATIAL_MAX_PAD = 6.0; // Max padMeters supported by spatial index
+
+function markShared(asset) {
+  if (asset) {
+    if (!asset.userData) asset.userData = {};
+    asset.userData.shared = true;
+  }
+  return asset;
+}
+
+// Shared cached Building Armory Key geometries & materials (userData.shared = true)
+const _keyGoldMat = markShared(
+  new THREE.MeshStandardMaterial({
+    color: 0xffd700,
+    roughness: 0.14,
+    metalness: 0.94,
+    emissive: 0x3b2800
+  })
+);
+const _keyCasePadMat = markShared(
+  new THREE.MeshStandardMaterial({
+    color: 0x162230,
+    roughness: 0.45,
+    metalness: 0.6,
+    emissive: 0x061528
+  })
+);
+const _keyPadGeo = markShared(new THREE.BoxGeometry(0.55, 0.08, 0.42));
+const _keyBowRingGeo = markShared(new THREE.TorusGeometry(0.11, 0.028, 8, 16));
+const _keyShaftGeo = markShared(new THREE.CylinderGeometry(0.022, 0.022, 0.32, 8));
+const _keyTooth1Geo = markShared(new THREE.BoxGeometry(0.036, 0.075, 0.024));
+const _keyTooth2Geo = markShared(new THREE.BoxGeometry(0.036, 0.055, 0.024));
+
+const _repairFxColor = new THREE.Color(0x2ecc71);
+const _buildHouseFxColor = new THREE.Color(0xf1c40f);
+const _fxOrigin = new THREE.Vector3();
+const _tmpGrid = { gx: 0, gy: 0, gz: 0 };
+const _SAMPLE_OFFSETS_9 = [
+  [0, 0],
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+  [1, 1],
+  [1, -1],
+  [-1, 1],
+  [-1, -1]
+];
+let _repairSearchStamp = 1;
 
 export const BuildingFactory = {
   /**
@@ -212,12 +260,12 @@ export const BuildingFactory = {
         }
 
         const ty = this.getGroundHeightAt(tx, tz);
-        const g = this.worldToGrid(tx, ty + 0.25, tz);
+        const g = this.worldToGrid(tx, ty + 0.25, tz, _tmpGrid);
 
         if (
-          !this.voxels.has(this.key(g.gx, g.gy, g.gz)) &&
-          !this.voxels.has(this.key(g.gx, g.gy + 1, g.gz)) &&
-          !this.voxels.has(this.key(g.gx, g.gy + 2, g.gz))
+          !this.hasVoxel(g.gx, g.gy, g.gz) &&
+          !this.hasVoxel(g.gx, g.gy + 1, g.gz) &&
+          !this.hasVoxel(g.gx, g.gy + 2, g.gz)
         ) {
           return new THREE.Vector3(tx, ty, tz);
         }
@@ -241,31 +289,21 @@ export const BuildingFactory = {
     const rightZ = -Math.sin(yaw);
 
     // Check 9 points across the oriented vehicle hull (center + 4 corners + 4 mid-edges)
-    const sampleOffsets = [
-      [0, 0],
-      [halfL, 0],
-      [-halfL, 0],
-      [0, halfW],
-      [0, -halfW],
-      [halfL, halfW],
-      [halfL, -halfW],
-      [-halfL, halfW],
-      [-halfL, -halfW]
-    ];
-
-    for (let i = 0; i < sampleOffsets.length; i++) {
-      const [longOff, latOff] = sampleOffsets[i];
+    for (let i = 0; i < 9; i++) {
+      const pair = _SAMPLE_OFFSETS_9[i];
+      const longOff = pair[0] * halfL;
+      const latOff = pair[1] * halfW;
       const px = wx + fwdX * longOff + rightX * latOff;
       const pz = wz + fwdZ * longOff + rightZ * latOff;
       if (this.isInsideBuildingOrContainer(px, pz, padMeters)) {
         return true;
       }
       const py = this.getGroundHeightAt(px, pz);
-      const g = this.worldToGrid(px, py + 0.5, pz);
+      const g = this.worldToGrid(px, py + 0.5, pz, _tmpGrid);
       // 1-block high obstacles (dy === 0 with no solid wall stacked at dy === 1 or dy === 2)
       // can be climbed / run over by tanks and armored vehicles, so only multi-block walls block!
-      const v1 = this.voxels.get(this.key(g.gx, g.gy + 1, g.gz));
-      const v2 = this.voxels.get(this.key(g.gx, g.gy + 2, g.gz));
+      const v1 = this.getVoxel(g.gx, g.gy + 1, g.gz);
+      const v2 = this.getVoxel(g.gx, g.gy + 2, g.gz);
       if (
         (v1 && !v1.isProp && v1.type !== 'sandbag') ||
         (v2 && !v2.isProp && v2.type !== 'sandbag')
@@ -306,21 +344,9 @@ export const BuildingFactory = {
 
   createBuildingKeyMesh() {
     const group = new THREE.Group();
-    const goldMat = new THREE.MeshStandardMaterial({
-      color: 0xffd700,
-      roughness: 0.14,
-      metalness: 0.94,
-      emissive: 0x3b2800
-    });
-    const casePadMat = new THREE.MeshStandardMaterial({
-      color: 0x162230,
-      roughness: 0.45,
-      metalness: 0.6,
-      emissive: 0x061528
-    });
 
     // Velvet-lined tactical key display pad on top of room table
-    const pad = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.08, 0.42), casePadMat);
+    const pad = new THREE.Mesh(_keyPadGeo, _keyCasePadMat);
     pad.position.set(0, 0.04, 0);
     group.add(pad);
 
@@ -329,14 +355,14 @@ export const BuildingFactory = {
     keyPivot.position.set(0, 0.34, 0);
     keyPivot.rotation.set(0.35, 0.4, 0.25);
 
-    const bowRing = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.028, 8, 16), goldMat);
+    const bowRing = new THREE.Mesh(_keyBowRingGeo, _keyGoldMat);
     bowRing.position.set(-0.14, 0, 0);
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.32, 8), goldMat);
+    const shaft = new THREE.Mesh(_keyShaftGeo, _keyGoldMat);
     shaft.rotation.z = Math.PI / 2;
     shaft.position.set(0.06, 0, 0);
-    const tooth1 = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.075, 0.024), goldMat);
+    const tooth1 = new THREE.Mesh(_keyTooth1Geo, _keyGoldMat);
     tooth1.position.set(0.14, -0.045, 0);
-    const tooth2 = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.055, 0.024), goldMat);
+    const tooth2 = new THREE.Mesh(_keyTooth2Geo, _keyGoldMat);
     tooth2.position.set(0.19, -0.035, 0);
 
     keyPivot.add(bowRing, shaft, tooth1, tooth2);
@@ -350,12 +376,10 @@ export const BuildingFactory = {
       startGx + Math.floor(width / 2),
       startGz + Math.floor(depth / 2)
     );
-    let minFootprintGy = maxFootprintGy;
     for (let sx = 0; sx < width; sx += Math.max(1, Math.floor(width / 3))) {
       for (let sz = 0; sz < depth; sz += Math.max(1, Math.floor(depth / 3))) {
         const sGy = this.getBaseGy(startGx + sx, startGz + sz);
         if (sGy > maxFootprintGy) maxFootprintGy = sGy;
-        if (sGy < minFootprintGy) minFootprintGy = sGy;
       }
     }
     const groundGy = maxFootprintGy;
@@ -369,9 +393,7 @@ export const BuildingFactory = {
       return v;
     };
 
-    // 2. Deep Terrain-Adaptive Foundation Plinth & Level Ground Floor Slab:
-    //    - Sinks a deep 3-voxel (3.75m) darkConcrete foundation below local terrain height on sloped hills (zero floating walls!)
-    //    - Clears any natural hill voxels protruding into the 1st-floor interior so rooms are 100% level
+    // 2. Deep Terrain-Adaptive Foundation Plinth & Level Ground Floor Slab
     for (let x = 0; x < width; x++) {
       for (let z = 0; z < depth; z++) {
         const gx = startGx + x;
@@ -384,20 +406,13 @@ export const BuildingFactory = {
         }
         // Clear any natural terrain blocks that rose into the ground-floor room space
         for (let cy = groundGy; cy < groundGy + floorHeight - 1; cy++) {
-          const ck = this.key(gx, cy, gz);
-          if (this.voxels.has(ck) && typeof this.removeVoxel === 'function') {
-            this.removeVoxel(gx, cy, gz, false);
-          } else if (this.voxels.has(ck)) {
-            this.voxels.delete(ck);
+          if (this.hasVoxel(gx, cy, gz)) {
+            this.destroyVoxel(gx, cy, gz, false);
           }
         }
       }
     }
 
-    // Adaptive Multi-Room Architectural Layout based on building footprint (width x depth):
-    // - Stairwell Hallway along x = 1..2 (double-wide stairs & landing with generous 2x5 ceiling shaft)
-    // - East Wing Room Partition at partX (for buildings with width >= 8) with wide 2-block archway doors
-    // - North/South Suite Partition at partZ (for deep buildings with depth >= 9) with connecting room doors
     const stairEndZ = Math.min(depth - 2, 5);
     const hasEastWing = width >= 8;
     const partX = hasEastWing ? Math.max(4, Math.floor(width * 0.52)) : -1;
@@ -407,7 +422,6 @@ export const BuildingFactory = {
     const midZ = Math.floor(depth / 2);
 
     // 3. Terrain-Adaptive Exterior Entry Porches & Steps at all 4 Cardinal Entrances
-    //    Bridges any elevation delta between the street terrain and `groundGy` so soldiers walk right in!
     const buildTerrainEntryRamp = (doorGx, doorGz, dirX, dirZ) => {
       const extGy = this.getBaseGy(doorGx + dirX * 2, doorGz + dirZ * 2);
       const drop = Math.max(0, Math.min(4, groundGy - extGy));
@@ -422,11 +436,8 @@ export const BuildingFactory = {
         }
         // Ensure 3-voxel vertical headroom above every exterior step so slopes never block doorways
         for (let ch = 1; ch <= 3; ch++) {
-          const ck = this.key(rx, stepTopGy + ch, rz);
-          if (this.voxels.has(ck) && typeof this.removeVoxel === 'function') {
-            this.removeVoxel(rx, stepTopGy + ch, rz, false);
-          } else if (this.voxels.has(ck)) {
-            this.voxels.delete(ck);
+          if (this.hasVoxel(rx, stepTopGy + ch, rz)) {
+            this.destroyVoxel(rx, stepTopGy + ch, rz, false);
           }
         }
       }
@@ -466,14 +477,12 @@ export const BuildingFactory = {
             for (let y = 0; y < floorHeight - 1; y++) {
               const gy = baseGy + y;
 
-              // Ground-floor wide 3-block street entrances on all 4 facades (aligned with corridors!)
               const isGroundDoor =
                 f === 0 &&
                 y < 3 &&
                 (((z === 0 || z === depth - 1) && Math.abs(x - midX) <= 1 && x !== partX) ||
                   ((x === 0 || x === width - 1) && Math.abs(z - midZ) <= 1 && z !== partZ));
 
-              // Upper-floor walk-out balcony doorway on front facade (z === 0)
               const isBalconyDoor =
                 f > 0 &&
                 width >= 7 &&
@@ -482,7 +491,6 @@ export const BuildingFactory = {
                 Math.abs(x - midX) <= 1 &&
                 x !== partX;
 
-              // Tall panoramic tactical windows with chest-high sill cover (y === 0 sill, y === 1..2 window opening)
               const isWindow =
                 (y === 1 || (y === 2 && (x + z) % 4 === 0)) &&
                 !isGroundDoor &&
@@ -503,18 +511,15 @@ export const BuildingFactory = {
             continue;
           }
 
-          // Upper-floor safety balustrade along the stairwell shaft edge so players don't fall in while strafing
           if (f > 0 && x === 3 && z >= 1 && z <= 2 && partX !== 3) {
             addBuildingVoxel(gx, baseGy, gz, 'wood');
           }
 
-          // Interior Multi-Room Partition Walls (with wide 2-voxel open archway doorways & peek windows!)
           const isVerticalPartition = hasEastWing && x === partX && z > 0 && z < depth - 1;
           const isHorizontalSuiteWall =
             hasSuiteSplit && z === partZ && x > partX && x < width - 1;
 
           if (isVerticalPartition || isHorizontalSuiteWall) {
-            // Wide 2-to-3 block interior room doorways so navigating room-to-room is effortless
             const isInteriorDoor = isVerticalPartition
               ? Math.abs(z - midZ) <= 1 || z === 2 || z === depth - 3
               : Math.abs(x - Math.floor((partX + width - 1) * 0.5)) <= 1;
@@ -524,15 +529,14 @@ export const BuildingFactory = {
                 (isHorizontalSuiteWall && x === width - 2));
 
             for (let y = 0; y < floorHeight - 1; y++) {
-              if (isInteriorDoor && y < 3) continue; // Full 3-voxel tall open archway
-              if (isInteriorPeekWindow && y === 1) continue; // Interior room-to-room firing port
+              if (isInteriorDoor && y < 3) continue;
+              if (isInteriorPeekWindow && y === 1) continue;
               addBuildingVoxel(gx, baseGy + y, gz, y === 0 ? 'darkConcrete' : 'concrete');
             }
           }
         }
       }
 
-      // Double-wide navigable interior staircase (x = 1 and x = 2) with unobstructed landing!
       if (width >= 6 && depth >= 6) {
         for (let step = 0; step < floorHeight - 1; step++) {
           const sz = startGz + 1 + Math.min(step, depth - 3);
@@ -541,13 +545,11 @@ export const BuildingFactory = {
             addBuildingVoxel(startGx + 2, baseGy + step, sz, 'wood');
           }
         }
-        // Tactical desk / crate in the East Wing Room (away from doorways & stairs so it never blocks navigation)
         const deskX = startGx + width - 2;
         const deskZ = startGz + depth - 2;
         addBuildingVoxel(deskX, baseGy, deskZ, 'wood', true);
       }
 
-      // Upper-floor walk-out exterior balconies with sandbagged firing parapets + exterior side breach stairs on large buildings
       if (f > 0 && width >= 7) {
         for (let bx = 2; bx < width - 2; bx++) {
           addBuildingVoxel(startGx + bx, baseGy - 1, startGz - 1, 'concrete');
@@ -555,7 +557,6 @@ export const BuildingFactory = {
             addBuildingVoxel(startGx + bx, baseGy, startGz - 1, 'sandbag');
           }
         }
-        // On 2nd floor of wide buildings (width >= 8), add exterior assault steps up to the front balcony from the West corner!
         if (f === 1 && width >= 8) {
           for (let s = 0; s < floorHeight; s++) {
             addBuildingVoxel(startGx + 1 + s, groundGy + s - 1, startGz - 2, 'darkConcrete');
@@ -580,14 +581,16 @@ export const BuildingFactory = {
       addBuildingVoxel(startGx + midX + 1, topGy, startGz + midZ, 'wood', true);
     }
 
+    // Pre-sort blueprintBlocks bottom-up once at creation so repairBuilding never clones/sorts at runtime
+    blueprintBlocks.sort((a, b) => a.gy - b.gy);
+
     // Register building foundation keys for structural collapse tracking
     const foundationKeys = [];
     for (let x = 0; x < width; x++) {
       for (let z = 0; z < depth; z++) {
         for (let y = 0; y <= 1; y++) {
-          const fk = this.key(startGx + x, groundGy + y, startGz + z);
-          if (this.voxels.has(fk)) {
-            foundationKeys.push(fk);
+          if (this.hasVoxel(startGx + x, groundGy + y, startGz + z)) {
+            foundationKeys.push(this.key(startGx + x, groundGy + y, startGz + z));
           }
         }
       }
@@ -636,6 +639,7 @@ export const BuildingFactory = {
       if (this.scene) {
         this.scene.add(keyMesh);
       }
+      if (this._ownedWorldObjects) this._ownedWorldObjects.push(keyMesh);
       this.buildingKeys.push({
         id: `bkey_${bldId}_f${keyFloor}`,
         buildingId: bldId,
@@ -669,7 +673,7 @@ export const BuildingFactory = {
     for (let i = 0; i < blocks.length; i++) {
       const bp = blocks[i];
       if (bp.isProp) continue;
-      const v = this.voxels.get(this.key(bp.gx, bp.gy, bp.gz));
+      const v = this.getVoxel(bp.gx, bp.gy, bp.gz);
       if (!v) {
         missingCount++;
       } else if (v.hp < v.maxHp) {
@@ -698,24 +702,64 @@ export const BuildingFactory = {
   findNearestDamagedBuilding(worldPos, maxDist = 14.0) {
     if (!this.buildings || !worldPos) return null;
     let best = null;
-    let bestDist = maxDist;
+    let bestDistSq = maxDist * maxDist;
     let bestInfo = null;
+    const px = worldPos.x;
+    const pz = worldPos.z;
+
+    if (this._spatialFootprintGrid) {
+      const minCx = Math.max(0, Math.min(SPATIAL_COLS - 1, (px - maxDist - SPATIAL_MIN_X) >> SPATIAL_CELL_SHIFT));
+      const maxCx = Math.max(0, Math.min(SPATIAL_COLS - 1, (px + maxDist - SPATIAL_MIN_X) >> SPATIAL_CELL_SHIFT));
+      const minCz = Math.max(0, Math.min(SPATIAL_ROWS - 1, (pz - maxDist - SPATIAL_MIN_Z) >> SPATIAL_CELL_SHIFT));
+      const maxCz = Math.max(0, Math.min(SPATIAL_ROWS - 1, (pz + maxDist - SPATIAL_MIN_Z) >> SPATIAL_CELL_SHIFT));
+      const stamp = ++_repairSearchStamp;
+
+      for (let cz = minCz; cz <= maxCz; cz++) {
+        const rowOff = cz * SPATIAL_COLS;
+        for (let cx = minCx; cx <= maxCx; cx++) {
+          const bucket = this._spatialFootprintGrid[rowOff + cx];
+          if (!bucket) continue;
+          for (let i = 0; i < bucket.length; i++) {
+            const b = bucket[i];
+            if (!b.blueprintBlocks || b._repairStamp === stamp) continue;
+            b._repairStamp = stamp;
+            const clampedX = px < b.minWx ? b.minWx : px > b.maxWx ? b.maxWx : px;
+            const clampedZ = pz < b.minWz ? b.minWz : pz > b.maxWz ? b.maxWz : pz;
+            const dx = px - clampedX;
+            const dz = pz - clampedZ;
+            const dSq = dx * dx + dz * dz;
+            if (dSq > bestDistSq) continue;
+
+            const info = this.getBuildingHealthInfo(b);
+            if (info.needsRepair) {
+              bestDistSq = dSq;
+              best = b;
+              bestInfo = info;
+            }
+          }
+        }
+      }
+      return best ? { building: best, info: bestInfo, distance: Math.sqrt(bestDistSq) } : null;
+    }
 
     for (let i = 0; i < this.buildings.length; i++) {
       const b = this.buildings[i];
-      const clampedX = Math.max(b.minWx, Math.min(b.maxWx, worldPos.x));
-      const clampedZ = Math.max(b.minWz, Math.min(b.maxWz, worldPos.z));
-      const d = Math.hypot(worldPos.x - clampedX, worldPos.z - clampedZ);
-      if (d > bestDist) continue;
+      if (!b.blueprintBlocks) continue;
+      const clampedX = px < b.minWx ? b.minWx : px > b.maxWx ? b.maxWx : px;
+      const clampedZ = pz < b.minWz ? b.minWz : pz > b.maxWz ? b.maxWz : pz;
+      const dx = px - clampedX;
+      const dz = pz - clampedZ;
+      const dSq = dx * dx + dz * dz;
+      if (dSq > bestDistSq) continue;
 
       const info = this.getBuildingHealthInfo(b);
       if (info.needsRepair) {
-        bestDist = d;
+        bestDistSq = dSq;
         best = b;
         bestInfo = info;
       }
     }
-    return best ? { building: best, info: bestInfo, distance: bestDist } : null;
+    return best ? { building: best, info: bestInfo, distance: Math.sqrt(bestDistSq) } : null;
   },
 
   /**
@@ -728,13 +772,12 @@ export const BuildingFactory = {
     }
 
     let restoredCount = 0;
-    // Sort blueprint blocks bottom-up so foundations and ground-floor defensive cover restore first
-    const sorted = [...bld.blueprintBlocks].sort((a, b) => a.gy - b.gy);
+    // blueprintBlocks is pre-sorted ascending by gy at creation time
+    const sorted = bld.blueprintBlocks;
 
     for (let i = 0; i < sorted.length; i++) {
       const bp = sorted[i];
-      const k = this.key(bp.gx, bp.gy, bp.gz);
-      const existing = this.voxels.get(k);
+      const existing = this.getVoxel(bp.gx, bp.gy, bp.gz);
 
       if (existing) {
         if (existing.hp < existing.maxHp) {
@@ -742,7 +785,7 @@ export const BuildingFactory = {
           const batch = this.instancedBatches[existing.type];
           if (batch) {
             batch.mesh.setColorAt(existing.instanceId, existing.baseColor);
-            if (batch.mesh.instanceColor) batch.mesh.instanceColor.needsUpdate = true;
+            this._markColorDirty(batch, existing.instanceId);
           }
           restoredCount++;
         }
@@ -766,21 +809,22 @@ export const BuildingFactory = {
     }
 
     // Re-evaluate foundation integrity so collapsed buildings become active standing cover again
-    let intactFoundations = 0;
-    for (let i = 0; i < bld.foundationKeys.length; i++) {
-      if (this.voxels.has(bld.foundationKeys[i])) intactFoundations++;
-    }
-    if (intactFoundations >= Math.max(1, bld.foundationKeys.length * 0.45)) {
+    if (Array.isArray(bld.foundationKeys) && bld.foundationKeys.length > 0) {
+      let intactFoundations = 0;
+      for (let i = 0; i < bld.foundationKeys.length; i++) {
+        if (this.voxels.has(bld.foundationKeys[i])) intactFoundations++;
+      }
+      if (intactFoundations >= Math.max(1, bld.foundationKeys.length * 0.45)) {
+        bld.collapsed = false;
+      }
+    } else {
       bld.collapsed = false;
     }
 
     const afterInfo = this.getBuildingHealthInfo(bld);
     if (restoredCount > 0) {
-      this.spawnDebris(
-        new THREE.Vector3(bld.centerWx, (bld.groundGy + 1.5) * VOXEL_SIZE, bld.centerWz),
-        new THREE.Color(0x2ecc71),
-        6
-      );
+      _fxOrigin.set(bld.centerWx, ((bld.groundGy ?? 0) + 1.5) * VOXEL_SIZE, bld.centerWz);
+      this.spawnDebris(_fxOrigin, _repairFxColor, 6);
     }
 
     return {
@@ -889,22 +933,18 @@ export const BuildingFactory = {
     const group = createRadarTowerMesh();
     group.position.set(wx, wy, wz);
     this.scene.add(group);
+    if (this._ownedWorldObjects) this._ownedWorldObjects.push(group);
   },
 
   /**
    * Builds progressive Chest-Wall & Firing-Port Defense Emplacements around a captured Objective (A–E)
-   * when a player presses [F] inside/near a friendly-held flag!
-   * Stage 1: East & West Chest-High Sandbag Breastworks (1.25m chest wall + concrete end pillars)
-   * Stage 2: North & South Chest-High Sandbag Breastworks
-   * Stage 3: NE & SW Corner Firing-Port Bunkers
-   * Stage 4: NW & SE Corner HESCO Bastions & Inner Command Breastwork
    */
   buildPointDefenseStage(flag, broadcastFn = null, playerPos = null) {
     if (!flag) return { stage: 0, maxStage: 4, blocksBuilt: 0 };
     const nextStage = Math.min(4, (flag.defenseStage || 0) + 1);
     flag.defenseStage = nextStage;
 
-    const cg = this.worldToGrid(flag.pos.x, flag.pos.y, flag.pos.z);
+    const cg = this.worldToGrid(flag.pos.x, flag.pos.y, flag.pos.z, _tmpGrid);
     const cx = cg.gx;
     const cz = cg.gz;
     let blocksBuilt = 0;
@@ -930,19 +970,16 @@ export const BuildingFactory = {
 
     const r = 6; // 6 voxels = 7.5m from flagpole center (inside the capture perimeter)
     if (nextStage === 1) {
-      // East & West 5-wide Chest-High Sandbag Breastworks (1.25m high so standing soldiers shoot over!)
       for (let dz = -2; dz <= 2; dz++) {
         const mat = Math.abs(dz) === 2 ? 'darkConcrete' : 'sandbag';
         placeDefenseBlock(cx - r, 0, cz + dz, mat);
         placeDefenseBlock(cx + r, 0, cz + dz, mat);
       }
-      // Corner end-cap crenels (2 blocks high at the very ends for side cover)
       placeDefenseBlock(cx - r, 1, cz - 2, 'sandbag');
       placeDefenseBlock(cx - r, 1, cz + 2, 'sandbag');
       placeDefenseBlock(cx + r, 1, cz - 2, 'sandbag');
       placeDefenseBlock(cx + r, 1, cz + 2, 'sandbag');
     } else if (nextStage === 2) {
-      // North & South 5-wide Chest-High Sandbag Breastworks
       for (let dx = -2; dx <= 2; dx++) {
         const mat = Math.abs(dx) === 2 ? 'darkConcrete' : 'sandbag';
         placeDefenseBlock(cx + dx, 0, cz - r, mat);
@@ -953,7 +990,6 @@ export const BuildingFactory = {
       placeDefenseBlock(cx - 2, 1, cz + r, 'sandbag');
       placeDefenseBlock(cx + 2, 1, cz + r, 'sandbag');
     } else if (nextStage === 3) {
-      // NE & SW Corner L-Shaped Chest-Wall Firing Positions
       for (const [sx, sz] of [
         [1, -1],
         [-1, 1]
@@ -966,7 +1002,6 @@ export const BuildingFactory = {
         placeDefenseBlock(bx - sx, 1, bz, 'sandbag');
       }
     } else if (nextStage === 4) {
-      // NW & SE Corner HESCO Bastions + Flagpole Chest-Wall Guard
       for (const [sx, sz] of [
         [-1, -1],
         [1, 1]
@@ -978,7 +1013,6 @@ export const BuildingFactory = {
         placeDefenseBlock(bx, 0, bz - sz, 'sandbag');
         placeDefenseBlock(bx, 1, bz - sz, 'sandbag');
       }
-      // Inner flagpole chest-high sandbag guard
       for (const [ox, oz] of [
         [-2, 0],
         [2, 0],
@@ -997,10 +1031,7 @@ export const BuildingFactory = {
   },
 
   /**
-   * Constructs a full walk-in 3D Player-Built Tactical House (2-story, 6x6 voxel brick/concrete strongpoint
-   * with stairs, windows & roof parapet) OR a Reinforced Concrete & Sandbag Command Bunker (5x5 pillbox
-   * with 360° firing slits, overhead blast roof & rooftop crenels) for $1,000!
-   * Also registers the structure in `this.buildings` so it can be repaired with [F]/[T] if damaged.
+   * Constructs a full walk-in 3D Player-Built Tactical House or Reinforced Command Bunker.
    */
   buildPlayerHouseOrBunker(
     centerWx,
@@ -1017,7 +1048,7 @@ export const BuildingFactory = {
     const floorHeight = 4;
     const wallMat = isHouse ? 'brick' : 'concrete';
 
-    const centerGrid = this.worldToGrid(centerWx, this.getGroundHeightAt(centerWx, centerWz), centerWz);
+    const centerGrid = this.worldToGrid(centerWx, this.getGroundHeightAt(centerWx, centerWz), centerWz, _tmpGrid);
     const startGx = centerGrid.gx - Math.floor(width / 2);
     const startGz = centerGrid.gz - Math.floor(depth / 2);
     const groundGy = this.getBaseGy(startGx + Math.floor(width / 2), startGz + Math.floor(depth / 2));
@@ -1034,7 +1065,7 @@ export const BuildingFactory = {
       ) {
         return null;
       }
-      const existing = this.voxels.get(this.key(gx, gy, gz));
+      const existing = this.getVoxel(gx, gy, gz);
       if (existing) {
         blueprintBlocks.push({ gx, gy, gz, mat: existing.type || mat, isProp: Boolean(isProp) });
         return existing;
@@ -1050,7 +1081,6 @@ export const BuildingFactory = {
       return v;
     };
 
-    // Deep foundation plinth under Player-Built House or Command Bunker so it never floats on slopes
     for (let x = 0; x < width; x++) {
       for (let z = 0; z < depth; z++) {
         const isEdge = x === 0 || x === width - 1 || z === 0 || z === depth - 1;
@@ -1064,8 +1094,6 @@ export const BuildingFactory = {
     }
 
     if (isHouse) {
-      // 2-Story Walk-In Tactical House (6x6 voxels = 7.5m x 7.5m) with ground doorways, firing windows,
-      // interior staircase to 2nd floor & roof deck, and rooftop sandbag/concrete parapet!
       for (let f = 0; f < floors; f++) {
         const baseGy = groundGy + f * floorHeight;
         for (let x = 0; x < width; x++) {
@@ -1105,13 +1133,11 @@ export const BuildingFactory = {
           }
         }
 
-        // Interior staircase (climbable from ground floor -> 2nd floor -> roof deck)
         for (let step = 0; step < floorHeight - 1; step++) {
           addStructureVoxel(startGx + 1, baseGy + step, startGz + 1 + step, 'wood');
         }
       }
 
-      // Rooftop sandbag & concrete defensive parapet
       const topGy = groundGy + floors * floorHeight;
       for (let x = 0; x < width; x++) {
         for (let z = 0; z < depth; z++) {
@@ -1122,9 +1148,6 @@ export const BuildingFactory = {
         }
       }
     } else {
-      // Fortified Command Pillbox Bunker (5x5 voxels = 6.25m x 6.25m):
-      // Heavy darkConcrete foundation, armored concrete/sandbag walls, wide firing slits on all 4 sides,
-      // walk-in doorways, overhead artillery-proof concrete roof slab, and rooftop sandbag crenels!
       const baseGy = groundGy;
       for (let x = 0; x < width; x++) {
         for (let z = 0; z < depth; z++) {
@@ -1135,7 +1158,6 @@ export const BuildingFactory = {
           const isCorner = isEdgeX && isEdgeZ;
           const isWall = isEdgeX || isEdgeZ;
 
-          // Overhead roof slab (with 1x2 ladder hatch at x=1, z=1..2)
           const isRoofHatch = x === 1 && (z === 1 || z === 2);
           if (!isRoofHatch) {
             addStructureVoxel(gx, baseGy + 3, gz, 'darkConcrete');
@@ -1145,9 +1167,7 @@ export const BuildingFactory = {
 
           for (let y = 0; y < 3; y++) {
             const gy = baseGy + y;
-            // Center doorway on South & North or West & East walls (y < 2 at midpoint)
             const isDoor = y < 2 && ((z === depth - 1 && x === 2) || (x === 0 && z === 2));
-            // Horizontal armored firing ports at eye/chest level (y === 1) along non-corner wall segments
             const isFiringSlit =
               y === 1 &&
               !isCorner &&
@@ -1163,11 +1183,9 @@ export const BuildingFactory = {
         }
       }
 
-      // Interior step-stairs up to the bunker roof hatch
       addStructureVoxel(startGx + 1, baseGy, startGz + 1, 'wood');
       addStructureVoxel(startGx + 1, baseGy + 1, startGz + 2, 'wood');
 
-      // Rooftop sandbag firing parapet
       const topGy = baseGy + 4;
       for (let x = 0; x < width; x++) {
         for (let z = 0; z < depth; z++) {
@@ -1179,13 +1197,15 @@ export const BuildingFactory = {
       }
     }
 
+    // Pre-sort blueprintBlocks bottom-up once at creation
+    blueprintBlocks.sort((a, b) => a.gy - b.gy);
+
     const foundationKeys = [];
     for (let x = 0; x < width; x++) {
       for (let z = 0; z < depth; z++) {
         for (let y = 0; y <= 1; y++) {
-          const fk = this.key(startGx + x, groundGy + y, startGz + z);
-          if (this.voxels.has(fk)) {
-            foundationKeys.push(fk);
+          if (this.hasVoxel(startGx + x, groundGy + y, startGz + z)) {
+            foundationKeys.push(this.key(startGx + x, groundGy + y, startGz + z));
           }
         }
       }
@@ -1219,13 +1239,9 @@ export const BuildingFactory = {
     this.buildings.push(bldRecord);
     this._registerSpatialFootprint(bldRecord);
 
-    // Spawn celebratory construction effect
     if (typeof this.spawnDebris === 'function') {
-      this.spawnDebris(
-        new THREE.Vector3(bldRecord.centerWx, (groundGy + 1.5) * VOXEL_SIZE, bldRecord.centerWz),
-        new THREE.Color(0xf1c40f),
-        10
-      );
+      _fxOrigin.set(bldRecord.centerWx, (groundGy + 1.5) * VOXEL_SIZE, bldRecord.centerWz);
+      this.spawnDebris(_fxOrigin, _buildHouseFxColor, 10);
     }
 
     return {
@@ -1238,11 +1254,7 @@ export const BuildingFactory = {
   },
 
   /**
-   * Builds a Squad-style Tactical Base Emplacement:
-   * - 'COVERED_BUNKER' ($350): Covered Hasco/Sandbag Shooting Position with 3 firing slits + overhead blast cover roof!
-   * - 'HMG_NEST' ($450): Sandbagged HMG Pit + Mountable [E] .50 Cal M2HB / NSV 12.7mm Heavy Machine Gun Turret!
-   * - 'MORTAR_PIT' ($600): Sandbagged Indirect-Fire Mortar Pit + Mountable [E] 81mm M252 Mortar Tube!
-   * - 'AA_EMPLACEMENT' ($650): Fortified HESCO AA Pit + Mountable [E] ZU-23-2 Twin 23mm + SAM Anti-Air Turret!
+   * Builds a Squad-style Tactical Base Emplacement
    */
   buildSquadEmplacement(
     centerWx,
@@ -1255,8 +1267,10 @@ export const BuildingFactory = {
     broadcastFn = null
   ) {
     const normKind = String(kind || 'HMG_NEST').toUpperCase();
-    const gCenter = this.worldToGrid(centerWx, this.getGroundHeightAt(centerWx, centerWz), centerWz);
-    const groundGy = this.getBaseGy(gCenter.gx, gCenter.gz);
+    const gCenter = this.worldToGrid(centerWx, this.getGroundHeightAt(centerWx, centerWz), centerWz, _tmpGrid);
+    const centerGx = gCenter.gx;
+    const centerGz = gCenter.gz;
+    const groundGy = this.getBaseGy(centerGx, centerGz);
     const fwdGx = Math.round(-Math.sin(yaw));
     const fwdGz = Math.round(-Math.cos(yaw));
     const alongX = Math.abs(Math.cos(yaw)) >= Math.abs(Math.sin(yaw));
@@ -1283,32 +1297,27 @@ export const BuildingFactory = {
     };
 
     if (normKind.includes('COVERED')) {
-      // Covered Hasco & Sandbag Shooting Position (3-wide front wall with firing slits, side walls, and overhead timber/concrete roof!)
       for (const s of [-1, 0, 1]) {
-        const fx = gCenter.gx + dx * s + fwdGx;
-        const fz = gCenter.gz + dz * s + fwdGz;
+        const fx = centerGx + dx * s + fwdGx;
+        const fz = centerGz + dz * s + fwdGz;
         addEmpVoxel(fx, groundGy, fz, 'sandbag');
         if (Math.abs(s) === 1) {
           addEmpVoxel(fx, groundGy + 1, fz, 'darkConcrete');
-          // Side protection wings
-          addEmpVoxel(gCenter.gx + dx * s, groundGy, gCenter.gz + dz * s, 'sandbag');
-          addEmpVoxel(gCenter.gx + dx * s, groundGy + 1, gCenter.gz + dz * s, 'sandbag');
+          addEmpVoxel(centerGx + dx * s, groundGy, centerGz + dz * s, 'sandbag');
+          addEmpVoxel(centerGx + dx * s, groundGy + 1, centerGz + dz * s, 'sandbag');
         }
-        // Overhead blast-cover roof slab across 3x2 dugout
         addEmpVoxel(fx, groundGy + 2, fz, 'darkConcrete');
-        addEmpVoxel(gCenter.gx + dx * s, groundGy + 2, gCenter.gz + dz * s, 'wood');
+        addEmpVoxel(centerGx + dx * s, groundGy + 2, centerGz + dz * s, 'wood');
       }
     } else {
-      // U-Shaped / Octagonal Sandbagged Gun Pit around the center weapon pedestal
       for (let ox = -2; ox <= 2; ox++) {
         for (let oz = -2; oz <= 2; oz++) {
           const isRing = Math.abs(ox) === 2 || Math.abs(oz) === 2;
           if (!isRing) continue;
-          // Leave rear entry gap so the gunner can walk right in and press [E]
           if (ox * fwdGx + oz * fwdGz < -1) continue;
-          const gx = gCenter.gx + ox;
-          const gz = gCenter.gz + oz;
-          const mat = (Math.abs(ox) === 2 && Math.abs(oz) === 2) ? 'darkConcrete' : 'sandbag';
+          const gx = centerGx + ox;
+          const gz = centerGz + oz;
+          const mat = Math.abs(ox) === 2 && Math.abs(oz) === 2 ? 'darkConcrete' : 'sandbag';
           addEmpVoxel(gx, groundGy, gz, mat);
         }
       }
@@ -1323,19 +1332,16 @@ export const BuildingFactory = {
         ? 'emplace_mortar'
         : 'emplace_hmg';
       const worldCenter = new THREE.Vector3(
-        gCenter.gx * VOXEL_SIZE,
-        this.getGroundHeightAt(gCenter.gx * VOXEL_SIZE, gCenter.gz * VOXEL_SIZE),
-        gCenter.gz * VOXEL_SIZE
+        centerGx * VOXEL_SIZE,
+        this.getGroundHeightAt(centerGx * VOXEL_SIZE, centerGz * VOXEL_SIZE),
+        centerGz * VOXEL_SIZE
       );
       spawnedVehicle = vm.spawnEmplacement(emplaceType, team, worldCenter, yaw);
     }
 
     if (typeof this.spawnDebris === 'function') {
-      this.spawnDebris(
-        new THREE.Vector3(gCenter.gx * VOXEL_SIZE, (groundGy + 1.2) * VOXEL_SIZE, gCenter.gz * VOXEL_SIZE),
-        new THREE.Color(0x2ecc71),
-        8
-      );
+      _fxOrigin.set(centerGx * VOXEL_SIZE, (groundGy + 1.2) * VOXEL_SIZE, centerGz * VOXEL_SIZE);
+      this.spawnDebris(_fxOrigin, _repairFxColor, 8);
     }
 
     return {

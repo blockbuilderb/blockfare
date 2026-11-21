@@ -1,11 +1,11 @@
-import { SQUAD_DEFS } from '../bots.js?v=90';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=90';
-import { events } from '../events.js?v=90';
+import { SQUAD_DEFS } from '../bots.js?v=91';
+import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=91';
+import { events } from '../events.js?v=91';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=90';
+} from '../core/StateMachines.js?v=91';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -152,6 +152,7 @@ export const DeployScreen = {
       spawnBtns.forEach((b) => {
         b.classList.toggle('active', b.dataset.spawn === bestKey);
       });
+      this.drawDeployMap?.(true);
     });
 
     this.deployMapCanvas.addEventListener('dblclick', () => {
@@ -719,14 +720,17 @@ export const DeployScreen = {
       }
       if (e.code === 'Tab') {
         e.preventDefault();
-        this.scoreboardEl.classList.remove('hidden');
-        this.renderScoreboard();
+        if (!e.repeat && this.scoreboardEl && this.scoreboardEl.classList.contains('hidden')) {
+          this.scoreboardEl.classList.remove('hidden');
+          this._scoreboardTimer = 0.25;
+          this.renderScoreboard(true);
+        }
       }
       if (e.code === 'F3') {
         e.preventDefault();
-        if (this.telemetryPanelEl) {
+        if (!e.repeat && this.telemetryPanelEl) {
           this.telemetryPanelEl.classList.toggle('hidden');
-          this.updateTelemetryPanel();
+          this.updateTelemetryPanel(true);
         }
       }
       // [F1] Controls Reference Overlay
@@ -739,6 +743,8 @@ export const DeployScreen = {
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Tab') {
         this.scoreboardEl.classList.add('hidden');
+        this._scoreboardTimer = 0;
+        this._lastScoreboardRenderAt = 0;
       }
     });
   },
@@ -802,6 +808,7 @@ export const DeployScreen = {
     let modal = this.el('mp-invite-modal');
     if (modal) {
       modal.remove();
+      if (this._domCache) this._domCache.delete('mp-invite-modal');
       return;
     }
     if (document.pointerLockElement === document.body) {
@@ -855,7 +862,10 @@ export const DeployScreen = {
     document.body.appendChild(modal);
     if (this._domCache) this._domCache.set('mp-invite-modal', modal);
 
-    modal.querySelector('#mp-modal-close-btn').addEventListener('click', () => modal.remove());
+    modal.querySelector('#mp-modal-close-btn').addEventListener('click', () => {
+      modal.remove();
+      if (this._domCache) this._domCache.delete('mp-invite-modal');
+    });
     modal.querySelector('#mp-modal-mode-sp').addEventListener('click', () => {
       this.network.setGameMode('SINGLEPLAYER');
       this.updateMultiplayerLobbyUI();
@@ -1186,7 +1196,7 @@ export const DeployScreen = {
     this.updateCommandOrderHud?.(era);
     this.renderDeployB2CustomizerBar?.();
     this.updateDeployClassTraitsCard?.();
-    this.drawDeployMap?.();
+    this.drawDeployMap?.(true);
   },
 
   updateDeployClassTraitsCard() {
@@ -1507,17 +1517,33 @@ export const DeployScreen = {
     if (this.downedOverlayEl) this.downedOverlayEl.classList.add('hidden');
     const topBtn = this.el('deploy-top-btn');
     const botBtn = this.el('deploy-btn');
-    if (topBtn) topBtn.textContent = 'DEPLOY [ENTER / SPACE]';
-    if (botBtn) botBtn.textContent = 'DEPLOY [ENTER / SPACE]';
+    if (topBtn) {
+      if (this._setText) this._setText(topBtn, 'DEPLOY [ENTER / SPACE]');
+      else topBtn.textContent = 'DEPLOY [ENTER / SPACE]';
+    }
+    if (botBtn) {
+      if (this._setText) this._setText(botBtn, 'DEPLOY [ENTER / SPACE]');
+      else botBtn.textContent = 'DEPLOY [ENTER / SPACE]';
+    }
     if (typeof this.renderDeployExtractedLootBar === 'function') {
       this.renderDeployExtractedLootBar();
     }
     if (typeof this.renderDeployB2CustomizerBar === 'function') {
       this.renderDeployB2CustomizerBar();
     }
+    this.drawDeployMap(true);
   },
 
-  drawDeployMap() {
+  drawDeployMap(force = false) {
+    if (this.deployScreenEl && this.deployScreenEl.classList.contains('hidden')) {
+      return;
+    }
+    const now = performance.now();
+    if (!force && this._lastDeployMapDrawAt && now - this._lastDeployMapDrawAt < 83) {
+      return;
+    }
+    this._lastDeployMapDrawAt = now;
+
     this.updateDeployClassTraitsCard?.();
     // Update spawn buttons so only Main Base, Squad, and Occupied Forward Flags are selectable
     const spawnBtns = document.querySelectorAll('.spawn-btn');

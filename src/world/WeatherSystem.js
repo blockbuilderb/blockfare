@@ -1,7 +1,12 @@
 import * as THREE from '../../vendor/three.module.js';
 
-// Pre-allocated reusable THREE.Color instance for sandstorm fog tinting (Phase 3F)
+// Pre-allocated reusable THREE.Color instances (Zero per-frame Color allocations)
 const _sandstormFogColor = new THREE.Color(0xb89058);
+const _sunsetBgColor = new THREE.Color(0xd97d54);
+const _sunsetFogColor = new THREE.Color(0xc86d51);
+const _nightBgColor = new THREE.Color(0x070b12);
+const _dayBgColor = new THREE.Color(0x87b8d8);
+const _WEATHER_EVENTS = ['FOG', 'HEAVY_FOG', 'SANDSTORM'];
 
 export const WeatherSystem = {
   /**
@@ -9,9 +14,14 @@ export const WeatherSystem = {
    */
   setAtmosphereMode(mode, hemiLight, dirLight) {
     this.atmosphereMode = mode;
+    let targetBg = _dayBgColor;
+    let targetFog = _dayBgColor;
+    let targetDensity = 0.0014;
+
     if (mode === 'SUNSET') {
-      this.scene.background = new THREE.Color(0xd97d54);
-      this.scene.fog = new THREE.FogExp2(0xc86d51, 0.0018);
+      targetBg = _sunsetBgColor;
+      targetFog = _sunsetFogColor;
+      targetDensity = 0.0018;
       if (hemiLight) {
         hemiLight.color.setHex(0xffb07c);
         hemiLight.groundColor.setHex(0x3a2e39);
@@ -23,8 +33,9 @@ export const WeatherSystem = {
         dirLight.position.set(-220, 110, 120);
       }
     } else if (mode === 'NIGHT') {
-      this.scene.background = new THREE.Color(0x070b12);
-      this.scene.fog = new THREE.FogExp2(0x070b12, 0.0028);
+      targetBg = _nightBgColor;
+      targetFog = _nightBgColor;
+      targetDensity = 0.0028;
       if (hemiLight) {
         hemiLight.color.setHex(0x1f3044);
         hemiLight.groundColor.setHex(0x090d12);
@@ -37,8 +48,6 @@ export const WeatherSystem = {
       }
     } else {
       // DAY
-      this.scene.background = new THREE.Color(0x87b8d8);
-      this.scene.fog = new THREE.FogExp2(0x87b8d8, 0.0014);
       if (hemiLight) {
         hemiLight.color.setHex(0xdff9fb);
         hemiLight.groundColor.setHex(0x4a5540);
@@ -51,10 +60,23 @@ export const WeatherSystem = {
       }
     }
 
+    if (this.scene.background && this.scene.background.isColor) {
+      this.scene.background.copy(targetBg);
+    } else {
+      this.scene.background = targetBg.clone();
+    }
+
+    if (this.scene.fog && this.scene.fog.isFogExp2) {
+      this.scene.fog.color.copy(targetFog);
+      this.scene.fog.density = targetDensity;
+    } else {
+      this.scene.fog = new THREE.FogExp2(targetFog.getHex(), targetDensity);
+    }
+
     if (this.lampBulbs) {
       const lampHex = mode === 'DAY' ? 0x95a5a6 : 0xffdd59;
-      for (const b of this.lampBulbs) {
-        b.material.color.setHex(lampHex);
+      for (let i = 0; i < this.lampBulbs.length; i++) {
+        this.lampBulbs[i].material.color.setHex(lampHex);
       }
     }
   },
@@ -66,8 +88,7 @@ export const WeatherSystem = {
     if (this.weatherState === 'CLEAR') {
       if (this.weatherTimer <= 0) {
         // Trigger random weather event
-        const events = ['FOG', 'HEAVY_FOG', 'SANDSTORM'];
-        this.weatherState = events[Math.floor(Math.random() * events.length)];
+        this.weatherState = _WEATHER_EVENTS[(Math.random() * _WEATHER_EVENTS.length) | 0];
         this.weatherDuration = 30 + Math.random() * 45; // 30-75 seconds
         this.weatherTimer = this.weatherDuration;
         this._weatherTransition = 0;
@@ -83,6 +104,18 @@ export const WeatherSystem = {
       }
     }
 
+    if (this.weatherParticles && this.weatherParticles.length > 0) {
+      for (let i = 0; i < this.weatherParticles.length; i++) {
+        const wp = this.weatherParticles[i];
+        if (wp && wp.mesh) {
+          if (wp.mesh.geometry && !wp.mesh.geometry.userData) wp.mesh.geometry.userData = { shared: true };
+          else if (wp.mesh.geometry) wp.mesh.geometry.userData.shared = true;
+          if (wp.mesh.material && !wp.mesh.material.userData) wp.mesh.material.userData = { shared: true };
+          else if (wp.mesh.material) wp.mesh.material.userData.shared = true;
+        }
+      }
+    }
+
     // Apply weather effects to fog density
     const mode = this.atmosphereMode || 'DAY';
     const baseDensity = mode === 'NIGHT' ? 0.0028 : mode === 'SUNSET' ? 0.0018 : 0.0014;
@@ -94,7 +127,7 @@ export const WeatherSystem = {
       targetDensity = baseDensity * 5.5;
     } else if (this.weatherState === 'SANDSTORM') {
       targetDensity = baseDensity * 4.0;
-      // Tint the fog amber during sandstorm
+      // Tint the fog amber during sandstorm (mutating fog.color in-place)
       if (this.scene.fog && this._weatherTransition > 0.3) {
         this.scene.fog.color.lerp(_sandstormFogColor, dt * 0.5);
       }
@@ -120,8 +153,8 @@ export const WeatherSystem = {
         dt * (isAirbornePilot ? 3.5 : 0.8)
       );
 
-      // Restore fog color when clearing
-      if (this.weatherState === 'CLEAR' && this.scene.background) {
+      // Restore fog color in-place when clearing
+      if (this.weatherState === 'CLEAR' && this.scene.background && this.scene.background.isColor) {
         this.scene.fog.color.lerp(this.scene.background, dt * 0.3);
       }
     }

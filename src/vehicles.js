@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=90';
-import { VEHICLE_STATS, PROJECTILES } from './config.js?v=90';
+import { sound } from './audio.js?v=91';
+import { VEHICLE_STATS, PROJECTILES } from './config.js?v=91';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=90';
-import { createVehicleMesh } from './models/vehicle-model.js?v=90';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=90';
-import { events, makeEventBridge } from './events.js?v=90';
+} from './assets/vehicle-defs.js?v=91';
+import { createVehicleMesh } from './models/vehicle-model.js?v=91';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=91';
+import { events, makeEventBridge } from './events.js?v=91';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,43 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=90';
+} from './core/StateMachines.js?v=91';
+
+function markShared(item) {
+  item.userData.shared = true;
+  return item;
+}
+
+const SHARED_TREB_BOULDER_GEO = markShared(new THREE.DodecahedronGeometry(0.68, 1));
+const SHARED_TREB_BOULDER_MAT = markShared(new THREE.MeshBasicMaterial({ color: 0xff6b00 }));
+const SHARED_AI_SAM_GEO = markShared(new THREE.BoxGeometry(0.24, 0.24, 1.35));
+const SHARED_AI_SAM_MAT = markShared(new THREE.MeshBasicMaterial({ color: 0x00d2d3 }));
+const SHARED_AI_AA_SHELL_GEO = markShared(new THREE.BoxGeometry(0.18, 0.18, 0.65));
+const SHARED_AI_AA_SHELL_MAT = markShared(new THREE.MeshBasicMaterial({ color: 0xff5252 }));
+const SHARED_AI_TANK_SHELL_GEO = markShared(new THREE.BoxGeometry(0.24, 0.24, 0.78));
+const SHARED_AI_TANK_SHELL_MAT = markShared(new THREE.MeshBasicMaterial({ color: 0xffaa00 }));
+const SHARED_AI_AUTO_SHELL_GEO = markShared(new THREE.BoxGeometry(0.16, 0.16, 0.48));
+const SHARED_AI_AUTO_SHELL_MAT = markShared(new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
+
+const PITCH_LIMITS_DEFAULT = Object.freeze({ min: -0.18, max: 0.35 });
+const PITCH_LIMITS_AA = Object.freeze({ min: -0.14, max: 1.48 });
+const PITCH_LIMITS_MORTAR = Object.freeze({ min: -0.35, max: 0.85 });
+const PITCH_LIMITS_APC = Object.freeze({ min: -0.18, max: 0.52 });
+const PITCH_LIMITS_CAR = Object.freeze({ min: -0.21, max: 0.61 });
+
+const COLOR_FIRE_ORANGE = new THREE.Color(0xff7f11);
+const COLOR_ERA_SPARK = new THREE.Color(0xff9f1a);
+const COLOR_HORSE_DEBRIS = new THREE.Color(0x8b4513);
+const COLOR_SMOKE_RED = new THREE.Color(0xff5252);
+const COLOR_SMOKE_DARK = new THREE.Color(0x2f3640);
+const COLOR_SMOKE_GREY = new THREE.Color(0x636e72);
+const COLOR_2STROKE_SMOKE = new THREE.Color(0x95afc0);
+const COLOR_BLOOD = new THREE.Color(0x8b1e1e);
+const COLOR_VORTEX_WHITE = new THREE.Color(0xecf0f1);
+const COLOR_B2_CYAN = new THREE.Color(0x00d2d3);
+const COLOR_FLARE_GOLD = new THREE.Color(0xffd32a);
+const COLOR_MUZZLE_GOLD = new THREE.Color(0xffaa00);
+const _wingtipOffsetScratch = new THREE.Vector3();
 
 export class VehicleManager {
   constructor(scene, world) {
@@ -29,6 +65,9 @@ export class VehicleManager {
     this.world = world;
     this.vehicles = [];
     this.hitMeshes = [];
+    this.boardableGroundByTeam = { US: [], RU: [] };
+    this.activeGroundTargetsByTeam = { US: [], RU: [] };
+    this.activeAircraftByTeam = { US: [], RU: [] };
     this.teamKills = { US: 0, RU: 0 };
     this.teamFunds = {
       US: VEHICLE_STATS.INITIAL_FACTION_FUNDS || 5000,
@@ -47,6 +86,37 @@ export class VehicleManager {
     );
 
     this.initVehicles();
+    this.refreshTeamVehicleLists();
+  }
+
+  refreshTeamVehicleLists() {
+    this.boardableGroundByTeam.US.length = 0;
+    this.boardableGroundByTeam.RU.length = 0;
+    this.activeGroundTargetsByTeam.US.length = 0;
+    this.activeGroundTargetsByTeam.RU.length = 0;
+    this.activeAircraftByTeam.US.length = 0;
+    this.activeAircraftByTeam.RU.length = 0;
+
+    for (let i = 0; i < this.vehicles.length; i++) {
+      const v = this.vehicles[i];
+      if (!v) continue;
+      v.fleetIndex = i;
+      if (v.dead) continue;
+      const team = v.team === 'RU' ? 'RU' : 'US';
+      const enemyTeam = team === 'US' ? 'RU' : 'US';
+
+      if (v.isAircraft) {
+        this.activeAircraftByTeam[team].push(v);
+      } else {
+        if (!v.isEmplacement && !v.isWarehouseBike && !v.driver && !v.npcDriver) {
+          this.boardableGroundByTeam[team].push(v);
+        }
+        const isOccupied = Boolean(v.driver || v.npcDriver);
+        if (isOccupied || (!v.isWarehouseBike && v.type !== 'bike' && v.type !== 'atv')) {
+          this.activeGroundTargetsByTeam[enemyTeam].push(v);
+        }
+      }
+    }
   }
 
   getTeamKills(team = 'US') {
@@ -363,11 +433,24 @@ export class VehicleManager {
     }
     createVehicleSubsystemsFSM(vehicle);
 
+    const vehHitMeshes = [];
+    vehicle.hitMeshes = vehHitMeshes;
+    vehicle.hitRadius = isPlane
+      ? cfg.type === 'gunship' ||
+        cfg.type === 'bomber' ||
+        cfg.aircraftRole === 'gunship' ||
+        cfg.aircraftRole === 'bomber' ||
+        cfg.aircraftRole === 'b2_spirit'
+        ? 24.0
+        : 13.0
+      : 6.5;
+    vehicle.fleetIndex = this.vehicles.length;
+
     group.traverse((child) => {
       if (child.isMesh) {
         child.userData.vehicle = vehicle;
-        child.frustumCulled = false;
         if (!child.userData.skipHitbox) {
+          vehHitMeshes.push(child);
           this.hitMeshes.push(child);
         }
       }
@@ -597,7 +680,7 @@ export class VehicleManager {
     if (this.world?.spawnDebris) {
       this.world.spawnDebris(
         tmpVec3(v.pos.x, v.pos.y + 4.4, v.pos.z),
-        new THREE.Color(0xff7f11),
+        COLOR_FIRE_ORANGE,
         7
       );
     }
@@ -612,10 +695,7 @@ export class VehicleManager {
     const vz = dz / flightTime;
     const vy = (dy + 0.5 * g * flightTime * flightTime) / flightTime;
 
-    const mMesh = new THREE.Mesh(
-      new THREE.DodecahedronGeometry(0.68, 1),
-      new THREE.MeshBasicMaterial({ color: 0xff6b00 })
-    );
+    const mMesh = new THREE.Mesh(SHARED_TREB_BOULDER_GEO, SHARED_TREB_BOULDER_MAT);
     mMesh.position.set(v.pos.x, v.pos.y + 4.8, v.pos.z);
     this.scene.add(mMesh);
 
@@ -819,20 +899,20 @@ export class VehicleManager {
    * - Dedicated Anti-Air (LAV-AD / Tunguska / ZU-23-2): -8° (-0.14 rad) to +85° (+1.48 rad)
    */
   getVehiclePitchLimits(v) {
-    if (!v) return { min: -0.18, max: 0.35 };
+    if (!v) return PITCH_LIMITS_DEFAULT;
     if (v.type === 'aa' || v.type === 'emplace_aa' || v.weaponType === 'aa_autocannon') {
-      return { min: -0.14, max: 1.48 };
+      return PITCH_LIMITS_AA;
     }
     if (v.type === 'emplace_mortar' || v.weaponType === 'mortar_tube') {
-      return { min: -0.35, max: 0.85 };
+      return PITCH_LIMITS_MORTAR;
     }
     if (v.type === 'tank' || v.weaponType === 'tank_cannon') {
-      return { min: -0.18, max: 0.35 };
+      return PITCH_LIMITS_DEFAULT;
     }
     if (v.type === 'apc' || v.weaponType === 'autocannon') {
-      return { min: -0.18, max: 0.52 };
+      return PITCH_LIMITS_APC;
     }
-    return { min: -0.21, max: 0.61 };
+    return PITCH_LIMITS_CAR;
   }
 
   /**
@@ -1347,6 +1427,7 @@ export class VehicleManager {
 
   update(dt, player = null, botManager = null, onDeployMenu = false) {
     if (player) this.lastPlayer = player;
+    this.refreshTeamVehicleLists();
     for (const v of this.vehicles) {
       if (v.dead) {
         if (onDeployMenu) continue;
@@ -1463,7 +1544,18 @@ export class VehicleManager {
           v.coaxOverheated = false;
         }
       }
-      syncVehicleSubsystemsFSM(v);
+      if (
+        !v.cmFSM ||
+        !v.thermalFSM ||
+        (v.flareActiveTimer || 0) > 0 ||
+        (v.flareCooldown || 0) > 0 ||
+        (v.coaxHeat || 0) > 0 ||
+        v.coaxOverheated ||
+        v.cmState !== 'CM_READY' ||
+        v.thermalState !== 'THERMAL_NORMAL'
+      ) {
+        syncVehicleSubsystemsFSM(v);
+      }
       if (v.barrelRecoil > 0) {
         v.barrelRecoil = Math.max(0, v.barrelRecoil - dt * 1.8);
       }
@@ -1537,9 +1629,9 @@ export class VehicleManager {
           const deckZ = v.pos.z + Math.cos(v.yaw) * 2.1 + (Math.random() - 0.5) * 0.6;
           const smokeCol = isCriticalHull
             ? Math.random() < 0.45
-              ? new THREE.Color(0xff5252)
-              : new THREE.Color(0x2f3640)
-            : new THREE.Color(0x636e72);
+              ? COLOR_SMOKE_RED
+              : COLOR_SMOKE_DARK
+            : COLOR_SMOKE_GREY;
           this.world.spawnDebris(
             tmpVec3(deckX, v.pos.y + 1.45, deckZ),
             smokeCol,
@@ -1553,7 +1645,20 @@ export class VehicleManager {
         v.npcDriver.drivingVehicle = null;
         v.npcDriver = null;
       }
-      syncGroundVehicleFSM(v);
+      const curThirdPerson = Boolean(v.driver?.thirdPersonVehicle);
+      if (
+        !v.occupancyFSM ||
+        v._lastSyncDead !== v.dead ||
+        v._lastSyncDriver !== v.driver ||
+        v._lastSyncNpcDriver !== v.npcDriver ||
+        v._lastSyncThirdPerson !== curThirdPerson
+      ) {
+        syncGroundVehicleFSM(v);
+        v._lastSyncDead = v.dead;
+        v._lastSyncDriver = v.driver;
+        v._lastSyncNpcDriver = v.npcDriver;
+        v._lastSyncThirdPerson = curThirdPerson;
+      }
 
       // =====================================================================
       // PHYSICAL NPC DRIVER CONTROL (ONLY when an NPC has walked to the vehicle and boarded it!)
@@ -1561,7 +1666,7 @@ export class VehicleManager {
       if (!v.driver && v.npcDriver && v.patrolPoints && v.patrolPoints.length > 0) {
         let wp = v.patrolPoints[v.patrolIndex % v.patrolPoints.length];
         const drv = v.npcDriver;
-        const vIdx = Math.max(0, this.vehicles.indexOf(v));
+        const vIdx = v.fleetIndex ?? Math.max(0, this.vehicles.indexOf(v));
         const vAngle = vIdx * 1.38 + (v.team === 'US' ? 0.35 : -0.35);
         const spacingMode =
           drv.spacingMode ||
@@ -1667,15 +1772,13 @@ export class VehicleManager {
         // Keep NPC driver's world coordinates synced with the vehicle they are piloting
         v.npcDriver.pos.copy(v.pos);
 
-        // Scan for enemy aircraft (if AA vehicle), enemy occupied vehicles, or enemy soldiers!
+        // Throttled 5 Hz AI Tank/IFV/AA Target Acquisition Scan using spatial grids & pre-bucketed fleet lists
         let bestTargetPos = null;
         let bestAirTarget = null;
         const isAaUnit = v.type === 'aa' || v.type === 'emplace_aa' || v.weaponType === 'aa_autocannon';
         const pitchLimits = this.getVehiclePitchLimits(v);
         const turretOriginY = v.pos.y + (v.type === 'tank' ? 2.25 : v.isEmplacement ? 1.45 : 2.5);
-        let bestDistSq = isAaUnit
-          ? VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT * VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT
-          : VEHICLE_STATS.ENGAGE_RANGE_VEHICLE * VEHICLE_STATS.ENGAGE_RANGE_VEHICLE;
+        const enemyTeam = v.team === 'US' ? 'RU' : 'US';
 
         const isWithinElevationLimits = (tx, ty, tz) => {
           const horiz = Math.max(0.5, Math.hypot(tx - v.pos.x, tz - v.pos.z));
@@ -1683,82 +1786,176 @@ export class VehicleManager {
           return elevRad >= pitchLimits.min && elevRad <= pitchLimits.max;
         };
 
-        if (isAaUnit) {
-          for (const airV of this.vehicles) {
-            if (!airV.isAircraft || airV.dead || airV.team === v.team) continue;
-            if (!airV.driver && !airV.aiPilotActive) continue;
-            // Low-altitude ground-effect radar masking (< 28m AGL) & 4.0s post-takeoff grace period
-            const airGroundY = this.world.getGroundHeightAt(airV.pos.x, airV.pos.z);
-            const airAltAgl = Math.max(0, airV.pos.y - airGroundY);
-            if (airAltAgl < 28.0 || (airV.airborneRadarTimer || 0) < 4.0 || airV.isLowAltRadarMasked) continue;
-            // Northrop B-2A Spirit Stealth Bomber: 88% radar/IR signature reduction (and 100% invisible during [X] RAM Stealth Cloak!)
-            const isStealthB2 = airV.aircraftRole === 'b2_spirit' || airV.isStealthAircraft;
-            if (isStealthB2 && (airV.flareActiveTimer || 0) > 0) continue;
-            const stealthMult = isStealthB2 ? airV.stealthFactor || 0.12 : 1.0;
-            const maxAirDist = VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT * stealthMult;
-            const dSq = v.pos.distanceToSquared(airV.pos);
-            if (
-              dSq < maxAirDist * maxAirDist &&
-              dSq < bestDistSq &&
-              isWithinElevationLimits(airV.pos.x, airV.pos.y, airV.pos.z)
-            ) {
-              bestDistSq = dSq;
-              bestAirTarget = airV;
-              bestTargetPos = tmpVec3(airV.pos.x, airV.pos.y, airV.pos.z);
-            }
+        v._aiTargetScanTimer = (v._aiTargetScanTimer || 0) - dt;
+        let usedCachedAiTarget = false;
+        if (v._aiTargetScanTimer > 0 && v._cachedAiTarget && v._cachedAiTarget.unit) {
+          const ct = v._cachedAiTarget;
+          const u = ct.unit;
+          if (
+            ct.kind === 'air' &&
+            !u.dead &&
+            !u.isShotDown &&
+            (u.driver || u.aiPilotActive) &&
+            !((u.aircraftRole === 'b2_spirit' || u.isStealthAircraft) && (u.flareActiveTimer || 0) > 0) &&
+            isWithinElevationLimits(u.pos.x, u.pos.y, u.pos.z)
+          ) {
+            bestAirTarget = u;
+            bestTargetPos = tmpVec3(u.pos.x, u.pos.y, u.pos.z);
+            usedCachedAiTarget = true;
+          } else if (
+            ct.kind === 'groundVeh' &&
+            !u.dead &&
+            isWithinElevationLimits(u.pos.x, u.pos.y + 1.4, u.pos.z)
+          ) {
+            bestTargetPos = tmpVec3(u.pos.x, u.pos.y + 1.4, u.pos.z);
+            usedCachedAiTarget = true;
+          } else if (
+            ct.kind === 'bot' &&
+            !u.dead &&
+            !u.downed &&
+            !u.drivingVehicle &&
+            isWithinElevationLimits(u.pos.x, u.pos.y + 1.1, u.pos.z)
+          ) {
+            bestTargetPos = tmpVec3(u.pos.x, u.pos.y + 1.1, u.pos.z);
+            usedCachedAiTarget = true;
+          } else if (
+            ct.kind === 'player' &&
+            !u.dead &&
+            !u.downed &&
+            isWithinElevationLimits(u.pos.x, u.pos.y + 1.2, u.pos.z)
+          ) {
+            bestTargetPos = tmpVec3(u.pos.x, u.pos.y + 1.2, u.pos.z);
+            usedCachedAiTarget = true;
+          } else {
+            ct.unit = null;
           }
         }
 
-        if (!bestTargetPos) {
-          bestDistSq = VEHICLE_STATS.ENGAGE_RANGE_VEHICLE * VEHICLE_STATS.ENGAGE_RANGE_VEHICLE;
-          for (const otherV of this.vehicles) {
-            if (otherV.dead || otherV.team === v.team || otherV.isAircraft) continue;
-            // Never shell unoccupied parked FOB motorcycles/ATVs
-            if (
-              !otherV.driver &&
-              !otherV.npcDriver &&
-              (otherV.isWarehouseBike || otherV.type === 'bike' || otherV.type === 'atv')
-            ) {
-              continue;
-            }
-            const dSq = v.pos.distanceToSquared(otherV.pos);
-            if (dSq < bestDistSq && isWithinElevationLimits(otherV.pos.x, otherV.pos.y + 1.4, otherV.pos.z)) {
-              bestDistSq = dSq;
-              bestTargetPos = tmpVec3(otherV.pos.x, otherV.pos.y + 1.4, otherV.pos.z);
+        if (!usedCachedAiTarget && v._aiTargetScanTimer <= 0) {
+          v._aiTargetScanTimer = 0.18 + Math.random() * 0.04;
+          let selectedKind = null;
+          let selectedUnit = null;
+          let bestDistSq = isAaUnit
+            ? VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT * VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT
+            : VEHICLE_STATS.ENGAGE_RANGE_VEHICLE * VEHICLE_STATS.ENGAGE_RANGE_VEHICLE;
+
+          if (isAaUnit) {
+            const enemyPlanes = this.activeAircraftByTeam?.[enemyTeam] || this.vehicles;
+            for (let ai = 0; ai < enemyPlanes.length; ai++) {
+              const airV = enemyPlanes[ai];
+              if (!airV.isAircraft || airV.dead || airV.team === v.team) continue;
+              if (!airV.driver && !airV.aiPilotActive) continue;
+              const airGroundY = this.world.getGroundHeightAt(airV.pos.x, airV.pos.z);
+              const airAltAgl = Math.max(0, airV.pos.y - airGroundY);
+              if (airAltAgl < 28.0 || (airV.airborneRadarTimer || 0) < 4.0 || airV.isLowAltRadarMasked) continue;
+              const isStealthB2 = airV.aircraftRole === 'b2_spirit' || airV.isStealthAircraft;
+              if (isStealthB2 && (airV.flareActiveTimer || 0) > 0) continue;
+              const stealthMult = isStealthB2 ? airV.stealthFactor || 0.12 : 1.0;
+              const maxAirDist = VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT * stealthMult;
+              const dSq = v.pos.distanceToSquared(airV.pos);
+              if (
+                dSq < maxAirDist * maxAirDist &&
+                dSq < bestDistSq &&
+                isWithinElevationLimits(airV.pos.x, airV.pos.y, airV.pos.z)
+              ) {
+                bestDistSq = dSq;
+                bestAirTarget = airV;
+                selectedKind = 'air';
+                selectedUnit = airV;
+                bestTargetPos = tmpVec3(airV.pos.x, airV.pos.y, airV.pos.z);
+              }
             }
           }
-        }
 
-        if (!bestTargetPos && botManager) {
-          for (const b of botManager.bots) {
-            if (b.dead || b.downed || b.drivingVehicle || b.team === v.team) continue;
-            if (v.type === 'tank' && b.parachuting) continue;
-            const dSq = v.pos.distanceToSquared(b.pos);
+          if (!bestTargetPos) {
+            bestDistSq = VEHICLE_STATS.ENGAGE_RANGE_VEHICLE * VEHICLE_STATS.ENGAGE_RANGE_VEHICLE;
+            const groundTargets = this.activeGroundTargetsByTeam?.[v.team] || this.vehicles;
+            for (let gi = 0; gi < groundTargets.length; gi++) {
+              const otherV = groundTargets[gi];
+              if (otherV.dead || otherV.team === v.team || otherV.isAircraft) continue;
+              if (
+                !otherV.driver &&
+                !otherV.npcDriver &&
+                (otherV.isWarehouseBike || otherV.type === 'bike' || otherV.type === 'atv')
+              ) {
+                continue;
+              }
+              const dSq = v.pos.distanceToSquared(otherV.pos);
+              if (dSq < bestDistSq && isWithinElevationLimits(otherV.pos.x, otherV.pos.y + 1.4, otherV.pos.z)) {
+                bestDistSq = dSq;
+                selectedKind = 'groundVeh';
+                selectedUnit = otherV;
+                bestTargetPos = tmpVec3(otherV.pos.x, otherV.pos.y + 1.4, otherV.pos.z);
+              }
+            }
+          }
+
+          if (!bestTargetPos && botManager) {
+            const infMaxR = VEHICLE_STATS.ENGAGE_RANGE_INFANTRY;
+            const infMaxSq = infMaxR * infMaxR;
+            const enemyGrid = botManager.teamGrid && botManager.teamGrid[enemyTeam];
+            if (enemyGrid) {
+              enemyGrid.forEachInRadius(v.pos.x, v.pos.z, infMaxR, (b, dSq2D) => {
+                if (b.dead || b.downed || b.drivingVehicle || b.team === v.team) return;
+                if (v.type === 'tank' && b.parachuting) return;
+                const dy = b.pos.y - v.pos.y;
+                const dSq = dSq2D + dy * dy;
+                if (
+                  dSq < infMaxSq &&
+                  dSq < bestDistSq &&
+                  isWithinElevationLimits(b.pos.x, b.pos.y + 1.1, b.pos.z)
+                ) {
+                  bestDistSq = dSq;
+                  selectedKind = 'bot';
+                  selectedUnit = b;
+                }
+              });
+              if (selectedKind === 'bot' && selectedUnit) {
+                bestTargetPos = tmpVec3(selectedUnit.pos.x, selectedUnit.pos.y + 1.1, selectedUnit.pos.z);
+              }
+            } else if (botManager.bots) {
+              for (const b of botManager.bots) {
+                if (b.dead || b.downed || b.drivingVehicle || b.team === v.team) continue;
+                if (v.type === 'tank' && b.parachuting) continue;
+                const dSq = v.pos.distanceToSquared(b.pos);
+                if (
+                  dSq < infMaxSq &&
+                  dSq < bestDistSq &&
+                  isWithinElevationLimits(b.pos.x, b.pos.y + 1.1, b.pos.z)
+                ) {
+                  bestDistSq = dSq;
+                  selectedKind = 'bot';
+                  selectedUnit = b;
+                  bestTargetPos = tmpVec3(b.pos.x, b.pos.y + 1.1, b.pos.z);
+                }
+              }
+            }
+          }
+
+          if (
+            !bestTargetPos &&
+            player &&
+            !player.dead &&
+            !player.downed &&
+            player.team !== v.team &&
+            !(v.type === 'tank' && player.parachuting)
+          ) {
+            const dSq = v.pos.distanceToSquared(player.pos);
             if (
               dSq < VEHICLE_STATS.ENGAGE_RANGE_INFANTRY * VEHICLE_STATS.ENGAGE_RANGE_INFANTRY &&
-              dSq < bestDistSq &&
-              isWithinElevationLimits(b.pos.x, b.pos.y + 1.1, b.pos.z)
+              isWithinElevationLimits(player.pos.x, player.pos.y + 1.2, player.pos.z)
             ) {
-              bestDistSq = dSq;
-              bestTargetPos = tmpVec3(b.pos.x, b.pos.y + 1.1, b.pos.z);
+              selectedKind = 'player';
+              selectedUnit = player;
+              bestTargetPos = tmpVec3(player.pos.x, player.pos.y + 1.2, player.pos.z);
             }
           }
-        }
 
-        if (
-          !bestTargetPos &&
-          player &&
-          !player.dead &&
-          !player.downed &&
-          player.team !== v.team &&
-          !(v.type === 'tank' && player.parachuting)
-        ) {
-          const dSq = v.pos.distanceToSquared(player.pos);
-          if (
-            dSq < VEHICLE_STATS.ENGAGE_RANGE_INFANTRY * VEHICLE_STATS.ENGAGE_RANGE_INFANTRY &&
-            isWithinElevationLimits(player.pos.x, player.pos.y + 1.2, player.pos.z)
-          ) {
-            bestTargetPos = tmpVec3(player.pos.x, player.pos.y + 1.2, player.pos.z);
+          if (!v._cachedAiTarget) {
+            v._cachedAiTarget = { kind: selectedKind, unit: selectedUnit };
+          } else {
+            v._cachedAiTarget.kind = selectedKind;
+            v._cachedAiTarget.unit = selectedUnit;
           }
         }
 
@@ -1802,7 +1999,10 @@ export class VehicleManager {
         if (v.type === 'emplace_aa') {
           let airTarget = null;
           let bestAirSq = VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT * VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT;
-          for (const airV of this.vehicles) {
+          const enemyTeam = v.team === 'US' ? 'RU' : 'US';
+          const enemyPlanes = this.activeAircraftByTeam?.[enemyTeam] || this.vehicles;
+          for (let ai = 0; ai < enemyPlanes.length; ai++) {
+            const airV = enemyPlanes[ai];
             if (!airV.isAircraft || airV.dead || airV.team === v.team) continue;
             if (!airV.driver && !airV.aiPilotActive) continue;
             const isStealthB2 = airV.aircraftRole === 'b2_spirit' || airV.isStealthAircraft;
@@ -1837,17 +2037,22 @@ export class VehicleManager {
 
       // ─── CREW-SERVED MEDIEVAL SIEGE TREBUCHET SETUP & BOULDER BARRAGE LOOP ─────────
       if (v.type === 'trebuchet') {
+        let crewNearCount = 0;
         if (Array.isArray(v.assignedCrewBots)) {
-          v.assignedCrewBots = v.assignedCrewBots.filter(
-            (b) => b && !b.dead && !b.downed && b.assignedTrebuchet === v
-          );
+          let writeIdx = 0;
+          for (let ci = 0; ci < v.assignedCrewBots.length; ci++) {
+            const b = v.assignedCrewBots[ci];
+            if (b && !b.dead && !b.downed && b.assignedTrebuchet === v) {
+              v.assignedCrewBots[writeIdx++] = b;
+              if (b.pos.distanceToSquared(v.pos) <= 13.5 * 13.5) {
+                crewNearCount++;
+              }
+            }
+          }
+          v.assignedCrewBots.length = writeIdx;
         } else {
           v.assignedCrewBots = [];
         }
-
-        const crewNearCount = v.assignedCrewBots.filter(
-          (b) => b.pos.distanceToSquared(v.pos) <= 13.5 * 13.5
-        ).length;
 
         if (v.driver) {
           v.setupState = 'READY_FIRING';
@@ -1914,29 +2119,59 @@ export class VehicleManager {
 
         // Autonomous Siege Crew Target Acquisition & Boulder Launching towards the Enemy!
         if (!v.driver && v.setupState === 'READY_FIRING' && !onDeployMenu) {
-          let boulderTarget = null;
-          let bestScore = Infinity;
-          if (botManager && Array.isArray(botManager.bots)) {
-            for (const eb of botManager.bots) {
-              if (!eb || eb.dead || eb.downed || eb.team === v.team) continue;
-              const d = v.pos.distanceTo(eb.pos);
-              if (d >= 35 && d <= 520 && d < bestScore) {
-                bestScore = d;
-                boulderTarget = eb.pos.clone();
+          v.aiFireTimer = (v.aiFireTimer || 0) - dt;
+          v._trebScanCooldown = Math.max(0, (v._trebScanCooldown || 0) - dt);
+
+          // Only run full spatial target scan when aiFireTimer <= 0.25 (or no cached target yet)
+          if ((v.aiFireTimer <= 0.25 && v._trebScanCooldown <= 0) || !v._cachedBoulderTargetPos) {
+            v._trebScanCooldown = 0.2;
+            let bestTargetSrc = null;
+            let bestDistSq = 520 * 520;
+            const minDistSq = 35 * 35;
+            const enemyTeam = v.team === 'US' ? 'RU' : 'US';
+            const enemyGrid = botManager?.teamGrid?.[enemyTeam];
+
+            if (enemyGrid) {
+              enemyGrid.forEachRingOrder(v.pos.x, v.pos.z, 520, (eb, dSq2D) => {
+                if (!eb || eb.dead || eb.downed || eb.team === v.team) return;
+                const dy = eb.pos.y - v.pos.y;
+                const dSq = dSq2D + dy * dy;
+                if (dSq >= minDistSq && dSq <= bestDistSq) {
+                  bestDistSq = dSq;
+                  bestTargetSrc = eb.pos;
+                }
+              });
+            } else if (botManager && Array.isArray(botManager.bots)) {
+              for (const eb of botManager.bots) {
+                if (!eb || eb.dead || eb.downed || eb.team === v.team) continue;
+                const dSq = v.pos.distanceToSquared(eb.pos);
+                if (dSq >= minDistSq && dSq <= bestDistSq) {
+                  bestDistSq = dSq;
+                  bestTargetSrc = eb.pos;
+                }
               }
             }
-          }
-          if (!boulderTarget && v.commandedTargetPos) {
-            boulderTarget = v.commandedTargetPos.clone();
-          }
-          if (!boulderTarget && this.world && Array.isArray(this.world.flags)) {
-            const enemyFlag =
-              this.world.flags.find((fl) => fl.owner !== v.team) || this.world.flags[2];
-            if (enemyFlag) {
-              boulderTarget = enemyFlag.pos.clone();
+            if (!bestTargetSrc && v.commandedTargetPos) {
+              bestTargetSrc = v.commandedTargetPos;
+            }
+            if (!bestTargetSrc && this.world && Array.isArray(this.world.flags)) {
+              let enemyFlag = null;
+              for (let fi = 0; fi < this.world.flags.length; fi++) {
+                if (this.world.flags[fi].owner !== v.team) {
+                  enemyFlag = this.world.flags[fi];
+                  break;
+                }
+              }
+              if (!enemyFlag) enemyFlag = this.world.flags[2];
+              if (enemyFlag) bestTargetSrc = enemyFlag.pos;
+            }
+            if (bestTargetSrc) {
+              if (!v._cachedBoulderTargetPos) v._cachedBoulderTargetPos = new THREE.Vector3();
+              v._cachedBoulderTargetPos.copy(bestTargetSrc);
             }
           }
 
+          const boulderTarget = v._cachedBoulderTargetPos;
           if (boulderTarget) {
             const tdx = boulderTarget.x - v.pos.x;
             const tdz = boulderTarget.z - v.pos.z;
@@ -1946,9 +2181,9 @@ export class VehicleManager {
             while (tDiff < -Math.PI) tDiff += Math.PI * 2;
             v.turretYaw += THREE.MathUtils.clamp(tDiff, -1.6 * dt, 1.6 * dt);
 
-            v.aiFireTimer = (v.aiFireTimer || 0) - dt;
             if (v.aiFireTimer <= 0 && Math.abs(tDiff) < 0.45) {
               this.fireTrebuchetBoulder(v, boulderTarget, player, botManager);
+              v._cachedBoulderTargetPos = null;
             }
           }
         }
@@ -2152,7 +2387,7 @@ export class VehicleManager {
             const exhaustZ = v.pos.z + Math.cos(v.yaw) * 0.85;
             this.world.spawnDebris(
               tmpVec3(exhaustX, v.pos.y + 0.78, exhaustZ),
-              new THREE.Color(0x95afc0),
+              COLOR_2STROKE_SMOKE,
               1
             );
           }
@@ -2313,20 +2548,20 @@ export class VehicleManager {
     const onKillCb =
       (player && (player.onKillEvent || player.onKill)) || this.onKill || null;
 
-    // 1. Check enemy NPCs in the vehicle's path (or friendly NPCs if human driver has Friendly Fire ON)
+    // 1. Check enemy NPCs in the vehicle's path via SpatialGrid2D (or friendly NPCs if human driver has Friendly Fire ON)
     if (botManager && botManager.bots) {
       const allowFriendlyRoadkill = Boolean(
         v.driver === player && player && player.friendlyFireEnabled
       );
-      for (const bot of botManager.bots) {
+      const testBotRoadkill = (bot) => {
         if (bot.dead || bot.drivingVehicle || (bot.team === v.team && !allowFriendlyRoadkill)) {
-          continue;
+          return;
         }
         if (bot._lastTrampleHitMs && nowMs - bot._lastTrampleHitMs < 480) {
-          continue;
+          return;
         }
         const dy = Math.abs(bot.pos.y - v.pos.y);
-        if (dy > 2.6) continue;
+        if (dy > 2.6) return;
 
         const dx = bot.pos.x - v.pos.x;
         const dz = bot.pos.z - v.pos.z;
@@ -2335,7 +2570,7 @@ export class VehicleManager {
 
         if (Math.abs(lateral) <= halfW && Math.abs(longitudinal) <= halfL) {
           // Ensure soldier is in front of or underneath the moving hull / hooves
-          if (longitudinal * moveSign < -halfL * 0.65) continue;
+          if (longitudinal * moveSign < -halfL * 0.65) return;
           bot._lastTrampleHitMs = nowMs;
 
           // Knock body forward & aside from bumper/tracks/hooves
@@ -2355,12 +2590,12 @@ export class VehicleManager {
           if (bot.downed) {
             // Running over / trampling an already downed enemy finishes them immediately under tracks/hooves
             bot.bleedOutTimer = Math.min(bot.bleedOutTimer || 0.1, 0.05);
-            continue;
+            return;
           }
 
           this.world.spawnDebris(
             tmpVec3(bot.pos.x, bot.pos.y + 0.9, bot.pos.z),
-            new THREE.Color(0x8b1e1e),
+            COLOR_BLOOD,
             5
           );
           if (isHorse) {
@@ -2430,6 +2665,20 @@ export class VehicleManager {
             botManager.onTelemetryEvent('VEHICLE_ROADKILL', roadkillPayload);
           }
         }
+      };
+
+      const queryR = Math.hypot(halfW, halfL) + 0.5;
+      if (botManager.spatialGrid && botManager.spatialGrid.count > 0) {
+        if (!allowFriendlyRoadkill && botManager.teamGrid) {
+          const enemyGrid = botManager.teamGrid[v.team === 'US' ? 'RU' : 'US'];
+          if (enemyGrid) enemyGrid.forEachInRadius(v.pos.x, v.pos.z, queryR, testBotRoadkill);
+        } else {
+          botManager.spatialGrid.forEachInRadius(v.pos.x, v.pos.z, queryR, testBotRoadkill);
+        }
+      } else {
+        for (const bot of botManager.bots) {
+          testBotRoadkill(bot);
+        }
       }
     }
 
@@ -2488,10 +2737,14 @@ export class VehicleManager {
         const span = cs?.wingSpan || 5.5;
         const q = v.mesh.quaternion;
         for (const side of [-1, 1]) {
-          const tipOffset = new THREE.Vector3(side * span, 1.35, 0.85).applyQuaternion(q);
+          _wingtipOffsetScratch.set(side * span, 1.35, 0.85).applyQuaternion(q);
           this.world.spawnDebris(
-            tmpVec3(v.pos.x + tipOffset.x, v.pos.y + tipOffset.y, v.pos.z + tipOffset.z),
-            new THREE.Color(0xecf0f1),
+            tmpVec3(
+              v.pos.x + _wingtipOffsetScratch.x,
+              v.pos.y + _wingtipOffsetScratch.y,
+              v.pos.z + _wingtipOffsetScratch.z
+            ),
+            COLOR_VORTEX_WHITE,
             1
           );
         }
@@ -2654,7 +2907,10 @@ export class VehicleManager {
       // (Northrop B-2A Spirit has 88% radar/IR stealth reduction, and planes < 28m AGL or < 4.0s post-takeoff are masked by radar ground clutter!)
       let dogfightTarget = null;
       let bestAirDist = 680;
-      for (const other of this.vehicles) {
+      const enemyAirTeam = v.team === 'US' ? 'RU' : 'US';
+      const enemyPlanes = this.activeAircraftByTeam?.[enemyAirTeam] || this.vehicles;
+      for (let ai = 0; ai < enemyPlanes.length; ai++) {
+        const other = enemyPlanes[ai];
         if (!other.isAircraft || other.dead || other.team === v.team) continue;
         if (!other.driver && !other.aiPilotActive) continue;
         const otherGroundH = this.world.getGroundHeightAt(other.pos.x, other.pos.z);
@@ -2870,10 +3126,7 @@ export class VehicleManager {
       // Launch Homing SAM periodically when tracking an enemy aircraft
       if (airTarget && v.coaxCooldown <= 0) {
         v.coaxCooldown = 15.5;
-        const samMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.24, 0.24, 1.35),
-          new THREE.MeshBasicMaterial({ color: 0x00d2d3 })
-        );
+        const samMesh = new THREE.Mesh(SHARED_AI_SAM_GEO, SHARED_AI_SAM_MAT);
         samMesh.position.copy(muzzleOrigin).addScaledVector(dir, 2.8);
         samMesh.lookAt(targetPos);
         this.scene.add(samMesh);
@@ -2892,10 +3145,7 @@ export class VehicleManager {
         });
         return;
       }
-      const shellMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.18, 0.18, 0.65),
-        new THREE.MeshBasicMaterial({ color: 0xff5252 })
-      );
+      const shellMesh = new THREE.Mesh(SHARED_AI_AA_SHELL_GEO, SHARED_AI_AA_SHELL_MAT);
       shellMesh.position.copy(muzzleOrigin).addScaledVector(dir, 2.5);
       this.scene.add(shellMesh);
       this.world.projectiles.push({
@@ -2914,13 +3164,10 @@ export class VehicleManager {
       if (distToPlayer < 220) sound.playTankCannon(distToPlayer, pan);
       this.world.spawnDebris(
         tmpVec3Copy(muzzleOrigin).addScaledVector(dir, 3.8),
-        new THREE.Color(0xffaa00),
+        COLOR_MUZZLE_GOLD,
         4
       );
-      const shellMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.24, 0.24, 0.78),
-        new THREE.MeshBasicMaterial({ color: 0xffaa00 })
-      );
+      const shellMesh = new THREE.Mesh(SHARED_AI_TANK_SHELL_GEO, SHARED_AI_TANK_SHELL_MAT);
       shellMesh.position.copy(muzzleOrigin).addScaledVector(dir, 4.0);
       shellMesh.lookAt(targetPos);
       this.scene.add(shellMesh);
@@ -2935,10 +3182,7 @@ export class VehicleManager {
       });
     } else if (v.weaponType === 'autocannon' || v.weaponType === 'hmg') {
       if (distToPlayer < 170) sound.playGunshot(v.weaponType, distToPlayer, pan);
-      const shellMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.16, 0.16, 0.48),
-        new THREE.MeshBasicMaterial({ color: 0xffcc00 })
-      );
+      const shellMesh = new THREE.Mesh(SHARED_AI_AUTO_SHELL_GEO, SHARED_AI_AUTO_SHELL_MAT);
       shellMesh.position.copy(muzzleOrigin).addScaledVector(dir, 2.4);
       this.scene.add(shellMesh);
 

@@ -1,12 +1,12 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=90';
-import { sound } from './audio.js?v=90';
-import { NETWORK } from './config.js?v=90';
-import { events, makeEventBridge } from './events.js?v=90';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=91';
+import { sound } from './audio.js?v=91';
+import { NETWORK } from './config.js?v=91';
+import { events, makeEventBridge } from './events.js?v=91';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=90';
+} from './core/StateMachines.js?v=91';
 
 export class NetworkManager {
   constructor(scene, world, player, botManager) {
@@ -20,6 +20,9 @@ export class NetworkManager {
     this.onRemoteCommsMessage = makeEventBridge('network:remote-comms', (msg, rp) => ({ msg, rp }));
 
     this.clientId = 'p_' + Math.random().toString(36).slice(2, 9);
+    this.playerId = this.clientId;
+    this._txSeq = 0;
+    this._peerSeqState = new Map();
     const params = new URLSearchParams(window.location.search);
     const urlMode = (params.get('mode') || '').trim().toUpperCase();
     const urlRoom = (params.get('room') || '').trim().toUpperCase();
@@ -134,6 +137,7 @@ export class NetworkManager {
     }
     this.remotePlayers.clear();
     this.remoteHitMeshes = [];
+    if (this._peerSeqState) this._peerSeqState.clear();
   }
 
   setGameMode(newMode, optionalBotMode = null) {
@@ -345,21 +349,65 @@ export class NetworkManager {
     }
   }
 
+  _isDuplicatePacket(msg) {
+    if (!msg) return true;
+    const seq = msg._seq;
+    const peerId = msg._sender || msg.senderId;
+    if (typeof seq !== 'number' || !peerId) return false;
+
+    let state = this._peerSeqState.get(peerId);
+    if (!state) {
+      state = {
+        maxSeq: 0,
+        lastStateSeq: 0,
+        ring: new Float64Array(128),
+        cursor: 0
+      };
+      this._peerSeqState.set(peerId, state);
+    }
+
+    const ring = state.ring;
+    for (let i = 0; i < 128; i++) {
+      if (ring[i] === seq) return true;
+    }
+    if (state.maxSeq - seq > 128 && seq > 4) {
+      return true;
+    }
+    if (msg.type === 'state') {
+      if (seq < state.lastStateSeq && state.lastStateSeq - seq < 512) {
+        return true;
+      }
+      state.lastStateSeq = seq;
+    }
+    if (seq > state.maxSeq || state.maxSeq - seq > 1000) {
+      state.maxSeq = seq;
+    }
+    ring[state.cursor] = seq;
+    state.cursor = (state.cursor + 1) & 127;
+    return false;
+  }
+
   send(payload) {
-    if (this.gameMode !== 'MULTIPLAYER') return;
+    if (this.gameMode !== 'MULTIPLAYER' || !payload) return;
     const packet = {
       ...payload,
+      _seq: ++this._txSeq,
+      _sender: this.playerId,
       senderId: this.clientId,
       room: this.roomCode,
       ts: performance.now()
     };
-    if (this.wsConnected && this.ws && this.ws.readyState === WebSocket.OPEN) {
+    const wsOpen = Boolean(
+      this.wsConnected && this.ws && this.ws.readyState === WebSocket.OPEN
+    );
+    if (wsOpen) {
       this.ws.send(JSON.stringify(packet));
+      return;
     }
     if (this.broadcastChannel) {
       this.broadcastChannel.postMessage(packet);
     }
-    if (payload.type !== 'state') {
+    if (!this.isStaticHost && payload.type !== 'state') {
       this.pendingHttpEvents.push(packet);
       if (this.pendingHttpEvents.length > 40) {
         this.pendingHttpEvents.shift();
@@ -369,6 +417,7 @@ export class NetworkManager {
 
   handleMessage(msg) {
     if (this.gameMode !== 'MULTIPLAYER') return;
+    if (this._isDuplicatePacket(msg)) return;
     switch (msg.type) {
       case 'state':
         this.updateRemotePlayer(msg);
@@ -655,6 +704,7 @@ export class NetworkManager {
 
   async syncHttpNow() {
     if (this.isStaticHost || this.gameMode !== 'MULTIPLAYER' || this.httpSyncInFlight) return;
+    if (this.wsConnected && this.ws && this.ws.readyState === WebSocket.OPEN) return;
     const reqEpoch = this._syncEpoch || 1;
     const reqRoom = this.roomCode;
     this.httpSyncInFlight = true;
@@ -726,11 +776,13 @@ export class NetworkManager {
       this.send(this.buildLocalStatePacket());
     }
 
-    // Reliable HTTP Room Sync every 0.16s (works across all browsers, tabs & LAN devices!)
-    this.httpSyncTimer += dt;
-    if (this.httpSyncTimer >= NETWORK.HTTP_SYNC_INTERVAL) {
-      this.httpSyncTimer = 0;
-      this.syncHttpNow();
+    // Reliable HTTP Room Sync every 0.16s ONLY in HTTP fallback mode (when WebSocket is not open)
+    if (!(this.wsConnected && this.ws && this.ws.readyState === WebSocket.OPEN)) {
+      this.httpSyncTimer += dt;
+      if (this.httpSyncTimer >= NETWORK.HTTP_SYNC_INTERVAL) {
+        this.httpSyncTimer = 0;
+        this.syncHttpNow();
+      }
     }
 
     this.roomPollTimer += dt;
@@ -761,6 +813,7 @@ export class NetworkManager {
           (m) => m.userData?.remotePlayer !== rp
         );
         this.remotePlayers.delete(id);
+        if (this._peerSeqState) this._peerSeqState.delete(id);
         if (this.onLobbyUpdated) {
           this.onLobbyUpdated();
         }

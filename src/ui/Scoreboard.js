@@ -1,4 +1,4 @@
-import { SQUAD_DEFS } from '../bots.js?v=90';
+import { SQUAD_DEFS } from '../bots.js?v=91';
 
 export const Scoreboard = {
   computeBattleStats() {
@@ -65,17 +65,38 @@ export const Scoreboard = {
     usUnits.sort((a, b) => b.score - a.score || b.kills - a.kills);
     ruUnits.sort((a, b) => b.score - a.score || b.kills - a.kills);
 
-    const sumTeam = (arr, team) => ({
-      team,
-      tickets: Math.max(0, Math.floor(team === 'US' ? this.lastTicketsUS : this.lastTicketsRU)),
-      flags: this.world.flags.filter((f) => f.owner === team).length,
-      kills: arr.reduce((s, u) => s + u.kills, 0),
-      deaths: arr.reduce((s, u) => s + u.deaths, 0),
-      revives: arr.reduce((s, u) => s + u.revives, 0),
-      medicKills: arr.reduce((s, u) => s + (u.medicKills || 0), 0),
-      vehicles: arr.reduce((s, u) => s + u.vehiclesDestroyed, 0),
-      score: arr.reduce((s, u) => s + u.score, 0)
-    });
+    const sumTeam = (arr, team) => {
+      let flags = 0;
+      for (let i = 0; i < this.world.flags.length; i++) {
+        if (this.world.flags[i].owner === team) flags++;
+      }
+      let kills = 0;
+      let deaths = 0;
+      let revives = 0;
+      let medicKills = 0;
+      let vehicles = 0;
+      let score = 0;
+      for (let i = 0; i < arr.length; i++) {
+        const u = arr[i];
+        kills += u.kills;
+        deaths += u.deaths;
+        revives += u.revives;
+        medicKills += u.medicKills || 0;
+        vehicles += u.vehiclesDestroyed;
+        score += u.score;
+      }
+      return {
+        team,
+        tickets: Math.max(0, Math.floor(team === 'US' ? this.lastTicketsUS : this.lastTicketsRU)),
+        flags,
+        kills,
+        deaths,
+        revives,
+        medicKills,
+        vehicles,
+        score
+      };
+    };
 
     const usStats = sumTeam(usUnits, 'US');
     const ruStats = sumTeam(ruUnits, 'RU');
@@ -212,7 +233,12 @@ export const Scoreboard = {
       .join('');
   },
 
-  renderScoreboard() {
+  renderScoreboard(force = false) {
+    const now = performance.now();
+    if (!force && this._lastScoreboardRenderAt && now - this._lastScoreboardRenderAt < 250) {
+      return;
+    }
+    this._lastScoreboardRenderAt = now;
     const { usUnits, ruUnits, usStats, ruStats, squads } = this.computeBattleStats();
 
     if (this.sbClockPillEl) {

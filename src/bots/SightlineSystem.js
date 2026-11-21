@@ -1,5 +1,5 @@
-import { BOT } from '../config.js?v=90';
-import { tmpVec3 } from '../utils/VectorPool.js?v=90';
+import { BOT } from '../config.js?v=91';
+import { tmpVec3 } from '../utils/VectorPool.js?v=91';
 
 /**
  * Multi-Ray "Vision Tube" Sightline Check:
@@ -18,7 +18,12 @@ export function hasClearSightline(bot, targetPos, checkFov = true) {
   if (dist < 1.4) return true;
 
   // 1. Field-of-View (150° cone) check beyond 14m unless alerted by damage/suppression
-  if (checkFov && dist > BOT.FOV_CHECK_BEYOND && (bot.flinchTimer || 0) <= 0 && (bot.suppressionLevel || 0) < 0.25) {
+  if (
+    checkFov &&
+    dist > BOT.FOV_CHECK_BEYOND &&
+    (bot.flinchTimer || 0) <= 0 &&
+    (bot.suppressionLevel || 0) < 0.25
+  ) {
     const horizDist = Math.hypot(dx, dz);
     if (horizDist > 0.1) {
       const fwdX = Math.sin(bot.yaw);
@@ -80,48 +85,62 @@ export function canBotSeeTarget(bot, targetKey, targetPos, checkFov = true) {
   const now = performance.now();
   const cached = bot._losCache.get(targetKey);
   if (cached && now < cached.exp) {
-    return cached.vis;
+    return !cached.blocked;
   }
   // Cap uncached raycasts per bot (2) and globally per frame (28) to prevent frame-time spikes across 250 bots
   if ((bot._raycastsThisFrame || 0) >= 2 || (this._frameRaycasts || 0) >= 28) {
-    return cached ? cached.vis : false;
+    return cached ? !cached.blocked : false;
   }
   bot._raycastsThisFrame = (bot._raycastsThisFrame || 0) + 1;
   this._frameRaycasts = (this._frameRaycasts || 0) + 1;
   const vis = this.hasClearSightline(bot, targetPos, checkFov);
-  bot._losCache.set(targetKey, { vis, exp: now + 260 + Math.random() * 160 });
+  const ttl = 260 + Math.random() * 160;
+  if (cached) {
+    cached.blocked = !vis;
+    cached.vis = vis;
+    cached.time = now;
+    cached.exp = now + ttl;
+  } else {
+    bot._losCache.set(targetKey, { blocked: !vis, vis, time: now, exp: now + ttl });
+  }
   return vis;
+}
+
+function isColumnBlocked(world, ox, wy, oz) {
+  const gWaist = world.worldToGrid(ox, wy + 0.75, oz);
+  if (
+    world.hasVoxel
+      ? world.hasVoxel(gWaist.gx, gWaist.gy, gWaist.gz)
+      : world.voxels.has(world.key(gWaist.gx, gWaist.gy, gWaist.gz))
+  ) {
+    return true;
+  }
+  const gHead = world.worldToGrid(ox, wy + 1.75, oz);
+  return world.hasVoxel
+    ? world.hasVoxel(gHead.gx, gHead.gy, gHead.gz)
+    : world.voxels.has(world.key(gHead.gx, gHead.gy, gHead.gz));
 }
 
 /**
  * Checks if a world position is blocked by waist/head-level voxels (including a soldier
  * shoulder-clearance radius) OR lies inside a building/container footprint so bots steer
  * cleanly around structures, castle curtain walls, towers, and corners.
+ * Unrolled with zero per-call array or string allocations.
  */
 export function isPointBlocked(wx, wy, wz, padRadius = 0.52) {
+  const world = this.world;
   if (
-    this.world.isInsideBuildingOrContainer &&
-    this.world.isInsideBuildingOrContainer(wx, wz, Math.max(1.05, padRadius + 0.55))
+    world.isInsideBuildingOrContainer &&
+    world.isInsideBuildingOrContainer(wx, wz, padRadius + 0.55 > 1.05 ? padRadius + 0.55 : 1.05)
   ) {
     return true;
   }
-  const checkOffsets =
-    padRadius > 0.05
-      ? [
-          [0, 0],
-          [padRadius, 0],
-          [-padRadius, 0],
-          [0, padRadius],
-          [0, -padRadius]
-        ]
-      : [[0, 0]];
-  for (let i = 0; i < checkOffsets.length; i++) {
-    const ox = wx + checkOffsets[i][0];
-    const oz = wz + checkOffsets[i][1];
-    const gWaist = this.world.worldToGrid(ox, wy + 0.75, oz);
-    if (this.world.voxels.has(this.world.key(gWaist.gx, gWaist.gy, gWaist.gz))) return true;
-    const gHead = this.world.worldToGrid(ox, wy + 1.75, oz);
-    if (this.world.voxels.has(this.world.key(gHead.gx, gHead.gy, gHead.gz))) return true;
+  if (isColumnBlocked(world, wx, wy, wz)) return true;
+  if (padRadius > 0.05) {
+    if (isColumnBlocked(world, wx + padRadius, wy, wz)) return true;
+    if (isColumnBlocked(world, wx - padRadius, wy, wz)) return true;
+    if (isColumnBlocked(world, wx, wy, wz + padRadius)) return true;
+    if (isColumnBlocked(world, wx, wy, wz - padRadius)) return true;
   }
   return false;
 }

@@ -1,4 +1,4 @@
-import { events } from '../events.js?v=90';
+import { events } from '../events.js?v=91';
 
 export const DamageIndicators = {
   flashDamage(isArmorHit = false) {
@@ -35,8 +35,47 @@ export const DamageIndicators = {
     }
   },
 
-  // Floating Damage Number (shows damage dealt on enemies in world space)
+  // Floating Damage Number (pooled DOM elements updated via compositor transform/opacity)
+  _acquireFloatingDamageSlot(container) {
+    if (!this._floatingDmgPool) {
+      this._floatingDmgPool = [];
+    }
+    const pool = this._floatingDmgPool;
+    const MAX_POOL = 16;
+    for (let i = 0; i < pool.length; i++) {
+      if (!pool[i].active) {
+        return pool[i];
+      }
+    }
+    if (pool.length < MAX_POOL) {
+      const el = document.createElement('div');
+      el.className = 'floating-dmg';
+      el.style.cssText =
+        "position:absolute;left:0px;top:0px;font-weight:900;pointer-events:none;font-family:'Rajdhani',sans-serif;letter-spacing:1px;text-shadow:0 1px 4px rgba(0,0,0,0.9);will-change:transform,opacity;display:none;opacity:0;";
+      container.appendChild(el);
+      const slot = {
+        el,
+        active: false,
+        x: 0,
+        y: 0,
+        age: 0,
+        duration: 1.2,
+        isHeadshot: null,
+        text: ''
+      };
+      pool.push(slot);
+      return slot;
+    }
+    // Recycle oldest active slot if pool is saturated
+    let oldest = pool[0];
+    for (let i = 1; i < pool.length; i++) {
+      if (pool[i].age > oldest.age) oldest = pool[i];
+    }
+    return oldest;
+  },
+
   spawnFloatingDamage(worldPos, damage, isHeadshot = false) {
+    if (!worldPos || !this.player || !this.player.camera) return;
     let container = this.el('floating-damage-container');
     if (!container) {
       container = document.createElement('div');
@@ -47,30 +86,54 @@ export const DamageIndicators = {
       if (this._domCache) this._domCache.set('floating-damage-container', container);
     }
 
-    const el = document.createElement('div');
-    el.className = 'floating-dmg';
-    el.textContent = `-${damage}`;
-    el.style.cssText = `
-      position: absolute; font-weight: 900; pointer-events: none;
-      font-family: 'Rajdhani', sans-serif; letter-spacing: 1px;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
-      animation: floatDmgUp 1.2s ease-out forwards;
-      font-size: ${isHeadshot ? '28px' : '22px'};
-      color: ${isHeadshot ? '#f39c12' : '#e74c3c'};
-    `;
+    const v = this._floatProjVec || (this._floatProjVec = worldPos.clone());
+    v.set(worldPos.x, worldPos.y, worldPos.z).project(this.player.camera);
+    if (v.z > 1) return;
 
-    // Project world position to screen
-    const v = worldPos.clone();
-    v.project(this.player.camera);
     const sx = (v.x * 0.5 + 0.5) * window.innerWidth + (Math.random() - 0.5) * 30;
     const sy = (-v.y * 0.5 + 0.5) * window.innerHeight + (Math.random() - 0.5) * 20;
-    el.style.left = `${sx}px`;
-    el.style.top = `${sy}px`;
 
-    container.appendChild(el);
-    setTimeout(() => {
-      if (el.parentNode) el.parentNode.removeChild(el);
-    }, 1300);
+    const slot = this._acquireFloatingDamageSlot(container);
+    const txt = `-${damage}`;
+    if (slot.text !== txt) {
+      slot.el.textContent = txt;
+      slot.text = txt;
+    }
+    if (slot.isHeadshot !== isHeadshot) {
+      slot.el.style.fontSize = isHeadshot ? '28px' : '22px';
+      slot.el.style.color = isHeadshot ? '#f39c12' : '#e74c3c';
+      slot.isHeadshot = isHeadshot;
+    }
+    slot.x = sx;
+    slot.y = sy;
+    slot.age = 0;
+    slot.duration = 1.2;
+    slot.active = true;
+    slot.el.style.display = 'block';
+    slot.el.style.opacity = '1';
+    slot.el.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0)`;
+  },
+
+  _updateFloatingDamagePool(dt) {
+    const pool = this._floatingDmgPool;
+    if (!pool || pool.length === 0) return;
+    for (let i = 0; i < pool.length; i++) {
+      const slot = pool[i];
+      if (!slot.active) continue;
+      slot.age += dt;
+      if (slot.age >= slot.duration) {
+        slot.active = false;
+        slot.el.style.opacity = '0';
+        slot.el.style.display = 'none';
+        continue;
+      }
+      const p = slot.age / slot.duration;
+      const easeOut = 1 - (1 - p) * (1 - p);
+      const y = slot.y - easeOut * 42;
+      const op = p < 0.65 ? 1 : Math.max(0, 1 - (p - 0.65) / 0.35);
+      slot.el.style.transform = `translate3d(${slot.x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+      slot.el.style.opacity = op.toFixed(2);
+    }
   },
 
   registerDamageIndicator(
@@ -162,11 +225,53 @@ export const DamageIndicators = {
     }
   },
 
+  _acquireDamageArcSlot(index) {
+    if (!this._dmgArcPool) {
+      this._dmgArcPool = [];
+    }
+    let slot = this._dmgArcPool[index];
+    if (!slot) {
+      const root = document.createElement('div');
+      root.className = 'dmg-arc-wrapper';
+      const wedge = document.createElement('div');
+      wedge.className = 'dmg-arc-wedge';
+      const tag = document.createElement('div');
+      tag.className = 'dmg-arc-tag';
+      root.appendChild(wedge);
+      root.appendChild(tag);
+      this.damageIndicatorRingEl.appendChild(root);
+      slot = {
+        root,
+        wedge,
+        tag,
+        visible: true,
+        isArmorHit: false,
+        transform: '',
+        opacity: '',
+        tagTransform: '',
+        labelText: ''
+      };
+      this._dmgArcPool[index] = slot;
+    } else if (!slot.visible) {
+      slot.root.style.display = '';
+      slot.visible = true;
+    }
+    return slot;
+  },
+
   updateDamageIndicators(dt) {
+    this._updateFloatingDamagePool(dt);
     if (!this.damageIndicatorRingEl) return;
     if (this.damageIndicators.length === 0) {
-      if (this.damageIndicatorRingEl.innerHTML !== '') {
-        this.damageIndicatorRingEl.innerHTML = '';
+      if (this._dmgArcPool) {
+        for (let i = 0; i < this._dmgArcPool.length; i++) {
+          const slot = this._dmgArcPool[i];
+          if (slot && slot.visible) {
+            slot.root.style.display = 'none';
+            slot.styleOpacity = '0';
+            slot.visible = false;
+          }
+        }
       }
       return;
     }
@@ -176,7 +281,7 @@ export const DamageIndicators = {
     const rightX = Math.cos(this.player.yaw);
     const rightZ = -Math.sin(this.player.yaw);
 
-    const htmlParts = [];
+    let activeSlotCount = 0;
     for (let i = this.damageIndicators.length - 1; i >= 0; i--) {
       const ind = this.damageIndicators[i];
       ind.timer -= dt;
@@ -192,22 +297,45 @@ export const DamageIndicators = {
       const dotRight = dx * rightX + dz * rightZ;
       const angleDeg = (Math.atan2(dotRight, dotFwd) * 180) / Math.PI;
       const opacity = Math.min(1, (ind.timer / ind.maxTimer) * 1.35).toFixed(2);
-      const cls = ind.isArmorHit ? 'dmg-arc-wrapper armor-hit' : 'dmg-arc-wrapper';
-      const labelText = ind.isArmorHit
+      const isArmor = Boolean(ind.isArmorHit);
+      const labelText = isArmor
         ? `HULL HIT: ${ind.weaponName} • ${distM}m`
         : `${ind.weaponName} • ${distM}m`;
 
-      htmlParts.push(`
-        <div class="${cls}" style="transform: rotate(${angleDeg.toFixed(1)}deg); opacity: ${opacity}">
-          <div class="dmg-arc-wedge"></div>
-          <div class="dmg-arc-tag" style="transform: translateX(-50%) rotate(${(-angleDeg).toFixed(
-            1
-          )}deg)">${labelText}</div>
-        </div>
-      `);
+      const slot = this._acquireDamageArcSlot(activeSlotCount++);
+      if (slot.isArmorHit !== isArmor) {
+        slot.root.className = isArmor ? 'dmg-arc-wrapper armor-hit' : 'dmg-arc-wrapper';
+        slot.isArmorHit = isArmor;
+      }
+      const trStr = `rotate(${angleDeg.toFixed(1)}deg)`;
+      if (slot.transform !== trStr) {
+        slot.root.style.transform = trStr;
+        slot.transform = trStr;
+      }
+      if (slot.opacity !== opacity) {
+        slot.root.style.opacity = opacity;
+        slot.opacity = opacity;
+      }
+      const tagTrStr = `translateX(-50%) rotate(${(-angleDeg).toFixed(1)}deg)`;
+      if (slot.tagTransform !== tagTrStr) {
+        slot.tag.style.transform = tagTrStr;
+        slot.tagTransform = tagTrStr;
+      }
+      if (slot.labelText !== labelText) {
+        slot.tag.textContent = labelText;
+        slot.labelText = labelText;
+      }
     }
 
-    this.damageIndicatorRingEl.innerHTML = htmlParts.join('');
+    if (this._dmgArcPool) {
+      for (let i = activeSlotCount; i < this._dmgArcPool.length; i++) {
+        const slot = this._dmgArcPool[i];
+        if (slot && slot.visible) {
+          slot.root.style.display = 'none';
+          slot.visible = false;
+        }
+      }
+    }
   }
 };
 

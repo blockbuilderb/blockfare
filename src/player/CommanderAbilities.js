@@ -1,33 +1,170 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=90';
-import { COMBAT, DEPLOYABLES } from '../config.js?v=90';
-import { events } from '../events.js?v=90';
+import { sound } from '../audio.js?v=91';
+import { COMBAT, DEPLOYABLES } from '../config.js?v=91';
+import { events } from '../events.js?v=91';
 import {
   COMMANDER_UAV_EVENTS,
   COMMANDER_AIRSTRIKE_EVENTS,
   COMMANDER_AIRSTRIKE_STATES,
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM
-} from '../core/StateMachines.js?v=90';
+} from '../core/StateMachines.js?v=91';
+
+function markShared(asset) {
+  if (asset) {
+    if (!asset.userData) asset.userData = {};
+    asset.userData.shared = true;
+  }
+  return asset;
+}
+
+// ─── Shared Cached Geometries & Materials (userData.shared = true) ─────────
+const _rallyPoleGeo = markShared(new THREE.CylinderGeometry(0.08, 0.08, 2.0, 6));
+const _rallyPoleMat = markShared(
+  new THREE.MeshStandardMaterial({ color: 0x27ae60, emissive: 0x27ae60, emissiveIntensity: 0.6 })
+);
+const _rallyBeaconGeo = markShared(new THREE.SphereGeometry(0.22, 8, 8));
+const _rallyBeaconMat = markShared(
+  new THREE.MeshStandardMaterial({
+    color: 0x2ecc71,
+    emissive: 0x2ecc71,
+    emissiveIntensity: 1.2,
+    transparent: true,
+    opacity: 0.85
+  })
+);
+const _rallyRingGeo = markShared(new THREE.RingGeometry(0.8, 1.2, 16));
+const _rallyRingMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0x2ecc71,
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.DoubleSide
+  })
+);
+
+const _uavHullMat = markShared(new THREE.MeshStandardMaterial({ color: 0x2f3640, roughness: 0.45 }));
+const _uavWingMat = markShared(new THREE.MeshStandardMaterial({ color: 0x353b48, roughness: 0.5 }));
+const _uavGlowMat = markShared(new THREE.MeshBasicMaterial({ color: 0x00d2d3 }));
+const _uavRedBeaconMat = markShared(new THREE.MeshBasicMaterial({ color: 0xff3838 }));
+const _uavBodyGeo = markShared(new THREE.BoxGeometry(1.1, 0.75, 5.2));
+const _uavWingsGeo = markShared(new THREE.BoxGeometry(11.5, 0.18, 1.15));
+const _uavTailGeo = markShared(new THREE.BoxGeometry(2.4, 0.14, 0.65));
+const _uavPodGeo = markShared(new THREE.SphereGeometry(0.45, 8, 8));
+const _uavStrobeGeo = markShared(new THREE.BoxGeometry(0.28, 0.28, 0.28));
+
+const _uavSweepRingGeo = markShared(new THREE.RingGeometry(2.5, 4.2, 36));
+_uavSweepRingGeo.rotateX(-Math.PI / 2);
+const _uavSweepRingMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0x00d2d3,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.65
+  })
+);
+
+const _jetFuselageMat = markShared(new THREE.MeshStandardMaterial({ color: 0x3d4852, roughness: 0.4 }));
+const _jetWingMat = markShared(new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.45 }));
+const _jetBurnerMat = markShared(new THREE.MeshBasicMaterial({ color: 0xff9f1a }));
+const _jetBodyGeo = markShared(new THREE.BoxGeometry(1.6, 1.0, 9.5));
+const _jetNoseGeo = markShared(new THREE.BoxGeometry(1.0, 0.7, 3.2));
+const _jetWingsGeo = markShared(new THREE.BoxGeometry(11.2, 0.22, 3.4));
+const _jetTailGeo = markShared(new THREE.BoxGeometry(0.22, 1.9, 2.0));
+const _jetBurnerGeo = markShared(new THREE.BoxGeometry(0.55, 0.55, 1.4));
+
+const _strikeOuterRingGeos = new Map();
+function getStrikeOuterRingGeo(outerRadius) {
+  let geo = _strikeOuterRingGeos.get(outerRadius);
+  if (!geo) {
+    geo = markShared(new THREE.RingGeometry(outerRadius - 1.5, outerRadius, 36));
+    _strikeOuterRingGeos.set(outerRadius, geo);
+  }
+  return geo;
+}
+const _strikeInnerRingGeo = markShared(new THREE.RingGeometry(2.2, 3.4, 24));
+const _strikeBeamGeo = markShared(new THREE.CylinderGeometry(0.22, 0.22, 55, 8));
+const _strikeRingMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xff3838,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.82
+  })
+);
+const _strikeBeamMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xff3838,
+    transparent: true,
+    opacity: 0.58
+  })
+);
+
+const _heavyGbuBodyGeo = markShared(new THREE.BoxGeometry(0.65, 1.85, 0.65));
+const _stdBombBodyGeo = markShared(new THREE.BoxGeometry(0.42, 1.25, 0.42));
+const _heavyGbuBodyMat = markShared(new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.5 }));
+const _stdBombBodyMat = markShared(new THREE.MeshStandardMaterial({ color: 0x2f3640, roughness: 0.5 }));
+const _heavyGbuGlowGeo = markShared(new THREE.BoxGeometry(0.5, 0.45, 0.5));
+const _stdBombGlowGeo = markShared(new THREE.BoxGeometry(0.34, 0.45, 0.34));
+const _bombGlowMat = markShared(new THREE.MeshBasicMaterial({ color: 0xff9f1a }));
+
+const _beaconBaseGeo = markShared(new THREE.CylinderGeometry(0.25, 0.35, 0.4, 8));
+const _beaconBaseMat = markShared(new THREE.MeshStandardMaterial({ color: 0x1a1a2e, roughness: 0.5 }));
+const _beaconAntGeo = markShared(new THREE.CylinderGeometry(0.03, 0.03, 0.8, 4));
+const _beaconAntMat = markShared(new THREE.MeshBasicMaterial({ color: 0x333333 }));
+const _beaconLightGeo = markShared(new THREE.SphereGeometry(0.12, 8, 8));
+const _beaconLightMat = markShared(
+  new THREE.MeshBasicMaterial({ color: 0x3498db, transparent: true, opacity: 0.6 })
+);
+
+const _strikeFlareColor = new THREE.Color(0xff3838);
+const _cmdOrigin = new THREE.Vector3();
+const _cmdDir = new THREE.Vector3();
+const _cmdQuat = new THREE.Quaternion();
+const _cmdScratch = new THREE.Vector3();
+const _COMMO_COMMANDS = {
+  contact_north: { text: 'CONTACT NORTH!', icon: '⚠️' },
+  contact_east: { text: 'CONTACT EAST!', icon: '⚠️' },
+  contact_south: { text: 'CONTACT SOUTH!', icon: '⚠️' },
+  contact_west: { text: 'CONTACT WEST!', icon: '⚠️' },
+  need_medic: { text: 'MEDIC! I NEED HELP!', icon: '🏥' },
+  need_ammo: { text: 'I NEED AMMO!', icon: '📦' },
+  affirmative: { text: 'AFFIRMATIVE!', icon: '✅' },
+  negative: { text: 'NEGATIVE!', icon: '❌' },
+  follow_me: { text: 'FOLLOW ME!', icon: '👆' },
+  go_go_go: { text: 'GO GO GO!', icon: '🏃' },
+  hold_position: { text: 'HOLD THIS POSITION!', icon: '🛡️' },
+  enemy_vehicle: { text: 'ENEMY VEHICLE SPOTTED!', icon: '🚗' },
+  order_all_attack: { text: 'COMMAND NET: ALL SQUADS ADVANCE ON OBJECTIVE!', icon: '⭐' },
+  order_squad_attack: { text: 'SQUAD NET: SQUAD ADVANCE ON OBJECTIVE!', icon: '🎯' },
+  order_flag_A: { text: 'STRATEGIC ORDER: CAPTURE OBJECTIVE ALPHA [A]!', icon: '🚩' },
+  order_flag_B: { text: 'STRATEGIC ORDER: CAPTURE OBJECTIVE BRAVO [B]!', icon: '🚩' },
+  order_flag_C: { text: 'STRATEGIC ORDER: CAPTURE OBJECTIVE CHARLIE [C]!', icon: '🚩' },
+  order_flag_D: { text: 'STRATEGIC ORDER: CAPTURE OBJECTIVE DELTA [D]!', icon: '🚩' },
+  order_flag_E: { text: 'STRATEGIC ORDER: CAPTURE OBJECTIVE ECHO [E]!', icon: '🚩' }
+};
 
 export const CommanderMethods = {
   triggerTacticalPing() {
     this.syncCameraTransform();
-    const origin = this.camera.getWorldPosition(new THREE.Vector3());
-    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(
-      this.camera.getWorldQuaternion(new THREE.Quaternion())
-    );
+    this.camera.getWorldPosition(_cmdOrigin);
+    this.camera.getWorldQuaternion(_cmdQuat);
+    _cmdDir.set(0, 0, -1).applyQuaternion(_cmdQuat);
 
     // Check if aiming near an enemy soldier to Spot them
     let bestEnemy = null;
     let bestDist = COMBAT.SPOT_DISTANCE;
-    for (const bot of this.botManager.bots) {
+    const spotPerpSq = COMBAT.SPOT_PERP_RADIUS * COMBAT.SPOT_PERP_RADIUS;
+    for (let i = 0; i < this.botManager.bots.length; i++) {
+      const bot = this.botManager.bots[i];
       if (bot.dead || bot.downed || bot.team === this.team) continue;
-      const toBot = bot.pos.clone().add(new THREE.Vector3(0, 1.1, 0)).sub(origin);
-      const proj = toBot.dot(dir);
+      const tx = bot.pos.x - _cmdOrigin.x;
+      const ty = bot.pos.y + 1.1 - _cmdOrigin.y;
+      const tz = bot.pos.z - _cmdOrigin.z;
+      const proj = tx * _cmdDir.x + ty * _cmdDir.y + tz * _cmdDir.z;
       if (proj > 1 && proj < bestDist) {
-        const perpSq = toBot.lengthSq() - proj * proj;
-        if (perpSq < COMBAT.SPOT_PERP_RADIUS * COMBAT.SPOT_PERP_RADIUS) {
+        const perpSq = tx * tx + ty * ty + tz * tz - proj * proj;
+        if (perpSq < spotPerpSq) {
           bestDist = proj;
           bestEnemy = bot;
         }
@@ -38,7 +175,7 @@ export const CommanderMethods = {
       bestEnemy.spottedTimer = COMBAT.SPOTTED_TIMER;
       const distM = Math.round(bestEnemy.pos.distanceTo(this.pos));
       this.activePing = {
-        pos: bestEnemy.pos.clone().add(new THREE.Vector3(0, 2.1, 0)),
+        pos: new THREE.Vector3(bestEnemy.pos.x, bestEnemy.pos.y + 2.1, bestEnemy.pos.z),
         timer: COMBAT.PING_TIMER_ENEMY,
         isEnemy: true,
         label: `ENEMY ${bestEnemy.role}`
@@ -51,8 +188,10 @@ export const CommanderMethods = {
       return;
     }
 
-    const voxelHit = this.world.raycastVoxel(origin, dir, COMBAT.SPOT_DISTANCE);
-    const pingPos = voxelHit ? voxelHit.point.clone() : origin.clone().addScaledVector(dir, 90);
+    const voxelHit = this.world.raycastVoxel(_cmdOrigin, _cmdDir, COMBAT.SPOT_DISTANCE);
+    const pingPos = voxelHit
+      ? voxelHit.point.clone()
+      : _cmdOrigin.clone().addScaledVector(_cmdDir, 90);
     this.activePing = {
       pos: pingPos,
       timer: COMBAT.PING_TIMER_SQUAD,
@@ -60,7 +199,11 @@ export const CommanderMethods = {
       label: 'SQUAD PING'
     };
     if (this.onCommoCommand) {
-      this.onCommoCommand('ping', `CHECK MARKED COORDINATES (${Math.round(pingPos.distanceTo(this.pos))}m)!`, '📍');
+      this.onCommoCommand(
+        'ping',
+        `CHECK MARKED COORDINATES (${Math.round(pingPos.distanceTo(this.pos))}m)!`,
+        '📍'
+      );
     }
     sound.playRadioBeep(false);
   },
@@ -76,12 +219,29 @@ export const CommanderMethods = {
     }
 
     // Check no enemies within clear radius
-    for (const b of this.botManager.bots) {
-      if (b.dead || b.team === this.team) continue;
-      if (b.pos.distanceTo(this.pos) < DEPLOYABLES.RALLY_ENEMY_CLEAR_RADIUS) {
-        if (this.onAwardXp) this.onAwardXp(0, 'CANNOT PLACE RALLY — ENEMY TOO CLOSE');
-        return;
+    const clearR = DEPLOYABLES.RALLY_ENEMY_CLEAR_RADIUS;
+    const clearRSq = clearR * clearR;
+    let enemyNear = false;
+    if (this.botManager?.spatialGrid?.count > 0) {
+      this.botManager.spatialGrid.forEachInRadius(this.pos.x, this.pos.z, clearR, (b) => {
+        if (!b.dead && b.team !== this.team && b.pos.distanceToSquared(this.pos) < clearRSq) {
+          enemyNear = true;
+          return false;
+        }
+      });
+    } else {
+      for (let i = 0; i < this.botManager.bots.length; i++) {
+        const b = this.botManager.bots[i];
+        if (b.dead || b.team === this.team) continue;
+        if (b.pos.distanceToSquared(this.pos) < clearRSq) {
+          enemyNear = true;
+          break;
+        }
       }
+    }
+    if (enemyNear) {
+      if (this.onAwardXp) this.onAwardXp(0, 'CANNOT PLACE RALLY — ENEMY TOO CLOSE');
+      return;
     }
 
     // Remove old rally mesh
@@ -89,25 +249,17 @@ export const CommanderMethods = {
       this.scene.remove(this.rallyPoint.mesh);
     }
 
-    // Create rally point beacon (green glowing pole)
+    // Create rally point beacon (green glowing pole) using shared geometries/materials
     const rallyGroup = new THREE.Group();
-    const poleMat = new THREE.MeshStandardMaterial({ color: 0x27ae60, emissive: 0x27ae60, emissiveIntensity: 0.6 });
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.0, 6), poleMat);
+    const pole = new THREE.Mesh(_rallyPoleGeo, _rallyPoleMat);
     pole.position.y = 1.0;
     rallyGroup.add(pole);
 
-    const beacon = new THREE.Mesh(
-      new THREE.SphereGeometry(0.22, 8, 8),
-      new THREE.MeshStandardMaterial({ color: 0x2ecc71, emissive: 0x2ecc71, emissiveIntensity: 1.2, transparent: true, opacity: 0.85 })
-    );
+    const beacon = new THREE.Mesh(_rallyBeaconGeo, _rallyBeaconMat);
     beacon.position.y = 2.15;
     rallyGroup.add(beacon);
 
-    // Green glow ring on ground
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.8, 1.2, 16),
-      new THREE.MeshBasicMaterial({ color: 0x2ecc71, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
-    );
+    const ring = new THREE.Mesh(_rallyRingGeo, _rallyRingMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.05;
     rallyGroup.add(ring);
@@ -118,7 +270,7 @@ export const CommanderMethods = {
     this.scene.add(rallyGroup);
 
     this.rallyPoint = {
-      pos: rallyPos.clone(),
+      pos: rallyPos,
       mesh: rallyGroup,
       timer: DEPLOYABLES.RALLY_TIMER, // lasts 2 minutes
       team: this.team,
@@ -145,18 +297,36 @@ export const CommanderMethods = {
     this.rallyPoint.timer -= dt;
 
     // Check if enemy destroyed it (within destroy radius)
-    for (const b of this.botManager.bots) {
-      if (b.dead || b.team === this.team) continue;
-      if (b.pos.distanceTo(this.rallyPoint.pos) < DEPLOYABLES.RALLY_ENEMY_DESTROY_RADIUS) {
-        if (this.onAwardXp) this.onAwardXp(0, 'RALLY POINT DESTROYED BY ENEMY');
-        this.scene.remove(this.rallyPoint.mesh);
-        this.rallyPoint = null;
-        this.rallyDeployableFSM?.send(DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY);
-        if (this.rallyCooldown <= 0) {
-          this.rallyDeployableFSM?.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
+    const destroyR = DEPLOYABLES.RALLY_ENEMY_DESTROY_RADIUS;
+    const destroyRSq = destroyR * destroyR;
+    let destroyedByEnemy = false;
+    const rPos = this.rallyPoint.pos;
+    if (this.botManager?.spatialGrid?.count > 0) {
+      this.botManager.spatialGrid.forEachInRadius(rPos.x, rPos.z, destroyR, (b) => {
+        if (!b.dead && b.team !== this.team && b.pos.distanceToSquared(rPos) < destroyRSq) {
+          destroyedByEnemy = true;
+          return false;
         }
-        return;
+      });
+    } else {
+      for (let i = 0; i < this.botManager.bots.length; i++) {
+        const b = this.botManager.bots[i];
+        if (b.dead || b.team === this.team) continue;
+        if (b.pos.distanceToSquared(rPos) < destroyRSq) {
+          destroyedByEnemy = true;
+          break;
+        }
       }
+    }
+    if (destroyedByEnemy) {
+      if (this.onAwardXp) this.onAwardXp(0, 'RALLY POINT DESTROYED BY ENEMY');
+      this.scene.remove(this.rallyPoint.mesh);
+      this.rallyPoint = null;
+      this.rallyDeployableFSM?.send(DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY);
+      if (this.rallyCooldown <= 0) {
+        this.rallyDeployableFSM?.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
+      }
+      return;
     }
 
     if (this.rallyPoint.timer <= 0) {
@@ -184,34 +354,30 @@ export const CommanderMethods = {
 
   buildUAVDroneMesh() {
     const group = new THREE.Group();
-    const hullMat = new THREE.MeshStandardMaterial({ color: 0x2f3640, roughness: 0.45 });
-    const wingMat = new THREE.MeshStandardMaterial({ color: 0x353b48, roughness: 0.5 });
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0x00d2d3 });
-    const redBeaconMat = new THREE.MeshBasicMaterial({ color: 0xff3838 });
 
     // Fuselage + V-tail + High-aspect Reaper wings + FLIR sensor turret
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.75, 5.2), hullMat);
+    const body = new THREE.Mesh(_uavBodyGeo, _uavHullMat);
     group.add(body);
-    const wings = new THREE.Mesh(new THREE.BoxGeometry(11.5, 0.18, 1.15), wingMat);
+    const wings = new THREE.Mesh(_uavWingsGeo, _uavWingMat);
     wings.position.set(0, 0.15, -0.2);
     group.add(wings);
-    const tailL = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.14, 0.65), wingMat);
+    const tailL = new THREE.Mesh(_uavTailGeo, _uavWingMat);
     tailL.position.set(-0.95, 0.65, 2.2);
     tailL.rotation.z = -0.52;
     group.add(tailL);
-    const tailR = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.14, 0.65), wingMat);
+    const tailR = new THREE.Mesh(_uavTailGeo, _uavWingMat);
     tailR.position.set(0.95, 0.65, 2.2);
     tailR.rotation.z = 0.52;
     group.add(tailR);
 
-    const sensorPod = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 8), glowMat);
+    const sensorPod = new THREE.Mesh(_uavPodGeo, _uavGlowMat);
     sensorPod.position.set(0, -0.5, -1.7);
     group.add(sensorPod);
 
-    const strobeL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.28), glowMat);
+    const strobeL = new THREE.Mesh(_uavStrobeGeo, _uavGlowMat);
     strobeL.position.set(-5.7, 0.2, -0.2);
     group.add(strobeL);
-    const strobeR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.28), redBeaconMat);
+    const strobeR = new THREE.Mesh(_uavStrobeGeo, _uavRedBeaconMat);
     strobeR.position.set(5.7, 0.2, -0.2);
     group.add(strobeR);
 
@@ -219,10 +385,14 @@ export const CommanderMethods = {
   },
 
   refreshUAVScanTargets() {
-    this.uavRevealedBots = [];
-    this.uavRevealedVehicles = [];
+    if (!this.uavRevealedBots) this.uavRevealedBots = [];
+    else this.uavRevealedBots.length = 0;
+    if (!this.uavRevealedVehicles) this.uavRevealedVehicles = [];
+    else this.uavRevealedVehicles.length = 0;
 
-    for (const bot of this.botManager.bots) {
+    const bots = this.botManager.bots;
+    for (let i = 0; i < bots.length; i++) {
+      const bot = bots[i];
       if (bot.dead || bot.team === this.team) {
         bot.uavRevealed = false;
         bot.uavRevealTimer = 0;
@@ -235,7 +405,9 @@ export const CommanderMethods = {
     }
 
     if (this.vehicleManager && this.vehicleManager.vehicles) {
-      for (const v of this.vehicleManager.vehicles) {
+      const vehs = this.vehicleManager.vehicles;
+      for (let i = 0; i < vehs.length; i++) {
+        const v = vehs[i];
         if (v.dead || v.team === this.team) {
           v.uavRevealed = false;
           continue;
@@ -249,10 +421,17 @@ export const CommanderMethods = {
     let bestFlagId = 'C';
     let bestCount = 0;
     if (this.world && this.world.flags) {
-      for (const f of this.world.flags) {
+      const revLen = this.uavRevealedBots.length;
+      for (let fIdx = 0; fIdx < this.world.flags.length; fIdx++) {
+        const f = this.world.flags[fIdx];
         let count = 0;
-        for (const b of this.uavRevealedBots) {
-          if (Math.hypot(b.pos.x - f.pos.x, b.pos.z - f.pos.z) <= 68) count++;
+        const fx = f.pos.x;
+        const fz = f.pos.z;
+        for (let bIdx = 0; bIdx < revLen; bIdx++) {
+          const b = this.uavRevealedBots[bIdx];
+          const dx = b.pos.x - fx;
+          const dz = b.pos.z - fz;
+          if (dx * dx + dz * dz <= 4624) count++;
         }
         if (count > bestCount) {
           bestCount = count;
@@ -275,6 +454,7 @@ export const CommanderMethods = {
     if (this.uavActive) {
       // Refreshing while active re-centers the radar pulse & extends scan
       this.uavTimer = Math.max(this.uavTimer, 25);
+      this._uavScanAccum = 0;
       this.refreshUAVScanTargets();
       if (this.onAwardXp) {
         this.onAwardXp(
@@ -290,28 +470,27 @@ export const CommanderMethods = {
     this.uavCooldown = 20; // 20-second fast tactical cooldown
     this.uavAssists = 0;
     this.uavOrbitAngle = 0;
+    this._uavScanAccum = 0;
     this.uavFSM?.send(COMMANDER_UAV_EVENTS.CALL_UAV);
 
     this.refreshUAVScanTargets();
 
     // Spawn 3D MQ-9 Reaper Drone circling overhead + Expanding Ground Radar Sweep Ring
-    if (this.uavDroneMesh) this.scene.remove(this.uavDroneMesh);
-    this.uavDroneMesh = this.buildUAVDroneMesh();
+    if (!this.uavDroneMesh) {
+      this.uavDroneMesh = this.buildUAVDroneMesh();
+    }
     this.uavDroneMesh.position.set(this.pos.x + 45, 76, this.pos.z);
-    this.scene.add(this.uavDroneMesh);
+    if (this.uavDroneMesh.parent !== this.scene) {
+      this.scene.add(this.uavDroneMesh);
+    }
 
-    if (this.uavSweepRingMesh) this.scene.remove(this.uavSweepRingMesh);
-    const sweepGeo = new THREE.RingGeometry(2.5, 4.2, 36);
-    sweepGeo.rotateX(-Math.PI / 2);
-    const sweepMat = new THREE.MeshBasicMaterial({
-      color: 0x00d2d3,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.65
-    });
-    this.uavSweepRingMesh = new THREE.Mesh(sweepGeo, sweepMat);
+    if (!this.uavSweepRingMesh) {
+      this.uavSweepRingMesh = new THREE.Mesh(_uavSweepRingGeo, _uavSweepRingMat);
+    }
     this.uavSweepRingMesh.position.set(this.pos.x, this.pos.y + 0.4, this.pos.z);
-    this.scene.add(this.uavSweepRingMesh);
+    if (this.uavSweepRingMesh.parent !== this.scene) {
+      this.scene.add(this.uavSweepRingMesh);
+    }
 
     const summary = `📡 MQ-9 UAV DATALINK ACTIVE — ${this.uavRevealedBots.length} INFANTRY & ${this.uavRevealedVehicles.length} ARMOR PAINTED IN 3D (${this.uavHotspotText})!`;
     if (this.onAwardXp) this.onAwardXp(60, summary);
@@ -359,7 +538,7 @@ export const CommanderMethods = {
       this.airstrikeTarget.timer -= dt;
       if (this.airstrikeTarget.markers) {
         const pulse = 1 + Math.sin(performance.now() * 0.014) * 0.12;
-        const outerRing = this.airstrikeTarget.markers.getObjectByName('strikeOuterRing');
+        const outerRing = this.airstrikeTarget.outerRing;
         if (outerRing) outerRing.scale.set(pulse, pulse, 1);
       }
       if (this.airstrikeTarget.timer <= 0) {
@@ -418,39 +597,43 @@ export const CommanderMethods = {
       }
     }
 
-    // UAV continuous full-battlefield scan + 3D drone & radar pulse animation
+    // UAV continuous full-battlefield scan (throttled to 2 Hz) + 3D drone & radar pulse animation
     if (this.uavActive) {
       this.uavTimer -= dt;
       if (this.uavTimer <= 0) {
         this.uavActive = false;
         this.uavTimer = 0;
-        for (const bot of this.botManager.bots) {
+        this._uavScanAccum = 0;
+        for (let i = 0; i < this.botManager.bots.length; i++) {
+          const bot = this.botManager.bots[i];
           if (bot.team !== this.team) {
             bot.uavRevealed = false;
             bot.uavRevealTimer = 0;
           }
         }
         if (this.vehicleManager && this.vehicleManager.vehicles) {
-          for (const v of this.vehicleManager.vehicles) {
-            v.uavRevealed = false;
+          for (let i = 0; i < this.vehicleManager.vehicles.length; i++) {
+            this.vehicleManager.vehicles[i].uavRevealed = false;
           }
         }
-        this.uavRevealedBots = [];
-        this.uavRevealedVehicles = [];
+        if (this.uavRevealedBots) this.uavRevealedBots.length = 0;
+        if (this.uavRevealedVehicles) this.uavRevealedVehicles.length = 0;
         if (this.uavDroneMesh) {
           this.scene.remove(this.uavDroneMesh);
-          this.uavDroneMesh = null;
         }
         if (this.uavSweepRingMesh) {
           this.scene.remove(this.uavSweepRingMesh);
-          this.uavSweepRingMesh = null;
         }
         this.uavFSM?.send(COMMANDER_UAV_EVENTS.SCAN_EXPIRED);
         if (this.uavCooldown <= 0) {
           this.uavFSM?.send(COMMANDER_UAV_EVENTS.COOLDOWN_DONE);
         }
       } else {
-        this.refreshUAVScanTargets();
+        this._uavScanAccum = (this._uavScanAccum || 0) + dt;
+        if (this._uavScanAccum >= 0.5) {
+          this._uavScanAccum = 0;
+          this.refreshUAVScanTargets();
+        }
         this.uavOrbitAngle = (this.uavOrbitAngle || 0) + dt * 0.55;
         if (this.uavDroneMesh) {
           const orbitR = 52;
@@ -497,24 +680,36 @@ export const CommanderMethods = {
           this.beaconDeployableFSM?.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
         }
       } else {
-        for (const bot of this.botManager.bots) {
-          if (bot.dead || bot.team === this.team) continue;
-          if (bot.pos.distanceTo(this.insertionBeacon.pos) < 6) {
-            if (this.onAwardXp) this.onAwardXp(0, 'INSERTION BEACON DESTROYED BY ENEMY');
-            if (this.insertionBeacon.mesh) this.scene.remove(this.insertionBeacon.mesh);
-            this.insertionBeacon = null;
-            this.beaconDeployableFSM?.send(DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY);
-            if (this.beaconCooldown <= 0) {
-              this.beaconDeployableFSM?.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
+        const bPos = this.insertionBeacon.pos;
+        let beaconDestroyed = false;
+        if (this.botManager?.spatialGrid?.count > 0) {
+          this.botManager.spatialGrid.forEachInRadius(bPos.x, bPos.z, 6, (bot) => {
+            if (!bot.dead && bot.team !== this.team && bot.pos.distanceToSquared(bPos) < 36) {
+              beaconDestroyed = true;
+              return false;
             }
-            break;
+          });
+        } else {
+          for (let i = 0; i < this.botManager.bots.length; i++) {
+            const bot = this.botManager.bots[i];
+            if (bot.dead || bot.team === this.team) continue;
+            if (bot.pos.distanceToSquared(bPos) < 36) {
+              beaconDestroyed = true;
+              break;
+            }
           }
         }
-        if (this.insertionBeacon && this.insertionBeacon.mesh) {
-          const beacon = this.insertionBeacon.mesh.getObjectByName('beaconLight');
-          if (beacon) {
-            beacon.material.opacity = 0.4 + Math.sin(performance.now() * 0.004) * 0.3;
+        if (beaconDestroyed) {
+          if (this.onAwardXp) this.onAwardXp(0, 'INSERTION BEACON DESTROYED BY ENEMY');
+          if (this.insertionBeacon.mesh) this.scene.remove(this.insertionBeacon.mesh);
+          this.insertionBeacon = null;
+          this.beaconDeployableFSM?.send(DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY);
+          if (this.beaconCooldown <= 0) {
+            this.beaconDeployableFSM?.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
           }
+        } else if (this.insertionBeacon && this.insertionBeacon.lightMesh) {
+          this.insertionBeacon.lightMesh.material.opacity =
+            0.4 + Math.sin(performance.now() * 0.004) * 0.3;
         }
       }
     }
@@ -562,21 +757,23 @@ export const CommanderMethods = {
     }
 
     this.syncCameraTransform();
-    const origin = this.camera.getWorldPosition(new THREE.Vector3());
-    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(
-      this.camera.getWorldQuaternion(new THREE.Quaternion())
-    );
+    this.camera.getWorldPosition(_cmdOrigin);
+    this.camera.getWorldQuaternion(_cmdQuat);
+    _cmdDir.set(0, 0, -1).applyQuaternion(_cmdQuat);
 
     // 1. Check if aiming directly at an enemy vehicle up to 650m
     if (this.vehicleManager && this.vehicleManager.vehicles) {
       let bestVeh = null;
       let bestVehDist = 650;
-      for (const v of this.vehicleManager.vehicles) {
+      for (let i = 0; i < this.vehicleManager.vehicles.length; i++) {
+        const v = this.vehicleManager.vehicles[i];
         if (v.dead || v.team === this.team) continue;
-        const toV = v.pos.clone().add(new THREE.Vector3(0, 1.4, 0)).sub(origin);
-        const proj = toV.dot(dir);
+        const vx = v.pos.x - _cmdOrigin.x;
+        const vy = v.pos.y + 1.4 - _cmdOrigin.y;
+        const vz = v.pos.z - _cmdOrigin.z;
+        const proj = vx * _cmdDir.x + vy * _cmdDir.y + vz * _cmdDir.z;
         if (proj > 4 && proj < bestVehDist) {
-          const perpSq = toV.lengthSq() - proj * proj;
+          const perpSq = vx * vx + vy * vy + vz * vz - proj * proj;
           if (perpSq < 5.5 * 5.5) {
             bestVehDist = proj;
             bestVeh = v;
@@ -591,7 +788,7 @@ export const CommanderMethods = {
     }
 
     // 2. Raycast against any 3D voxel building, wall, roof, bridge, or terrain up to 850m!
-    const voxelHit = this.world.raycastVoxel(origin, dir, 850);
+    const voxelHit = this.world.raycastVoxel(_cmdOrigin, _cmdDir, 850);
     if (voxelHit && voxelHit.point) {
       const tx = THREE.MathUtils.clamp(voxelHit.point.x, -1020, 1020);
       const tz = THREE.MathUtils.clamp(voxelHit.point.z, -580, 580);
@@ -600,33 +797,34 @@ export const CommanderMethods = {
     }
 
     // 3. If aiming downward at open ground beyond voxel raycast
-    if (dir.y < -0.03) {
+    if (_cmdDir.y < -0.03) {
       const groundBaseY = this.pos.y;
-      const t = THREE.MathUtils.clamp((groundBaseY - origin.y) / dir.y, 12, 750);
-      const hitPt = origin.clone().addScaledVector(dir, t);
-      const tx = THREE.MathUtils.clamp(hitPt.x, -1020, 1020);
-      const tz = THREE.MathUtils.clamp(hitPt.z, -580, 580);
+      const t = THREE.MathUtils.clamp((groundBaseY - _cmdOrigin.y) / _cmdDir.y, 12, 750);
+      const tx = THREE.MathUtils.clamp(_cmdOrigin.x + _cmdDir.x * t, -1020, 1020);
+      const tz = THREE.MathUtils.clamp(_cmdOrigin.z + _cmdDir.z * t, -580, 580);
       const ty = this.world.getGroundHeightAt(tx, tz);
       return new THREE.Vector3(tx, ty, tz);
     }
 
     // 4. If aiming horizontally or upward into the sky: check if looking toward an Objective A-E,
     //    or project 95m forward along the horizontal look direction (never fails!)
-    const horizDir = new THREE.Vector3(dir.x, 0, dir.z);
-    if (horizDir.lengthSq() < 0.001) {
-      horizDir.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    _cmdScratch.set(_cmdDir.x, 0, _cmdDir.z);
+    if (_cmdScratch.lengthSq() < 0.001) {
+      _cmdScratch.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     }
-    horizDir.normalize();
+    _cmdScratch.normalize();
 
     if (this.world && this.world.flags) {
       let bestFlag = null;
       let bestDot = 0.94; // within ~19 degrees of crosshair azimuth
-      for (const f of this.world.flags) {
-        const toF = new THREE.Vector3(f.pos.x - this.pos.x, 0, f.pos.z - this.pos.z);
-        const dist = toF.length();
-        if (dist > 15 && dist < 850) {
-          toF.normalize();
-          const d = toF.dot(horizDir);
+      for (let i = 0; i < this.world.flags.length; i++) {
+        const f = this.world.flags[i];
+        const fx = f.pos.x - this.pos.x;
+        const fz = f.pos.z - this.pos.z;
+        const distSq = fx * fx + fz * fz;
+        if (distSq > 225 && distSq < 722500) {
+          const invDist = 1 / Math.sqrt(distSq);
+          const d = (fx * _cmdScratch.x + fz * _cmdScratch.z) * invDist;
           if (d > bestDot) {
             bestDot = d;
             bestFlag = f;
@@ -642,37 +840,33 @@ export const CommanderMethods = {
       }
     }
 
-    const fallbackPos = this.pos.clone().addScaledVector(horizDir, 85);
-    const tx = THREE.MathUtils.clamp(fallbackPos.x, -1020, 1020);
-    const tz = THREE.MathUtils.clamp(fallbackPos.z, -580, 580);
+    const tx = THREE.MathUtils.clamp(this.pos.x + _cmdScratch.x * 85, -1020, 1020);
+    const tz = THREE.MathUtils.clamp(this.pos.z + _cmdScratch.z * 85, -580, 580);
     const ty = this.world.getGroundHeightAt(tx, tz);
     return new THREE.Vector3(tx, ty, tz);
   },
 
   buildStrikeJetMesh() {
     const group = new THREE.Group();
-    const fuselageMat = new THREE.MeshStandardMaterial({ color: 0x3d4852, roughness: 0.4 });
-    const wingMat = new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.45 });
-    const burnerMat = new THREE.MeshBasicMaterial({ color: 0xff9f1a });
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.0, 9.5), fuselageMat);
+    const body = new THREE.Mesh(_jetBodyGeo, _jetFuselageMat);
     group.add(body);
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.7, 3.2), fuselageMat);
+    const nose = new THREE.Mesh(_jetNoseGeo, _jetFuselageMat);
     nose.position.set(0, -0.1, -5.8);
     group.add(nose);
-    const wings = new THREE.Mesh(new THREE.BoxGeometry(11.2, 0.22, 3.4), wingMat);
+    const wings = new THREE.Mesh(_jetWingsGeo, _jetWingMat);
     wings.position.set(0, 0, 0.6);
     group.add(wings);
-    const tailL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.9, 2.0), wingMat);
+    const tailL = new THREE.Mesh(_jetTailGeo, _jetWingMat);
     tailL.position.set(-0.7, 1.1, 3.6);
     group.add(tailL);
-    const tailR = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.9, 2.0), wingMat);
+    const tailR = new THREE.Mesh(_jetTailGeo, _jetWingMat);
     tailR.position.set(0.7, 1.1, 3.6);
     group.add(tailR);
-    const burnerL = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 1.4), burnerMat);
+    const burnerL = new THREE.Mesh(_jetBurnerGeo, _jetBurnerMat);
     burnerL.position.set(-0.42, 0, 5.1);
     group.add(burnerL);
-    const burnerR = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 1.4), burnerMat);
+    const burnerR = new THREE.Mesh(_jetBurnerGeo, _jetBurnerMat);
     burnerR.position.set(0.42, 0, 5.1);
     group.add(burnerR);
 
@@ -709,49 +903,38 @@ export const CommanderMethods = {
     }
     strikeDir.normalize();
 
-    // Create high-visibility 3D target zone rings + red smoke flare beacon
+    // Create high-visibility 3D target zone rings + red smoke flare beacon (shared geometries & materials)
     const markerGroup = new THREE.Group();
     const outerRadius = pattern === 'ARTILLERY' ? 22 : pattern === 'BUNKER_BUSTER' ? 16 : 18;
-    const ringGeo = new THREE.RingGeometry(outerRadius - 1.5, outerRadius, 36);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xff3838,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.82
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
+    const ringGeo = getStrikeOuterRingGeo(outerRadius);
+    const ring = new THREE.Mesh(ringGeo, _strikeRingMat);
     ring.name = 'strikeOuterRing';
     ring.rotation.x = -Math.PI / 2;
     ring.position.set(targetPos.x, targetPos.y + 0.45, targetPos.z);
     markerGroup.add(ring);
 
-    const innerGeo = new THREE.RingGeometry(2.2, 3.4, 24);
-    const innerRing = new THREE.Mesh(innerGeo, ringMat);
+    const innerRing = new THREE.Mesh(_strikeInnerRingGeo, _strikeRingMat);
     innerRing.rotation.x = -Math.PI / 2;
     innerRing.position.set(targetPos.x, targetPos.y + 0.48, targetPos.z);
     markerGroup.add(innerRing);
 
-    const beamGeo = new THREE.CylinderGeometry(0.22, 0.22, 55, 8);
-    const beamMat = new THREE.MeshBasicMaterial({
-      color: 0xff3838,
-      transparent: true,
-      opacity: 0.58
-    });
-    const beam = new THREE.Mesh(beamGeo, beamMat);
+    const beam = new THREE.Mesh(_strikeBeamGeo, _strikeBeamMat);
     beam.position.set(targetPos.x, targetPos.y + 27.5, targetPos.z);
     markerGroup.add(beam);
 
     this.scene.add(markerGroup);
-    this.world.spawnDebris(targetPos.clone().add(new THREE.Vector3(0, 1.2, 0)), new THREE.Color(0xff3838), 6);
+    _cmdScratch.set(targetPos.x, targetPos.y + 1.2, targetPos.z);
+    this.world.spawnDebris(_cmdScratch, _strikeFlareColor, 6);
 
     const leadTime = 2.4; // Fast 2.4s strike lead-in!
     this.airstrikeTarget = {
-      pos: targetPos.clone(),
+      pos: targetPos,
       timer: leadTime,
       maxTimer: leadTime,
       pattern,
-      strikeDir: strikeDir.clone(),
-      markers: markerGroup
+      strikeDir,
+      markers: markerGroup,
+      outerRing: ring
     };
     this.airstrikeCooldown = 16; // Fast 16s tactical rearm cooldown
     if (this.airstrikeFSM) {
@@ -763,12 +946,17 @@ export const CommanderMethods = {
     // Spawn 3D Strike Fighter Jet screaming in across the sky toward the target!
     if (pattern !== 'ARTILLERY') {
       const jetMesh = this.buildStrikeJetMesh();
-      const jetStart = targetPos
-        .clone()
-        .addScaledVector(strikeDir, -195)
-        .add(new THREE.Vector3(0, 62, 0));
-      jetMesh.position.copy(jetStart);
-      jetMesh.lookAt(targetPos.clone().addScaledVector(strikeDir, 195).add(new THREE.Vector3(0, 62, 0)));
+      jetMesh.position.set(
+        targetPos.x - strikeDir.x * 195,
+        targetPos.y + 62,
+        targetPos.z - strikeDir.z * 195
+      );
+      _cmdScratch.set(
+        targetPos.x + strikeDir.x * 195,
+        targetPos.y + 62,
+        targetPos.z + strikeDir.z * 195
+      );
+      jetMesh.lookAt(_cmdScratch);
       this.scene.add(jetMesh);
       this.activeAirstrikeJets.push({
         mesh: jetMesh,
@@ -805,27 +993,18 @@ export const CommanderMethods = {
   },
 
   spawnPhysicalAirstrikeBomb(bItem) {
-    const isHeavyGbu = bItem.isHeavyGbu;
+    const isHeavyGbu = Boolean(bItem.isHeavyGbu);
     const bombGroup = new THREE.Group();
-    const bodyGeo = new THREE.BoxGeometry(
-      isHeavyGbu ? 0.65 : 0.42,
-      isHeavyGbu ? 1.85 : 1.25,
-      isHeavyGbu ? 0.65 : 0.42
+    const bodyMesh = new THREE.Mesh(
+      isHeavyGbu ? _heavyGbuBodyGeo : _stdBombBodyGeo,
+      isHeavyGbu ? _heavyGbuBodyMat : _stdBombBodyMat
     );
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: isHeavyGbu ? 0xc0392b : 0x2f3640,
-      roughness: 0.5
-    });
-    const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
     bombGroup.add(bodyMesh);
 
-    const glowGeo = new THREE.BoxGeometry(
-      isHeavyGbu ? 0.5 : 0.34,
-      0.45,
-      isHeavyGbu ? 0.5 : 0.34
+    const glowMesh = new THREE.Mesh(
+      isHeavyGbu ? _heavyGbuGlowGeo : _stdBombGlowGeo,
+      _bombGlowMat
     );
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0xff9f1a });
-    const glowMesh = new THREE.Mesh(glowGeo, glowMat);
     glowMesh.position.y = isHeavyGbu ? 0.85 : 0.58;
     bombGroup.add(glowMesh);
 
@@ -854,8 +1033,9 @@ export const CommanderMethods = {
     }
 
     const pattern = target.pattern || this.airstrikePattern || 'CARPET';
-    const dir = target.strikeDir || new THREE.Vector3(1, 0, 0);
-    const right = new THREE.Vector3(-dir.z, 0, dir.x);
+    const dir = target.strikeDir || _cmdScratch.set(1, 0, 0);
+    const rx = -dir.z;
+    const rz = dir.x;
 
     if (pattern === 'BUNKER_BUSTER') {
       // 1 Massive 2,000lb GBU-28 Bunker-Buster dead-center + 4 secondary cluster submunitions
@@ -874,9 +1054,10 @@ export const CommanderMethods = {
         [8, -6],
         [-8, -6]
       ];
-      clusterOffsets.forEach(([ox, oz], idx) => {
-        const ix = target.pos.x + dir.x * ox + right.x * oz;
-        const iz = target.pos.z + dir.z * ox + right.z * oz;
+      for (let idx = 0; idx < clusterOffsets.length; idx++) {
+        const [ox, oz] = clusterOffsets[idx];
+        const ix = target.pos.x + dir.x * ox + rx * oz;
+        const iz = target.pos.z + dir.z * ox + rz * oz;
         const iy = this.world.getGroundHeightAt(ix, iz);
         this.pendingAirstrikeBombs.push({
           delay: 0.22 + idx * 0.09,
@@ -887,7 +1068,7 @@ export const CommanderMethods = {
           weaponLabel: 'GBU CLUSTER WARHEAD',
           isHeavyGbu: false
         });
-      });
+      }
     } else if (pattern === 'ARTILLERY') {
       // 12 Whistling 155mm HE Shells saturating a 30m radius zone over 2.2 seconds
       for (let i = 0; i < 12; i++) {
@@ -912,8 +1093,8 @@ export const CommanderMethods = {
       for (let i = 0; i < totalBombs; i++) {
         const along = (i - (totalBombs - 1) * 0.5) * 6.8; // -27.2m to +27.2m rolling carpet
         const lateral = (i % 2 === 0 ? 1 : -1) * (i === 4 ? 0 : 3.2);
-        const ix = target.pos.x + dir.x * along + right.x * lateral;
-        const iz = target.pos.z + dir.z * along + right.z * lateral;
+        const ix = target.pos.x + dir.x * along + rx * lateral;
+        const iz = target.pos.z + dir.z * along + rz * lateral;
         const iy = this.world.getGroundHeightAt(ix, iz);
         this.pendingAirstrikeBombs.push({
           delay: i * 0.12,
@@ -948,7 +1129,6 @@ export const CommanderMethods = {
       return;
     }
     if (this.insertionBeacon) {
-      // Remove existing beacon
       if (this.insertionBeacon.mesh) {
         this.scene.remove(this.insertionBeacon.mesh);
       }
@@ -959,27 +1139,17 @@ export const CommanderMethods = {
     const beaconPos = this.pos.clone();
     beaconPos.y = this.world.getGroundHeightAt(beaconPos.x, beaconPos.z);
 
-    // Create visual beacon mesh
+    // Create visual beacon mesh using shared geometries/materials
     const group = new THREE.Group();
-
-    // Base cylinder (small black device)
-    const baseGeo = new THREE.CylinderGeometry(0.25, 0.35, 0.4, 8);
-    const baseMat = new THREE.MeshStandardMaterial({ color: 0x1a1a2e, roughness: 0.5 });
-    const base = new THREE.Mesh(baseGeo, baseMat);
+    const base = new THREE.Mesh(_beaconBaseGeo, _beaconBaseMat);
     base.position.y = 0.2;
     group.add(base);
 
-    // Antenna
-    const antGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.8, 4);
-    const antMat = new THREE.MeshBasicMaterial({ color: 0x333333 });
-    const ant = new THREE.Mesh(antGeo, antMat);
+    const ant = new THREE.Mesh(_beaconAntGeo, _beaconAntMat);
     ant.position.y = 0.8;
     group.add(ant);
 
-    // Pulsing blue light
-    const lightGeo = new THREE.SphereGeometry(0.12, 8, 8);
-    const lightMat = new THREE.MeshBasicMaterial({ color: 0x3498db, transparent: true, opacity: 0.6 });
-    const light = new THREE.Mesh(lightGeo, lightMat);
+    const light = new THREE.Mesh(_beaconLightGeo, _beaconLightMat);
     light.name = 'beaconLight';
     light.position.y = 1.2;
     group.add(light);
@@ -988,8 +1158,9 @@ export const CommanderMethods = {
     this.scene.add(group);
 
     this.insertionBeacon = {
-      pos: beaconPos.clone(),
+      pos: beaconPos,
       mesh: group,
+      lightMesh: light,
       spawnsLeft: DEPLOYABLES.BEACON_SPAWNS,
       timer: DEPLOYABLES.BEACON_TIMER // 3 minute lifetime
     };
@@ -1006,29 +1177,7 @@ export const CommanderMethods = {
     this.commoRoseCooldown = 1.5; // prevent spam
     sound.playRadioBeep(false);
 
-    const COMMO_COMMANDS = {
-      'contact_north': { text: 'CONTACT NORTH!', icon: '⚠️' },
-      'contact_east': { text: 'CONTACT EAST!', icon: '⚠️' },
-      'contact_south': { text: 'CONTACT SOUTH!', icon: '⚠️' },
-      'contact_west': { text: 'CONTACT WEST!', icon: '⚠️' },
-      'need_medic': { text: 'MEDIC! I NEED HELP!', icon: '🏥' },
-      'need_ammo': { text: 'I NEED AMMO!', icon: '📦' },
-      'affirmative': { text: 'AFFIRMATIVE!', icon: '✅' },
-      'negative': { text: 'NEGATIVE!', icon: '❌' },
-      'follow_me': { text: 'FOLLOW ME!', icon: '👆' },
-      'go_go_go': { text: 'GO GO GO!', icon: '🏃' },
-      'hold_position': { text: 'HOLD THIS POSITION!', icon: '🛡️' },
-      'enemy_vehicle': { text: 'ENEMY VEHICLE SPOTTED!', icon: '🚗' },
-      'order_all_attack': { text: 'COMMAND NET: ALL SQUADS ADVANCE ON OBJECTIVE!', icon: '⭐' },
-      'order_squad_attack': { text: 'SQUAD NET: SQUAD ADVANCE ON OBJECTIVE!', icon: '🎯' },
-      'order_flag_A': { text: 'STRATEGIC ORDER: CAPTURE OBJECTIVE ALPHA [A]!', icon: '🚩' },
-      'order_flag_B': { text: 'STRATEGIC ORDER: CAPTURE OBJECTIVE BRAVO [B]!', icon: '🚩' },
-      'order_flag_C': { text: 'STRATEGIC ORDER: CAPTURE OBJECTIVE CHARLIE [C]!', icon: '🚩' },
-      'order_flag_D': { text: 'STRATEGIC ORDER: CAPTURE OBJECTIVE DELTA [D]!', icon: '🚩' },
-      'order_flag_E': { text: 'STRATEGIC ORDER: CAPTURE OBJECTIVE ECHO [E]!', icon: '🚩' }
-    };
-
-    const cmd = COMMO_COMMANDS[commandId];
+    const cmd = _COMMO_COMMANDS[commandId];
     if (!cmd) return;
 
     this.lastCommoCommand = cmd;

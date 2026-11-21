@@ -1,33 +1,58 @@
 import * as THREE from '../../vendor/three.module.js';
-import { events } from '../events.js?v=90';
+import { events } from '../events.js?v=91';
+
+function markShared(asset) {
+  if (asset) {
+    if (!asset.userData) asset.userData = {};
+    asset.userData.shared = true;
+  }
+  return asset;
+}
+
+const _flagPoleGeo = markShared(new THREE.CylinderGeometry(0.14, 0.14, 10.5, 8));
+const _flagPoleMat = markShared(new THREE.MeshStandardMaterial({ color: 0xdcdde1, metalness: 0.5 }));
+const _flagBannerGeo = markShared(new THREE.BoxGeometry(2.6, 1.5, 0.14));
+const _flagRingGeos = new Map();
+
+const _colUS = new THREE.Color(0x3498db);
+const _colRU = new THREE.Color(0xe74c3c);
+const _colNeutral = new THREE.Color(0x95a5a6);
+
+function getSharedFlagRingGeo(radius) {
+  const key = Math.round(radius * 100);
+  let geo = _flagRingGeos.get(key);
+  if (!geo) {
+    geo = new THREE.RingGeometry(radius - 0.4, radius, 36);
+    geo.rotateX(-Math.PI / 2);
+    markShared(geo);
+    _flagRingGeos.set(key, geo);
+  }
+  return geo;
+}
 
 export const ConquestSystem = {
   buildConquestFlags() {
-    const poleGeo = new THREE.CylinderGeometry(0.14, 0.14, 10.5, 8);
-    const poleMat = new THREE.MeshStandardMaterial({ color: 0xdcdde1, metalness: 0.5 });
-    const bannerGeo = new THREE.BoxGeometry(2.6, 1.5, 0.14);
-
     for (const flag of this.flags) {
       const group = new THREE.Group();
       group.position.copy(flag.pos);
 
-      const pole = new THREE.Mesh(poleGeo, poleMat);
+      const pole = new THREE.Mesh(_flagPoleGeo, _flagPoleMat);
       pole.position.y = 5.25;
       pole.castShadow = true;
       group.add(pole);
 
+      const initHex = this.getTeamHex(flag.owner);
       const bannerMat = new THREE.MeshStandardMaterial({
-        color: this.getTeamHex(flag.owner),
+        color: initHex,
         roughness: 0.5
       });
-      const banner = new THREE.Mesh(bannerGeo, bannerMat);
+      const banner = new THREE.Mesh(_flagBannerGeo, bannerMat);
       banner.position.set(1.35, 9.0, 0);
       group.add(banner);
 
-      const ringGeo = new THREE.RingGeometry(flag.radius - 0.4, flag.radius, 36);
-      ringGeo.rotateX(-Math.PI / 2);
+      const ringGeo = getSharedFlagRingGeo(flag.radius);
       const ringMat = new THREE.MeshBasicMaterial({
-        color: this.getTeamHex(flag.owner),
+        color: initHex,
         side: THREE.DoubleSide,
         transparent: true,
         opacity: 0.55
@@ -37,8 +62,10 @@ export const ConquestSystem = {
       group.add(ring);
 
       this.scene.add(group);
+      flag.groupMesh = group;
       flag.bannerMesh = banner;
       flag.zoneMesh = ring;
+      flag._lastColorHex = initHex;
       flag.defenseStage = flag.defenseStage || 0;
     }
   },
@@ -51,8 +78,17 @@ export const ConquestSystem = {
 
   updateFlags(dt, units, onFlagCaptured = null) {
     const playerUnit = units && units.length > 0 ? units[0] : null;
+    const bm =
+      this.botManager ||
+      (typeof window !== 'undefined' && window.game ? window.game.botManager : null);
+    const grid = bm && bm.spatialGrid && bm.spatialGrid.count > 0 ? bm.spatialGrid : null;
+    const remotePlayers =
+      typeof window !== 'undefined' && window.game?.network?.remotePlayers
+        ? window.game.network.remotePlayers
+        : null;
 
-    for (const flag of this.flags) {
+    for (let fIdx = 0; fIdx < this.flags.length; fIdx++) {
+      const flag = this.flags[fIdx];
       let usSoldiers = 0;
       let ruSoldiers = 0;
       let usWeight = 0;
@@ -65,14 +101,12 @@ export const ConquestSystem = {
       // 1.35x to 1.65x hold weight so attackers must bring numerical superiority or clear the garrison!
       const defStageBonus = Math.min(4, flag.defenseStage || 0) * 0.075;
       const defenderWeightMult = 1.35 + defStageBonus;
+      const radSq = flag.radius * flag.radius;
+      const fx = flag.pos.x;
+      const fz = flag.pos.z;
 
-      for (const u of units) {
-        if (!u || u.dead) continue;
-        const dx = u.pos.x - flag.pos.x;
-        const dz = u.pos.z - flag.pos.z;
-        const distSq = dx * dx + dz * dz;
-        if (distSq > flag.radius * flag.radius) continue;
-
+      const tallyUnit = (u, distSq) => {
+        if (!u || u.dead) return;
         // CRITICAL: Downed / incapacitated / bleeding-out bodies MUST be 100% excluded
         // from forward base taking points & capture progress calculations!
         const isDownedBody =
@@ -85,12 +119,12 @@ export const ConquestSystem = {
         if (isDownedBody) {
           if (u.team === 'US') usDownedExcluded++;
           else if (u.team === 'RU') ruDownedExcluded++;
-          continue;
+          return;
         }
 
         // Active standing/fighting units only:
         // Give the human player 5x capture weight (6x when right on the flagpole <=16m)
-        const isInnerCore = distSq <= 16 * 16;
+        const isInnerCore = distSq <= 256;
         const baseWeight = u === playerUnit ? (isInnerCore ? 6 : 5) : 1;
         const isDefenderOfBase = flag.owner !== 'NEUTRAL' && u.team === flag.owner;
         const weight = isDefenderOfBase ? baseWeight * defenderWeightMult : baseWeight;
@@ -101,13 +135,53 @@ export const ConquestSystem = {
           ruSoldiers++;
           ruWeight += weight;
         }
+      };
+
+      if (grid && units) {
+        if (playerUnit && !playerUnit.dead && playerUnit.pos) {
+          const pdx = playerUnit.pos.x - fx;
+          const pdz = playerUnit.pos.z - fz;
+          const pDistSq = pdx * pdx + pdz * pdz;
+          if (pDistSq <= radSq) {
+            tallyUnit(playerUnit, pDistSq);
+          }
+        }
+        grid.forEachInRadius(fx, fz, flag.radius, (bot, dSq) => {
+          if (bot !== playerUnit) {
+            tallyUnit(bot, dSq);
+          }
+        });
+        if (remotePlayers && remotePlayers.size > 0) {
+          for (const rp of remotePlayers.values()) {
+            if (!rp || rp.dead || !rp.pos) continue;
+            const rdx = rp.pos.x - fx;
+            const rdz = rp.pos.z - fz;
+            const rDistSq = rdx * rdx + rdz * rdz;
+            if (rDistSq <= radSq) {
+              tallyUnit(rp, rDistSq);
+            }
+          }
+        }
+      } else if (units) {
+        for (let i = 0; i < units.length; i++) {
+          const u = units[i];
+          if (!u || u.dead) continue;
+          const dx = u.pos.x - fx;
+          if (dx > flag.radius || dx < -flag.radius) continue;
+          const dz = u.pos.z - fz;
+          if (dz > flag.radius || dz < -flag.radius) continue;
+          const distSq = dx * dx + dz * dz;
+          if (distSq <= radSq) {
+            tallyUnit(u, distSq);
+          }
+        }
       }
 
       flag.usPresent = usSoldiers;
       flag.ruPresent = ruSoldiers;
-      flag.usWeight = Number(usWeight.toFixed(2));
-      flag.ruWeight = Number(ruWeight.toFixed(2));
-      flag.defenderWeightMult = Number(defenderWeightMult.toFixed(2));
+      flag.usWeight = Math.round(usWeight * 100) / 100;
+      flag.ruWeight = Math.round(ruWeight * 100) / 100;
+      flag.defenderWeightMult = Math.round(defenderWeightMult * 100) / 100;
       flag.usDownedPresent = usDownedExcluded;
       flag.ruDownedPresent = ruDownedExcluded;
       flag.zoneClashing = usSoldiers > 0 && ruSoldiers > 0;
@@ -165,7 +239,7 @@ export const ConquestSystem = {
         }
       }
 
-      const absProg = Math.abs(flag.captureProgress) / 100;
+      const absProg = Math.abs(flag.captureProgress) * 0.01;
       flag.bannerMesh.position.y = 2.4 + absProg * 6.6;
       const colorHex =
         flag.captureProgress > 10
@@ -173,8 +247,13 @@ export const ConquestSystem = {
           : flag.captureProgress < -10
           ? 0xe74c3c
           : 0x95a5a6;
-      flag.bannerMesh.material.color.setHex(colorHex);
-      flag.zoneMesh.material.color.setHex(colorHex);
+      if (flag._lastColorHex !== colorHex) {
+        flag._lastColorHex = colorHex;
+        const targetCol =
+          colorHex === 0x3498db ? _colUS : colorHex === 0xe74c3c ? _colRU : _colNeutral;
+        flag.bannerMesh.material.color.copy(targetCol);
+        flag.zoneMesh.material.color.copy(targetCol);
+      }
     }
   }
 };

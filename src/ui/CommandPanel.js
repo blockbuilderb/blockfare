@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SQUAD_DEFS } from '../bots.js?v=90';
+import { SQUAD_DEFS } from '../bots.js?v=91';
 
 export const CommandPanel = {
   setCommandScope(scope) {
@@ -192,10 +192,16 @@ export const CommandPanel = {
     const team = this.player.team || 'US';
     const sqId = this.player.squad || 'ALPHA';
 
-    const aliveTeamBots = this.botManager.bots.filter((b) => !b.dead && b.team === team).length;
-    const aliveSquadBots = this.botManager.bots.filter(
-      (b) => !b.dead && b.team === team && b.squad === sqId
-    ).length;
+    let aliveTeamBots = 0;
+    let aliveSquadBots = 0;
+    const bots = this.botManager.bots;
+    for (let i = 0; i < bots.length; i++) {
+      const b = bots[i];
+      if (!b.dead && b.team === team) {
+        aliveTeamBots++;
+        if (b.squad === sqId) aliveSquadBots++;
+      }
+    }
 
     if (allBtn) {
       allBtn.textContent = `★ ALL 5 SQUADS (${aliveTeamBots})`;
@@ -446,11 +452,40 @@ export const CommandPanel = {
     }
   },
 
+  isCommandModalVisible() {
+    const modal = this.el('command-modal');
+    if (
+      !modal ||
+      !modal.isConnected ||
+      modal.classList.contains('hidden') ||
+      modal.style.display === 'none'
+    ) {
+      return false;
+    }
+    const canvas = this.el('cmd-tactical-map-canvas');
+    if (canvas && (canvas.style.display === 'none' || canvas.offsetParent === null)) {
+      return false;
+    }
+    return true;
+  },
+
+  _destroyCommandModal(modal) {
+    if (modal) modal.remove();
+    if (this._domCache) {
+      this._domCache.delete('command-modal');
+      this._domCache.delete('cmd-tactical-map-canvas');
+    }
+  },
+
   toggleCommandModal() {
     let modal = this.el('command-modal');
     if (modal) {
-      modal.remove();
-      return;
+      if (modal.classList.contains('hidden') || modal.style.display === 'none') {
+        this._destroyCommandModal(modal);
+      } else {
+        this._destroyCommandModal(modal);
+        return;
+      }
     }
     if (document.pointerLockElement === document.body) {
       document.exitPointerLock();
@@ -735,7 +770,7 @@ export const CommandPanel = {
     `;
 
     const closeBtn = modal.querySelector('#cmd-modal-close');
-    if (closeBtn) closeBtn.addEventListener('click', () => modal.remove());
+    if (closeBtn) closeBtn.addEventListener('click', () => this._destroyCommandModal(modal));
 
     const mapModeOrderBtn = modal.querySelector('#cmd-map-mode-order');
     if (mapModeOrderBtn) {
@@ -791,7 +826,14 @@ export const CommandPanel = {
     const mapCanvas = modal.querySelector('#cmd-tactical-map-canvas');
     if (mapCanvas) {
       if (this._domCache) this._domCache.set('cmd-tactical-map-canvas', mapCanvas);
-      this.drawCommandTacticalMap(mapCanvas);
+      if (
+        modal.isConnected &&
+        !modal.classList.contains('hidden') &&
+        modal.style.display !== 'none' &&
+        mapCanvas.offsetParent !== null
+      ) {
+        this.drawCommandTacticalMap(mapCanvas);
+      }
       const triggerMapAirstrikeAt = (e) => {
         const rect = mapCanvas.getBoundingClientRect();
         const cx = ((e.clientX - rect.left) / rect.width) * mapCanvas.width;
@@ -852,21 +894,21 @@ export const CommandPanel = {
     if (uavBtn) {
       uavBtn.addEventListener('click', () => {
         this.player.triggerCommanderUAV();
-        modal.remove();
+        this._destroyCommandModal(modal);
       });
     }
     const airBtn = modal.querySelector('#cmd-asset-airstrike');
     if (airBtn) {
       airBtn.addEventListener('click', () => {
         this.player.callCommanderAirstrike();
-        modal.remove();
+        this._destroyCommandModal(modal);
       });
     }
     const rallyBtn = modal.querySelector('#cmd-asset-rally');
     if (rallyBtn) {
       rallyBtn.addEventListener('click', () => {
         this.player.placeRallyPoint();
-        modal.remove();
+        this._destroyCommandModal(modal);
       });
     }
     modal.querySelectorAll('.modal-build-emplace-btn').forEach((btn) => {
@@ -875,7 +917,7 @@ export const CommandPanel = {
         if (this.player && typeof this.player.buildPaidHouseOrBunker === 'function') {
           this.player.buildPaidHouseOrBunker(kind);
           this.updateCashAndGunsmithHud?.();
-          modal.remove();
+          this._destroyCommandModal(modal);
         }
       });
     });
@@ -885,7 +927,7 @@ export const CommandPanel = {
         if (this.player && typeof this.player.launchAircraftSortie === 'function') {
           this.player.launchAircraftSortie(role);
           this.updateCommandOrderHud?.();
-          modal.remove();
+          this._destroyCommandModal(modal);
         }
       });
     });

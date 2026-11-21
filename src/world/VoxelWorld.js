@@ -1,19 +1,33 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=90';
-import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=90';
-import { getMapDefinition } from '../maps/index.js?v=90';
-import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=90';
-import { events, makeEventBridge } from '../events.js?v=90';
-import { TerrainGenerator } from './TerrainGenerator.js?v=90';
-import { BuildingFactory } from './BuildingFactory.js?v=90';
-import { ConquestSystem } from './ConquestSystem.js?v=90';
-import { ProjectileManager } from './ProjectileManager.js?v=90';
-import { WeatherSystem } from './WeatherSystem.js?v=90';
+import { TEXTURES } from '../assets/textures.js?v=91';
+import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=91';
+import { getMapDefinition } from '../maps/index.js?v=91';
+import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=91';
+import { events, makeEventBridge } from '../events.js?v=91';
+import { TerrainGenerator } from './TerrainGenerator.js?v=91';
+import { BuildingFactory } from './BuildingFactory.js?v=91';
+import { ConquestSystem } from './ConquestSystem.js?v=91';
+import { ProjectileManager } from './ProjectileManager.js?v=91';
+import { WeatherSystem } from './WeatherSystem.js?v=91';
 
 export { VOXEL_SIZE, MAT_DEFS };
 
-// Pre-allocated reusable THREE.Color instance for setColorAt operations (Phase 3F)
+// Pre-allocated reusable instances for zero-allocation hot paths
 const _tempColor = new THREE.Color();
+const _rayBoxHit = new THREE.Vector3();
+
+function disposeMaterialSafe(mat) {
+  if (!mat) return;
+  if (Array.isArray(mat)) {
+    for (let i = 0; i < mat.length; i++) {
+      if (mat[i] && !mat[i].userData?.shared) {
+        mat[i].dispose();
+      }
+    }
+  } else if (!mat.userData?.shared) {
+    mat.dispose();
+  }
+}
 
 export class VoxelWorld {
   constructor(mapScene, mapId = 'frugis_river') {
@@ -21,7 +35,8 @@ export class VoxelWorld {
     this.mapDef = getMapDefinition(mapId);
     this.mapId = this.mapDef.id || mapId;
     this.era = this.mapDef.era || 'modern';
-    this.voxels = new Map(); // "gx,gy,gz" -> voxel record
+    this.voxels = new Map(); // 31-bit Smi integer key -> voxel record
+    this._hasOverflowVoxels = false;
     this.instancedBatches = {};
     this.debrisParticles = [];
     this.projectiles = [];
@@ -29,6 +44,9 @@ export class VoxelWorld {
     this.lootPacks = [];
     this.buildings = [];
     this.containers = [];
+    this._ownedWorldObjects = [];
+    this._buildingWorld = false;
+
     // Configurable option: Allow buildings to be damaged/collapsed (Default: YES / true)
     let savedDestruction = true;
     try {
@@ -41,9 +59,20 @@ export class VoxelWorld {
       (centerPos, radius, collapsedVoxels) => ({ centerPos, radius, collapsedVoxels })
     );
     this._tempColor = _tempColor;
+    this._rayBoxHit = _rayBoxHit;
 
-    // Load graded terrain pads from active map definition (src/maps/frugis-river.js)
-    this.gradedPads = this.mapDef.gradedPads.map((p) => ({ ...p }));
+    // Load graded terrain pads from active map definition with precomputed inverse radii & AABB bounds
+    this.gradedPads = this.mapDef.gradedPads.map((p) => ({
+      ...p,
+      invRx: 1 / p.rx,
+      invRz: 1 / p.rz,
+      maxDx: p.rx * 1.45,
+      maxDz: p.rz * 1.45
+    }));
+
+    if (typeof this._bakeTerrainHeightmap === 'function') {
+      this._bakeTerrainHeightmap();
+    }
 
     this.sharedBoxGeo = new THREE.BoxGeometry(VOXEL_SIZE, VOXEL_SIZE, VOXEL_SIZE);
     this.bakeVoxelFaceShading(this.sharedBoxGeo);
@@ -76,7 +105,21 @@ export class VoxelWorld {
       RU_BASE: new THREE.Vector3(ruHq.x, this.getTerrainHeight(ruHq.x, ruHq.z), ruHq.z)
     };
 
+    this._buildingWorld = true;
     this.buildEnvironment();
+    this._buildingWorld = false;
+
+    for (const batch of Object.values(this.instancedBatches)) {
+      if (batch.count > 0) {
+        batch.mesh.instanceMatrix.clearUpdateRanges();
+        batch.mesh.instanceMatrix.needsUpdate = true;
+        if (batch.mesh.instanceColor) {
+          batch.mesh.instanceColor.clearUpdateRanges();
+          batch.mesh.instanceColor.needsUpdate = true;
+        }
+      }
+    }
+
     this.buildConquestFlags();
 
     // Dynamic Weather System (Battlefield 2042 inspired)
@@ -127,6 +170,7 @@ export class VoxelWorld {
   }
 
   initInstancedBatches() {
+    _tempColor.setRGB(1, 1, 1);
     for (const [type, def] of Object.entries(MAT_DEFS)) {
       const mat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
@@ -138,6 +182,12 @@ export class VoxelWorld {
 
       const mesh = new THREE.InstancedMesh(this.sharedBoxGeo, mat, def.maxInstances);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.setColorAt(0, _tempColor);
+      if (mesh.instanceColor) {
+        mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+      }
+      mesh.frustumCulled = false;
+      mesh.matrixAutoUpdate = false;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.count = 0;
@@ -152,30 +202,94 @@ export class VoxelWorld {
     }
   }
 
+  _markMatrixDirty(batch, instanceId) {
+    if (!this._buildingWorld && batch && batch.mesh) {
+      batch.mesh.instanceMatrix.addUpdateRange(instanceId * 16, 16);
+      batch.mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  _markColorDirty(batch, instanceId) {
+    if (!this._buildingWorld && batch && batch.mesh && batch.mesh.instanceColor) {
+      batch.mesh.instanceColor.addUpdateRange(instanceId * 3, 3);
+      batch.mesh.instanceColor.needsUpdate = true;
+    }
+  }
+
   key(gx, gy, gz) {
-    return `${gx},${gy},${gz}`;
+    gx |= 0;
+    gy |= 0;
+    gz |= 0;
+    if (gy < -16 || gy > 111 || gx < -2048 || gx > 2047 || gz < -2048 || gz > 2047) {
+      return `${gx},${gy},${gz}`;
+    }
+    return (((gx + 2048) | ((gz + 2048) << 12) | ((gy + 16) << 24)) - 0x40000000) | 0;
   }
 
-  worldToGrid(x, y, z) {
-    return {
-      gx: Math.round(x / VOXEL_SIZE),
-      gy: Math.floor(y / VOXEL_SIZE),
-      gz: Math.round(z / VOXEL_SIZE)
-    };
+  getVoxel(gx, gy, gz) {
+    gx |= 0;
+    gy |= 0;
+    gz |= 0;
+    if (gy < -16 || gy > 111 || gx < -2048 || gx > 2047 || gz < -2048 || gz > 2047) {
+      return this._hasOverflowVoxels ? this.voxels.get(`${gx},${gy},${gz}`) || null : null;
+    }
+    const k = (((gx + 2048) | ((gz + 2048) << 12) | ((gy + 16) << 24)) - 0x40000000) | 0;
+    return this.voxels.get(k) || null;
   }
 
-  gridToWorld(gx, gy, gz) {
-    return new THREE.Vector3(
-      gx * VOXEL_SIZE,
-      gy * VOXEL_SIZE + VOXEL_SIZE * 0.5,
-      gz * VOXEL_SIZE
+  hasVoxel(gx, gy, gz) {
+    gx |= 0;
+    gy |= 0;
+    gz |= 0;
+    if (gy < -16 || gy > 111 || gx < -2048 || gx > 2047 || gz < -2048 || gz > 2047) {
+      return this._hasOverflowVoxels ? this.voxels.has(`${gx},${gy},${gz}`) : false;
+    }
+    const k = (((gx + 2048) | ((gz + 2048) << 12) | ((gy + 16) << 24)) - 0x40000000) | 0;
+    return this.voxels.has(k);
+  }
+
+  hasVoxelAtWorld(wx, wy, wz) {
+    return this.hasVoxel(
+      Math.round(wx / VOXEL_SIZE),
+      Math.floor(wy / VOXEL_SIZE),
+      Math.round(wz / VOXEL_SIZE)
     );
   }
 
+  worldToGrid(x, y, z, out = null) {
+    const gx = Math.round(x / VOXEL_SIZE);
+    const gy = Math.floor(y / VOXEL_SIZE);
+    const gz = Math.round(z / VOXEL_SIZE);
+    if (out) {
+      out.gx = gx;
+      out.gy = gy;
+      out.gz = gz;
+      return out;
+    }
+    return { gx, gy, gz };
+  }
+
+  gridToWorld(gx, gy, gz, out = null) {
+    const wx = gx * VOXEL_SIZE;
+    const wy = gy * VOXEL_SIZE + VOXEL_SIZE * 0.5;
+    const wz = gz * VOXEL_SIZE;
+    if (out) {
+      return out.set(wx, wy, wz);
+    }
+    return new THREE.Vector3(wx, wy, wz);
+  }
+
   addVoxel(gx, gy, gz, type = 'brick', isProp = false, isFortification = false) {
+    gx |= 0;
+    gy |= 0;
+    gz |= 0;
     if (gy < -8) return null;
     const k = this.key(gx, gy, gz);
-    if (this.voxels.has(k)) return this.voxels.get(k);
+    if (typeof k === 'string') {
+      this._hasOverflowVoxels = true;
+    }
+    const existing = this.voxels.get(k);
+    if (existing) return existing;
 
     const batch = this.instancedBatches[type] || this.instancedBatches.brick;
     let instanceId;
@@ -187,8 +301,11 @@ export class VoxelWorld {
       batch.mesh.count = batch.count;
     }
 
-    const wPos = this.gridToWorld(gx, gy, gz);
-    this.dummy.position.copy(wPos);
+    const wx = gx * VOXEL_SIZE;
+    const wy = gy * VOXEL_SIZE + VOXEL_SIZE * 0.5;
+    const wz = gz * VOXEL_SIZE;
+
+    this.dummy.position.set(wx, wy, wz);
     this.dummy.scale.set(1, 1, 1);
     this.dummy.rotation.set(0, 0, 0);
     this.dummy.updateMatrix();
@@ -202,10 +319,11 @@ export class VoxelWorld {
     const baseColor = new THREE.Color(batch.def.color).multiplyScalar(shade);
     batch.mesh.setColorAt(instanceId, baseColor);
 
-    batch.mesh.instanceMatrix.needsUpdate = true;
-    if (batch.mesh.instanceColor) batch.mesh.instanceColor.needsUpdate = true;
+    this._markMatrixDirty(batch, instanceId);
+    this._markColorDirty(batch, instanceId);
 
     const half = VOXEL_SIZE * 0.5;
+    const wPos = new THREE.Vector3(wx, wy, wz);
     const voxel = {
       key: k,
       gx,
@@ -219,12 +337,12 @@ export class VoxelWorld {
       maxHp: isProp ? MAT_HP.PROP : batch.def.hp,
       baseColor,
       pos: wPos,
-      minX: wPos.x - half,
-      maxX: wPos.x + half,
-      minY: wPos.y - half,
-      maxY: wPos.y + half,
-      minZ: wPos.z - half,
-      maxZ: wPos.z + half
+      minX: wx - half,
+      maxX: wx + half,
+      minY: wy - half,
+      maxY: wy + half,
+      minZ: wz - half,
+      maxZ: wz + half
     };
 
     this.voxels.set(k, voxel);
@@ -241,8 +359,7 @@ export class VoxelWorld {
   }
 
   damageVoxel(gx, gy, gz, amount, broadcastFn = null, skipIntegrity = false) {
-    const k = this.key(gx, gy, gz);
-    const voxel = this.voxels.get(k);
+    const voxel = this.getVoxel(gx, gy, gz);
     if (!voxel) return false;
 
     // If Building Destruction is turned OFF, structural building walls/floors/containers are indestructible!
@@ -265,18 +382,16 @@ export class VoxelWorld {
       const batch = this.instancedBatches[voxel.type];
       if (batch) {
         const ratio = Math.max(0.25, voxel.hp / voxel.maxHp);
-        // Phase 3F: Reuse pre-allocated THREE.Color instead of allocating a new clone per hit
         _tempColor.copy(voxel.baseColor).multiplyScalar(0.38 + 0.62 * ratio);
         batch.mesh.setColorAt(voxel.instanceId, _tempColor);
-        if (batch.mesh.instanceColor) batch.mesh.instanceColor.needsUpdate = true;
+        this._markColorDirty(batch, voxel.instanceId);
       }
       return false;
     }
   }
 
   destroyVoxel(gx, gy, gz, spawnDebris = true, asCollapseBlock = false) {
-    const k = this.key(gx, gy, gz);
-    const voxel = this.voxels.get(k);
+    const voxel = this.getVoxel(gx, gy, gz);
     if (!voxel) return false;
 
     const batch = this.instancedBatches[voxel.type];
@@ -285,13 +400,13 @@ export class VoxelWorld {
       this.dummy.scale.set(0, 0, 0);
       this.dummy.updateMatrix();
       batch.mesh.setMatrixAt(voxel.instanceId, this.dummy.matrix);
-      batch.mesh.instanceMatrix.needsUpdate = true;
+      this._markMatrixDirty(batch, voxel.instanceId);
       batch.freeIds.push(voxel.instanceId);
     }
 
-    const pos = voxel.pos.clone();
-    const color = voxel.baseColor.clone();
-    this.voxels.delete(k);
+    const pos = voxel.pos;
+    const color = voxel.baseColor;
+    this.voxels.delete(voxel.key);
 
     if (asCollapseBlock) {
       this.spawnFallingBlock(pos, color);
@@ -303,25 +418,42 @@ export class VoxelWorld {
 
   /**
    * High-Precision 3D Voxel + Sculpted Terrain Raycast (up to 420m across the valley)
-   * Includes diagonal corner-seam blocking and optional ray thickness (`rayRadius`)
-   * so neither bullets nor NPC sightlines can slip through thin cracks or diagonal block seams.
+   * Includes skyward early-exit, cell-deduplicated integer Smi lookups, diagonal corner-seam blocking,
+   * and optional ray thickness (`rayRadius`).
    */
   raycastVoxel(origin, dir, maxDist = DISTANCES.RAYCAST_MAX, rayRadius = 0, ignoreVoxelKey = null) {
+    if (
+      origin.y > 46.0 &&
+      dir.y >= 0 &&
+      Math.abs(origin.x) < 2000 &&
+      Math.abs(origin.z) < 1300
+    ) {
+      return null;
+    }
+
     const stepSize = VOXEL_SIZE * 0.36;
+    const invVoxelSize = 1 / VOXEL_SIZE;
     const steps = Math.ceil(maxDist / stepSize);
+    const groundBias = rayRadius > 0 ? 0.08 : 0;
+    const radSq = rayRadius * rayRadius;
+
     let prevGx = null;
     let prevGy = null;
     let prevGz = null;
 
     for (let i = 1; i <= steps; i++) {
-      const dist = Math.min(maxDist, i * stepSize);
+      const dist = i * stepSize < maxDist ? i * stepSize : maxDist;
       const px = origin.x + dir.x * dist;
       const py = origin.y + dir.y * dist;
       const pz = origin.z + dir.z * dist;
 
+      if (py > 52.0 && dir.y >= 0 && Math.abs(px) < 2000 && Math.abs(pz) < 1300) {
+        return null;
+      }
+
       if (py < 18.0) {
         const groundH = this.getGroundHeightAt(px, pz);
-        if (py <= groundH + (rayRadius > 0 ? 0.08 : 0)) {
+        if (py <= groundH + groundBias) {
           return {
             voxel: null,
             isGround: true,
@@ -332,16 +464,19 @@ export class VoxelWorld {
         }
       }
 
-      const gx = Math.round(px / VOXEL_SIZE);
-      const gy = Math.floor(py / VOXEL_SIZE);
-      const gz = Math.round(pz / VOXEL_SIZE);
+      const gx = Math.round(px * invVoxelSize);
+      const gy = Math.floor(py * invVoxelSize);
+      const gz = Math.round(pz * invVoxelSize);
 
-      // 1. Diagonal corner-seam check: prevent slipping diagonally between two adjacent blocks
-      if (prevGx !== null && prevGz !== null && (gx !== prevGx || gz !== prevGz || gy !== prevGy)) {
-        if (gx !== prevGx && gz !== prevGz) {
-          const seamA = this.voxels.get(this.key(prevGx, gy, gz));
-          const seamB = this.voxels.get(this.key(gx, gy, prevGz));
-          if (seamA && seamB && seamA.key !== ignoreVoxelKey && seamB.key !== ignoreVoxelKey) {
+      const cellChanged = gx !== prevGx || gy !== prevGy || gz !== prevGz;
+      if (cellChanged) {
+        // 1. Diagonal corner-seam check: prevent slipping diagonally between two adjacent blocks
+        if (prevGx !== null && gx !== prevGx && gz !== prevGz) {
+          const seamA = this.getVoxel(prevGx, gy, gz);
+          const seamB = this.getVoxel(gx, gy, prevGz);
+          const validA = seamA && seamA.key !== ignoreVoxelKey;
+          const validB = seamB && seamB.key !== ignoreVoxelKey;
+          if (validA && validB) {
             return {
               voxel: seamA,
               isGround: false,
@@ -350,10 +485,9 @@ export class VoxelWorld {
               normal: new THREE.Vector3(Math.sign(prevGx - gx), 0, Math.sign(prevGz - gz)).normalize()
             };
           }
-          if (rayRadius > 0 && ((seamA && seamA.key !== ignoreVoxelKey) || (seamB && seamB.key !== ignoreVoxelKey))) {
-            const hitSeam = seamA && seamA.key !== ignoreVoxelKey ? seamA : seamB;
+          if (rayRadius > 0 && (validA || validB)) {
             return {
-              voxel: hitSeam,
+              voxel: validA ? seamA : seamB,
               isGround: false,
               distance: dist,
               point: new THREE.Vector3(px, py, pz),
@@ -361,27 +495,32 @@ export class VoxelWorld {
             };
           }
         }
-      }
 
-      // 2. Direct voxel hit check
-      const k = this.key(gx, gy, gz);
-      const v = k !== ignoreVoxelKey ? this.voxels.get(k) : null;
-      if (v) {
-        const normal = new THREE.Vector3(
-          prevGx !== null ? Math.sign(prevGx - gx) : 0,
-          prevGy !== null ? Math.sign(prevGy - gy) : 0,
-          prevGz !== null ? Math.sign(prevGz - gz) : 0
-        );
-        if (normal.lengthSq() === 0) normal.set(0, 1, 0);
-        else normal.normalize();
+        // 2. Direct voxel hit check
+        const v = this.getVoxel(gx, gy, gz);
+        if (v && v.key !== ignoreVoxelKey) {
+          const normal = new THREE.Vector3(
+            prevGx !== null ? Math.sign(prevGx - gx) : 0,
+            prevGy !== null ? Math.sign(prevGy - gy) : 0,
+            prevGz !== null ? Math.sign(prevGz - gz) : 0
+          );
+          if (normal.lengthSq() === 0) normal.set(0, 1, 0);
+          else normal.normalize();
 
-        return {
-          voxel: v,
-          isGround: false,
-          distance: dist,
-          point: new THREE.Vector3(px, py, pz),
-          normal
-        };
+          return {
+            voxel: v,
+            isGround: false,
+            distance: dist,
+            point: new THREE.Vector3(px, py, pz),
+            normal
+          };
+        }
+
+        prevGx = gx;
+        prevGy = gy;
+        prevGz = gz;
+      } else if (rayRadius <= 0) {
+        continue;
       }
 
       // 3. Thick ray radius check (blocks NPC vision & shots through tiny hairline gaps near block edges)
@@ -389,18 +528,16 @@ export class VoxelWorld {
         for (let dx = -1; dx <= 1; dx++) {
           for (let dz = -1; dz <= 1; dz++) {
             if (dx === 0 && dz === 0) continue;
-            const nk = this.key(gx + dx, gy, gz + dz);
-            if (nk === ignoreVoxelKey) continue;
-            const nv = this.voxels.get(nk);
-            if (!nv) continue;
-            const clampedX = Math.max(nv.minX, Math.min(px, nv.maxX));
-            const clampedY = Math.max(nv.minY, Math.min(py, nv.maxY));
-            const clampedZ = Math.max(nv.minZ, Math.min(pz, nv.maxZ));
+            const nv = this.getVoxel(gx + dx, gy, gz + dz);
+            if (!nv || nv.key === ignoreVoxelKey) continue;
+            const clampedX = px < nv.minX ? nv.minX : px > nv.maxX ? nv.maxX : px;
+            const clampedY = py < nv.minY ? nv.minY : py > nv.maxY ? nv.maxY : py;
+            const clampedZ = pz < nv.minZ ? nv.minZ : pz > nv.maxZ ? nv.maxZ : pz;
             const dSq =
               (px - clampedX) * (px - clampedX) +
               (py - clampedY) * (py - clampedY) +
               (pz - clampedZ) * (pz - clampedZ);
-            if (dSq <= rayRadius * rayRadius) {
+            if (dSq <= radSq) {
               return {
                 voxel: nv,
                 isGround: false,
@@ -412,12 +549,91 @@ export class VoxelWorld {
           }
         }
       }
-
-      prevGx = gx;
-      prevGy = gy;
-      prevGz = gz;
     }
     return null;
+  }
+
+  dispose() {
+    if (this.sharedBoxGeo && !this.sharedBoxGeo.userData?.shared) {
+      this.sharedBoxGeo.dispose();
+    }
+    this.sharedBoxGeo = null;
+
+    if (this.instancedBatches) {
+      for (const batch of Object.values(this.instancedBatches)) {
+        if (batch && batch.mesh) {
+          if (this.scene) this.scene.remove(batch.mesh);
+          disposeMaterialSafe(batch.mesh.material);
+          batch.mesh.dispose?.();
+        }
+      }
+      this.instancedBatches = {};
+    }
+
+    if (typeof this._disposeParticlePools === 'function') {
+      this._disposeParticlePools();
+    }
+
+    if (this.debrisParticles) {
+      for (let i = 0; i < this.debrisParticles.length; i++) {
+        const p = this.debrisParticles[i];
+        if (p && p.mesh) {
+          if (this.scene) this.scene.remove(p.mesh);
+          if (p.mesh.geometry && !p.mesh.geometry.userData?.shared) p.mesh.geometry.dispose();
+          disposeMaterialSafe(p.mesh.material);
+        }
+      }
+      this.debrisParticles.length = 0;
+    }
+
+    if (this.projectiles) {
+      for (let i = 0; i < this.projectiles.length; i++) {
+        const pr = this.projectiles[i];
+        if (pr && pr.mesh) {
+          if (this.scene) this.scene.remove(pr.mesh);
+          pr.mesh.traverse?.((ch) => {
+            if (ch.isMesh || ch.isLine) {
+              if (ch.geometry && !ch.geometry.userData?.shared) ch.geometry.dispose();
+              disposeMaterialSafe(ch.material);
+            }
+          });
+        }
+      }
+      this.projectiles.length = 0;
+    }
+
+    if (this.flags) {
+      for (let i = 0; i < this.flags.length; i++) {
+        const f = this.flags[i];
+        if (f.groupMesh && this.scene) this.scene.remove(f.groupMesh);
+        if (f.bannerMesh) disposeMaterialSafe(f.bannerMesh.material);
+        if (f.zoneMesh) disposeMaterialSafe(f.zoneMesh.material);
+      }
+    }
+
+    if (this._ownedWorldObjects) {
+      for (let i = 0; i < this._ownedWorldObjects.length; i++) {
+        const obj = this._ownedWorldObjects[i];
+        if (!obj) continue;
+        if (this.scene && obj.parent === this.scene) this.scene.remove(obj);
+        obj.traverse?.((ch) => {
+          if (ch.isMesh || ch.isInstancedMesh || ch.isLine) {
+            if (ch.geometry && !ch.geometry.userData?.shared) ch.geometry.dispose();
+            disposeMaterialSafe(ch.material);
+            if (ch.isInstancedMesh) ch.dispose?.();
+          }
+        });
+      }
+      this._ownedWorldObjects.length = 0;
+    }
+
+    if (this.riverTex) {
+      this.riverTex.dispose();
+      this.riverTex = null;
+    }
+
+    this._heightmap = null;
+    this.voxels.clear();
   }
 
   update(dt, units, onExplosionDamage, broadcastFn, onFlagCaptured = null, vehicles = []) {

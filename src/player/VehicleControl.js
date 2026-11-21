@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=90';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=90';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=90';
-import { events } from '../events.js?v=90';
+import { sound } from '../audio.js?v=91';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=91';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=91';
+import { events } from '../events.js?v=91';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +11,93 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=90';
+} from '../core/StateMachines.js?v=91';
+
+function markShared(asset) {
+  if (asset) {
+    if (!asset.userData) asset.userData = {};
+    asset.userData.shared = true;
+  }
+  return asset;
+}
+
+// ─── Shared Cached Vehicle / Aircraft / Flare / Ordnance Geometries & Materials (userData.shared = true) ───
+const _chuteCanopyGeo = markShared(new THREE.BoxGeometry(3.8, 0.45, 2.4));
+const _chuteCanopyMat = markShared(
+  new THREE.MeshStandardMaterial({ color: 0x556b2f, roughness: 0.8, side: THREE.DoubleSide })
+);
+const _chuteCordGeo = markShared(new THREE.BoxGeometry(0.05, 3.2, 0.05));
+const _chuteCordMat = markShared(new THREE.MeshBasicMaterial({ color: 0xbdc3c7 }));
+
+const _ccipRingGeo = markShared(new THREE.RingGeometry(4.5, 6.2, 28));
+_ccipRingGeo.rotateX(-Math.PI / 2);
+const _ccipRingMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xff9f1a,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.78
+  })
+);
+
+const _trebBoulderGeo = markShared(new THREE.DodecahedronGeometry(0.68, 1));
+const _trebBoulderMat = markShared(new THREE.MeshBasicMaterial({ color: 0xff6b00 }));
+const _mortarShellGeo = markShared(new THREE.BoxGeometry(0.26, 0.26, 0.82));
+const _mortarShellMat = markShared(new THREE.MeshBasicMaterial({ color: 0xff9f1a }));
+const _mortarSalvoMat = markShared(new THREE.MeshBasicMaterial({ color: 0xff5252 }));
+const _aaShellGeo = markShared(new THREE.BoxGeometry(0.18, 0.18, 0.65));
+const _aaShellMat = markShared(new THREE.MeshBasicMaterial({ color: 0xff5252 }));
+const _tankShellGeo = markShared(new THREE.BoxGeometry(0.24, 0.24, 0.78));
+const _tankShellMat = markShared(new THREE.MeshBasicMaterial({ color: 0xffaa00 }));
+const _autocannonShellGeo = markShared(new THREE.BoxGeometry(0.16, 0.16, 0.48));
+const _autocannonShellMat = markShared(new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
+const _vehSamGeo = markShared(new THREE.BoxGeometry(0.24, 0.24, 1.45));
+const _vehSamMat = markShared(new THREE.MeshBasicMaterial({ color: 0x00d2d3 }));
+
+const _flareCoreGeo = markShared(new THREE.BoxGeometry(0.45, 0.45, 0.45));
+const _flareHaloGeo = markShared(new THREE.BoxGeometry(0.95, 0.95, 0.95));
+const _flareCoreMatB2 = markShared(new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+const _flareCoreMatWright = markShared(new THREE.MeshBasicMaterial({ color: 0xffeaa7 }));
+const _flareCoreMatStd = markShared(new THREE.MeshBasicMaterial({ color: 0xffffff }));
+
+const _b2CarpetBombGeo = markShared(new THREE.BoxGeometry(0.44, 0.44, 1.75));
+const _b2CarpetBombMat = markShared(
+  new THREE.MeshStandardMaterial({ color: 0x2f3640, roughness: 0.45, metalness: 0.4 })
+);
+const _bofors40mmGeo = markShared(new THREE.BoxGeometry(0.28, 0.28, 0.95));
+const _bofors40mmMat = markShared(new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
+const _howitzer105mmGeo = markShared(new THREE.BoxGeometry(0.42, 0.42, 1.45));
+const _howitzer105mmMat = markShared(new THREE.MeshBasicMaterial({ color: 0xff5252 }));
+const _jdam500Geo = markShared(new THREE.BoxGeometry(0.42, 0.42, 1.65));
+const _jdam500Mat = markShared(new THREE.MeshStandardMaterial({ color: 0x3b4d3b, roughness: 0.6 }));
+const _wrightDynGeo = markShared(new THREE.BoxGeometry(0.46, 0.36, 0.56));
+const _wrightDynMat = markShared(new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.6 }));
+const _gbu57MopGeo = markShared(new THREE.BoxGeometry(0.68, 0.68, 2.95));
+const _gbu57MopMat = markShared(
+  new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.4, metalness: 0.55 })
+);
+const _airRocketGeo = markShared(new THREE.BoxGeometry(0.28, 0.28, 1.35));
+const _airRocketMat = markShared(new THREE.MeshBasicMaterial({ color: 0xff9f1a }));
+const _gbu28Geo = markShared(new THREE.BoxGeometry(0.58, 0.58, 2.4));
+const _gbu28Mat = markShared(new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.5 }));
+const _a2aMissileGeo = markShared(new THREE.BoxGeometry(0.26, 0.26, 1.75));
+const _a2aMissileMat = markShared(new THREE.MeshBasicMaterial({ color: 0x00d2d3 }));
+
+const _colSmokeWhite = new THREE.Color(0xdfe6e9);
+const _colCyan = new THREE.Color(0x00d2d3);
+const _colTrebOrange = new THREE.Color(0xff7f11);
+const _colTankFlash = new THREE.Color(0xffaa00);
+const _colHowitzerFlash = new THREE.Color(0xff9f1a);
+const _colFlareGold = new THREE.Color(0xffd32a);
+const _colFlareBlue = new THREE.Color(0x74b9ff);
+const _colFlarePale = new THREE.Color(0xffeaa7);
+const _colSmokeRed = new THREE.Color(0xff5252);
+const _colSmokeDark = new THREE.Color(0x2f3640);
+
+const _tmpGrid = { gx: 0, gy: 0, gz: 0 };
+const _ccipSimVel = new THREE.Vector3();
+const _vehScratchA = new THREE.Vector3();
+const _vehScratchB = new THREE.Vector3();
 
 export const VehicleControlMethods = {
   /**
@@ -280,8 +366,8 @@ export const VehicleControlMethods = {
 
     // Also ensure the camera does not sit inside a solid voxel cell
     if (this.world.voxels && typeof this.world.worldToGrid === 'function') {
-      const g = this.world.worldToGrid(outPos.x, outPos.y, outPos.z);
-      const vox = this.world.voxels.get(this.world.key(g.gx, g.gy, g.gz));
+      const g = this.world.worldToGrid(outPos.x, outPos.y, outPos.z, _tmpGrid);
+      const vox = this.world.getVoxel ? this.world.getVoxel(g.gx, g.gy, g.gz) : this.world.voxels.get(this.world.key(g.gx, g.gy, g.gz));
       if (vox && !vox.isProp) {
         const voxelCenterX = (g.gx + 0.5) * 1.25;
         const voxelCenterZ = (g.gz + 0.5) * 1.25;
@@ -564,17 +650,11 @@ export const VehicleControlMethods = {
 
     if (!this.parachuteMesh && this.scene) {
       const chuteGroup = new THREE.Group();
-      const canopyMat = new THREE.MeshStandardMaterial({
-        color: 0x556b2f,
-        roughness: 0.8,
-        side: THREE.DoubleSide
-      });
-      const canopy = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.45, 2.4), canopyMat);
+      const canopy = new THREE.Mesh(_chuteCanopyGeo, _chuteCanopyMat);
       canopy.position.set(0, 3.6, 0);
       chuteGroup.add(canopy);
-      const cordMat = new THREE.MeshBasicMaterial({ color: 0xbdc3c7 });
       for (const sx of [-1.4, 1.4]) {
-        const cord = new THREE.Mesh(new THREE.BoxGeometry(0.05, 3.2, 0.05), cordMat);
+        const cord = new THREE.Mesh(_chuteCordGeo, _chuteCordMat);
         cord.position.set(sx * 0.6, 2.0, 0);
         cord.rotation.z = sx * 0.22;
         chuteGroup.add(cord);
@@ -1243,8 +1323,14 @@ export const VehicleControlMethods = {
     this.camera.updateMatrixWorld();
 
     const targetFov = this.isAds ? PLAYER.VEHICLE_FOV_ADS : PLAYER.VEHICLE_FOV_NORMAL;
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, dt * 12);
-    this.camera.updateProjectionMatrix();
+    const nextFov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, dt * 12));
+    if (Math.abs(this.camera.fov - nextFov) > 0.02) {
+      this.camera.fov = nextFov;
+      this.camera.updateProjectionMatrix();
+    } else if (this.camera.fov !== targetFov) {
+      this.camera.fov = targetFov;
+      this.camera.updateProjectionMatrix();
+    }
 
     // Exact 3D Sight Ray passing directly through the center '+' crosshair (50vw, 50vh)
     const camOrigin = this.camera.getWorldPosition(new THREE.Vector3());
@@ -1290,15 +1376,7 @@ export const VehicleControlMethods = {
       this.aircraftCcipPoint = mortarTargetPos;
 
       if (!this.ccipMarkerMesh && this.scene) {
-        const ringGeo = new THREE.RingGeometry(4.5, 6.2, 28);
-        ringGeo.rotateX(-Math.PI / 2);
-        const ringMat = new THREE.MeshBasicMaterial({
-          color: 0xff9f1a,
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.78
-        });
-        this.ccipMarkerMesh = new THREE.Mesh(ringGeo, ringMat);
+        this.ccipMarkerMesh = new THREE.Mesh(_ccipRingGeo, _ccipRingMat);
         this.scene.add(this.ccipMarkerMesh);
       }
       if (this.ccipMarkerMesh) {
@@ -1375,10 +1453,8 @@ export const VehicleControlMethods = {
         const vy = (dy + 0.5 * g * flightTime * flightTime) / flightTime;
 
         const mMesh = new THREE.Mesh(
-          isTreb
-            ? new THREE.DodecahedronGeometry(0.68, 1)
-            : new THREE.BoxGeometry(0.26, 0.26, 0.82),
-          new THREE.MeshBasicMaterial({ color: isTreb ? 0xff6b00 : 0xff9f1a })
+          isTreb ? _trebBoulderGeo : _mortarShellGeo,
+          isTreb ? _trebBoulderMat : _mortarShellMat
         );
         mMesh.position.set(v.pos.x, v.pos.y + (isTreb ? 4.5 : 1.8), v.pos.z);
         this.scene.add(mMesh);
@@ -1528,12 +1604,10 @@ export const VehicleControlMethods = {
         // Every 2nd shot also spawns a high-velocity proximity-fuzed AA airburst shell (`isAaProximity: true`)
         this._aaBurstToggle = ((this._aaBurstToggle || 0) + 1) % 2;
         if (this._aaBurstToggle === 0) {
-          const shellMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(0.18, 0.18, 0.65),
-            new THREE.MeshBasicMaterial({ color: 0xff5252 })
-          );
+          const shellMesh = new THREE.Mesh(_aaShellGeo, _aaShellMat);
           shellMesh.position.copy(muzzleOrigin);
-          shellMesh.lookAt(muzzleOrigin.clone().addScaledVector(aaDir, 10));
+          _vehScratchA.copy(muzzleOrigin).addScaledVector(aaDir, 10);
+          shellMesh.lookAt(_vehScratchA);
           this.scene.add(shellMesh);
 
           this.world.projectiles.push({
@@ -1558,13 +1632,12 @@ export const VehicleControlMethods = {
         } else {
           sound.playExplosion(0);
         }
-        this.world.spawnDebris(muzzleOrigin, new THREE.Color(0xffaa00), 5);
+        this.world.spawnDebris(muzzleOrigin, _colTankFlash, 5);
 
         const aimTarget = this.computeVehicleAimTarget(camOrigin, camDir, v, 140);
         const targetDist = muzzleOrigin.distanceTo(aimTarget.point);
         const shellSpeed = PROJECTILES.TANK_SHELL.speed;
         const shellGrav = PROJECTILES.TANK_SHELL.gravity;
-        // Compensate for gravity up to ~135m zero range so medium-range shots hit dead-on '+'
         const compDist = Math.min(targetDist, 135);
         const flightTime = compDist / shellSpeed;
         const gravDropComp = 0.5 * shellGrav * flightTime * flightTime;
@@ -1573,12 +1646,10 @@ export const VehicleControlMethods = {
           .add(new THREE.Vector3(0, gravDropComp, 0));
         const launchDir = compensatedAimPoint.sub(muzzleOrigin).normalize();
 
-        const shellMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.24, 0.24, 0.78),
-          new THREE.MeshBasicMaterial({ color: 0xffaa00 })
-        );
+        const shellMesh = new THREE.Mesh(_tankShellGeo, _tankShellMat);
         shellMesh.position.copy(muzzleOrigin);
-        shellMesh.lookAt(muzzleOrigin.clone().addScaledVector(launchDir, 10));
+        _vehScratchA.copy(muzzleOrigin).addScaledVector(launchDir, 10);
+        shellMesh.lookAt(_vehScratchA);
         this.scene.add(shellMesh);
 
         this.world.projectiles.push({
@@ -1606,12 +1677,10 @@ export const VehicleControlMethods = {
           .add(new THREE.Vector3(0, gravDropComp, 0));
         const launchDir = compensatedAimPoint.sub(muzzleOrigin).normalize();
 
-        const shellMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.16, 0.16, 0.48),
-          new THREE.MeshBasicMaterial({ color: 0xffcc00 })
-        );
+        const shellMesh = new THREE.Mesh(_autocannonShellGeo, _autocannonShellMat);
         shellMesh.position.copy(muzzleOrigin);
-        shellMesh.lookAt(muzzleOrigin.clone().addScaledVector(launchDir, 10));
+        _vehScratchA.copy(muzzleOrigin).addScaledVector(launchDir, 10);
+        shellMesh.lookAt(_vehScratchA);
         this.scene.add(shellMesh);
 
         this.world.projectiles.push({
@@ -1673,12 +1742,10 @@ export const VehicleControlMethods = {
       }
 
       const samDir = samTarget ? samTarget.pos.clone().sub(muzzleOrigin).normalize() : camDir.clone();
-      const samMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(0.24, 0.24, 1.45),
-        new THREE.MeshBasicMaterial({ color: 0x00d2d3 })
-      );
+      const samMesh = new THREE.Mesh(_vehSamGeo, _vehSamMat);
       samMesh.position.copy(muzzleOrigin);
-      samMesh.lookAt(muzzleOrigin.clone().add(samDir));
+      _vehScratchA.copy(muzzleOrigin).add(samDir);
+      samMesh.lookAt(_vehScratchA);
       this.scene.add(samMesh);
 
       const samName = v.team === 'RU' ? '9M311 TUNGUSKA SAM' : 'FIM-92 STINGER SAM';
@@ -1723,10 +1790,7 @@ export const VehicleControlMethods = {
         const vz = dz / flightTime;
         const vy = (dy + 0.5 * g * flightTime * flightTime) / flightTime;
 
-        const mMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.26, 0.26, 0.82),
-          new THREE.MeshBasicMaterial({ color: 0xff5252 })
-        );
+        const mMesh = new THREE.Mesh(_mortarShellGeo, _mortarSalvoMat);
         mMesh.position.set(v.pos.x, v.pos.y + 1.8 + sIdx * 0.35, v.pos.z);
         this.scene.add(mMesh);
 
@@ -1872,75 +1936,92 @@ export const VehicleControlMethods = {
     if (!this._activeFlareDecoys) {
       this._activeFlareDecoys = [];
     }
+    if (!this._flareDecoyPool) {
+      this._flareDecoyPool = [];
+    }
     const isB2 = v.aircraftRole === 'b2_spirit' || v.isStealthAircraft;
     const isWright = v.aircraftRole === 'wright_flyer';
     const cosP = Math.cos(v.pitch || 0);
-    const flightDir = new THREE.Vector3(
+    const flightDir = _vehScratchA.set(
       -Math.sin(v.yaw || 0) * cosP,
       Math.sin(v.pitch || 0),
       -Math.cos(v.yaw || 0) * cosP
     ).normalize();
-    const rightVec = new THREE.Vector3(Math.cos(v.yaw || 0), 0, -Math.sin(v.yaw || 0)).normalize();
+    const rightVec = _vehScratchB.set(Math.cos(v.yaw || 0), 0, -Math.sin(v.yaw || 0)).normalize();
     const pairsCount = isInitialSalvo ? 2 : 1;
+    const coreMat = isB2 ? _flareCoreMatB2 : isWright ? _flareCoreMatWright : _flareCoreMatStd;
+    const haloHex = isB2 ? 0xa29bfe : isWright ? 0xf39c12 : 0xff7f11;
 
     for (let pIdx = 0; pIdx < pairsCount; pIdx++) {
       for (const side of [-1, 1]) {
-        const flareGroup = new THREE.Group();
-        const coreColor = isB2 ? 0x00ffff : isWright ? 0xffeaa7 : 0xffffff;
-        const haloColor = isB2 ? 0xa29bfe : isWright ? 0xf39c12 : 0xff7f11;
-
-        const coreMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.45, 0.45, 0.45),
-          new THREE.MeshBasicMaterial({ color: coreColor })
-        );
-        const haloMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.95, 0.95, 0.95),
-          new THREE.MeshBasicMaterial({
-            color: haloColor,
+        let decoy = this._flareDecoyPool.pop();
+        if (!decoy) {
+          const flareGroup = new THREE.Group();
+          const coreMesh = new THREE.Mesh(_flareCoreGeo, coreMat);
+          const haloMat = new THREE.MeshBasicMaterial({
+            color: haloHex,
             transparent: true,
             opacity: 0.72
-          })
-        );
-        flareGroup.add(coreMesh);
-        flareGroup.add(haloMesh);
+          });
+          const haloMesh = new THREE.Mesh(_flareHaloGeo, haloMat);
+          flareGroup.add(coreMesh, haloMesh);
+          decoy = {
+            mesh: flareGroup,
+            coreMesh,
+            haloMesh,
+            vel: new THREE.Vector3(),
+            isB2: false,
+            life: 0,
+            maxLife: 2.1,
+            smokeTimer: 0
+          };
+        } else {
+          decoy.coreMesh.material = coreMat;
+          decoy.haloMesh.material.color.setHex(haloHex);
+          decoy.haloMesh.material.opacity = 0.72;
+        }
 
-        // Spawn slightly ahead/outward of the wing roots so flares arc visibly across both 1st-person & 3rd-person views!
-        const spawnPos = v.pos
-          .clone()
-          .addScaledVector(flightDir, 2.2 - pIdx * 2.4)
-          .addScaledVector(rightVec, side * (2.6 + pIdx * 1.2))
-          .add(new THREE.Vector3(0, 0.4 + pIdx * 0.35, 0));
-        flareGroup.position.copy(spawnPos);
-        this.scene.add(flareGroup);
+        const fwdOff = 2.2 - pIdx * 2.4;
+        const rightOff = side * (2.6 + pIdx * 1.2);
+        const upOff = 0.4 + pIdx * 0.35;
+        decoy.mesh.position.set(
+          v.pos.x + flightDir.x * fwdOff + rightVec.x * rightOff,
+          v.pos.y + flightDir.y * fwdOff + upOff,
+          v.pos.z + flightDir.z * fwdOff + rightVec.z * rightOff
+        );
+        decoy.mesh.scale.setScalar(1);
+        decoy.mesh.visible = true;
+        if (decoy.mesh.parent !== this.scene) {
+          this.scene.add(decoy.mesh);
+        }
 
         const lateralSpeed = (15.5 + pIdx * 5.5 + Math.random() * 4.0) * side;
         const upSpeed = 4.5 + pIdx * 2.8 + Math.random() * 2.5;
         const fwdCarry = Math.max(22, (v.forwardSpeed || 58) * 0.86);
-        const vel = flightDir
-          .clone()
-          .multiplyScalar(fwdCarry)
-          .addScaledVector(rightVec, lateralSpeed)
-          .add(new THREE.Vector3(0, upSpeed, 0));
+        decoy.vel.set(
+          flightDir.x * fwdCarry + rightVec.x * lateralSpeed,
+          flightDir.y * fwdCarry + upSpeed,
+          flightDir.z * fwdCarry + rightVec.z * lateralSpeed
+        );
+        decoy.isB2 = Boolean(isB2);
+        decoy.life = 2.1;
+        decoy.maxLife = 2.1;
+        decoy.smokeTimer = 0;
 
-        this._activeFlareDecoys.push({
-          mesh: flareGroup,
-          haloMesh,
-          vel,
-          isB2,
-          life: 2.1,
-          maxLife: 2.1,
-          smokeTimer: 0
-        });
+        this._activeFlareDecoys.push(decoy);
       }
     }
 
     if (this.world?.spawnDebris) {
       for (const side of [-1, 1]) {
-        const puffPos = v.pos
-          .clone()
-          .addScaledVector(flightDir, 1.5)
-          .addScaledVector(rightVec, side * 3.2);
-        this.world.spawnDebris(puffPos, new THREE.Color(isB2 ? 0x00d2d3 : 0xffd32a), 5);
+        const puffX = v.pos.x + flightDir.x * 1.5 + rightVec.x * side * 3.2;
+        const puffY = v.pos.y + flightDir.y * 1.5;
+        const puffZ = v.pos.z + flightDir.z * 1.5 + rightVec.z * side * 3.2;
+        this.world.spawnDebris(
+          { x: puffX, y: puffY, z: puffZ },
+          isB2 ? _colCyan : _colFlareGold,
+          5
+        );
       }
     }
   },
@@ -1949,7 +2030,6 @@ export const VehicleControlMethods = {
    * Updates all airborne 3D IR Flare & Chaff Decoy projectiles and trails smoke behind them.
    */
   updateAircraftCountermeasureVisuals(dt, v) {
-    // 1. Emit continuous Angel-Wing flare salvos while countermeasures are active (v.flareActiveTimer > 0)
     if (v && v.isAircraft && (v.flareActiveTimer || 0) > 0 && !v.dead) {
       v._cmSalvoBurstTimer = (v._cmSalvoBurstTimer || 0) - dt;
       if (v._cmSalvoBurstTimer <= 0) {
@@ -1958,18 +2038,26 @@ export const VehicleControlMethods = {
       }
     }
 
-    // 2. Step and fade active 3D flare decoy orbs
     if (!Array.isArray(this._activeFlareDecoys) || this._activeFlareDecoys.length === 0) return;
+    const dragMult = Math.pow(0.45, dt);
     for (let i = this._activeFlareDecoys.length - 1; i >= 0; i--) {
       const f = this._activeFlareDecoys[i];
       f.life -= dt;
       if (f.life <= 0 || !f.mesh) {
-        if (f.mesh && this.scene) this.scene.remove(f.mesh);
+        if (f.mesh) {
+          if (this.scene) this.scene.remove(f.mesh);
+          f.mesh.visible = false;
+          if (!this._flareDecoyPool) this._flareDecoyPool = [];
+          if (this._flareDecoyPool.length < 32) {
+            this._flareDecoyPool.push(f);
+          } else if (f.haloMesh?.material && !f.haloMesh.material.userData?.shared) {
+            f.haloMesh.material.dispose();
+          }
+        }
         this._activeFlareDecoys.splice(i, 1);
         continue;
       }
-      // Aerodynamic drag slows flare forward carry so it trails gracefully behind and outward from the wings
-      f.vel.multiplyScalar(Math.pow(0.45, dt));
+      f.vel.multiplyScalar(dragMult);
       f.vel.y -= 9.8 * dt;
       f.mesh.position.addScaledVector(f.vel, dt);
       f.mesh.rotation.x += dt * 7.5;
@@ -1984,8 +2072,8 @@ export const VehicleControlMethods = {
       if (f.smokeTimer <= 0 && this.world?.spawnDebris) {
         f.smokeTimer = 0.065;
         this.world.spawnDebris(
-          f.mesh.position.clone(),
-          new THREE.Color(f.isB2 ? 0x74b9ff : lifeRatio > 0.5 ? 0xffeaa7 : 0xdfe6e9),
+          f.mesh.position,
+          f.isB2 ? _colFlareBlue : lifeRatio > 0.5 ? _colFlarePale : _colSmokeWhite,
           1
         );
       }
@@ -2015,15 +2103,22 @@ export const VehicleControlMethods = {
   /**
    * Returns the highest obstacle Y (terrain + any standing building/tower/castle voxels) at (wx, wz).
    */
-  getAircraftObstacleHeightAt(wx, wz) {
+  getAircraftObstacleHeightAt(wx, wz, aircraftY = 0) {
     const terrY = this.world ? this.world.getGroundHeightAt(wx, wz) : 0;
     if (!this.world || !this.world.voxels) return terrY;
+    if (aircraftY > 55.0 && Math.abs(wx) < 2000 && Math.abs(wz) < 1300) {
+      return terrY;
+    }
     let maxY = terrY;
-    const g = this.world.worldToGrid(wx, terrY + 0.5, wz);
+    const g = this.world.worldToGrid(wx, terrY + 0.5, wz, _tmpGrid);
+    const gx = g.gx;
+    const baseGy = g.gy;
+    const gz = g.gz;
     for (let dy = 0; dy <= 18; dy++) {
-      const vox = this.world.voxels.get(this.world.key(g.gx, g.gy + dy, g.gz));
+      const vox = this.world.getVoxel(gx, baseGy + dy, gz);
       if (vox && !vox.isProp) {
-        maxY = Math.max(maxY, vox.maxY ?? terrY + (dy + 1) * 1.25);
+        const top = vox.maxY ?? terrY + (dy + 1) * 1.25;
+        if (top > maxY) maxY = top;
       }
     }
     return maxY;
@@ -2035,22 +2130,45 @@ export const VehicleControlMethods = {
    */
   checkAircraftStructureCollision(v, pos, flightDir) {
     if (!this.world || !this.world.voxels) return null;
+    if (pos.y > 55.0 && Math.abs(pos.x) < 2000 && Math.abs(pos.z) < 1300) {
+      return null;
+    }
     const rightX = Math.cos(v.yaw || 0);
     const rightZ = -Math.sin(v.yaw || 0);
     const wingSpan = v.aircraftRole === 'b2_spirit' ? 6.5 : 4.2;
-    const checkPoints = [
-      [pos.x + flightDir.x * 4.5, pos.y + flightDir.y * 4.5, pos.z + flightDir.z * 4.5], // Nose cone
-      [pos.x, pos.y, pos.z], // Center fuselage
-      [pos.x - flightDir.x * 3.2, pos.y - flightDir.y * 3.2, pos.z - flightDir.z * 3.2], // Tail
-      [pos.x + rightX * wingSpan, pos.y + Math.sin(v.roll || 0) * wingSpan, pos.z + rightZ * wingSpan], // Right wingtip
-      [pos.x - rightX * wingSpan, pos.y - Math.sin(v.roll || 0) * wingSpan, pos.z - rightZ * wingSpan] // Left wingtip
-    ];
-    for (let i = 0; i < checkPoints.length; i++) {
-      const [px, py, pz] = checkPoints[i];
-      const g = this.world.worldToGrid(px, py, pz);
-      const hitVox = this.world.voxels.get(this.world.key(g.gx, g.gy, g.gz));
+    const wingSin = Math.sin(v.roll || 0) * wingSpan;
+
+    for (let i = 0; i < 5; i++) {
+      let px, py, pz;
+      if (i === 0) {
+        px = pos.x + flightDir.x * 4.5;
+        py = pos.y + flightDir.y * 4.5;
+        pz = pos.z + flightDir.z * 4.5;
+      } else if (i === 1) {
+        px = pos.x;
+        py = pos.y;
+        pz = pos.z;
+      } else if (i === 2) {
+        px = pos.x - flightDir.x * 3.2;
+        py = pos.y - flightDir.y * 3.2;
+        pz = pos.z - flightDir.z * 3.2;
+      } else if (i === 3) {
+        px = pos.x + rightX * wingSpan;
+        py = pos.y + wingSin;
+        pz = pos.z + rightZ * wingSpan;
+      } else {
+        px = pos.x - rightX * wingSpan;
+        py = pos.y - wingSin;
+        pz = pos.z - rightZ * wingSpan;
+      }
+      const g = this.world.worldToGrid(px, py, pz, _tmpGrid);
+      const hitVox = this.world.getVoxel(g.gx, g.gy, g.gz);
       if (hitVox && !hitVox.isProp) {
-        return { point: new THREE.Vector3(px, py, pz), voxel: hitVox, grid: g };
+        return {
+          point: new THREE.Vector3(px, py, pz),
+          voxel: hitVox,
+          grid: { gx: g.gx, gy: g.gy, gz: g.gz }
+        };
       }
     }
     return null;
@@ -2300,8 +2418,8 @@ export const VehicleControlMethods = {
         if (collisionAvoidAuto && !insideSecretCave && !onRunway) {
           const lookX = v.pos.x - Math.sin(v.yaw) * 36;
           const lookZ = v.pos.z - Math.cos(v.yaw) * 36;
-          const curObsH = this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z);
-          const fwdObsH = this.getAircraftObstacleHeightAt(lookX, lookZ);
+          const curObsH = this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z, v.pos.y);
+          const fwdObsH = this.getAircraftObstacleHeightAt(lookX, lookZ, v.pos.y);
           lookaheadObstacleH = Math.max(groundH, curObsH, fwdObsH);
         }
         const effectiveClearance = v.pos.y - lookaheadObstacleH;
@@ -2455,7 +2573,7 @@ export const VehicleControlMethods = {
           return;
         }
         if (!insideSecretCaveNow && v.hasLeftRunwayOnce && !v.isStalling) {
-          const obsTopY = this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z);
+          const obsTopY = this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z, nextY);
           if (obsTopY > newGroundH + 1.0 && nextY < obsTopY + 3.2) {
             // Auto Collision Avoidance smoothly lifts the plane over the building/tower roof!
             v.pos.y = THREE.MathUtils.clamp(
@@ -2565,31 +2683,69 @@ export const VehicleControlMethods = {
     this.camera.quaternion.setFromEuler(camEuler);
 
     const targetFov = this.isAds ? (isGunship ? 36 : 48) : throttleInput > 0 ? 82 : 76;
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, dt * 10);
-    this.camera.updateProjectionMatrix();
+    const nextFov = THREE.MathUtils.lerp(this.camera.fov, targetFov, Math.min(1, dt * 10));
+    if (Math.abs(this.camera.fov - nextFov) > 0.02) {
+      this.camera.fov = nextFov;
+      this.camera.updateProjectionMatrix();
+    } else if (this.camera.fov !== targetFov) {
+      this.camera.fov = targetFov;
+      this.camera.updateProjectionMatrix();
+    }
 
     const camOrigin = this.camera.getWorldPosition(new THREE.Vector3());
     const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
 
     // 5. Compute CCIP (Continuously Computed Impact Point) Ground Bombing Reticle on Terrain
-    const bombInitVel = flightDir
-      .clone()
-      .multiplyScalar(Math.max(38, v.forwardSpeed))
-      .add(new THREE.Vector3(0, -6.0, 0));
+    const initSpd = Math.max(38, v.forwardSpeed);
+    const bombInitVel = new THREE.Vector3(
+      flightDir.x * initSpd,
+      flightDir.y * initSpd - 6.0,
+      flightDir.z * initSpd
+    );
     const bombGrav = PROJECTILES.JDAM_BOMB?.gravity || 26.0;
-    let ccipPos = v.pos.clone();
+    if (!this._ccipPoint) this._ccipPoint = new THREE.Vector3();
+    const ccipPos = this._ccipPoint;
     if (isGunship) {
       const gunshipHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 450);
-      ccipPos = gunshipHit.point.clone();
+      ccipPos.copy(gunshipHit.point);
     } else {
-      const simVel = bombInitVel.clone();
-      const simStep = 0.08;
-      for (let step = 0; step < 260; step++) {
-        simVel.y -= bombGrav * simStep;
-        ccipPos.addScaledVector(simVel, simStep);
+      ccipPos.copy(v.pos);
+      _ccipSimVel.copy(bombInitVel);
+      const simStep = 0.25;
+      for (let step = 0; step < 84; step++) {
+        const prevX = ccipPos.x;
+        const prevY = ccipPos.y;
+        const prevZ = ccipPos.z;
+        _ccipSimVel.y -= bombGrav * simStep;
+        ccipPos.x += _ccipSimVel.x * simStep;
+        ccipPos.y += _ccipSimVel.y * simStep;
+        ccipPos.z += _ccipSimVel.z * simStep;
         const gh = this.world ? this.world.getGroundHeightAt(ccipPos.x, ccipPos.z) : 0;
         if (ccipPos.y <= gh + 0.5) {
-          ccipPos.y = gh + 0.35;
+          // 2-step bisection refinement on ground crossing
+          let loX = prevX;
+          let loY = prevY;
+          let loZ = prevZ;
+          let hiX = ccipPos.x;
+          let hiY = ccipPos.y;
+          let hiZ = ccipPos.z;
+          for (let b = 0; b < 2; b++) {
+            const midX = (loX + hiX) * 0.5;
+            const midY = (loY + hiY) * 0.5;
+            const midZ = (loZ + hiZ) * 0.5;
+            const midGh = this.world ? this.world.getGroundHeightAt(midX, midZ) : 0;
+            if (midY <= midGh + 0.5) {
+              hiX = midX;
+              hiY = midY;
+              hiZ = midZ;
+            } else {
+              loX = midX;
+              loY = midY;
+              loZ = midZ;
+            }
+          }
+          const finalGh = this.world ? this.world.getGroundHeightAt(hiX, hiZ) : 0;
+          ccipPos.set(hiX, finalGh + 0.35, hiZ);
           break;
         }
       }
@@ -2597,15 +2753,7 @@ export const VehicleControlMethods = {
     this.aircraftCcipPoint = ccipPos;
 
     if (!this.ccipMarkerMesh && this.scene) {
-      const ringGeo = new THREE.RingGeometry(4.5, 6.2, 28);
-      ringGeo.rotateX(-Math.PI / 2);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: 0xff9f1a,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.78
-      });
-      this.ccipMarkerMesh = new THREE.Mesh(ringGeo, ringMat);
+      this.ccipMarkerMesh = new THREE.Mesh(_ccipRingGeo, _ccipRingMat);
       this.scene.add(this.ccipMarkerMesh);
     }
     if (this.ccipMarkerMesh) {
@@ -2745,16 +2893,10 @@ export const VehicleControlMethods = {
             .addScaledVector(rightVec, lat * 0.42)
             .addScaledVector(flightDir, longOffset);
 
-          const cBombMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(0.44, 0.44, 1.75),
-            new THREE.MeshStandardMaterial({
-              color: 0x2f3640,
-              roughness: 0.45,
-              metalness: 0.4
-            })
-          );
+          const cBombMesh = new THREE.Mesh(_b2CarpetBombGeo, _b2CarpetBombMat);
           cBombMesh.position.copy(dropPos);
-          cBombMesh.lookAt(ccipPos.clone().addScaledVector(rightVec, lat));
+          _vehScratchA.copy(ccipPos).addScaledVector(rightVec, lat);
+          cBombMesh.lookAt(_vehScratchA);
           this.scene.add(cBombMesh);
 
           const waveVel = bombInitVel
@@ -2898,10 +3040,7 @@ export const VehicleControlMethods = {
 
           const aimHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 300);
           const boforsDir = aimHit.point.clone().sub(noseMuzzle).normalize();
-          const boforsMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(0.28, 0.28, 0.95),
-            new THREE.MeshBasicMaterial({ color: 0xffcc00 })
-          );
+          const boforsMesh = new THREE.Mesh(_bofors40mmGeo, _bofors40mmMat);
           boforsMesh.position.copy(noseMuzzle);
           boforsMesh.lookAt(aimHit.point);
           this.scene.add(boforsMesh);
@@ -2925,14 +3064,11 @@ export const VehicleControlMethods = {
           this.recoilOffsetPitch += 0.025;
           this.addShake(0.45);
           sound.playTankCannon?.(0, 0);
-          this.world.spawnDebris(noseMuzzle, new THREE.Color(0xff9f1a), 6);
+          this.world.spawnDebris(noseMuzzle, _colHowitzerFlash, 6);
 
           const aimHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 320);
           const howitzerDir = aimHit.point.clone().sub(noseMuzzle).normalize();
-          const howitzerMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(0.42, 0.42, 1.45),
-            new THREE.MeshBasicMaterial({ color: 0xff5252 })
-          );
+          const howitzerMesh = new THREE.Mesh(_howitzer105mmGeo, _howitzer105mmMat);
           howitzerMesh.position.copy(noseMuzzle);
           howitzerMesh.lookAt(aimHit.point);
           this.scene.add(howitzerMesh);
@@ -2960,11 +3096,8 @@ export const VehicleControlMethods = {
         this.addShake(0.18);
         sound.playRocketLaunch?.(0);
 
-        const bombMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.42, 0.42, 1.65),
-          new THREE.MeshStandardMaterial({ color: 0x3b4d3b, roughness: 0.6 })
-        );
-        bombMesh.position.copy(v.pos).add(new THREE.Vector3(0, -1.2, 0));
+        const bombMesh = new THREE.Mesh(_jdam500Geo, _jdam500Mat);
+        bombMesh.position.set(v.pos.x, v.pos.y - 1.2, v.pos.z);
         bombMesh.lookAt(ccipPos);
         this.scene.add(bombMesh);
 
@@ -3046,14 +3179,12 @@ export const VehicleControlMethods = {
         sound.playRocketLaunch?.(0);
         const rightVec = new THREE.Vector3(Math.cos(v.yaw), 0, -Math.sin(v.yaw)).normalize();
         for (const side of [-1, 0, 1]) {
-          const dynMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(0.46, 0.36, 0.56),
-            new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.6 })
+          const dynMesh = new THREE.Mesh(_wrightDynGeo, _wrightDynMat);
+          dynMesh.position.set(
+            v.pos.x + rightVec.x * side * 1.35,
+            v.pos.y - 0.65,
+            v.pos.z + rightVec.z * side * 1.35
           );
-          dynMesh.position
-            .copy(v.pos)
-            .add(new THREE.Vector3(0, -0.65, 0))
-            .addScaledVector(rightVec, side * 1.35);
           this.scene.add(dynMesh);
           this.world.projectiles.push({
             type: 'jdam_bomb',
@@ -3074,7 +3205,7 @@ export const VehicleControlMethods = {
           this.onAwardXp(0, '🧨 1903 KITTY HAWK 3× DYNAMITE CRATES TOSSED OVERBOARD!');
         }
       } else if (isB2Spirit && activeSlot === 0 && wantSpaceOrdnance) {
-        // B-2 Spirit [SPACE] while in Slot [1] Carpet Mode: Drop an instant 5-bomb Carpet Wave + 1 GBU-57 MOP!
+        // B-2 Spirit [SPACE] while in Slot [1] Carpet Mode: Drop an instant 5-bomb Carpet Wave!
         v.coaxCooldown = 0.24;
         const rightVec = new THREE.Vector3(Math.cos(v.yaw), 0, -Math.sin(v.yaw)).normalize();
         const latOffsets = [-10.0, -5.0, 0, 5.0, 10.0];
@@ -3087,12 +3218,10 @@ export const VehicleControlMethods = {
             .add(new THREE.Vector3(0, -1.35, 0))
             .addScaledVector(rightVec, lat * 0.42)
             .addScaledVector(flightDir, (bIdx - 2) * 2.8);
-          const cBombMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(0.44, 0.44, 1.75),
-            new THREE.MeshStandardMaterial({ color: 0x2f3640, roughness: 0.45, metalness: 0.4 })
-          );
+          const cBombMesh = new THREE.Mesh(_b2CarpetBombGeo, _b2CarpetBombMat);
           cBombMesh.position.copy(dropPos);
-          cBombMesh.lookAt(ccipPos.clone().addScaledVector(rightVec, lat));
+          _vehScratchA.copy(ccipPos).addScaledVector(rightVec, lat);
+          cBombMesh.lookAt(_vehScratchA);
           this.scene.add(cBombMesh);
           this.world.projectiles.push({
             type: 'jdam_bomb',
@@ -3120,14 +3249,12 @@ export const VehicleControlMethods = {
         sound.playTankCannon?.(0, 0);
         const rightVec = new THREE.Vector3(Math.cos(v.yaw), 0, -Math.sin(v.yaw)).normalize();
         for (const side of [-1, 1]) {
-          const mopMesh = new THREE.Mesh(
-            new THREE.BoxGeometry(0.68, 0.68, 2.95),
-            new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.4, metalness: 0.55 })
+          const mopMesh = new THREE.Mesh(_gbu57MopGeo, _gbu57MopMat);
+          mopMesh.position.set(
+            v.pos.x + rightVec.x * side * 1.2,
+            v.pos.y - 1.45,
+            v.pos.z + rightVec.z * side * 1.2
           );
-          mopMesh.position
-            .copy(v.pos)
-            .add(new THREE.Vector3(0, -1.45, 0))
-            .addScaledVector(rightVec, side * 1.2);
           mopMesh.lookAt(ccipPos);
           this.scene.add(mopMesh);
 
@@ -3155,10 +3282,7 @@ export const VehicleControlMethods = {
 
         const aimHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 260);
         const rktDir = aimHit.point.clone().sub(noseMuzzle).normalize();
-        const rktMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.28, 0.28, 1.35),
-          new THREE.MeshBasicMaterial({ color: 0xff9f1a })
-        );
+        const rktMesh = new THREE.Mesh(_airRocketGeo, _airRocketMat);
         rktMesh.position.copy(noseMuzzle);
         rktMesh.lookAt(aimHit.point);
         this.scene.add(rktMesh);
@@ -3180,14 +3304,11 @@ export const VehicleControlMethods = {
         this.recoilOffsetPitch += 0.025;
         this.addShake(0.45);
         sound.playTankCannon?.(0, 0);
-        this.world.spawnDebris(noseMuzzle, new THREE.Color(0xff9f1a), 6);
+        this.world.spawnDebris(noseMuzzle, _colHowitzerFlash, 6);
 
         const aimHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 320);
         const howitzerDir = aimHit.point.clone().sub(noseMuzzle).normalize();
-        const howitzerMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.42, 0.42, 1.45),
-          new THREE.MeshBasicMaterial({ color: 0xff5252 })
-        );
+        const howitzerMesh = new THREE.Mesh(_howitzer105mmGeo, _howitzer105mmMat);
         howitzerMesh.position.copy(noseMuzzle);
         howitzerMesh.lookAt(aimHit.point);
         this.scene.add(howitzerMesh);
@@ -3216,11 +3337,8 @@ export const VehicleControlMethods = {
         this.addShake(0.32);
         sound.playRocketLaunch?.(0);
 
-        const gbuMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.58, 0.58, 2.4),
-          new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.5 })
-        );
-        gbuMesh.position.copy(v.pos).add(new THREE.Vector3(0, -1.4, 0));
+        const gbuMesh = new THREE.Mesh(_gbu28Geo, _gbu28Mat);
+        gbuMesh.position.set(v.pos.x, v.pos.y - 1.4, v.pos.z);
         gbuMesh.lookAt(ccipPos);
         this.scene.add(gbuMesh);
 
@@ -3244,15 +3362,14 @@ export const VehicleControlMethods = {
         this.addShake(0.22);
         sound.playRocketLaunch?.(0);
 
-        // Lock onto aircraftLockTarget or nearest enemy aircraft in sky!
         let missileTarget = this.aircraftLockTarget;
         if (!missileTarget && this.vehicleManager) {
-          let bestDist = 1200;
+          let bestDistSq = 1200 * 1200;
           for (const other of this.vehicleManager.vehicles) {
             if (!other.isAircraft || other.dead || other.team === this.team) continue;
-            const d = v.pos.distanceTo(other.pos);
-            if (d < bestDist) {
-              bestDist = d;
+            const dSq = v.pos.distanceToSquared(other.pos);
+            if (dSq < bestDistSq) {
+              bestDistSq = dSq;
               missileTarget = other;
             }
           }
@@ -3261,12 +3378,10 @@ export const VehicleControlMethods = {
         const mslDir = missileTarget
           ? missileTarget.pos.clone().sub(noseMuzzle).normalize()
           : camDir.clone();
-        const mslMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(0.26, 0.26, 1.75),
-          new THREE.MeshBasicMaterial({ color: 0x00d2d3 })
-        );
+        const mslMesh = new THREE.Mesh(_a2aMissileGeo, _a2aMissileMat);
         mslMesh.position.copy(noseMuzzle);
-        mslMesh.lookAt(noseMuzzle.clone().add(mslDir));
+        _vehScratchA.copy(noseMuzzle).add(mslDir);
+        mslMesh.lookAt(_vehScratchA);
         this.scene.add(mslMesh);
 
         this.world.projectiles.push({

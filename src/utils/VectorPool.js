@@ -1,6 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
 
-const POOL_SIZE = 64;
+const POOL_SIZE = 512;
+const POOL_MASK = POOL_SIZE - 1;
 const pool = Array.from({ length: POOL_SIZE }, () => new THREE.Vector3());
 let poolIdx = 0;
 
@@ -10,7 +11,7 @@ let poolIdx = 0;
  */
 export function tmpVec3(x = 0, y = 0, z = 0) {
   const v = pool[poolIdx];
-  poolIdx = (poolIdx + 1) & (POOL_SIZE - 1);
+  poolIdx = (poolIdx + 1) & POOL_MASK;
   return v.set(x, y, z);
 }
 
@@ -20,6 +21,6 @@ export function tmpVec3(x = 0, y = 0, z = 0) {
  */
 export function tmpVec3Copy(other) {
   const v = pool[poolIdx];
-  poolIdx = (poolIdx + 1) & (POOL_SIZE - 1);
+  poolIdx = (poolIdx + 1) & POOL_MASK;
   return v.copy(other);
 }

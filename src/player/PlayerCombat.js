@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=90';
+import { sound } from '../audio.js?v=91';
 import {
   PLAYER,
   COMBAT,
@@ -8,9 +8,73 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=90';
-import { events } from '../events.js?v=90';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=90';
+} from '../config.js?v=91';
+import { events } from '../events.js?v=91';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=91';
+
+function markShared(asset) {
+  if (asset) {
+    if (!asset.userData) asset.userData = {};
+    asset.userData.shared = true;
+  }
+  return asset;
+}
+
+// ─── Shared Cached Projectile / Arrow / Ordnance Geometries & Materials (userData.shared = true) ───
+const _droppedMagGeo = markShared(new THREE.BoxGeometry(0.044, 0.16, 0.072));
+const _droppedMagMat = markShared(new THREE.MeshStandardMaterial({ color: 0x22282e, roughness: 0.75 }));
+const _brassCasingGeo = markShared(new THREE.BoxGeometry(0.018, 0.018, 0.045));
+const _brassCasingMat = markShared(new THREE.MeshBasicMaterial({ color: 0xf1c40f }));
+const _rpgRocketGeo = markShared(new THREE.BoxGeometry(0.18, 0.18, 0.68));
+const _rpgRocketMat = markShared(new THREE.MeshBasicMaterial({ color: 0xe67e22 }));
+const _stingerSamGeo = markShared(new THREE.BoxGeometry(0.2, 0.2, 1.15));
+const _stingerSamMat = markShared(new THREE.MeshBasicMaterial({ color: 0x00d2d3 }));
+const _fragGrenadeGeo = markShared(new THREE.OctahedronGeometry(0.14, 0));
+const _fragGrenadeMat = markShared(new THREE.MeshStandardMaterial({ color: 0x3b5323, roughness: 0.7 }));
+const _c4Geo = markShared(new THREE.BoxGeometry(0.26, 0.15, 0.34));
+const _c4Mat = markShared(new THREE.MeshStandardMaterial({ color: 0x5c6650 }));
+
+const _arrowShaftGeo = markShared(new THREE.BoxGeometry(0.044, 0.044, 1.45));
+const _xbowShaftGeo = markShared(new THREE.BoxGeometry(0.044, 0.044, 1.15));
+const _arrowTipGeo = markShared(new THREE.ConeGeometry(0.08, 0.3, 4));
+const _arrowFletchHGeo = markShared(new THREE.BoxGeometry(0.22, 0.02, 0.26));
+const _arrowFletchVGeo = markShared(new THREE.BoxGeometry(0.02, 0.22, 0.26));
+const _fireArrowConeGeo = markShared(new THREE.ConeGeometry(0.14, 0.46, 6));
+const _arrowShaftMat = markShared(new THREE.MeshBasicMaterial({ color: 0xc89652 }));
+const _xbowShaftMat = markShared(new THREE.MeshBasicMaterial({ color: 0x8b5a2b }));
+const _arrowTipMat = markShared(new THREE.MeshBasicMaterial({ color: 0xd0d7de }));
+const _fireTipMat = markShared(new THREE.MeshBasicMaterial({ color: 0xff7f00 }));
+const _fletchMatRU = markShared(new THREE.MeshBasicMaterial({ color: 0xe74c3c }));
+const _fletchMatUS = markShared(new THREE.MeshBasicMaterial({ color: 0xf5f6fa }));
+const _fireConeMat = markShared(
+  new THREE.MeshBasicMaterial({ color: 0xff5500, transparent: true, opacity: 0.9 })
+);
+
+const _hitArmorColor = new THREE.Color(0x48dbfb);
+const _hitHeadColor = new THREE.Color(0xff2222);
+const _hitBodyColor = new THREE.Color(0xd63031);
+const _hitVehColor = new THREE.Color(0xf1c40f);
+const _hitGroundColor = new THREE.Color(0x6b7c59);
+
+const _fireCamQuat = new THREE.Quaternion();
+const _fireOrigin = new THREE.Vector3();
+const _fireFwdDir = new THREE.Vector3();
+const _fireMuzzlePos = new THREE.Vector3();
+const _firePelletDir = new THREE.Vector3();
+
+const _stepPrevPos = new THREE.Vector3();
+const _stepVec = new THREE.Vector3();
+const _stepDir = new THREE.Vector3();
+const _stepImpactPt = new THREE.Vector3();
+const _stepHeadPos = new THREE.Vector3();
+const _stepTailPos = new THREE.Vector3();
+const _stepLookAt = new THREE.Vector3();
+
+const _muzzleQuat = new THREE.Quaternion();
+const _muzzleRight = new THREE.Vector3();
+const _muzzleUp = new THREE.Vector3();
+const _casingPos = new THREE.Vector3();
+const _casingVel = new THREE.Vector3();
 
 export const CombatMethods = {
   getActiveOpticType() {
@@ -28,12 +92,25 @@ export const CombatMethods = {
   findNearestInjuredFriendly(maxDist = DISTANCES.INTERACT_RANGE) {
     if (!this.botManager || !this.botManager.bots) return null;
     let best = null;
-    let bestDist = maxDist;
-    for (const b of this.botManager.bots) {
+    let bestDistSq = maxDist * maxDist;
+    const teamGrid = this.botManager.teamGrid && this.botManager.teamGrid[this.team];
+    if (teamGrid && teamGrid.count > 0) {
+      teamGrid.forEachInRadius(this.pos.x, this.pos.z, maxDist, (b) => {
+        if (b.dead || b.downed || b.team !== this.team || b.hp >= PLAYER.MAX_HP) return;
+        const dSq = b.pos.distanceToSquared(this.pos);
+        if (dSq <= bestDistSq) {
+          bestDistSq = dSq;
+          best = b;
+        }
+      });
+      return best;
+    }
+    for (let i = 0; i < this.botManager.bots.length; i++) {
+      const b = this.botManager.bots[i];
       if (b.dead || b.downed || b.team !== this.team || b.hp >= PLAYER.MAX_HP) continue;
-      const d = b.pos.distanceTo(this.pos);
-      if (d <= bestDist) {
-        bestDist = d;
+      const dSq = b.pos.distanceToSquared(this.pos);
+      if (dSq <= bestDistSq) {
+        bestDistSq = dSq;
         best = b;
       }
     }
@@ -46,12 +123,25 @@ export const CombatMethods = {
   findNearestFriendlyMedic(maxDist = 6.5) {
     if (!this.botManager || !this.botManager.bots) return null;
     let best = null;
-    let bestDist = maxDist;
-    for (const b of this.botManager.bots) {
+    let bestDistSq = maxDist * maxDist;
+    const teamGrid = this.botManager.teamGrid && this.botManager.teamGrid[this.team];
+    if (teamGrid && teamGrid.count > 0) {
+      teamGrid.forEachInRadius(this.pos.x, this.pos.z, maxDist, (b) => {
+        if (b.dead || b.downed || b.drivingVehicle || b.team !== this.team || b.role !== 'MEDIC') return;
+        const dSq = b.pos.distanceToSquared(this.pos);
+        if (dSq <= bestDistSq) {
+          bestDistSq = dSq;
+          best = b;
+        }
+      });
+      return best;
+    }
+    for (let i = 0; i < this.botManager.bots.length; i++) {
+      const b = this.botManager.bots[i];
       if (b.dead || b.downed || b.drivingVehicle || b.team !== this.team || b.role !== 'MEDIC') continue;
-      const d = b.pos.distanceTo(this.pos);
-      if (d <= bestDist) {
-        bestDist = d;
+      const dSq = b.pos.distanceToSquared(this.pos);
+      if (dSq <= bestDistSq) {
+        bestDistSq = dSq;
         best = b;
       }
     }
@@ -983,20 +1073,38 @@ export const CombatMethods = {
   },
 
   ejectDroppedMagVisual() {
-    if (!this.world || !this.world.debrisParticles || this.world.debrisParticles.length > 120) return;
-    const camPos = this.camera.getWorldPosition(new THREE.Vector3());
-    const camQuat = this.camera.getWorldQuaternion(new THREE.Quaternion());
-    const offset = new THREE.Vector3(0.05, -0.24, -0.32).applyQuaternion(camQuat);
-    const vel = new THREE.Vector3(0.4, -1.6, -0.6).applyQuaternion(camQuat);
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.044, 0.16, 0.072),
-      new THREE.MeshStandardMaterial({ color: 0x22282e, roughness: 0.75 })
-    );
-    mesh.position.copy(camPos).add(offset);
+    if (!this.world) return;
+    this.camera.getWorldPosition(_casingPos);
+    this.camera.getWorldQuaternion(_muzzleQuat);
+    _muzzleRight.set(0.05, -0.24, -0.32).applyQuaternion(_muzzleQuat);
+    _casingPos.add(_muzzleRight);
+    _casingVel.set(0.4, -1.6, -0.6).applyQuaternion(_muzzleQuat);
+    if (typeof this.world.spawnCustomDebris === 'function') {
+      this.world.spawnCustomDebris(
+        _casingPos.x,
+        _casingPos.y,
+        _casingPos.z,
+        _casingVel.x,
+        _casingVel.y,
+        _casingVel.z,
+        6,
+        4,
+        8,
+        0.044,
+        0.16,
+        0.072,
+        0x22282e,
+        1.5
+      );
+      return;
+    }
+    if (!this.world.debrisParticles || this.world.debrisParticles.length > 120) return;
+    const mesh = new THREE.Mesh(_droppedMagGeo, _droppedMagMat);
+    mesh.position.copy(_casingPos);
     this.scene.add(mesh);
     this.world.debrisParticles.push({
       mesh,
-      vel,
+      vel: _casingVel.clone(),
       rotVel: new THREE.Vector3(6, 4, 8),
       life: 1.5
     });
@@ -1211,8 +1319,10 @@ export const CombatMethods = {
     // In ADS, zeroes to `this.zeroDistance` (100m/200m/300m/400m via [X]); in hipfire, uses a 50m point-blank battle zero.
     const activeZeroDist = this.isAds ? this.zeroDistance || PLAYER.ZERO_DISTANCE_DEFAULT || 100 : 50;
     const zeroElevation = (bulletGrav * activeZeroDist) / (2 * muzzleVel * muzzleVel);
-    const camQuat = this.camera.getWorldQuaternion(new THREE.Quaternion());
-    const origin = this.camera.getWorldPosition(new THREE.Vector3());
+    this.camera.getWorldQuaternion(_fireCamQuat);
+    this.camera.getWorldPosition(_fireOrigin);
+    _fireFwdDir.set(0, 0, -1).applyQuaternion(_fireCamQuat);
+    const muzzleWorldPos = this.getWeaponMuzzleWorldPosition(_fireOrigin, _fireFwdDir, _fireMuzzlePos);
     const pelletCount = Math.max(1, def.pellets || 1);
     const armorPenMult = def.armorPenMult || 1.0;
 
@@ -1236,19 +1346,19 @@ export const CombatMethods = {
         sy = (Math.random() - 0.5) * spread;
       }
 
-      const dir = new THREE.Vector3(sx, sy + zeroElevation, -1).normalize();
-      dir.applyQuaternion(camQuat);
+      _firePelletDir.set(sx, sy + zeroElevation, -1).normalize().applyQuaternion(_fireCamQuat);
 
       this.fireBallisticRay(
-        origin,
-        dir,
+        _fireOrigin,
+        _firePelletDir,
         def.damage,
         def.headshotMult,
         def.voxelDamage,
         def.shortName,
         armorPenMult,
         def,
-        pelletCount
+        pelletCount,
+        muzzleWorldPos
       );
     }
 
@@ -1418,8 +1528,12 @@ export const CombatMethods = {
         : 6;
     const isBrightTracer = !hideTracers && this.shotsFired % tracerInterval === 1;
     const tracerStart =
-      tracerOriginOverride || this.getWeaponMuzzleWorldPosition(origin, dir);
-    const muzzleOffset = tracerStart.clone().sub(origin);
+      tracerOriginOverride || this.getWeaponMuzzleWorldPosition(origin, dir, _fireMuzzlePos);
+    const muzzleOffset = new THREE.Vector3(
+      tracerStart.x - origin.x,
+      tracerStart.y - origin.y,
+      tracerStart.z - origin.z
+    );
 
     let tracerLine = null;
     if (!hideTracers && this.scene && this.activeBullets.length < 140) {
@@ -1432,15 +1546,17 @@ export const CombatMethods = {
         : isBrightTracer
         ? 0xffeaa7
         : 0xf6d365;
-      const points = [tracerStart.clone(), tracerStart.clone().addScaledVector(dir, 0.35)];
-      const geo = new THREE.BufferGeometry().setFromPoints(points);
-      const mat = new THREE.LineBasicMaterial({
-        color: tracerColor,
-        transparent: true,
-        opacity: isFireArrow || isVenomProj || isBrightTracer || isMountedMg ? 0.94 : 0.55
-      });
-      tracerLine = new THREE.Line(geo, mat);
-      this.scene.add(tracerLine);
+      const opacity = isFireArrow || isVenomProj || isBrightTracer || isMountedMg ? 0.94 : 0.55;
+      tracerLine = this._acquireTracerLine(
+        tracerStart.x,
+        tracerStart.y,
+        tracerStart.z,
+        tracerStart.x + dir.x * 0.35,
+        tracerStart.y + dir.y * 0.35,
+        tracerStart.z + dir.z * 0.35,
+        tracerColor,
+        opacity
+      );
     }
 
     let arrowMesh = null;
@@ -1449,37 +1565,33 @@ export const CombatMethods = {
       const isXbow = Boolean(
         (wepDef && wepDef.isCrossbow) || String(weaponLabel || '').includes('CROSSBOW')
       );
-      const shaftMat = new THREE.MeshBasicMaterial({ color: isXbow ? 0x8b5a2b : 0xc89652 });
-      const tipMat = new THREE.MeshBasicMaterial({ color: isFireArrow ? 0xff7f00 : 0xd0d7de });
-      const fletchMat = new THREE.MeshBasicMaterial({
-        color: this.team === 'RU' ? 0xe74c3c : 0xf5f6fa
-      });
-      // Clean physical 3D wooden shaft + steel broadhead + feathered fletching (plus flame head when Fire Arrow [V] is lit!)
       const shaftLen = isXbow ? 1.15 : 1.45;
-      const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.044, shaftLen), shaftMat);
-      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.3, 4), tipMat);
+      const shaft = new THREE.Mesh(
+        isXbow ? _xbowShaftGeo : _arrowShaftGeo,
+        isXbow ? _xbowShaftMat : _arrowShaftMat
+      );
+      const tip = new THREE.Mesh(_arrowTipGeo, isFireArrow ? _fireTipMat : _arrowTipMat);
       tip.rotation.x = Math.PI / 2;
       tip.position.set(0, 0, shaftLen * 0.5 + 0.12);
-      const fletchH = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.02, 0.26), fletchMat);
+      const fletchMat = this.team === 'RU' ? _fletchMatRU : _fletchMatUS;
+      const fletchH = new THREE.Mesh(_arrowFletchHGeo, fletchMat);
       fletchH.position.set(0, 0, -shaftLen * 0.5 + 0.14);
-      const fletchV = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.22, 0.26), fletchMat);
+      const fletchV = new THREE.Mesh(_arrowFletchVGeo, fletchMat);
       fletchV.position.set(0, 0, -shaftLen * 0.5 + 0.14);
       arrowMesh.add(shaft, tip, fletchH, fletchV);
       if (isFireArrow) {
-        const flameCone = new THREE.Mesh(
-          new THREE.ConeGeometry(0.14, 0.46, 6),
-          new THREE.MeshBasicMaterial({ color: 0xff5500, transparent: true, opacity: 0.9 })
-        );
+        const flameCone = new THREE.Mesh(_fireArrowConeGeo, _fireConeMat);
         flameCone.rotation.x = -Math.PI / 2;
         flameCone.position.set(0, 0, shaftLen * 0.5 + 0.04);
         arrowMesh.add(flameCone);
       }
-      const launchPos = origin
-        .clone()
-        .addScaledVector(dir, 0.55)
-        .add(new THREE.Vector3(0, -0.05, 0));
-      arrowMesh.position.copy(launchPos);
-      arrowMesh.lookAt(launchPos.clone().add(dir));
+      arrowMesh.position.set(
+        origin.x + dir.x * 0.55,
+        origin.y + dir.y * 0.55 - 0.05,
+        origin.z + dir.z * 0.55
+      );
+      _stepLookAt.copy(arrowMesh.position).add(dir);
+      arrowMesh.lookAt(_stepLookAt);
       this.scene.add(arrowMesh);
     }
 
@@ -1489,7 +1601,7 @@ export const CombatMethods = {
       startOrigin: origin.clone(),
       tracerStart: tracerStart.clone(),
       muzzleOffset,
-      vel: normDir.clone().multiplyScalar(muzzleVelocity),
+      vel: normDir.multiplyScalar(muzzleVelocity),
       muzzleVelocity,
       gravity: bulletGravity,
       traveledDist: 0,
@@ -1523,6 +1635,47 @@ export const CombatMethods = {
     this.activeBullets.push(bullet);
   },
 
+  _acquireTracerLine(x0, y0, z0, x1, y1, z1, colorHex, opacity) {
+    if (!this._tracerLinePool) this._tracerLinePool = [];
+    let line = this._tracerLinePool.pop();
+    if (!line) {
+      const geo = new THREE.BufferGeometry();
+      const attr = new THREE.Float32BufferAttribute(new Float32Array(6), 3);
+      attr.setUsage(THREE.DynamicDrawUsage);
+      geo.setAttribute('position', attr);
+      const mat = new THREE.LineBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity
+      });
+      line = new THREE.Line(geo, mat);
+      line.frustumCulled = false;
+    } else {
+      line.material.color.setHex(colorHex);
+      line.material.opacity = opacity;
+    }
+    const posAttr = line.geometry.attributes.position;
+    posAttr.setXYZ(0, x0, y0, z0);
+    posAttr.setXYZ(1, x1, y1, z1);
+    posAttr.needsUpdate = true;
+    line.visible = true;
+    this.scene.add(line);
+    return line;
+  },
+
+  _releaseTracerLine(line) {
+    if (!line) return;
+    if (this.scene) this.scene.remove(line);
+    line.visible = false;
+    if (!this._tracerLinePool) this._tracerLinePool = [];
+    if (this._tracerLinePool.length < 160) {
+      this._tracerLinePool.push(line);
+    } else {
+      if (line.geometry && !line.geometry.userData?.shared) line.geometry.dispose();
+      if (line.material && !line.material.userData?.shared) line.material.dispose();
+    }
+  },
+
   /**
    * Advances all in-flight ballistic bullets each frame (`dt`), applying gravity drop (`9.81 m/s²`)
    * and aerodynamic drag, and raycasting strictly along the frame's physical travel segment
@@ -1538,17 +1691,15 @@ export const CombatMethods = {
       const keepAlive = this._stepBallisticBullet(b, clampedDt);
       if (!keepAlive) {
         if (b.tracerLine) {
-          this.scene.remove(b.tracerLine);
-          b.tracerLine.geometry.dispose();
-          b.tracerLine.material.dispose();
+          this._releaseTracerLine(b.tracerLine);
           b.tracerLine = null;
         }
         if (b.arrowMesh) {
           this.scene.remove(b.arrowMesh);
           b.arrowMesh.traverse((ch) => {
             if (ch.isMesh) {
-              ch.geometry?.dispose?.();
-              ch.material?.dispose?.();
+              if (ch.geometry && !ch.geometry.userData?.shared) ch.geometry.dispose();
+              if (ch.material && !ch.material.userData?.shared) ch.material.dispose();
             }
           });
           b.arrowMesh = null;
@@ -1559,21 +1710,21 @@ export const CombatMethods = {
   },
 
   _stepBallisticBullet(bullet, dt) {
-    const prevPos = bullet.pos.clone();
+    _stepPrevPos.copy(bullet.pos);
 
     // 1. Apply ballistic gravity drop & subtle aerodynamic drag over flight time
     bullet.vel.y -= bullet.gravity * dt;
     const dragFactor = bullet.isBuckshot ? 0.35 : 0.06;
     bullet.vel.multiplyScalar(Math.max(0.88, 1 - dragFactor * dt));
 
-    const stepVec = bullet.vel.clone().multiplyScalar(dt);
-    let stepDist = stepVec.length();
+    _stepVec.copy(bullet.vel).multiplyScalar(dt);
+    let stepDist = _stepVec.length();
     if (stepDist <= 0.0001) return false;
 
     const remainingRange = bullet.maxRayRange - bullet.traveledDist;
     if (remainingRange <= 0) return false;
 
-    const stepDir = stepVec.clone().divideScalar(stepDist);
+    _stepDir.copy(_stepVec).multiplyScalar(1 / stepDist);
     let reachedMaxRange = false;
     if (stepDist >= remainingRange) {
       stepDist = remainingRange;
@@ -1584,8 +1735,8 @@ export const CombatMethods = {
 
     // 2. Check 3D Voxel Grid along this frame's segment `[prevPos, prevPos + stepDir * stepDist]`
     let voxelHit = this.world.raycastVoxel(
-      prevPos,
-      stepDir,
+      _stepPrevPos,
+      _stepDir,
       stepDist,
       0,
       bullet.ignoredVoxelKey
@@ -1623,8 +1774,8 @@ export const CombatMethods = {
             voxelHit.voxel.baseColor
           );
           const secondHit = this.world.raycastVoxel(
-            prevPos,
-            stepDir,
+            _stepPrevPos,
+            _stepDir,
             stepDist,
             0,
             bullet.ignoredVoxelKey
@@ -1660,8 +1811,8 @@ export const CombatMethods = {
             voxelHit.voxel.baseColor
           );
           const secondHit = this.world.raycastVoxel(
-            prevPos,
-            stepDir,
+            _stepPrevPos,
+            _stepDir,
             stepDist,
             0,
             bullet.ignoredVoxelKey
@@ -1680,57 +1831,120 @@ export const CombatMethods = {
       }
     }
 
-    // 3. Raycast against Soldiers & Vehicles within this frame's segment `[0, maxSegmentEntityDist]`
-    this.raycaster.set(prevPos, stepDir);
+    // 3. Broadphase-Filtered Raycast against Soldiers & Vehicles within `[0, maxSegmentEntityDist]`
+    this.raycaster.set(_stepPrevPos, _stepDir);
     this.raycaster.far = Math.max(0.01, maxSegmentEntityDist);
 
-    const targets = [];
-    if (this.vehicleManager && Array.isArray(this.vehicleManager.hitMeshes)) {
-      for (let vIdx = 0; vIdx < this.vehicleManager.hitMeshes.length; vIdx++) {
-        const vm = this.vehicleManager.hitMeshes[vIdx];
-        if (!vm || (this.activeVehicle && vm.userData && vm.userData.vehicle === this.activeVehicle)) {
-          continue;
-        }
-        targets.push(vm);
-      }
-    }
-    if (this.botManager && this.botManager.bots) {
-      for (let i = 0; i < this.botManager.bots.length; i++) {
-        const b = this.botManager.bots[i];
+    if (!this._bulletRayTargets) this._bulletRayTargets = [];
+    else this._bulletRayTargets.length = 0;
+    const targets = this._bulletRayTargets;
+
+    const ppx = _stepPrevPos.x;
+    const ppy = _stepPrevPos.y;
+    const ppz = _stepPrevPos.z;
+    const sdx = _stepDir.x;
+    const sdy = _stepDir.y;
+    const sdz = _stepDir.z;
+
+    if (this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+      const vehs = this.vehicleManager.vehicles;
+      for (let vIdx = 0; vIdx < vehs.length; vIdx++) {
+        const v = vehs[vIdx];
         if (
-          b.dead ||
-          b.downed ||
-          (typeof b.hp === 'number' && b.hp <= 0) ||
-          (typeof b.bleedOutTimer === 'number' && b.bleedOutTimer > 0) ||
-          b.drivingVehicle ||
-          (b.team === this.team && !this.friendlyFireEnabled) ||
-          !b.hitMeshes ||
-          bullet.hitBots.has(b)
+          !v ||
+          v.dead ||
+          v === this.activeVehicle ||
+          (v.team === this.team && !this.friendlyFireEnabled)
         ) {
           continue;
         }
-        const vx = b.pos.x - prevPos.x;
-        const vy = b.pos.y + 0.9 - prevPos.y;
-        const vz = b.pos.z - prevPos.z;
-        const proj = vx * stepDir.x + vy * stepDir.y + vz * stepDir.z;
-        if (proj < -2.0 || proj > maxSegmentEntityDist + 2.0) continue;
+        const vx = v.pos.x - ppx;
+        const vy = v.pos.y + (v.isAircraft ? 1.5 : 1.2) - ppy;
+        const vz = v.pos.z - ppz;
+        const r = v.hitRadius || (v.isAircraft ? 16.0 : 6.5);
+        const proj = vx * sdx + vy * sdy + vz * sdz;
+        if (proj < -r || proj > maxSegmentEntityDist + r) continue;
         const perpSq = vx * vx + vy * vy + vz * vz - proj * proj;
-        if (perpSq <= 6.25) {
-          for (let m = 0; m < b.hitMeshes.length; m++) {
-            targets.push(b.hitMeshes[m]);
+        if (perpSq <= r * r) {
+          if (v.mesh && v.mesh._culledOffFrustum) {
+            THREE.Group.prototype.updateMatrixWorld.call(v.mesh, true);
+          }
+          if (Array.isArray(v.hitMeshes)) {
+            for (let m = 0; m < v.hitMeshes.length; m++) {
+              targets.push(v.hitMeshes[m]);
+            }
+          } else if (Array.isArray(this.vehicleManager.hitMeshes)) {
+            for (let m = 0; m < this.vehicleManager.hitMeshes.length; m++) {
+              const vm = this.vehicleManager.hitMeshes[m];
+              if (vm && vm.userData && vm.userData.vehicle === v) {
+                targets.push(vm);
+              }
+            }
           }
         }
       }
     }
+
+    const considerBotTarget = (b) => {
+      if (
+        !b ||
+        b.dead ||
+        b.downed ||
+        (typeof b.hp === 'number' && b.hp <= 0) ||
+        (typeof b.bleedOutTimer === 'number' && b.bleedOutTimer > 0) ||
+        b.drivingVehicle ||
+        (b.team === this.team && !this.friendlyFireEnabled) ||
+        !b.hitMeshes ||
+        bullet.hitBots.has(b)
+      ) {
+        return;
+      }
+      const vx = b.pos.x - ppx;
+      const vy = b.pos.y + 0.9 - ppy;
+      const vz = b.pos.z - ppz;
+      const proj = vx * sdx + vy * sdy + vz * sdz;
+      if (proj < -2.0 || proj > maxSegmentEntityDist + 2.0) return;
+      const perpSq = vx * vx + vy * vy + vz * vz - proj * proj;
+      if (perpSq <= 6.25) {
+        if (b.mesh && b.mesh._culledOffFrustum) {
+          THREE.Group.prototype.updateMatrixWorld.call(b.mesh, true);
+        }
+        for (let m = 0; m < b.hitMeshes.length; m++) {
+          targets.push(b.hitMeshes[m]);
+        }
+      }
+    };
+
+    if (this.botManager) {
+      if (this.botManager.spatialGrid && this.botManager.spatialGrid.count > 0) {
+        const endX = ppx + sdx * maxSegmentEntityDist;
+        const endZ = ppz + sdz * maxSegmentEntityDist;
+        const boxMinX = (ppx < endX ? ppx : endX) - 2.5;
+        const boxMaxX = (ppx > endX ? ppx : endX) + 2.5;
+        const boxMinZ = (ppz < endZ ? ppz : endZ) - 2.5;
+        const boxMaxZ = (ppz > endZ ? ppz : endZ) + 2.5;
+        this.botManager.spatialGrid.forEachInAABB(boxMinX, boxMaxX, boxMinZ, boxMaxZ, considerBotTarget);
+      } else if (this.botManager.bots) {
+        for (let i = 0; i < this.botManager.bots.length; i++) {
+          considerBotTarget(this.botManager.bots[i]);
+        }
+      }
+    }
+
     if (this.onGetRemoteMeshes) {
-      targets.push(...this.onGetRemoteMeshes());
+      const rem = this.onGetRemoteMeshes();
+      if (rem && rem.length > 0) {
+        for (let rIdx = 0; rIdx < rem.length; rIdx++) targets.push(rem[rIdx]);
+      }
     }
 
     let terminatedOnEntity = false;
-    let impactPoint = prevPos.clone().addScaledVector(stepDir, maxSegmentEntityDist);
+    _stepImpactPt.copy(_stepPrevPos).addScaledVector(_stepDir, maxSegmentEntityDist);
 
     if (targets.length > 0) {
-      const hits = this.raycaster.intersectObjects(targets, false);
+      if (!this._bulletRayHits) this._bulletRayHits = [];
+      else this._bulletRayHits.length = 0;
+      const hits = this.raycaster.intersectObjects(targets, false, this._bulletRayHits);
       for (let hIdx = 0; hIdx < hits.length; hIdx++) {
         const hit = hits[hIdx];
         if (hit.distance > maxSegmentEntityDist + 0.05) break;
@@ -1804,14 +2018,14 @@ export const CombatMethods = {
 
           bullet.hitBots.add(bot);
           bullet.collateralHits++;
-          impactPoint = bestBotHit.point.clone();
+          _stepImpactPt.copy(bestBotHit.point);
 
           const impactColor =
             res.hitType === 'armor'
-              ? new THREE.Color(0x48dbfb)
+              ? _hitArmorColor
               : isHeadshot
-              ? new THREE.Color(0xff2222)
-              : new THREE.Color(0xd63031);
+              ? _hitHeadColor
+              : _hitBodyColor;
           this.world.spawnDebris(bestBotHit.point, impactColor, res.killed ? 6 : 3);
           if (bot.mesh.userData.parts && bot.mesh.userData.parts.upperBody) {
             bot.mesh.userData.parts.upperBody.rotation.x = -0.42;
@@ -1879,9 +2093,9 @@ export const CombatMethods = {
           if (!veh || veh === this.activeVehicle || veh.dead) {
             continue;
           }
-          impactPoint = hit.point.clone();
+          _stepImpactPt.copy(hit.point);
           if (veh.team !== this.team && !veh.dead) {
-            this.world.spawnDebris(hit.point, new THREE.Color(0xf1c40f), 3);
+            this.world.spawnDebris(hit.point, _hitVehColor, 3);
             sound.playHitmarker('armor');
             const apDmg = Math.max(
               1,
@@ -1910,7 +2124,7 @@ export const CombatMethods = {
           break;
         } else if (hit.object.userData.remotePlayer) {
           const rp = hit.object.userData.remotePlayer;
-          impactPoint = hit.point.clone();
+          _stepImpactPt.copy(hit.point);
           if (rp.team !== this.team) {
             const isHeadshot = Boolean(hit.object.userData.isHead);
             const dmg = Math.round(
@@ -1953,17 +2167,17 @@ export const CombatMethods = {
         ) {
           continue;
         }
-        const vx = airV.pos.x - prevPos.x;
-        const vy = airV.pos.y - prevPos.y;
-        const vz = airV.pos.z - prevPos.z;
+        const vx = airV.pos.x - ppx;
+        const vy = airV.pos.y - ppy;
+        const vz = airV.pos.z - ppz;
         const proj = THREE.MathUtils.clamp(
-          vx * stepDir.x + vy * stepDir.y + vz * stepDir.z,
+          vx * sdx + vy * sdy + vz * sdz,
           0,
           maxSegmentEntityDist
         );
-        const closestX = prevPos.x + stepDir.x * proj;
-        const closestY = prevPos.y + stepDir.y * proj;
-        const closestZ = prevPos.z + stepDir.z * proj;
+        const closestX = ppx + sdx * proj;
+        const closestY = ppy + sdy * proj;
+        const closestZ = ppz + sdz * proj;
         const dx = airV.pos.x - closestX;
         const dy = airV.pos.y - closestY;
         const dz = airV.pos.z - closestZ;
@@ -1972,8 +2186,8 @@ export const CombatMethods = {
           airV.aircraftRole === 'gunship' || airV.aircraftRole === 'bomber' ? 10.5 : 7.4;
 
         if (distSq <= hitRadius * hitRadius) {
-          impactPoint.set(closestX, closestY, closestZ);
-          this.world.spawnDebris(impactPoint, new THREE.Color(0xf1c40f), 4);
+          _stepImpactPt.set(closestX, closestY, closestZ);
+          this.world.spawnDebris(_stepImpactPt, _hitVehColor, 4);
           sound.playHitmarker('armor');
           const apDmg = Math.max(
             1,
@@ -2005,7 +2219,7 @@ export const CombatMethods = {
 
     // 4. If stopped by a non-penetrated voxel (and didn't already terminate on an entity in front of it)
     if (!terminatedOnEntity && stoppedByVoxel) {
-      impactPoint = stoppedByVoxel.point.clone();
+      _stepImpactPt.copy(stoppedByVoxel.point);
       if (stoppedByVoxel.voxel) {
         if (stoppedByVoxel.voxel.isProp || stoppedByVoxel.voxel.type === 'wood') {
           this.world.damageVoxel(
@@ -2043,7 +2257,7 @@ export const CombatMethods = {
       }
       const impactCol = stoppedByVoxel.voxel
         ? stoppedByVoxel.voxel.baseColor
-        : new THREE.Color(0x6b7c59);
+        : _hitGroundColor;
       this.world.spawnBulletImpact(
         stoppedByVoxel.point,
         stoppedByVoxel.normal,
@@ -2055,21 +2269,46 @@ export const CombatMethods = {
       terminatedOnEntity || stoppedByVoxel || reachedMaxRange
     );
 
-    // 5. Near-miss suppression along this frame's segment
-    if (this.botManager && this.botManager.bots) {
-      for (const bot of this.botManager.bots) {
-        if (bot.dead || bot.downed || bot.team === this.team) continue;
-        const distToBullet = bot.pos.distanceTo(impactPoint);
-        if (distToBullet < 5.2 && distToBullet > 0.1) {
-          bot.suppressionLevel = Math.min(1.0, (bot.suppressionLevel || 0) + 0.15);
-          bot.underFireTimer = 2.4;
-          if (!bot.lastShooterPos) bot.lastShooterPos = new THREE.Vector3();
-          bot.lastShooterPos.copy(this.pos);
+    // 5. Near-miss suppression along this frame's segment (O(1) spatial grid + fast AABB pre-reject)
+    if (this.botManager) {
+      const ix = _stepImpactPt.x;
+      const iy = _stepImpactPt.y;
+      const iz = _stepImpactPt.z;
+      if (this.botManager.spatialGrid && this.botManager.spatialGrid.count > 0) {
+        this.botManager.spatialGrid.forEachInRadius(ix, iz, 5.2, (bot, dSqXZ) => {
+          if (bot.dead || bot.downed || bot.team === this.team) return;
+          const dy = bot.pos.y - iy;
+          if (dy > 5.2 || dy < -5.2) return;
+          const dSq = dSqXZ + dy * dy;
+          if (dSq < 27.04 && dSq > 0.01) {
+            bot.suppressionLevel = Math.min(1.0, (bot.suppressionLevel || 0) + 0.15);
+            bot.underFireTimer = 2.4;
+            if (!bot.lastShooterPos) bot.lastShooterPos = new THREE.Vector3();
+            bot.lastShooterPos.copy(this.pos);
+          }
+        });
+      } else if (this.botManager.bots) {
+        for (let i = 0; i < this.botManager.bots.length; i++) {
+          const bot = this.botManager.bots[i];
+          if (bot.dead || bot.downed || bot.team === this.team) continue;
+          const dx = bot.pos.x - ix;
+          if (dx > 5.2 || dx < -5.2) continue;
+          const dz = bot.pos.z - iz;
+          if (dz > 5.2 || dz < -5.2) continue;
+          const dy = bot.pos.y - iy;
+          if (dy > 5.2 || dy < -5.2) continue;
+          const dSq = dx * dx + dy * dy + dz * dz;
+          if (dSq < 27.04 && dSq > 0.01) {
+            bot.suppressionLevel = Math.min(1.0, (bot.suppressionLevel || 0) + 0.15);
+            bot.underFireTimer = 2.4;
+            if (!bot.lastShooterPos) bot.lastShooterPos = new THREE.Vector3();
+            bot.lastShooterPos.copy(this.pos);
+          }
         }
       }
     }
 
-    // 6. If bullet terminated, award any multi-target collateral bonus and trigger explosive HEI splash (30mm GAU-8 / 25mm GAU-12)
+    // 6. If bullet terminated, award any multi-target collateral bonus and trigger explosive HEI splash
     if (bulletTerminated) {
       if (bullet.collateralKills >= 2) {
         const colBonus = bullet.collateralKills * 50;
@@ -2093,8 +2332,9 @@ export const CombatMethods = {
 
       if (bullet.explosiveSplash && this.world && (terminatedOnEntity || stoppedByVoxel)) {
         const sp = bullet.explosiveSplash;
+        const splashPos = _stepImpactPt.clone();
         this.world.explodeAt(
-          impactPoint,
+          splashPos,
           sp.radius || 3.5,
           sp.damage || 105,
           (pos, r, d, broken) => {
@@ -2126,7 +2366,7 @@ export const CombatMethods = {
         this.onBroadcast({
           type: 'shoot',
           origin: bullet.tracerStart.toArray(),
-          end: impactPoint.toArray(),
+          end: _stepImpactPt.toArray(),
           weapon: bullet.weaponLabel,
           weaponId: bullet.wepDef?.id || null,
           soundType: bullet.wepDef?.soundType || 'rifle',
@@ -2138,23 +2378,20 @@ export const CombatMethods = {
     }
 
     // 7. Advance bullet position & update live 3D in-flight tracer streak / 3D arrow mesh
-    bullet.pos.addScaledVector(stepDir, stepDist);
+    bullet.pos.addScaledVector(_stepDir, stepDist);
     bullet.traveledDist += stepDist;
 
     if (bullet.arrowMesh) {
       const blend = Math.max(0, 1 - bullet.traveledDist / 14.0);
-      const arrowHeadPos = bullet.pos
-        .clone()
-        .addScaledVector(bullet.muzzleOffset, blend);
-      bullet.arrowMesh.position.copy(arrowHeadPos);
-      bullet.arrowMesh.lookAt(arrowHeadPos.clone().add(stepDir));
+      _stepHeadPos.copy(bullet.pos).addScaledVector(bullet.muzzleOffset, blend);
+      bullet.arrowMesh.position.copy(_stepHeadPos);
+      _stepLookAt.copy(_stepHeadPos).add(_stepDir);
+      bullet.arrowMesh.lookAt(_stepLookAt);
     }
 
     if (bullet.tracerLine) {
       const blend = Math.max(0, 1 - bullet.traveledDist / 14.0);
-      const headPos = bullet.pos
-        .clone()
-        .addScaledVector(bullet.muzzleOffset, blend);
+      _stepHeadPos.copy(bullet.pos).addScaledVector(bullet.muzzleOffset, blend);
       const streakLen = Math.min(
         bullet.traveledDist,
         bullet.isMountedMg ? 22.0 : 14.0
@@ -2163,14 +2400,14 @@ export const CombatMethods = {
         0,
         1 - Math.max(0, bullet.traveledDist - streakLen) / 14.0
       );
-      const tailPos = bullet.pos
-        .clone()
-        .addScaledVector(stepDir, -Math.max(0.45, streakLen))
+      _stepTailPos
+        .copy(bullet.pos)
+        .addScaledVector(_stepDir, -Math.max(0.45, streakLen))
         .addScaledVector(bullet.muzzleOffset, tailBlend);
       const posAttr = bullet.tracerLine.geometry.attributes.position;
       if (posAttr) {
-        posAttr.setXYZ(0, tailPos.x, tailPos.y, tailPos.z);
-        posAttr.setXYZ(1, headPos.x, headPos.y, headPos.z);
+        posAttr.setXYZ(0, _stepTailPos.x, _stepTailPos.y, _stepTailPos.z);
+        posAttr.setXYZ(1, _stepHeadPos.x, _stepHeadPos.y, _stepHeadPos.z);
         posAttr.needsUpdate = true;
       }
     }
@@ -2183,53 +2420,70 @@ export const CombatMethods = {
    * or right-hand weapon barrel offset in hipfire/ADS, so bullet trails originate from the gun barrel
    * instead of the center of the player's body.
    */
-  getWeaponMuzzleWorldPosition(origin, dir) {
+  getWeaponMuzzleWorldPosition(origin, dir, out = null) {
+    const target = out || new THREE.Vector3();
     if (this.activeVehicle) {
-      return origin.clone();
+      return target.copy(origin);
     }
-    const cur = this.currentWeapon;
+    const cur = typeof this.currentWeapon === 'function' ? this.currentWeapon() : this.currentWeapon;
     if (cur && cur.mesh) {
       const flashObj = cur.mesh.getObjectByName('muzzleFlash');
       if (flashObj) {
         this.camera.updateMatrixWorld(true);
-        const worldMuzzle = new THREE.Vector3();
-        flashObj.getWorldPosition(worldMuzzle);
-        if (Number.isFinite(worldMuzzle.x)) {
-          return worldMuzzle;
+        flashObj.getWorldPosition(target);
+        if (Number.isFinite(target.x)) {
+          return target;
         }
       }
     }
-    const camQuat = this.camera.getWorldQuaternion(new THREE.Quaternion());
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camQuat);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camQuat);
+    this.camera.getWorldQuaternion(_muzzleQuat);
+    _muzzleRight.set(1, 0, 0).applyQuaternion(_muzzleQuat);
+    _muzzleUp.set(0, 1, 0).applyQuaternion(_muzzleQuat);
     const lateralOffset = this.isAds ? 0.01 : 0.24;
     const verticalOffset = this.isAds ? -0.05 : -0.13;
-    return origin
-      .clone()
-      .addScaledVector(right, lateralOffset)
-      .addScaledVector(up, verticalOffset)
+    return target
+      .copy(origin)
+      .addScaledVector(_muzzleRight, lateralOffset)
+      .addScaledVector(_muzzleUp, verticalOffset)
       .addScaledVector(dir, 0.85);
   },
 
   ejectBrassCasing() {
-    if (this.world.debrisParticles.length > 120) return;
-    const camPos = this.camera.getWorldPosition(new THREE.Vector3());
-    const camQuat = this.camera.getWorldQuaternion(new THREE.Quaternion());
-    const offset = new THREE.Vector3(0.18, -0.1, -0.25).applyQuaternion(camQuat);
-    const vel = new THREE.Vector3(2.2 + Math.random(), 2.4 + Math.random(), 0.5).applyQuaternion(
-      camQuat
-    );
+    if (!this.world) return;
+    this.camera.getWorldPosition(_casingPos);
+    this.camera.getWorldQuaternion(_muzzleQuat);
+    _muzzleRight.set(0.18, -0.1, -0.25).applyQuaternion(_muzzleQuat);
+    _casingPos.add(_muzzleRight);
+    _casingVel.set(2.2 + Math.random(), 2.4 + Math.random(), 0.5).applyQuaternion(_muzzleQuat);
 
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.018, 0.018, 0.045),
-      new THREE.MeshBasicMaterial({ color: 0xf1c40f })
-    );
-    mesh.position.copy(camPos).add(offset);
+    if (typeof this.world.spawnCustomDebris === 'function') {
+      this.world.spawnCustomDebris(
+        _casingPos.x,
+        _casingPos.y,
+        _casingPos.z,
+        _casingVel.x,
+        _casingVel.y,
+        _casingVel.z,
+        14,
+        18,
+        12,
+        0.018,
+        0.018,
+        0.045,
+        0xf1c40f,
+        0.75
+      );
+      return;
+    }
+
+    if (this.world.debrisParticles.length > 120) return;
+    const mesh = new THREE.Mesh(_brassCasingGeo, _brassCasingMat);
+    mesh.position.copy(_casingPos);
     this.scene.add(mesh);
 
     this.world.debrisParticles.push({
       mesh,
-      vel,
+      vel: _casingVel.clone(),
       rotVel: new THREE.Vector3(14, 18, 12),
       life: 0.75
     });
@@ -2238,15 +2492,13 @@ export const CombatMethods = {
   launchRocket() {
     const origin = this.camera.getWorldPosition(new THREE.Vector3());
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(
-      this.camera.getWorldQuaternion(new THREE.Quaternion())
+      this.camera.getWorldQuaternion(_muzzleQuat)
     );
 
-    const rocketMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.18, 0.68),
-      new THREE.MeshBasicMaterial({ color: 0xe67e22 })
-    );
+    const rocketMesh = new THREE.Mesh(_rpgRocketGeo, _rpgRocketMat);
     rocketMesh.position.copy(origin).addScaledVector(dir, 1.1);
-    rocketMesh.lookAt(origin.clone().addScaledVector(dir, 10));
+    _stepLookAt.copy(origin).addScaledVector(dir, 10);
+    rocketMesh.lookAt(_stepLookAt);
     this.scene.add(rocketMesh);
 
     this.world.projectiles.push({
@@ -2295,12 +2547,10 @@ export const CombatMethods = {
       }
     }
 
-    const samMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.2, 0.2, 1.15),
-      new THREE.MeshBasicMaterial({ color: 0x00d2d3 })
-    );
+    const samMesh = new THREE.Mesh(_stingerSamGeo, _stingerSamMat);
     samMesh.position.copy(origin).addScaledVector(dir, 1.2);
-    samMesh.lookAt(origin.clone().addScaledVector(dir, 12));
+    _stepLookAt.copy(origin).addScaledVector(dir, 12);
+    samMesh.lookAt(_stepLookAt);
     this.scene.add(samMesh);
 
     const samCfg = PROJECTILES.STINGER_SAM || {
@@ -2445,10 +2695,7 @@ export const CombatMethods = {
       .normalize()
       .applyQuaternion(this.camera.getWorldQuaternion(new THREE.Quaternion()));
 
-    const grenMesh = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.14, 0),
-      new THREE.MeshStandardMaterial({ color: 0x3b5323, roughness: 0.7 })
-    );
+    const grenMesh = new THREE.Mesh(_fragGrenadeGeo, _fragGrenadeMat);
     grenMesh.position.copy(origin).addScaledVector(dir, 0.9);
     this.scene.add(grenMesh);
 
@@ -2466,12 +2713,9 @@ export const CombatMethods = {
     const origin = this.camera.getWorldPosition(new THREE.Vector3());
     const dir = new THREE.Vector3(0, 0.16, -1)
       .normalize()
-      .applyQuaternion(this.camera.getWorldQuaternion(new THREE.Quaternion()));
+      .applyQuaternion(this.camera.getWorldQuaternion(_muzzleQuat));
 
-    const c4Mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.26, 0.15, 0.34),
-      new THREE.MeshStandardMaterial({ color: 0x5c6650 })
-    );
+    const c4Mesh = new THREE.Mesh(_c4Geo, _c4Mat);
     c4Mesh.position.copy(origin).addScaledVector(dir, 0.9);
     this.scene.add(c4Mesh);
 
@@ -2679,65 +2923,72 @@ export const CombatMethods = {
     const maxTargets = def.maxCleaveTargets || (def.isTwoHandedSword ? 3 : 1);
 
     let hitCount = 0;
-    if (this.botManager && Array.isArray(this.botManager.bots)) {
-      for (const bot of this.botManager.bots) {
-        if (hitCount >= maxTargets) break;
-        if (!bot || bot.dead || bot.downed || bot.team === this.team) continue;
-        const toBot = bot.pos.clone().add(new THREE.Vector3(0, 0.9, 0)).sub(origin);
-        const dist = toBot.length();
-        if (dist <= reach) {
-          const dirToBot = toBot.clone().normalize();
-          if (forward.dot(dirToBot) >= arcMinDot || dist <= 2.2) {
-            const isHs = toBot.y > 0.35 || swingType === 'OVERHEAD_CLEAVE';
-            // Anti-Cavalry Bonus: Polearms deal 2.0x damage against mounted riders!
-            const antiCavMult = def.isPolearm && bot.isMountedKnight ? 1.85 : 1.0;
-            const finalDmg = Math.round(dmg * antiCavMult * (isHs ? def.headshotMult || 1.5 : 1));
-            const res = this.botManager.damageBot(
-              bot,
-              finalDmg,
-              this.name,
-              this.team,
-              def.shortName || 'BROADSWORD',
-              isHs,
-              this.onKillEvent,
-              this.onAwardXp
-            );
-            // 2H Large Shield Bash or 1H Shield Bash Riposte knocks enemy back & staggers their guard!
-            if ((def.isTwoHandedShield || swingType === 'SHIELD_BASH_RIPOSTE') && !bot.dead) {
-              const kbDist = def.isTwoHandedShield ? 3.1 : 2.2;
-              bot.pos.x += forward.x * kbDist;
-              bot.pos.z += forward.z * kbDist;
-              bot.pos.y = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
-              bot.flinchTimer = 0.65;
-              bot.shootCooldown = Math.max(bot.shootCooldown || 0, 1.25);
-              sound.playShieldBlock?.(false, 0, 0);
-            }
-            hitCount++;
-            this.world.spawnDebris(
-              bot.pos.clone().add(new THREE.Vector3(0, 1.1, 0)),
-              new THREE.Color(0xd63031),
-              5
-            );
-            sound.playHitmarker(res?.killed ? 'kill' : 'normal');
-            if (this.onHitmarker) {
-              const actionLbl = def.isTwoHandedShield
-                ? '🛡️ SHIELD BASH'
-                : def.isPolearm
-                ? '🔱 SPEAR THRUST'
-                : def.isTwoHandedSword && hitCount > 1
-                ? `🗡️ 2H MULTI-CLEAVE x${hitCount}`
-                : `⚔️ ${swingType.replace('_', ' ')}`;
-              this.onHitmarker(
-                res?.killed ? 'kill' : 'normal',
-                res?.killed ? `${actionLbl}! (${bot.name})` : `${actionLbl} -${finalDmg}`
-              );
-            }
-            if (res?.killed) {
-              this.kills++;
-              this.score += COMBAT.KILL_XP_NORMAL;
-              this.registerKill(bot.name);
-            }
+    const reachSq = reach * reach;
+    const processMeleeBot = (bot) => {
+      if (hitCount >= maxTargets) return false;
+      if (!bot || bot.dead || bot.downed || bot.team === this.team) return;
+      const tbx = bot.pos.x - origin.x;
+      const tby = bot.pos.y + 0.9 - origin.y;
+      const tbz = bot.pos.z - origin.z;
+      const distSq = tbx * tbx + tby * tby + tbz * tbz;
+      if (distSq <= reachSq) {
+        const dist = Math.sqrt(distSq) || 0.001;
+        const dot = (forward.x * tbx + forward.y * tby + forward.z * tbz) / dist;
+        if (dot >= arcMinDot || dist <= 2.2) {
+          const isHs = tby > 0.35 || swingType === 'OVERHEAD_CLEAVE';
+          const antiCavMult = def.isPolearm && bot.isMountedKnight ? 1.85 : 1.0;
+          const finalDmg = Math.round(dmg * antiCavMult * (isHs ? def.headshotMult || 1.5 : 1));
+          const res = this.botManager.damageBot(
+            bot,
+            finalDmg,
+            this.name,
+            this.team,
+            def.shortName || 'BROADSWORD',
+            isHs,
+            this.onKillEvent,
+            this.onAwardXp
+          );
+          if ((def.isTwoHandedShield || swingType === 'SHIELD_BASH_RIPOSTE') && !bot.dead) {
+            const kbDist = def.isTwoHandedShield ? 3.1 : 2.2;
+            bot.pos.x += forward.x * kbDist;
+            bot.pos.z += forward.z * kbDist;
+            bot.pos.y = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
+            bot.flinchTimer = 0.65;
+            bot.shootCooldown = Math.max(bot.shootCooldown || 0, 1.25);
+            sound.playShieldBlock?.(false, 0, 0);
           }
+          hitCount++;
+          _stepLookAt.set(bot.pos.x, bot.pos.y + 1.1, bot.pos.z);
+          this.world.spawnDebris(_stepLookAt, _hitBodyColor, 5);
+          sound.playHitmarker(res?.killed ? 'kill' : 'normal');
+          if (this.onHitmarker) {
+            const actionLbl = def.isTwoHandedShield
+              ? '🛡️ SHIELD BASH'
+              : def.isPolearm
+              ? '🔱 SPEAR THRUST'
+              : def.isTwoHandedSword && hitCount > 1
+              ? `🗡️ 2H MULTI-CLEAVE x${hitCount}`
+              : `⚔️ ${swingType.replace('_', ' ')}`;
+            this.onHitmarker(
+              res?.killed ? 'kill' : 'normal',
+              res?.killed ? `${actionLbl}! (${bot.name})` : `${actionLbl} -${finalDmg}`
+            );
+          }
+          if (res?.killed) {
+            this.kills++;
+            this.score += COMBAT.KILL_XP_NORMAL;
+            this.registerKill(bot.name);
+          }
+        }
+      }
+    };
+
+    if (this.botManager) {
+      if (this.botManager.spatialGrid && this.botManager.spatialGrid.count > 0) {
+        this.botManager.spatialGrid.forEachInRadius(origin.x, origin.z, reach + 1.0, processMeleeBot);
+      } else if (Array.isArray(this.botManager.bots)) {
+        for (let i = 0; i < this.botManager.bots.length; i++) {
+          if (processMeleeBot(this.botManager.bots[i]) === false) break;
         }
       }
     }

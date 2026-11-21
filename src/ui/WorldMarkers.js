@@ -1,21 +1,46 @@
 import * as THREE from '../../vendor/three.module.js';
 
+const MARKER_POOL_TYPES = ['flag', 'ally', 'spot', 'revive', 'airBox', 'leadLine', 'misc'];
+
 export const WorldMarkers = {
-  _acquireWorldMarkerSlot(index) {
-    if (!this._markerPool) {
-      this._markerPool = [];
+  _ensureMarkerSubPools() {
+    if (!this._markerSubPools) {
+      this._markerSubPools = {
+        flag: { items: [], idx: 0 },
+        ally: { items: [], idx: 0 },
+        spot: { items: [], idx: 0 },
+        revive: { items: [], idx: 0 },
+        airBox: { items: [], idx: 0 },
+        leadLine: { items: [], idx: 0 },
+        misc: { items: [], idx: 0 }
+      };
     }
-    let slot = this._markerPool[index];
+    return this._markerSubPools;
+  },
+
+  _acquireWorldMarkerSlot(type = 'misc') {
+    const pools = this._ensureMarkerSubPools();
+    const bucket = pools[type] || pools.misc;
+    const index = bucket.idx++;
+    let slot = bucket.items[index];
     if (!slot) {
       const root = document.createElement('div');
       root.className = 'world-marker';
       root.style.left = '0px';
       root.style.top = '0px';
+      root._visible = true;
 
       const iconEl = document.createElement('div');
       const iconSpan = document.createElement('span');
       const distEl = document.createElement('div');
       distEl.className = 'world-marker-dist';
+
+      if (type === 'leadLine') {
+        root.style.transformOrigin = '0 50%';
+        iconEl.style.cssText =
+          'width:1px;height:1.8px;background:#00d2d3;transform-origin:0 50%;pointer-events:none;';
+        distEl.style.display = 'none';
+      }
 
       root.appendChild(iconEl);
       root.appendChild(distEl);
@@ -27,24 +52,67 @@ export const WorldMarkers = {
         iconSpan,
         distEl,
         visible: true,
-        type: '',
+        type,
         transform: '',
         opacity: '',
         iconClass: '',
         iconStyle: '',
         iconText: '',
+        lineColor: type === 'leadLine' ? '#00d2d3' : '',
         hasSpan: false,
-        distVisible: true,
+        distVisible: type !== 'leadLine',
         distText: '',
         distColor: '',
         distWeight: ''
       };
-      this._markerPool[index] = slot;
-    } else if (!slot.visible) {
+      bucket.items[index] = slot;
+    } else if (slot.root._visible === false) {
       slot.root.style.display = '';
+      slot.root._visible = true;
       slot.visible = true;
     }
     return slot;
+  },
+
+  _configureLeadLineSlot(slot, startX, startY, angleDeg, lenPx, color, opacity) {
+    const transform = `translate3d(${startX.toFixed(1)}px, ${startY.toFixed(1)}px, 0) rotate(${angleDeg.toFixed(1)}deg) scaleX(${lenPx.toFixed(1)})`;
+    if (slot.transform !== transform) {
+      slot.root.style.transform = transform;
+      slot.transform = transform;
+    }
+    const opStr = String(opacity);
+    if (slot.opacity !== opStr) {
+      slot.root.style.opacity = opStr;
+      slot.opacity = opStr;
+    }
+    if (slot.lineColor !== color) {
+      slot.iconEl.style.background = color;
+      slot.lineColor = color;
+    }
+  },
+
+  projectWorldToScreen(worldPos, yOffset = 0, cam = null, w = 0, h = 0) {
+    const camera = cam || this.player.camera;
+    const vw = w || window.innerWidth;
+    const vh = h || window.innerHeight;
+    const projVec = this._projVec || (this._projVec = new THREE.Vector3());
+    const out =
+      this._projOut ||
+      (this._projOut = { x: 0, y: 0, behind: false, ndcZ: 0, centerDist: 0 });
+
+    projVec.set(worldPos.x, worldPos.y + yOffset, worldPos.z).project(camera);
+    out.ndcZ = projVec.z;
+    if (projVec.z > 1) {
+      out.behind = true;
+      return out;
+    }
+    out.behind = false;
+    const sx = Math.round((projVec.x * 0.5 + 0.5) * vw);
+    const sy = Math.round((-projVec.y * 0.5 + 0.5) * vh);
+    out.x = sx;
+    out.y = sy;
+    out.centerDist = Math.hypot(sx - vw * 0.5, sy - vh * 0.5);
+    return out;
   },
 
   _configureMarkerSlot(slot, opts) {
@@ -129,20 +197,17 @@ export const WorldMarkers = {
     const cam = this.player.camera;
     const w = window.innerWidth;
     const h = window.innerHeight;
-    const cx = w * 0.5;
-    const cy = h * 0.5;
     const inAds = this.player.adsAmount > 0.25;
     const isPlayerMedic = String(this.player.role || '').toUpperCase() === 'MEDIC';
-    let activeCount = 0;
 
-    const projVec = this._projVec || (this._projVec = new THREE.Vector3());
+    const pools = this._ensureMarkerSubPools();
+    for (let i = 0; i < MARKER_POOL_TYPES.length; i++) {
+      pools[MARKER_POOL_TYPES[i]].idx = 0;
+    }
+
     const projectToScreen = (worldPos, yOffset = 0) => {
-      projVec.set(worldPos.x, worldPos.y + yOffset, worldPos.z).project(cam);
-      if (projVec.z > 1) return null;
-      const sx = Math.round((projVec.x * 0.5 + 0.5) * w);
-      const sy = Math.round((-projVec.y * 0.5 + 0.5) * h);
-      const centerDist = Math.hypot(sx - cx, sy - cy);
-      return { x: sx, y: sy, centerDist };
+      const out = this.projectWorldToScreen(worldPos, yOffset, cam, w, h);
+      return out.behind ? null : out;
     };
 
     // Sightline Auto-Fade: markers near the crosshair fade strongly in both Hipfire and ADS
@@ -185,7 +250,7 @@ export const WorldMarkers = {
           : 'rgba(127, 140, 141, 0.68)';
       const borderStyle = isOrderedFlag ? ';border:2px solid #f1c40f;box-shadow:0 0 12px #f1c40f;' : '';
       const op = getSightlineOpacity(scr.centerDist, isOrderedFlag ? 0.94 : 0.82, 0.18);
-      const slot = this._acquireWorldMarkerSlot(activeCount++);
+      const slot = this._acquireWorldMarkerSlot('flag');
       this._configureMarkerSlot(slot, {
         x: scr.x,
         y: scr.y,
@@ -216,7 +281,7 @@ export const WorldMarkers = {
       if (holdScr) {
         const holdDist = Math.round(this.player.pos.distanceTo(activeCmdOrder.pos));
         const op = getSightlineOpacity(holdScr.centerDist, 0.9, 0.2);
-        const slot = this._acquireWorldMarkerSlot(activeCount++);
+        const slot = this._acquireWorldMarkerSlot('misc');
         this._configureMarkerSlot(slot, {
           x: holdScr.x,
           y: holdScr.y,
@@ -289,7 +354,7 @@ export const WorldMarkers = {
             const op = getSightlineOpacity(scr.centerDist, 0.68, 0.14);
             // Only show a short name when very close (< 8m) and outside the central aiming reticle
             const showShortName = dist < 8 && scr.centerDist > 85 && !inAds;
-            const slot = this._acquireWorldMarkerSlot(activeCount++);
+            const slot = this._acquireWorldMarkerSlot('ally');
             this._configureMarkerSlot(slot, {
               x: scr.x,
               y: scr.y,
@@ -310,7 +375,7 @@ export const WorldMarkers = {
         if (scr) {
           const op = getSightlineOpacity(scr.centerDist, bot.uavRevealed ? 0.88 : 0.85, 0.25);
           const showDist = bot.uavRevealed && scr.centerDist > 95 && !inAds && dist < 180;
-          const slot = this._acquireWorldMarkerSlot(activeCount++);
+          const slot = this._acquireWorldMarkerSlot('spot');
           this._configureMarkerSlot(slot, {
             x: scr.x,
             y: scr.y,
@@ -336,7 +401,7 @@ export const WorldMarkers = {
           const op = getSightlineOpacity(scr.centerDist, 0.92, 0.28);
           const vTypeLabel =
             v.type === 'tank' ? 'TANK' : v.type === 'apc' ? 'BTR/APC' : 'ARMORED CAR';
-          const slot = this._acquireWorldMarkerSlot(activeCount++);
+          const slot = this._acquireWorldMarkerSlot('misc');
           this._configureMarkerSlot(slot, {
             x: scr.x,
             y: scr.y,
@@ -358,7 +423,7 @@ export const WorldMarkers = {
       if (aScr) {
         const aDist = Math.round(this.player.pos.distanceTo(aPos));
         const aSecs = Math.max(0, this.player.airstrikeTarget.timer).toFixed(1);
-        const slot = this._acquireWorldMarkerSlot(activeCount++);
+        const slot = this._acquireWorldMarkerSlot('misc');
         this._configureMarkerSlot(slot, {
           x: aScr.x,
           y: aScr.y,
@@ -396,7 +461,7 @@ export const WorldMarkers = {
               (activeAircraft.aircraftRole === 'gunship' ||
                 (activeAircraft.aircraftRole === 'fighter' && activeAircraft.activeWeaponSlot === 2)));
           const ringColor = isMortarEmplace ? '#f1c40f' : isBombOrMortar ? '#2ecc71' : '#00d2d3';
-          const slot = this._acquireWorldMarkerSlot(activeCount++);
+          const slot = this._acquireWorldMarkerSlot('airBox');
           this._configureMarkerSlot(slot, {
             x: ccipScr.x,
             y: ccipScr.y,
@@ -456,6 +521,9 @@ export const WorldMarkers = {
             }
             const scr = projectToScreen(v.pos, 0);
             if (!scr) continue;
+            const vx = scr.x;
+            const vy = scr.y;
+            const vCenterDist = scr.centerDist;
             const isLocked = lockTgt === v && lockProg >= 1;
             const isSeeking = lockTgt === v && lockProg > 0.05 && lockProg < 1;
             const shortModel = v.name ? v.name.split(' ')[0] : v.type.toUpperCase();
@@ -482,10 +550,10 @@ export const WorldMarkers = {
               ? `📡 SEEK ${shortModel} (${Math.round(lockProg * 100)}%) • ${vDist}m`
               : `${shortModel} • ${vDist}m`;
 
-            const slot = this._acquireWorldMarkerSlot(activeCount++);
+            const slot = this._acquireWorldMarkerSlot('airBox');
             this._configureMarkerSlot(slot, {
-              x: scr.x,
-              y: scr.y,
+              x: vx,
+              y: vy,
               opacity: isLocked || isSeeking ? 0.98 : 0.88,
               iconClass: '',
               iconStyle: `width:26px;height:26px;background:transparent;border:${boxBorder};border-radius:2px;box-sizing:border-box;`,
@@ -508,32 +576,37 @@ export const WorldMarkers = {
               const leadData = this.player.computeAircraftLeadData(v, refPos, 360, 4.5);
               const leadScr = leadData && leadData.leadPos ? projectToScreen(leadData.leadPos, 0) : null;
               if (leadScr) {
-                const dx = leadScr.x - scr.x;
-                const dy = leadScr.y - scr.y;
+                const lx = leadScr.x;
+                const ly = leadScr.y;
+                const lCenterDist = leadScr.centerDist;
+                const dx = lx - vx;
+                const dy = ly - vy;
                 const lineLen = Math.hypot(dx, dy);
                 const angleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
-                const isOnLead = leadScr.centerDist <= 34;
-                const isNearLead = leadScr.centerDist <= 85;
+                const isOnLead = lCenterDist <= 34;
+                const isNearLead = lCenterDist <= 85;
                 const pipperCol = isOnLead
                   ? '#2ecc71'
                   : isNearLead
                   ? '#ffeb3b'
                   : '#00d2d3';
 
-                // Connecting Flight-Path Lead Vector Line from Enemy Aircraft Nose to Lead Pipper
+                // Connecting Flight-Path Lead Vector Line (compositor-only translate3d + rotate + scaleX, zero width reflow)
                 if (lineLen > 14 && lineLen < 680) {
-                  const midX = (scr.x + leadScr.x) * 0.5;
-                  const midY = (scr.y + leadScr.y) * 0.5;
-                  const lineSlot = this._acquireWorldMarkerSlot(activeCount++);
-                  this._configureMarkerSlot(lineSlot, {
-                    x: midX,
-                    y: midY,
-                    opacity: isOnLead ? 0.95 : 0.78,
-                    iconClass: '',
-                    iconStyle: `width:${Math.max(8, Math.round(lineLen - 22))}px;height:0px;border-top:1.8px dashed ${pipperCol};transform:rotate(${angleDeg.toFixed(1)}deg);box-sizing:border-box;pointer-events:none;`,
-                    iconText: '',
-                    distText: ''
-                  });
+                  const invLen = 1 / lineLen;
+                  const startX = vx + dx * invLen * 11;
+                  const startY = vy + dy * invLen * 11;
+                  const segLen = Math.max(8, lineLen - 22);
+                  const lineSlot = this._acquireWorldMarkerSlot('leadLine');
+                  this._configureLeadLineSlot(
+                    lineSlot,
+                    startX,
+                    startY,
+                    angleDeg,
+                    segLen,
+                    pipperCol,
+                    isOnLead ? 0.95 : 0.78
+                  );
                 }
 
                 // Hollow Circular MG Lead Pipper Reticle ahead of the enemy plane
@@ -541,16 +614,16 @@ export const WorldMarkers = {
                   ? `🎯 SHOOT LEAD (+${Math.round(leadData.leadMeters)}m • ${leadData.tof.toFixed(2)}s)`
                   : isNearLead
                   ? `LEAD +${Math.round(leadData.leadMeters)}m (${leadData.tof.toFixed(1)}s)`
-                  : scr.centerDist < 420
+                  : vCenterDist < 420
                   ? `LEAD +${Math.round(leadData.leadMeters)}m`
                   : '';
                 const pipperBorder = isOnLead
                   ? `2.2px solid #2ecc71;box-shadow:0 0 12px rgba(46,204,113,0.95), inset 0 0 6px rgba(46,204,113,0.45)`
                   : `1.8px solid ${pipperCol};box-shadow:0 0 6px rgba(0,0,0,0.75)`;
-                const leadSlot = this._acquireWorldMarkerSlot(activeCount++);
+                const leadSlot = this._acquireWorldMarkerSlot('airBox');
                 this._configureMarkerSlot(leadSlot, {
-                  x: leadScr.x,
-                  y: leadScr.y,
+                  x: lx,
+                  y: ly,
                   opacity: isOnLead ? 1.0 : 0.92,
                   iconClass: '',
                   iconStyle: `width:22px;height:22px;background:transparent;border:${pipperBorder};border-radius:50%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;color:${pipperCol};font-size:10px;font-weight:900;`,
@@ -584,7 +657,7 @@ export const WorldMarkers = {
                 : '#ff9f43';
             // Progressive disclosure: only show type name when near the aiming reticle; peripheral targets show compact range only
             const groundTag = isNearAim ? `${vLabel} • ${vDist}m` : scr.centerDist < 380 ? `${vDist}m` : '';
-            const slot = this._acquireWorldMarkerSlot(activeCount++);
+            const slot = this._acquireWorldMarkerSlot('airBox');
             this._configureMarkerSlot(slot, {
               x: scr.x,
               y: scr.y,
@@ -610,7 +683,7 @@ export const WorldMarkers = {
         cl.minDist <= 4.8 && !inAds
           ? `[F] REVIVE • [E] DRAG (${cl.closestBot.name})`
           : '';
-      const slot = this._acquireWorldMarkerSlot(activeCount++);
+      const slot = this._acquireWorldMarkerSlot('revive');
       this._configureMarkerSlot(slot, {
         x: cl.x,
         y: cl.y,
@@ -634,7 +707,7 @@ export const WorldMarkers = {
             const color = inSq ? '#2ecc71' : '#f1c40f';
             const op = getSightlineOpacity(scr.centerDist, 0.82, 0.22);
             const showName = scr.centerDist > 75 && !inAds;
-            const slot = this._acquireWorldMarkerSlot(activeCount++);
+            const slot = this._acquireWorldMarkerSlot('ally');
             this._configureMarkerSlot(slot, {
               x: scr.x,
               y: scr.y,
@@ -657,7 +730,7 @@ export const WorldMarkers = {
       if (scr) {
         const dist = Math.round(this.player.pos.distanceTo(ping.pos));
         const col = ping.isEnemy ? '#ff2e2e' : '#f1c40f';
-        const slot = this._acquireWorldMarkerSlot(activeCount++);
+        const slot = this._acquireWorldMarkerSlot('misc');
         this._configureMarkerSlot(slot, {
           x: scr.x,
           y: scr.y,
@@ -685,7 +758,7 @@ export const WorldMarkers = {
               dist <= 4.5
                 ? `[F] RESUPPLY • [L] CYCLE ROLE (${Math.round(dist)}m)`
                 : `📦 AMMO & KIT (${Math.round(dist)}m)`;
-            const slot = this._acquireWorldMarkerSlot(activeCount++);
+            const slot = this._acquireWorldMarkerSlot('misc');
             this._configureMarkerSlot(slot, {
               x: scr.x,
               y: scr.y,
@@ -701,12 +774,14 @@ export const WorldMarkers = {
       }
     }
 
-    // Hide any unused pooled marker nodes without removing them from the DOM
-    if (this._markerPool) {
-      for (let i = activeCount; i < this._markerPool.length; i++) {
-        const slot = this._markerPool[i];
-        if (slot && slot.visible) {
+    // Hide unused tail elements of each archetype sub-pool without thrashing DOM classes/styles
+    for (let pIdx = 0; pIdx < MARKER_POOL_TYPES.length; pIdx++) {
+      const bucket = pools[MARKER_POOL_TYPES[pIdx]];
+      for (let i = bucket.idx; i < bucket.items.length; i++) {
+        const slot = bucket.items[i];
+        if (slot && slot.root._visible !== false) {
           slot.root.style.display = 'none';
+          slot.root._visible = false;
           slot.visible = false;
         }
       }

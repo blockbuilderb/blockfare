@@ -1,35 +1,114 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=90';
-import { BOT } from '../config.js?v=90';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=90';
-import { events } from '../events.js?v=90';
+import { sound } from '../audio.js?v=91';
+import { BOT } from '../config.js?v=91';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=91';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=91';
+import { events } from '../events.js?v=91';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
+function markShared(item) {
+  item.userData.shared = true;
+  return item;
+}
+
+const SHARED_BOT_SAM_GEO = markShared(new THREE.BoxGeometry(0.2, 0.2, 1.15));
+const SHARED_BOT_SAM_MAT = markShared(new THREE.MeshBasicMaterial({ color: 0x00d2d3 }));
+const SHARED_BOT_RPG_GEO = markShared(new THREE.BoxGeometry(0.2, 0.2, 0.72));
+const SHARED_BOT_RPG_MAT = markShared(new THREE.MeshBasicMaterial({ color: 0xe67e22 }));
+const SHARED_CHUTE_CANOPY_GEO = markShared(new THREE.BoxGeometry(3.8, 0.52, 2.2));
+const SHARED_CHUTE_CORD_GEO = markShared(new THREE.BoxGeometry(0.03, 2.5, 0.03));
+const SHARED_CHUTE_US_MAT = markShared(
+  new THREE.MeshStandardMaterial({ color: 0x4b6584, roughness: 0.75 })
+);
+const SHARED_CHUTE_RU_MAT = markShared(
+  new THREE.MeshStandardMaterial({ color: 0x4b5320, roughness: 0.75 })
+);
+const SHARED_CHUTE_LINE_MAT = markShared(new THREE.MeshBasicMaterial({ color: 0xdfe6e9 }));
+
+function acquireTracerLine(botMgr, x0, y0, z0, x1, y1, z1, colorHex, opacity = 0.88) {
+  if (!botMgr._tracerPool) botMgr._tracerPool = [];
+  let line = botMgr._tracerPool.pop();
+  if (!line) {
+    const positions = new Float32Array(6);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.userData.shared = true;
+    const mat = new THREE.LineBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity
+    });
+    mat.userData.shared = true;
+    line = new THREE.Line(geo, mat);
+    line.frustumCulled = false;
+    botMgr.scene.add(line);
+  } else {
+    line.material.color.setHex(colorHex);
+    line.material.opacity = opacity;
+    line.visible = true;
+  }
+  const posAttr = line.geometry.attributes.position;
+  posAttr.setXYZ(0, x0, y0, z0);
+  posAttr.setXYZ(1, x1, y1, z1);
+  posAttr.needsUpdate = true;
+  return line;
+}
+
+function releaseTracerLine(botMgr, line) {
+  if (!line) return;
+  line.visible = false;
+  if (!botMgr._tracerPool) botMgr._tracerPool = [];
+  botMgr._tracerPool.push(line);
+}
+
+function setBotEnemyRef(bot, pos, isPlayer, isVehicle, unit) {
+  let ref = bot._enemyRef;
+  if (!ref) {
+    ref = { isPlayer: false, isVehicle: false, pos: null, unit: null, bot: null, vehicle: null };
+    bot._enemyRef = ref;
+  }
+  ref.pos = pos;
+  ref.isPlayer = Boolean(isPlayer);
+  ref.isVehicle = Boolean(isVehicle);
+  ref.unit = unit;
+  ref.bot = !isPlayer && !isVehicle ? unit : null;
+  ref.vehicle = isVehicle ? unit : null;
+  return ref;
+}
+
 export function spawnTracer(start, end, color = 0xffeaa7) {
   if (this.tracers.length > 90) return;
-  const points = [start.clone(), end.clone()];
-  const geo = new THREE.BufferGeometry().setFromPoints(points);
-  const mat = new THREE.LineBasicMaterial({
+  const line = acquireTracerLine(
+    this,
+    start.x,
+    start.y,
+    start.z,
+    end.x,
+    end.y,
+    end.z,
     color,
-    transparent: true,
-    opacity: 0.85
-  });
-  const line = new THREE.Line(geo, mat);
-  this.scene.add(line);
+    0.85
+  );
   this.tracers.push({ line, life: 0.075 });
 }
 
 export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = null, onAwardXp = null) {
-  // 1. Update Contested / Overrun Base states (Main Bases + Forward Flags A-E) at 4 Hz
-  this._contestedTimer = (this._contestedTimer || 0) - dt;
-  if (this._contestedTimer <= 0) {
-    this._contestedTimer = 0.25;
-    this.updateContestedBases(player, onAwardXp);
-  }
-
-  // Pre-collect downed bots and active alive bots per team once per frame for O(1) Medic & Target scanning
+  // 0. Rebuild 2D spatial grids & team lists once at the start of frame for O(1) queries
   this._frameRaycasts = 0;
+  if (!this.spatialGrid) {
+    this.spatialGrid = new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 300);
+  }
+  if (!this.teamGrid) {
+    this.teamGrid = {
+      US: new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 160),
+      RU: new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 160)
+    };
+  }
+  this.spatialGrid.clear();
+  this.teamGrid.US.clear();
+  this.teamGrid.RU.clear();
+
   if (!this.downedByTeam) {
     this.downedByTeam = { US: [], RU: [] };
   } else {
@@ -45,11 +124,22 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
   for (let i = 0; i < this.bots.length; i++) {
     const b = this.bots[i];
     if (b.dead) continue;
+    this.spatialGrid.insert(b.pos.x, b.pos.z, b);
+    if (this.teamGrid[b.team]) {
+      this.teamGrid[b.team].insert(b.pos.x, b.pos.z, b);
+    }
     if (b.downed) {
       if (this.downedByTeam[b.team]) this.downedByTeam[b.team].push(b);
     } else if (!b.drivingVehicle && this.aliveByTeam[b.team]) {
       this.aliveByTeam[b.team].push(b);
     }
+  }
+
+  // 1. Update Contested / Overrun Base states (Main Bases + Forward Flags A-E) at 4 Hz
+  this._contestedTimer = (this._contestedTimer || 0) - dt;
+  if (this._contestedTimer <= 0) {
+    this._contestedTimer = 0.25;
+    this.updateContestedBases(player, onAwardXp);
   }
 
   // 2. Update In-Flight Ballistic Bot Bullets, Bullet Tracers & 3D Medic Smoke Screens
@@ -76,9 +166,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
 
     if (bb.traveled >= bb.maxDist) {
       if (bb.tracerLine) {
-        this.scene.remove(bb.tracerLine);
-        bb.tracerLine.geometry.dispose();
-        bb.tracerLine.material.dispose();
+        releaseTracerLine(this, bb.tracerLine);
         bb.tracerLine = null;
       }
       if (bb.voxelHit) {
@@ -195,6 +283,11 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         player.applySuppression(intensity);
       }
       this.botBullets.splice(i, 1);
+      if (!this._bulletPool) this._bulletPool = [];
+      bb.bot = null;
+      bb.voxelHit = null;
+      bb.target.unit = null;
+      this._bulletPool.push(bb);
     }
   }
 
@@ -202,9 +295,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     const t = this.tracers[i];
     t.life -= dt;
     if (t.life <= 0) {
-      this.scene.remove(t.line);
-      t.line.geometry.dispose();
-      t.line.material.dispose();
+      releaseTracerLine(this, t.line);
       this.tracers.splice(i, 1);
     }
   }
@@ -215,8 +306,8 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     if (sc.life <= 0) {
       this.scene.remove(sc.group);
       for (const p of sc.puffs) {
-        p.geometry.dispose();
-        p.material.dispose();
+        if (p.geometry && !p.geometry.userData?.shared) p.geometry.dispose();
+        if (p.material && !p.material.userData?.shared) p.material.dispose();
       }
       this.smokeClouds.splice(i, 1);
     } else {
@@ -242,10 +333,31 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     }
   }
 
+  // Precompute camera forward XZ once per frame for off-camera scene-graph & limb culling
+  let camX = player ? player.pos.x : 0;
+  let camZ = player ? player.pos.z : 0;
+  let camFwdX = player ? -Math.sin(player.yaw || 0) : 0;
+  let camFwdZ = player ? -Math.cos(player.yaw || 0) : -1;
+  let hasHorizCam = Boolean(player);
+  if (player?.camera?.matrixWorld?.elements) {
+    const me = player.camera.matrixWorld.elements;
+    camX = me[12];
+    camZ = me[14];
+    const rfx = -me[8];
+    const rfz = -me[10];
+    const hLen = Math.hypot(rfx, rfz);
+    if (hLen >= 0.15) {
+      camFwdX = rfx / hLen;
+      camFwdZ = rfz / hLen;
+    } else {
+      hasHorizCam = false;
+    }
+  }
+
   for (let bIdx = 0; bIdx < this.bots.length; bIdx++) {
     const bot = this.bots[bIdx];
     bot._raycastsThisFrame = 0;
-    const parts = bot.mesh.userData.parts;
+    const parts = bot.parts || bot.mesh.userData.parts;
     bot.inPlayerSquad = bot.team === player.team && bot.squad === (player.squad || 'ALPHA');
 
     if (bot.spottedTimer > 0) {
@@ -302,6 +414,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
 
         bot.dead = false;
         bot.downed = false;
+        bot._losCache?.clear();
         bot.hp = bot.maxHp || BOT.HP;
         bot.hasHelmet = true;
         bot.armorHp = BOT.ARMOR_HP;
@@ -341,6 +454,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
           bot.targetFlagIndex = activeOrder.flagIndex;
           bot.playerOrderTimer = Math.max(bot.playerOrderTimer || 0, 90);
         }
+        bot.mesh._culledOffFrustum = false;
         bot.mesh.visible = true;
         if (onTicketBleedFn) onTicketBleedFn(bot.team, 1, 'SOLDIER', bot.name);
       }
@@ -352,6 +466,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     if (bot.drivingVehicle) {
       if (bot.drivingVehicle.dead || bot.drivingVehicle.npcDriver !== bot) {
         bot.drivingVehicle = null;
+        bot.mesh._culledOffFrustum = false;
         bot.mesh.visible = true;
       } else {
         bot.pos.copy(bot.drivingVehicle.pos);
@@ -360,35 +475,47 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       }
     }
 
+    const dxCam = bot.pos.x - camX;
+    const dzCam = bot.pos.z - camZ;
+    const distSqCam = dxCam * dxCam + dzCam * dzCam;
+    const dotUnnorm = dxCam * camFwdX + dzCam * camFwdZ;
+    // Behind camera (dot < -0.25) and >16m away -> cull scene-graph matrix updates & limb math
+    const offFrustum =
+      hasHorizCam &&
+      distSqCam > 16 * 16 &&
+      dotUnnorm < 0 &&
+      dotUnnorm * dotUnnorm > 0.0625 * distSqCam;
+
     // Mid-Air Ejected Pilot Parachute Descent
     if (bot.parachuting) {
       if (!bot.parachuteMesh) {
         const pGroup = new THREE.Group();
         const canopy = new THREE.Mesh(
-          new THREE.BoxGeometry(3.8, 0.52, 2.2),
-          new THREE.MeshStandardMaterial({
-            color: bot.team === 'US' ? 0x4b6584 : 0x4b5320,
-            roughness: 0.75
-          })
+          SHARED_CHUTE_CANOPY_GEO,
+          bot.team === 'US' ? SHARED_CHUTE_US_MAT : SHARED_CHUTE_RU_MAT
         );
         canopy.position.set(0, 3.6, 0);
+        canopy.updateMatrix();
+        canopy.matrixAutoUpdate = false;
         pGroup.add(canopy);
-        const lineMat = new THREE.MeshBasicMaterial({ color: 0xdfe6e9 });
         for (const [lx, lz] of [
           [-1.35, -0.75],
           [1.35, -0.75],
           [-1.35, 0.75],
           [1.35, 0.75]
         ]) {
-          const cord = new THREE.Mesh(new THREE.BoxGeometry(0.03, 2.5, 0.03), lineMat);
+          const cord = new THREE.Mesh(SHARED_CHUTE_CORD_GEO, SHARED_CHUTE_LINE_MAT);
           cord.position.set(lx * 0.55, 2.25, lz * 0.55);
           cord.rotation.z = -lx * 0.24;
           cord.rotation.x = lz * 0.22;
+          cord.updateMatrix();
+          cord.matrixAutoUpdate = false;
           pGroup.add(cord);
         }
         bot.parachuteMesh = pGroup;
         this.scene.add(pGroup);
       }
+      bot.mesh._culledOffFrustum = offFrustum;
       bot.mesh.visible = true;
       bot.parachuteMesh.visible = true;
       const gY = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
@@ -426,22 +553,30 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.bleedOutTimer -= dt;
       }
 
-      bot.animPhase += dt * 2.5;
       const gY = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
       bot.pos.y = gY + 0.22;
       bot.mesh.rotation.x = -Math.PI / 2;
-      parts.pelvisGroup.rotation.y = 0;
-      parts.upperBody.position.y = 0.78;
-      parts.upperBody.rotation.set(0.15, Math.sin(bot.animPhase) * 0.12, 0);
-      parts.headGroup.rotation.set(0.35, Math.sin(bot.animPhase * 0.8) * 0.35, 0);
-      parts.leftLeg.rotation.x = Math.sin(bot.animPhase) * 0.25;
-      parts.rightLeg.rotation.x = -Math.sin(bot.animPhase) * 0.25;
-      parts.leftShin.rotation.x = 0.45;
-      parts.rightShin.rotation.x = 0.35;
-      if (parts.muzzleFlash) parts.muzzleFlash.material.opacity = 0;
+      if (parts.muzzleFlash && parts.muzzleFlash.visible) {
+        parts.muzzleFlash.visible = false;
+      }
+      if (offFrustum) {
+        bot.mesh._culledOffFrustum = true;
+      } else {
+        if (bot.mesh._culledOffFrustum) bot.mesh._culledOffFrustum = false;
+        bot.animPhase += dt * 2.5;
+        parts.pelvisGroup.rotation.y = 0;
+        parts.upperBody.position.y = 0.78;
+        parts.upperBody.rotation.set(0.15, Math.sin(bot.animPhase) * 0.12, 0);
+        parts.headGroup.rotation.set(0.35, Math.sin(bot.animPhase * 0.8) * 0.35, 0);
+        parts.leftLeg.rotation.x = Math.sin(bot.animPhase) * 0.25;
+        parts.rightLeg.rotation.x = -Math.sin(bot.animPhase) * 0.25;
+        parts.leftShin.rotation.x = 0.45;
+        parts.rightShin.rotation.x = 0.35;
+      }
 
       if (bot.bleedOutTimer <= 0) {
         this.clearBotRescueLinks(bot);
+        bot._losCache?.clear();
         bot.downed = false;
         bot.dead = true;
         bot.respawnTimer = BOT.RESPAWN_TIMER;
@@ -450,6 +585,10 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         events.emit('bot:killed', { bot, stage: 'bleedout' });
       }
       continue;
+    }
+
+    if (!offFrustum && bot.mesh._culledOffFrustum) {
+      bot.mesh._culledOffFrustum = false;
     }
 
     // =======================================================================
@@ -673,63 +812,69 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     // PHYSICAL BASE VEHICLE SEEKING & BOARDING (BRAVO Armor Squad prioritizes crewing Tanks/IFVs/Cars!)
     // =======================================================================
     let seekingVehicle = null;
-    if (vehicleManager && vehicleManager.vehicles && !bot.rescueTarget) {
-      const isBravoArmorCrew = bot.squad === 'BRAVO';
-      const seekRangeSq = isBravoArmorCrew
-        ? BOT.VEHICLE_SEEK_RANGE_BRAVO * BOT.VEHICLE_SEEK_RANGE_BRAVO
-        : BOT.VEHICLE_SEEK_RANGE_OTHER * BOT.VEHICLE_SEEK_RANGE_OTHER;
-      let bestVehDistSq = seekRangeSq;
-      for (const veh of vehicleManager.vehicles) {
-        if (
-          veh.dead ||
-          veh.isAircraft ||
-          veh.isEmplacement ||
-          veh.isWarehouseBike ||
-          veh.driver ||
-          veh.npcDriver ||
-          veh.team !== bot.team
-        ) {
-          continue;
-        }
-        const dSq = bot.pos.distanceToSquared(veh.pos);
-        if (dSq >= bestVehDistSq) continue;
-        // Check if another closer friendly bot (or a BRAVO Armor Squad crewman) is already sprinting to claim this vehicle
-        if (
-          veh.claimedByBot &&
-          veh.claimedByBot !== bot &&
-          !veh.claimedByBot.dead &&
-          !veh.claimedByBot.downed &&
-          !veh.claimedByBot.drivingVehicle &&
-          ((veh.claimedByBot.squad === 'BRAVO' && !isBravoArmorCrew) ||
-            veh.claimedByBot.pos.distanceToSquared(veh.pos) < dSq)
-        ) {
-          continue;
-        }
-        bestVehDistSq = dSq;
-        seekingVehicle = veh;
-      }
-
-      if (seekingVehicle) {
-        seekingVehicle.claimedByBot = bot;
-        if (bestVehDistSq <= BOT.VEHICLE_BOARD_DISTANCE * BOT.VEHICLE_BOARD_DISTANCE) {
-          // NPC has reached the vehicle at the Base Motor Pool -> Climb Inside & Drive!
-          seekingVehicle.npcDriver = bot;
-          seekingVehicle.claimedByBot = null;
-          bot.drivingVehicle = seekingVehicle;
-          bot.mesh.visible = false;
-          if (this.onTelemetryEvent) {
-            this.onTelemetryEvent('NPC_BOARDED_VEHICLE', {
-              npc: bot.name,
-              team: bot.team,
-              squad: bot.squad,
-              role: bot.role,
-              vehicleId: seekingVehicle.id,
-              vehicleName: seekingVehicle.name,
-              x: Math.round(seekingVehicle.pos.x),
-              z: Math.round(seekingVehicle.pos.z)
-            });
+    if (vehicleManager && !bot.rescueTarget) {
+      const boardableList = vehicleManager.boardableGroundByTeam
+        ? vehicleManager.boardableGroundByTeam[bot.team]
+        : vehicleManager.vehicles;
+      if (boardableList && boardableList.length > 0) {
+        const isBravoArmorCrew = bot.squad === 'BRAVO';
+        const seekRangeSq = isBravoArmorCrew
+          ? BOT.VEHICLE_SEEK_RANGE_BRAVO * BOT.VEHICLE_SEEK_RANGE_BRAVO
+          : BOT.VEHICLE_SEEK_RANGE_OTHER * BOT.VEHICLE_SEEK_RANGE_OTHER;
+        let bestVehDistSq = seekRangeSq;
+        for (let vi = 0; vi < boardableList.length; vi++) {
+          const veh = boardableList[vi];
+          if (
+            veh.dead ||
+            veh.isAircraft ||
+            veh.isEmplacement ||
+            veh.isWarehouseBike ||
+            veh.driver ||
+            veh.npcDriver ||
+            veh.team !== bot.team
+          ) {
+            continue;
           }
-          continue;
+          const dSq = bot.pos.distanceToSquared(veh.pos);
+          if (dSq >= bestVehDistSq) continue;
+          // Check if another closer friendly bot (or a BRAVO Armor Squad crewman) is already sprinting to claim this vehicle
+          if (
+            veh.claimedByBot &&
+            veh.claimedByBot !== bot &&
+            !veh.claimedByBot.dead &&
+            !veh.claimedByBot.downed &&
+            !veh.claimedByBot.drivingVehicle &&
+            ((veh.claimedByBot.squad === 'BRAVO' && !isBravoArmorCrew) ||
+              veh.claimedByBot.pos.distanceToSquared(veh.pos) < dSq)
+          ) {
+            continue;
+          }
+          bestVehDistSq = dSq;
+          seekingVehicle = veh;
+        }
+
+        if (seekingVehicle) {
+          seekingVehicle.claimedByBot = bot;
+          if (bestVehDistSq <= BOT.VEHICLE_BOARD_DISTANCE * BOT.VEHICLE_BOARD_DISTANCE) {
+            // NPC has reached the vehicle at the Base Motor Pool -> Climb Inside & Drive!
+            seekingVehicle.npcDriver = bot;
+            seekingVehicle.claimedByBot = null;
+            bot.drivingVehicle = seekingVehicle;
+            bot.mesh.visible = false;
+            if (this.onTelemetryEvent) {
+              this.onTelemetryEvent('NPC_BOARDED_VEHICLE', {
+                npc: bot.name,
+                team: bot.team,
+                squad: bot.squad,
+                role: bot.role,
+                vehicleId: seekingVehicle.id,
+                vehicleName: seekingVehicle.name,
+                x: Math.round(seekingVehicle.pos.x),
+                z: Math.round(seekingVehicle.pos.z)
+              });
+            }
+            continue;
+          }
         }
       }
     }
@@ -762,16 +907,18 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         nearestArmorDistSq = bot.pos.distanceToSquared(nearestArmor.pos);
       } else {
         bot._armorScanTimer = 0.35 + Math.random() * 0.25;
-        for (const veh of vehicleManager.vehicles) {
-          if (veh.dead || veh.team === bot.team) continue;
-          // Never waste RPG-7 rockets or 3D sightline raycasts on unoccupied parked FOB bikes/ATVs!
-          const isOccupied = Boolean(veh.driver || veh.npcDriver);
-          if (!isOccupied && (veh.isWarehouseBike || veh.type === 'bike' || veh.type === 'atv')) {
-            continue;
-          }
-          // Engineers carry both RPG-7 (Anti-Armor up to 135m) and Stinger/Igla MANPADS (Anti-Air up to 380m)!
-          if (veh.isAircraft) {
-            if (!veh.driver && !veh.aiPilotActive) continue;
+        const enemyTeam = bot.team === 'US' ? 'RU' : 'US';
+        const enemyAirList = vehicleManager.activeAircraftByTeam
+          ? vehicleManager.activeAircraftByTeam[enemyTeam]
+          : null;
+        const enemyGroundList = vehicleManager.activeGroundTargetsByTeam
+          ? vehicleManager.activeGroundTargetsByTeam[bot.team]
+          : null;
+
+        if (enemyAirList && enemyGroundList) {
+          for (let ai = 0; ai < enemyAirList.length; ai++) {
+            const veh = enemyAirList[ai];
+            if (veh.dead || (!veh.driver && !veh.aiPilotActive)) continue;
             if (veh.isLowAltRadarMasked || (veh.airborneRadarTimer || 0) < 4.0) continue;
             const isStealthPlane = veh.isStealthAircraft || veh.aircraftRole === 'b2_spirit';
             if (isStealthPlane && (veh.flareActiveTimer || 0) > 0) continue;
@@ -784,17 +931,55 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
               nearestArmorDistSq = airDistSq;
               nearestArmor = veh;
             }
-            continue;
           }
-          // Engineers prioritize enemy armor that is actively driven by the Player or an NPC
-          const dSq = bot.pos.distanceToSquared(veh.pos);
-          const effectiveDistSq = isOccupied ? dSq * 0.7 : dSq;
-          if (
-            effectiveDistSq < nearestArmorDistSq &&
-            this.canBotSeeTarget(bot, `veh_${veh.id}`, veh.pos, true)
-          ) {
-            nearestArmorDistSq = dSq;
-            nearestArmor = veh;
+          if (!nearestArmor) {
+            for (let gi = 0; gi < enemyGroundList.length; gi++) {
+              const veh = enemyGroundList[gi];
+              if (veh.dead || veh.team === bot.team) continue;
+              const isOccupied = Boolean(veh.driver || veh.npcDriver);
+              const dSq = bot.pos.distanceToSquared(veh.pos);
+              const effectiveDistSq = isOccupied ? dSq * 0.7 : dSq;
+              if (
+                effectiveDistSq < nearestArmorDistSq &&
+                this.canBotSeeTarget(bot, `veh_${veh.id}`, veh.pos, true)
+              ) {
+                nearestArmorDistSq = dSq;
+                nearestArmor = veh;
+              }
+            }
+          }
+        } else {
+          for (const veh of vehicleManager.vehicles) {
+            if (veh.dead || veh.team === bot.team) continue;
+            const isOccupied = Boolean(veh.driver || veh.npcDriver);
+            if (!isOccupied && (veh.isWarehouseBike || veh.type === 'bike' || veh.type === 'atv')) {
+              continue;
+            }
+            if (veh.isAircraft) {
+              if (!veh.driver && !veh.aiPilotActive) continue;
+              if (veh.isLowAltRadarMasked || (veh.airborneRadarTimer || 0) < 4.0) continue;
+              const isStealthPlane = veh.isStealthAircraft || veh.aircraftRole === 'b2_spirit';
+              if (isStealthPlane && (veh.flareActiveTimer || 0) > 0) continue;
+              const maxManpadsRange = isStealthPlane ? 380 * (veh.stealthFactor || 0.12) : 380;
+              const airDistSq = bot.pos.distanceToSquared(veh.pos);
+              if (
+                airDistSq < maxManpadsRange * maxManpadsRange &&
+                (!nearestArmor || !nearestArmor.isAircraft || airDistSq < nearestArmorDistSq)
+              ) {
+                nearestArmorDistSq = airDistSq;
+                nearestArmor = veh;
+              }
+              continue;
+            }
+            const dSq = bot.pos.distanceToSquared(veh.pos);
+            const effectiveDistSq = isOccupied ? dSq * 0.7 : dSq;
+            if (
+              effectiveDistSq < nearestArmorDistSq &&
+              this.canBotSeeTarget(bot, `veh_${veh.id}`, veh.pos, true)
+            ) {
+              nearestArmorDistSq = dSq;
+              nearestArmor = veh;
+            }
           }
         }
         bot._cachedArmorTarget = nearestArmor;
@@ -818,7 +1003,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       if (parts.rpgBackTube) parts.rpgBackTube.visible = !shouldUseRpg;
     }
 
-    // Find nearest VISIBLE enemy (up to 115m engagement range, strictly respecting building walls & thin gaps!)
+    // Find nearest VISIBLE enemy (ring-ordered so close-range threats are tested FIRST within the 2-raycast budget!)
     bot._targetScanTimer = (bot._targetScanTimer || 0) - dt;
     let nearestEnemy = null;
     let nearestDistSq = BOT.ENGAGE_RANGE_INFANTRY * BOT.ENGAGE_RANGE_INFANTRY;
@@ -830,7 +1015,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     } else if (nearestArmor) {
       // Engineers prioritize enemy Main Battle Tanks, APCs & Armored Cars!
       nearestDistSq = nearestArmorDistSq;
-      nearestEnemy = { isVehicle: true, pos: nearestArmor.pos, unit: nearestArmor };
+      nearestEnemy = setBotEnemyRef(bot, nearestArmor.pos, false, true, nearestArmor);
     } else if (
       bot._targetScanTimer > 0 &&
       bot._cachedEnemy &&
@@ -840,6 +1025,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       !bot._cachedEnemy.unit.drivingVehicle
     ) {
       nearestEnemy = bot._cachedEnemy;
+      nearestEnemy.pos = nearestEnemy.unit.pos;
       nearestDistSq = bot.pos.distanceToSquared(nearestEnemy.pos);
     } else {
       bot._targetScanTimer = 0.28 + Math.random() * 0.22;
@@ -859,38 +1045,47 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
             this.canBotSeeTarget(bot, 'PLAYER_VEH', pVeh.pos, true)
           ) {
             nearestDistSq = dSq;
-            nearestEnemy = {
-              isVehicle: true,
-              pos: pVeh.pos,
-              unit: pVeh
-            };
+            nearestEnemy = setBotEnemyRef(bot, pVeh.pos, false, true, pVeh);
           }
         } else if (
           dSq < nearestDistSq &&
           this.canBotSeeTarget(bot, 'PLAYER', player.pos, true)
         ) {
           nearestDistSq = dSq;
-          nearestEnemy = { isPlayer: true, pos: player.pos, unit: player };
+          nearestEnemy = setBotEnemyRef(bot, player.pos, true, false, player);
         }
       }
 
       const maxEngage = BOT.ENGAGE_RANGE_INFANTRY;
-      const enemyList =
-        this.aliveByTeam && this.aliveByTeam[bot.team === 'US' ? 'RU' : 'US']
-          ? this.aliveByTeam[bot.team === 'US' ? 'RU' : 'US']
-          : this.bots;
-      for (let i = 0; i < enemyList.length; i++) {
-        const other = enemyList[i];
-        if (other.dead || other.downed || other.drivingVehicle || other.team === bot.team) continue;
-        const dx = other.pos.x - bot.pos.x;
-        if (dx > maxEngage || dx < -maxEngage) continue;
-        const dz = other.pos.z - bot.pos.z;
-        if (dz > maxEngage || dz < -maxEngage) continue;
-        const dy = other.pos.y - bot.pos.y;
-        const dSq = dx * dx + dy * dy + dz * dz;
-        if (dSq < nearestDistSq && this.canBotSeeTarget(bot, other.id, other.pos, true)) {
-          nearestDistSq = dSq;
-          nearestEnemy = { isPlayer: false, pos: other.pos, unit: other };
+      const enemyTeam = bot.team === 'US' ? 'RU' : 'US';
+      const enemyGrid = this.teamGrid && this.teamGrid[enemyTeam];
+      if (enemyGrid) {
+        enemyGrid.forEachRingOrder(bot.pos.x, bot.pos.z, maxEngage, (other, dSq2D) => {
+          if (dSq2D >= nearestDistSq) return;
+          if (other.dead || other.downed || other.drivingVehicle || other.team === bot.team) return;
+          const dy = other.pos.y - bot.pos.y;
+          const dSq = dSq2D + dy * dy;
+          if (dSq < nearestDistSq && this.canBotSeeTarget(bot, other.id, other.pos, true)) {
+            nearestDistSq = dSq;
+            nearestEnemy = setBotEnemyRef(bot, other.pos, false, false, other);
+          }
+        });
+      } else {
+        const enemyList =
+          this.aliveByTeam && this.aliveByTeam[enemyTeam] ? this.aliveByTeam[enemyTeam] : this.bots;
+        for (let i = 0; i < enemyList.length; i++) {
+          const other = enemyList[i];
+          if (other.dead || other.downed || other.drivingVehicle || other.team === bot.team) continue;
+          const dx = other.pos.x - bot.pos.x;
+          if (dx > maxEngage || dx < -maxEngage) continue;
+          const dz = other.pos.z - bot.pos.z;
+          if (dz > maxEngage || dz < -maxEngage) continue;
+          const dy = other.pos.y - bot.pos.y;
+          const dSq = dx * dx + dy * dy + dz * dz;
+          if (dSq < nearestDistSq && this.canBotSeeTarget(bot, other.id, other.pos, true)) {
+            nearestDistSq = dSq;
+            nearestEnemy = setBotEnemyRef(bot, other.pos, false, false, other);
+          }
         }
       }
       bot._cachedEnemy = nearestEnemy;
@@ -1534,17 +1729,15 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       const moveDirZ = bot.velZ / actualSpeed;
       const trampleDmg = Math.round(THREE.MathUtils.clamp(45 + actualSpeed * 10.5, 65, 145));
       const enemyTeam = bot.team === 'US' ? 'RU' : 'US';
-      const enemyList = this.aliveByTeam && this.aliveByTeam[enemyTeam] ? this.aliveByTeam[enemyTeam] : this.bots;
-      for (let eIdx = 0; eIdx < enemyList.length; eIdx++) {
-        const victim = enemyList[eIdx];
+      const checkVictim = (victim) => {
         if (!victim || victim.dead || victim.team === bot.team || victim.drivingVehicle || victim.isMountedKnight) {
-          continue;
+          return;
         }
-        if (victim._lastTrampleHitMs && nowMs - victim._lastTrampleHitMs < 550) continue;
+        if (victim._lastTrampleHitMs && nowMs - victim._lastTrampleHitMs < 550) return;
         const edx = victim.pos.x - bot.pos.x;
         const edz = victim.pos.z - bot.pos.z;
         const edy = Math.abs(victim.pos.y - bot.pos.y);
-        if (edy > 2.2) continue;
+        if (edy > 2.2) return;
         const fwdProj = edx * moveDirX + edz * moveDirZ;
         const latProj = Math.abs(-edx * moveDirZ + edz * moveDirX);
         if (fwdProj >= -0.4 && fwdProj <= 1.55 && latProj <= 0.95) {
@@ -1566,6 +1759,15 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
               null
             );
           }
+        }
+      };
+      const enemyGrid = this.teamGrid && this.teamGrid[enemyTeam];
+      if (enemyGrid) {
+        enemyGrid.forEachInRadius(bot.pos.x, bot.pos.z, 3.5, checkVictim);
+      } else {
+        const enemyList = this.aliveByTeam && this.aliveByTeam[enemyTeam] ? this.aliveByTeam[enemyTeam] : this.bots;
+        for (let eIdx = 0; eIdx < enemyList.length; eIdx++) {
+          checkVictim(enemyList[eIdx]);
         }
       }
       if (
@@ -1834,19 +2036,25 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     const targetLean = bot.leanDir;
     bot.leanAmount += (targetLean - bot.leanAmount) * Math.min(1, dt * 10);
 
-    // Decay firing recoil & hit flinch
+    // Decay firing recoil & hit flinch; toggle muzzleFlash visibility instead of mutating shared material opacity
     bot.recoilKick *= Math.pow(0.01, dt);
     if (bot.flinchTimer > 0) bot.flinchTimer = Math.max(0, bot.flinchTimer - dt);
     if (bot.muzzleFlashTimer > 0) {
       bot.muzzleFlashTimer -= dt;
-      parts.muzzleFlash.material.opacity = 0.92;
-      parts.muzzleFlash.rotation.z = Math.random() * Math.PI;
-    } else {
-      parts.muzzleFlash.material.opacity = 0;
+      if (parts.muzzleFlash) {
+        parts.muzzleFlash.visible = true;
+        if (parts.muzzleFlash.material && parts.muzzleFlash.material.opacity < 0.85) {
+          parts.muzzleFlash.material.opacity = 0.9;
+        }
+        parts.muzzleFlash.rotation.z = Math.random() * Math.PI;
+      }
+    } else if (parts.muzzleFlash && parts.muzzleFlash.visible) {
+      parts.muzzleFlash.visible = false;
     }
 
-    // Distance-based 3D Render Culling & Animation LOD for 250-Bot Scale:
+    // Distance-based 3D Render Culling, Off-Camera Frustum Culling & Animation LOD for 250-Bot Scale:
     // Soldiers beyond 340m (or 620m when scoped in) are hidden from WebGL draw calls while 100% active in AI simulation & Map!
+    // Soldiers >16m behind camera skip `updateMatrixWorld` scene-graph traversal AND sub-limb Euler updates!
     // Soldiers beyond 110m skip sub-limb Euler updates while keeping 3D position & yaw active!
     // Soldiers between 42m and 110m update sub-limb gait on alternating frames (30Hz LOD) to keep 60 FPS at crowded FOB C!
     const distSqToPlayer = bot.pos.distanceToSquared(player.pos);
@@ -1855,7 +2063,14 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     if (bot.mesh.visible !== within3DRender) {
       bot.mesh.visible = within3DRender;
     }
-    if (!within3DRender || distSqToPlayer > 110 * 110) {
+    if (!within3DRender || offFrustum) {
+      bot.mesh._culledOffFrustum = true;
+      continue;
+    }
+    if (bot.mesh._culledOffFrustum) {
+      bot.mesh._culledOffFrustum = false;
+    }
+    if (distSqToPlayer > 110 * 110) {
       continue;
     }
     if (distSqToPlayer > 42 * 42 && ((bIdx + (this._frameRaycasts || 0)) & 1) === 1) {
@@ -2014,6 +2229,7 @@ export function getBotMuzzleWorldPosition(bot) {
     bot &&
     bot.mesh &&
     bot.mesh.visible &&
+    !bot.mesh._culledOffFrustum &&
     bot.mesh.userData &&
     bot.mesh.userData.parts &&
     (!this.player || bot.pos.distanceToSquared(this.player.pos) <= 35 * 35)
@@ -2051,7 +2267,24 @@ export function getBotMuzzleWorldPosition(bot) {
 }
 
 export function botFireRpgAt(bot, targetVehicle, player) {
-  if (!targetVehicle.isAircraft && !this.hasClearSightline(bot, targetVehicle.pos, false)) return;
+  if (!targetVehicle.isAircraft) {
+    const now = performance.now();
+    const losKey = `veh_${targetVehicle.id}`;
+    const cached = bot._losCache ? bot._losCache.get(losKey) : null;
+    if (!(cached && !cached.blocked && now - cached.time <= 180)) {
+      const vis = this.hasClearSightline(bot, targetVehicle.pos, false);
+      if (!bot._losCache) bot._losCache = new Map();
+      if (cached) {
+        cached.blocked = !vis;
+        cached.vis = vis;
+        cached.time = now;
+        cached.exp = now + 260;
+      } else {
+        bot._losCache.set(losKey, { blocked: !vis, vis, time: now, exp: now + 260 });
+      }
+      if (!vis) return;
+    }
+  }
   bot.recoilKick = 0.18;
   bot.muzzleFlashTimer = 0.08;
 
@@ -2066,10 +2299,7 @@ export function botFireRpgAt(bot, targetVehicle, player) {
   if (targetVehicle.isAircraft) {
     bot.rpgCooldown = 18.0 + Math.random() * 6.0;
     const dir = new THREE.Vector3().subVectors(targetCenter, start).normalize();
-    const samMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.2, 0.2, 1.15),
-      new THREE.MeshBasicMaterial({ color: 0x00d2d3 })
-    );
+    const samMesh = new THREE.Mesh(SHARED_BOT_SAM_GEO, SHARED_BOT_SAM_MAT);
     samMesh.position.copy(start).addScaledVector(dir, 0.75);
     samMesh.lookAt(targetCenter);
     this.scene.add(samMesh);
@@ -2125,10 +2355,7 @@ export function botFireRpgAt(bot, targetVehicle, player) {
     3
   );
 
-  const rocketMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(0.2, 0.2, 0.72),
-    new THREE.MeshBasicMaterial({ color: 0xe67e22 })
-  );
+  const rocketMesh = new THREE.Mesh(SHARED_BOT_RPG_GEO, SHARED_BOT_RPG_MAT);
   rocketMesh.position.copy(start).addScaledVector(dir, 0.65);
   rocketMesh.lookAt(tmpVec3Copy(start).addScaledVector(dir, 10));
   this.scene.add(rocketMesh);
@@ -2144,9 +2371,30 @@ export function botFireRpgAt(bot, targetVehicle, player) {
 }
 
 export function botFireAt(bot, target, player, onKillFn, vehicleManager = null) {
-  // Final real-time sightline gate: never fire if target moved behind a building wall or thin gap!
-  if (!this.hasClearSightline(bot, target.pos, false)) {
-    return;
+  // Reuse cached LOS if verified clear within the last 0.18s (`180ms`) to avoid duplicate firing raycasts!
+  const now = performance.now();
+  const losKey = target.isVehicle
+    ? target.unit === player?.activeVehicle
+      ? 'PLAYER_VEH'
+      : `veh_${target.unit?.id || ''}`
+    : target.isPlayer
+    ? 'PLAYER'
+    : target.unit?.id || null;
+  const cachedLos = losKey && bot._losCache ? bot._losCache.get(losKey) : null;
+  if (!(cachedLos && !cachedLos.blocked && now - cachedLos.time <= 180)) {
+    const vis = this.hasClearSightline(bot, target.pos, false);
+    if (losKey) {
+      if (!bot._losCache) bot._losCache = new Map();
+      if (cachedLos) {
+        cachedLos.blocked = !vis;
+        cachedLos.vis = vis;
+        cachedLos.time = now;
+        cachedLos.exp = now + 260;
+      } else {
+        bot._losCache.set(losKey, { blocked: !vis, vis, time: now, exp: now + 260 });
+      }
+    }
+    if (!vis) return;
   }
 
   bot.recoilKick = 0.085;
@@ -2358,31 +2606,56 @@ export function botFireAt(bot, target, player, onKillFn, vehicleManager = null) 
         : bot.team === 'US'
         ? 0x74b9ff
         : 0xff7675;
-    const points = [start.clone(), start.clone().addScaledVector(dir, 0.4)];
-    const geo = new THREE.BufferGeometry().setFromPoints(points);
-    const mat = new THREE.LineBasicMaterial({
-      color: tColor,
-      transparent: true,
-      opacity: 0.88
-    });
-    tracerLine = new THREE.Line(geo, mat);
-    this.scene.add(tracerLine);
+    tracerLine = acquireTracerLine(
+      this,
+      start.x,
+      start.y,
+      start.z,
+      start.x + dir.x * 0.4,
+      start.y + dir.y * 0.4,
+      start.z + dir.z * 0.4,
+      tColor,
+      0.88
+    );
   }
 
-  this.botBullets.push({
-    bot,
-    target,
-    pos: start.clone(),
-    dir: dir.clone(),
-    endPoint: endPoint.clone(),
-    speed: bulletSpeed,
-    traveled: 0,
-    maxDist,
-    voxelHit: hitWall ? voxelHit : null,
-    willHit,
-    weaponName,
-    tracerLine
-  });
+  let bullet = this._bulletPool && this._bulletPool.length > 0 ? this._bulletPool.pop() : null;
+  if (bullet) {
+    bullet.bot = bot;
+    bullet.target.isPlayer = Boolean(target.isPlayer);
+    bullet.target.isVehicle = Boolean(target.isVehicle);
+    bullet.target.unit = target.unit;
+    bullet.pos.copy(start);
+    bullet.dir.copy(dir);
+    bullet.endPoint.copy(endPoint);
+    bullet.speed = bulletSpeed;
+    bullet.traveled = 0;
+    bullet.maxDist = maxDist;
+    bullet.voxelHit = hitWall ? voxelHit : null;
+    bullet.willHit = willHit;
+    bullet.weaponName = weaponName;
+    bullet.tracerLine = tracerLine;
+    this.botBullets.push(bullet);
+  } else {
+    this.botBullets.push({
+      bot,
+      target: {
+        isPlayer: Boolean(target.isPlayer),
+        isVehicle: Boolean(target.isVehicle),
+        unit: target.unit
+      },
+      pos: start.clone(),
+      dir: dir.clone(),
+      endPoint: endPoint.clone(),
+      speed: bulletSpeed,
+      traveled: 0,
+      maxDist,
+      voxelHit: hitWall ? voxelHit : null,
+      willHit,
+      weaponName,
+      tracerLine
+    });
+  }
 }
 
 export const BotAIMethods = {

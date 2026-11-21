@@ -6,6 +6,129 @@
 
 import * as THREE from '../../vendor/three.module.js';
 
+// ─── SHARED VEHICLE GEOMETRY & WHEEL MERGE CACHES (userData.shared = true) ───
+const _vehGeoCache = new Map();
+const _tmpMergeMat = new THREE.Matrix4();
+const _tmpMergeQuat = new THREE.Quaternion();
+const _tmpMergeEuler = new THREE.Euler();
+const _tmpMergePos = new THREE.Vector3();
+const _tmpMergeScale = new THREE.Vector3(1, 1, 1);
+
+function _getCachedBoxGeo(w, h, d) {
+  const key = `box:${w.toFixed(4)}_${h.toFixed(4)}_${d.toFixed(4)}`;
+  let g = _vehGeoCache.get(key);
+  if (!g) {
+    g = new THREE.BoxGeometry(w, h, d);
+    g.userData.shared = true;
+    _vehGeoCache.set(key, g);
+  }
+  return g;
+}
+
+function _getCachedCylGeo(rt, rb, h, seg = 8, rotZ = 0) {
+  const key = `cyl:${rt.toFixed(4)}_${rb.toFixed(4)}_${h.toFixed(4)}_${seg}_${rotZ.toFixed(4)}`;
+  let g = _vehGeoCache.get(key);
+  if (!g) {
+    g = new THREE.CylinderGeometry(rt, rb, h, seg);
+    if (rotZ !== 0) g.rotateZ(rotZ);
+    g.userData.shared = true;
+    _vehGeoCache.set(key, g);
+  }
+  return g;
+}
+
+function _mergePartGeometries(parts) {
+  let totalVerts = 0;
+  const nonIndexed = [];
+  for (let i = 0; i < parts.length; i++) {
+    const { geo, pos, rot } = parts[i];
+    const ni = geo.index ? geo.toNonIndexed() : geo.clone();
+    _tmpMergePos.set(pos[0], pos[1], pos[2]);
+    _tmpMergeEuler.set(rot[0], rot[1], rot[2]);
+    _tmpMergeQuat.setFromEuler(_tmpMergeEuler);
+    _tmpMergeMat.compose(_tmpMergePos, _tmpMergeQuat, _tmpMergeScale);
+    ni.applyMatrix4(_tmpMergeMat);
+    totalVerts += ni.attributes.position.count;
+    nonIndexed.push(ni);
+  }
+  const positions = new Float32Array(totalVerts * 3);
+  const normals = new Float32Array(totalVerts * 3);
+  let offset = 0;
+  for (let i = 0; i < nonIndexed.length; i++) {
+    const ni = nonIndexed[i];
+    const pArr = ni.attributes.position.array;
+    const nArr = ni.attributes.normal.array;
+    positions.set(pArr, offset);
+    normals.set(nArr, offset);
+    offset += pArr.length;
+    ni.dispose();
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  merged.computeBoundingSphere();
+  merged.userData.shared = true;
+  return merged;
+}
+
+function _getMergedTreadTireGeo(radius, width, radialSegs, lugCount, lugW, lugH, lugD, lugRadius) {
+  const key = `treadTire:${radius.toFixed(4)}_${width.toFixed(4)}_${radialSegs}_${lugCount}_${lugW.toFixed(4)}_${lugH.toFixed(4)}_${lugD.toFixed(4)}_${lugRadius.toFixed(4)}`;
+  let g = _vehGeoCache.get(key);
+  if (g) return g;
+  const parts = [];
+  const baseCyl = new THREE.CylinderGeometry(radius, radius, width, radialSegs);
+  parts.push({ geo: baseCyl, pos: [0, 0, 0], rot: [0, 0, Math.PI / 2] });
+  const baseLug = new THREE.BoxGeometry(lugW, lugH, lugD);
+  for (let t = 0; t < lugCount; t++) {
+    const ang = (t / lugCount) * Math.PI * 2;
+    parts.push({
+      geo: baseLug,
+      pos: [0, Math.cos(ang) * lugRadius, Math.sin(ang) * lugRadius],
+      rot: [-ang, 0, 0]
+    });
+  }
+  g = _mergePartGeometries(parts);
+  baseCyl.dispose();
+  baseLug.dispose();
+  _vehGeoCache.set(key, g);
+  return g;
+}
+
+function _getMergedLugRingGeo(lugCount, lugW, lugH, lugD, lugRadius) {
+  const key = `lugRing:${lugCount}_${lugW.toFixed(4)}_${lugH.toFixed(4)}_${lugD.toFixed(4)}_${lugRadius.toFixed(4)}`;
+  let g = _vehGeoCache.get(key);
+  if (g) return g;
+  const parts = [];
+  const baseLug = new THREE.BoxGeometry(lugW, lugH, lugD);
+  for (let t = 0; t < lugCount; t++) {
+    const ang = (t / lugCount) * Math.PI * 2;
+    parts.push({
+      geo: baseLug,
+      pos: [0, Math.cos(ang) * lugRadius, Math.sin(ang) * lugRadius],
+      rot: [-ang, 0, 0]
+    });
+  }
+  g = _mergePartGeometries(parts);
+  baseLug.dispose();
+  _vehGeoCache.set(key, g);
+  return g;
+}
+
+function _getMergedSpokesGeo(spokeCount, w, h, d) {
+  const key = `spokes:${spokeCount}_${w.toFixed(4)}_${h.toFixed(4)}_${d.toFixed(4)}`;
+  let g = _vehGeoCache.get(key);
+  if (g) return g;
+  const parts = [];
+  const baseSpoke = new THREE.BoxGeometry(w, h, d);
+  for (let s = 0; s < spokeCount; s++) {
+    parts.push({ geo: baseSpoke, pos: [0, 0, 0], rot: [(s * Math.PI) / spokeCount, 0, 0] });
+  }
+  g = _mergePartGeometries(parts);
+  baseSpoke.dispose();
+  _vehGeoCache.set(key, g);
+  return g;
+}
+
 export const B2_COLOR_PRESETS = [
   {
     id: 'midnight_ram',
@@ -156,7 +279,7 @@ export function createDetailedVehicleRider(opts = {}) {
     const dir = new THREE.Vector3().subVectors(p2, p1);
     const len = dir.length();
     if (len < 0.001) return null;
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(r2, r1, len, 8), mat);
+    const mesh = new THREE.Mesh(_getCachedCylGeo(r2, r1, len, 8), mat);
     mesh.position.copy(p1).addScaledVector(dir, 0.5);
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
     mesh.castShadow = true;
@@ -1602,34 +1725,23 @@ export function createVehicleMesh(cfg) {
       const wheelPivot = new THREE.Group();
       wheelPivot.position.set(wx, 0.44, wz);
 
-      const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.44, 0.36, 16), darkMat);
-      tire.rotation.z = Math.PI / 2;
+      // Merged Tire + 10 Knobby Mud Tread Lugs (1 draw call instead of 11)
+      const tire = new THREE.Mesh(
+        _getMergedTreadTireGeo(0.44, 0.36, 16, 10, 0.37, 0.055, 0.09, 0.43),
+        darkMat
+      );
       tire.castShadow = true;
       wheelPivot.add(tire);
 
-      // Deep knobby mud tread lugs around circumference so rotation is visually unmistakable
-      for (let t = 0; t < 10; t++) {
-        const ang = (t / 10) * Math.PI * 2;
-        const lug = new THREE.Mesh(new THREE.BoxGeometry(0.37, 0.055, 0.09), darkMat);
-        lug.position.set(0, Math.cos(ang) * 0.43, Math.sin(ang) * 0.43);
-        lug.rotation.x = -ang;
-        wheelPivot.add(lug);
-      }
-
       // Alloy Beadlock Rim & Hub Cap
-      const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.38, 12), accentMat);
-      rim.rotation.z = Math.PI / 2;
+      const rim = new THREE.Mesh(_getCachedCylGeo(0.25, 0.25, 0.38, 12, Math.PI / 2), accentMat);
       wheelPivot.add(rim);
 
-      const beadRing = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.39, 12), shockMat);
-      beadRing.rotation.z = Math.PI / 2;
+      const beadRing = new THREE.Mesh(_getCachedCylGeo(0.26, 0.26, 0.39, 12, Math.PI / 2), shockMat);
       wheelPivot.add(beadRing);
 
-      for (let s = 0; s < 3; s++) {
-        const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.045, 0.46), chromeMat);
-        spoke.rotation.x = (s * Math.PI) / 3;
-        wheelPivot.add(spoke);
-      }
+      const spokes = new THREE.Mesh(_getMergedSpokesGeo(3, 0.4, 0.045, 0.46), chromeMat);
+      wheelPivot.add(spokes);
 
       group.add(wheelPivot);
       wheels.push(wheelPivot);
@@ -1868,30 +1980,21 @@ export function createVehicleMesh(cfg) {
         const wheelPivot = new THREE.Group();
         wheelPivot.position.set(0, 0.29, wz);
 
-        const tire = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.19, 16), darkMat);
-        tire.rotation.z = Math.PI / 2;
+        const tire = new THREE.Mesh(
+          _getMergedTreadTireGeo(0.29, 0.19, 16, 8, 0.2, 0.035, 0.06, 0.285),
+          darkMat
+        );
         tire.castShadow = true;
         wheelPivot.add(tire);
 
-        for (let t = 0; t < 8; t++) {
-          const ang = (t / 8) * Math.PI * 2;
-          const tread = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.035, 0.06), darkMat);
-          tread.position.set(0, Math.cos(ang) * 0.285, Math.sin(ang) * 0.285);
-          tread.rotation.x = -ang;
-          wheelPivot.add(tread);
-        }
-
         // Dual Brushless Hub Motor Core + Orange Rim Ring + Drilled Brake Disc
-        const hubMotor = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.21, 12), accentMat);
-        hubMotor.rotation.z = Math.PI / 2;
+        const hubMotor = new THREE.Mesh(_getCachedCylGeo(0.18, 0.18, 0.21, 12, Math.PI / 2), accentMat);
         wheelPivot.add(hubMotor);
 
-        const rimRing = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.195, 12), primaryMat);
-        rimRing.rotation.z = Math.PI / 2;
+        const rimRing = new THREE.Mesh(_getCachedCylGeo(0.2, 0.2, 0.195, 12, Math.PI / 2), primaryMat);
         wheelPivot.add(rimRing);
 
-        const brakeDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.018, 12), chromeMat);
-        brakeDisc.rotation.z = Math.PI / 2;
+        const brakeDisc = new THREE.Mesh(_getCachedCylGeo(0.16, 0.16, 0.018, 12, Math.PI / 2), chromeMat);
         brakeDisc.position.x = 0.11;
         wheelPivot.add(brakeDisc);
 
@@ -2024,43 +2127,49 @@ export function createVehicleMesh(cfg) {
         const wheelPivot = new THREE.Group();
         wheelPivot.position.set(0, wheelRadius, wz);
 
-        const tire = new THREE.Mesh(
-          new THREE.CylinderGeometry(wheelRadius, wheelRadius, wWidth, 18),
-          darkMat
-        );
-        tire.rotation.z = Math.PI / 2;
-        tire.castShadow = true;
-        wheelPivot.add(tire);
-
-        // Knobby treads for MX/2-Stroke/E-Motos or visible wheel speed bars for Supersports
-        const lugCount = isSport ? 6 : 12;
-        for (let t = 0; t < lugCount; t++) {
-          const ang = (t / lugCount) * Math.PI * 2;
-          const lug = new THREE.Mesh(
-            new THREE.BoxGeometry(wWidth * 1.02, 0.032 * scale, (isSport ? 0.04 : 0.065) * scale),
-            isSport ? accentMat : darkMat
+        if (isSport) {
+          const tire = new THREE.Mesh(
+            _getCachedCylGeo(wheelRadius, wheelRadius, wWidth, 18, Math.PI / 2),
+            darkMat
           );
-          lug.position.set(0, Math.cos(ang) * (wheelRadius - 0.005), Math.sin(ang) * (wheelRadius - 0.005));
-          lug.rotation.x = -ang;
-          wheelPivot.add(lug);
+          tire.castShadow = true;
+          wheelPivot.add(tire);
+
+          const lugRing = new THREE.Mesh(
+            _getMergedLugRingGeo(6, wWidth * 1.02, 0.032 * scale, 0.04 * scale, wheelRadius - 0.005),
+            accentMat
+          );
+          wheelPivot.add(lugRing);
+        } else {
+          const tire = new THREE.Mesh(
+            _getMergedTreadTireGeo(
+              wheelRadius,
+              wWidth,
+              18,
+              12,
+              wWidth * 1.02,
+              0.032 * scale,
+              0.065 * scale,
+              wheelRadius - 0.005
+            ),
+            darkMat
+          );
+          tire.castShadow = true;
+          wheelPivot.add(tire);
         }
 
-        // Outer Alloy Rim Hoop & 6 Inner Spokes
+        // Outer Alloy Rim Hoop & Merged Inner Spokes
         const rimHoop = new THREE.Mesh(
-          new THREE.CylinderGeometry(wheelRadius * 0.68, wheelRadius * 0.68, wWidth * 1.04, 14),
+          _getCachedCylGeo(wheelRadius * 0.68, wheelRadius * 0.68, wWidth * 1.04, 14, Math.PI / 2),
           rimMat
         );
-        rimHoop.rotation.z = Math.PI / 2;
         wheelPivot.add(rimHoop);
 
-        for (let s = 0; s < 3; s++) {
-          const spoke = new THREE.Mesh(
-            new THREE.BoxGeometry(wWidth * 1.08, 0.036 * scale, wheelRadius * 1.32),
-            chromeMat
-          );
-          spoke.rotation.x = (s * Math.PI) / 3;
-          wheelPivot.add(spoke);
-        }
+        const spokes = new THREE.Mesh(
+          _getMergedSpokesGeo(3, wWidth * 1.08, 0.036 * scale, wheelRadius * 1.32),
+          chromeMat
+        );
+        wheelPivot.add(spokes);
 
         // Drilled Stainless Wave Brake Rotor(s)
         const rotorSides = isSport && !isRear ? [-1, 1] : [-1];
@@ -3008,5 +3117,63 @@ export function createVehicleMesh(cfg) {
   }
 
   group.add(turretPivot);
+
+  // Deduplicate unbaked BoxGeometry primitives across fleet & freeze static leaf Mesh local matrices
+  const dynamicNodes = new Set();
+  dynamicNodes.add(group);
+  dynamicNodes.add(turretPivot);
+  if (barrelGroup) dynamicNodes.add(barrelGroup);
+  for (let i = 0; i < wheels.length; i++) {
+    if (wheels[i]) dynamicNodes.add(wheels[i]);
+  }
+  const ud = group.userData;
+  if (ud) {
+    if (Array.isArray(ud.wrightProps)) {
+      for (let i = 0; i < ud.wrightProps.length; i++) dynamicNodes.add(ud.wrightProps[i]);
+    }
+    if (ud.controlSurfaces) {
+      const cs = ud.controlSurfaces;
+      if (cs.leftAileron) dynamicNodes.add(cs.leftAileron);
+      if (cs.rightAileron) dynamicNodes.add(cs.rightAileron);
+      if (cs.elevator) dynamicNodes.add(cs.elevator);
+      if (Array.isArray(cs.rudders)) {
+        for (let i = 0; i < cs.rudders.length; i++) dynamicNodes.add(cs.rudders[i]);
+      }
+    }
+    if (ud.riderGroup) {
+      dynamicNodes.add(ud.riderGroup);
+      if (ud.riderGroup.userData?.headPivot) dynamicNodes.add(ud.riderGroup.userData.headPivot);
+    }
+    if (ud.boulderMesh) dynamicNodes.add(ud.boulderMesh);
+    if (ud.fireAuraMesh) dynamicNodes.add(ud.fireAuraMesh);
+    if (Array.isArray(ud.winchWheels)) {
+      for (let i = 0; i < ud.winchWheels.length; i++) dynamicNodes.add(ud.winchWheels[i]);
+    }
+    if (ud.headNeckGroup) dynamicNodes.add(ud.headNeckGroup);
+  }
+
+  group.traverse((child) => {
+    if (!child.isMesh) return;
+    const geo = child.geometry;
+    if (geo && geo.type === 'BoxGeometry' && geo.parameters && !geo.userData?.shared) {
+      const p = geo.parameters;
+      if (
+        (p.widthSegments || 1) === 1 &&
+        (p.heightSegments || 1) === 1 &&
+        (p.depthSegments || 1) === 1
+      ) {
+        const sharedBox = _getCachedBoxGeo(p.width, p.height, p.depth);
+        if (sharedBox !== geo) {
+          child.geometry = sharedBox;
+          geo.dispose();
+        }
+      }
+    }
+    if (!dynamicNodes.has(child)) {
+      child.updateMatrix();
+      child.matrixAutoUpdate = false;
+    }
+  });
+
   return { group, wheels, turretPivot, barrelGroup };
 }

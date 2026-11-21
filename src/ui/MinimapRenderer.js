@@ -17,6 +17,10 @@ export const MinimapRenderer = {
     const w = this.minimapCanvas.width;
     const h = this.minimapCanvas.height;
     const scale = 0.36;
+    const px = this.player.pos.x;
+    const pz = this.player.pos.z;
+    const viewRangeX = (w * 0.5) / scale + 12;
+    const viewRangeZ = (h * 0.5) / scale + 12;
 
     ctx.fillStyle = '#182419';
     ctx.fillRect(0, 0, w, h);
@@ -26,51 +30,56 @@ export const MinimapRenderer = {
 
     // River strip
     ctx.fillStyle = '#1f4e68';
-    ctx.fillRect((-18 - this.player.pos.x) * scale, -h * 2, 36 * scale, h * 4);
+    ctx.fillRect((-18 - px) * scale, -h * 2, 36 * scale, h * 4);
 
     // Main Highway Road & 3 Bridges
     ctx.fillStyle = '#2d3436';
-    ctx.fillRect(
-      (-1000 - this.player.pos.x) * scale,
-      (-7 - this.player.pos.z) * scale,
-      2000 * scale,
-      14 * scale
-    );
-    ctx.fillRect(
-      (-22 - this.player.pos.x) * scale,
-      (-228 - this.player.pos.z) * scale,
-      44 * scale,
-      16 * scale
-    );
-    ctx.fillRect(
-      (-22 - this.player.pos.x) * scale,
-      (212 - this.player.pos.z) * scale,
-      44 * scale,
-      16 * scale
-    );
+    ctx.fillRect((-1000 - px) * scale, (-7 - pz) * scale, 2000 * scale, 14 * scale);
+    ctx.fillRect((-22 - px) * scale, (-228 - pz) * scale, 44 * scale, 16 * scale);
+    ctx.fillRect((-22 - px) * scale, (212 - pz) * scale, 44 * scale, 16 * scale);
 
     // 5 Conquest Flags
-    for (const flag of this.world.flags) {
-      const fx = (flag.pos.x - this.player.pos.x) * scale;
-      const fz = (flag.pos.z - this.player.pos.z) * scale;
+    const flags = this.world.flags;
+    ctx.lineWidth = 1.6;
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    for (let i = 0; i < flags.length; i++) {
+      const flag = flags[i];
+      const dx = flag.pos.x - px;
+      const dz = flag.pos.z - pz;
+      const flagPad = flag.radius + 14;
+      if (
+        dx > viewRangeX + flagPad ||
+        dx < -viewRangeX - flagPad ||
+        dz > viewRangeZ + flagPad ||
+        dz < -viewRangeZ - flagPad
+      ) {
+        continue;
+      }
+      const fx = dx * scale;
+      const fz = dz * scale;
       ctx.strokeStyle =
         flag.owner === 'US' ? '#3498db' : flag.owner === 'RU' ? '#e74c3c' : '#95a5a6';
-      ctx.lineWidth = 1.6;
       ctx.beginPath();
       ctx.arc(fx, fz, flag.radius * scale, 0, Math.PI * 2);
       ctx.stroke();
 
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.textAlign = 'center';
       ctx.fillText(flag.id, fx, fz + 3.5);
     }
 
-    // Vehicles & Combat Aircraft on Minimap
-    for (const v of this.vehicleManager.vehicles) {
+    // Vehicles & Combat Aircraft on Minimap (pre-culled outside minimap viewRange)
+    const vehicles = this.vehicleManager.vehicles;
+    for (let i = 0; i < vehicles.length; i++) {
+      const v = vehicles[i];
       if (v.dead) continue;
-      const vx = (v.pos.x - this.player.pos.x) * scale;
-      const vz = (v.pos.z - this.player.pos.z) * scale;
+      const dx = v.pos.x - px;
+      if (dx > viewRangeX || dx < -viewRangeX) continue;
+      const dz = v.pos.z - pz;
+      if (dz > viewRangeZ || dz < -viewRangeZ) continue;
+
+      const vx = dx * scale;
+      const vz = dz * scale;
       ctx.fillStyle = v.isWarehouseBike
         ? '#00d2d3'
         : v.team === 'US'
@@ -97,76 +106,138 @@ export const MinimapRenderer = {
 
     // Rally Point on Minimap (green diamond)
     if (this.player.rallyPoint && this.player.rallyPoint.timer > 0) {
-      const rx = (this.player.rallyPoint.pos.x - this.player.pos.x) * scale;
-      const rz = (this.player.rallyPoint.pos.z - this.player.pos.z) * scale;
-      ctx.fillStyle = '#2ecc71';
-      ctx.save();
-      ctx.translate(rx, rz);
-      ctx.rotate(Math.PI / 4);
-      ctx.fillRect(-4, -4, 8, 8);
-      ctx.restore();
+      const dx = this.player.rallyPoint.pos.x - px;
+      const dz = this.player.rallyPoint.pos.z - pz;
+      if (Math.abs(dx) <= viewRangeX && Math.abs(dz) <= viewRangeZ) {
+        ctx.fillStyle = '#2ecc71';
+        ctx.save();
+        ctx.translate(dx * scale, dz * scale);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillRect(-4, -4, 8, 8);
+        ctx.restore();
+      }
     }
 
     // Insertion Beacon on Minimap (cyan diamond)
     if (this.player.insertionBeacon && this.player.insertionBeacon.spawnsLeft > 0) {
-      const bx = (this.player.insertionBeacon.pos.x - this.player.pos.x) * scale;
-      const bz = (this.player.insertionBeacon.pos.z - this.player.pos.z) * scale;
-      ctx.fillStyle = '#00d2d3';
-      ctx.save();
-      ctx.translate(bx, bz);
-      ctx.rotate(Math.PI / 4);
-      ctx.fillRect(-3.5, -3.5, 7, 7);
-      ctx.restore();
+      const dx = this.player.insertionBeacon.pos.x - px;
+      const dz = this.player.insertionBeacon.pos.z - pz;
+      if (Math.abs(dx) <= viewRangeX && Math.abs(dz) <= viewRangeZ) {
+        ctx.fillStyle = '#00d2d3';
+        ctx.save();
+        ctx.translate(dx * scale, dz * scale);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillRect(-3.5, -3.5, 7, 7);
+        ctx.restore();
+      }
     }
 
     // Active Airstrike Target Zone on Minimap (pulsing red ring)
     if (this.player.airstrikeTarget) {
-      const ax = (this.player.airstrikeTarget.pos.x - this.player.pos.x) * scale;
-      const az = (this.player.airstrikeTarget.pos.z - this.player.pos.z) * scale;
-      ctx.strokeStyle = 'rgba(231, 76, 60, 0.9)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(ax, az, 10 * scale, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // Ammo Crates on Minimap (green squares)
-    if (this.world.ammoCrates) {
-      for (const crate of this.world.ammoCrates) {
-        const cx = (crate.pos.x - this.player.pos.x) * scale;
-        const cz = (crate.pos.z - this.player.pos.z) * scale;
-        ctx.fillStyle = '#27ae60';
-        ctx.fillRect(cx - 2.5, cz - 2.5, 5, 5);
-      }
-    }
-
-    // UAV-Revealed & Spotted Enemy Bots on Minimap (red diamonds)
-    for (const bot of this.botManager.bots) {
-      if (bot.dead || bot.team === this.player.team) continue;
-      if (bot.uavRevealed || (bot.spottedTimer && bot.spottedTimer > 0)) {
-        const ex = (bot.pos.x - this.player.pos.x) * scale;
-        const ez = (bot.pos.z - this.player.pos.z) * scale;
-        ctx.fillStyle = '#ff3838';
+      const dx = this.player.airstrikeTarget.pos.x - px;
+      const dz = this.player.airstrikeTarget.pos.z - pz;
+      if (Math.abs(dx) <= viewRangeX + 12 && Math.abs(dz) <= viewRangeZ + 12) {
+        ctx.strokeStyle = 'rgba(231, 76, 60, 0.9)';
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(ex, ez, 2.8, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.arc(dx * scale, dz * scale, 10 * scale, 0, Math.PI * 2);
+        ctx.stroke();
       }
     }
 
-    // Friendly Bots & Downed Revive Crosses
-    for (const bot of this.botManager.bots) {
-      if (bot.dead || bot.team !== this.player.team) continue;
-      const bx = (bot.pos.x - this.player.pos.x) * scale;
-      const bz = (bot.pos.z - this.player.pos.z) * scale;
-      if (bot.downed) {
-        ctx.fillStyle = '#ff5252';
+    // Ammo Crates on Minimap (green squares, pre-culled & single fillStyle)
+    if (this.world.ammoCrates && this.world.ammoCrates.length > 0) {
+      ctx.fillStyle = '#27ae60';
+      const crates = this.world.ammoCrates;
+      for (let i = 0; i < crates.length; i++) {
+        const crate = crates[i];
+        const dx = crate.pos.x - px;
+        if (dx > viewRangeX || dx < -viewRangeX) continue;
+        const dz = crate.pos.z - pz;
+        if (dz > viewRangeZ || dz < -viewRangeZ) continue;
+        ctx.fillRect(dx * scale - 2.5, dz * scale - 2.5, 5, 5);
+      }
+    }
+
+    // Single pre-culled 250-bot pass bucketed by fillStyle (ally, squad, enemy, downed)
+    const allyCoords = this._mmAllyCoords || (this._mmAllyCoords = []);
+    const squadCoords = this._mmSquadCoords || (this._mmSquadCoords = []);
+    const enemyCoords = this._mmEnemyCoords || (this._mmEnemyCoords = []);
+    const downedCoords = this._mmDownedCoords || (this._mmDownedCoords = []);
+    allyCoords.length = 0;
+    squadCoords.length = 0;
+    enemyCoords.length = 0;
+    downedCoords.length = 0;
+
+    const playerTeam = this.player.team;
+    const bots = this.botManager.bots;
+    for (let i = 0; i < bots.length; i++) {
+      const bot = bots[i];
+      if (bot.dead) continue;
+      const dx = bot.pos.x - px;
+      if (dx > viewRangeX || dx < -viewRangeX) continue;
+      const dz = bot.pos.z - pz;
+      if (dz > viewRangeZ || dz < -viewRangeZ) continue;
+
+      if (bot.team === playerTeam) {
+        const bx = dx * scale;
+        const bz = dz * scale;
+        if (bot.downed) {
+          downedCoords.push(bx, bz);
+        } else if (bot.inPlayerSquad) {
+          squadCoords.push(bx, bz);
+        } else {
+          allyCoords.push(bx, bz);
+        }
+      } else if (bot.uavRevealed || (bot.spottedTimer && bot.spottedTimer > 0)) {
+        enemyCoords.push(dx * scale, dz * scale);
+      }
+    }
+
+    const TAU = Math.PI * 2;
+    if (enemyCoords.length > 0) {
+      ctx.fillStyle = '#ff3838';
+      ctx.beginPath();
+      for (let i = 0; i < enemyCoords.length; i += 2) {
+        const ex = enemyCoords[i];
+        const ez = enemyCoords[i + 1];
+        ctx.moveTo(ex + 2.8, ez);
+        ctx.arc(ex, ez, 2.8, 0, TAU);
+      }
+      ctx.fill();
+    }
+
+    if (allyCoords.length > 0) {
+      ctx.fillStyle = '#5dade2';
+      ctx.beginPath();
+      for (let i = 0; i < allyCoords.length; i += 2) {
+        const bx = allyCoords[i];
+        const bz = allyCoords[i + 1];
+        ctx.moveTo(bx + 2.2, bz);
+        ctx.arc(bx, bz, 2.2, 0, TAU);
+      }
+      ctx.fill();
+    }
+
+    if (squadCoords.length > 0) {
+      ctx.fillStyle = '#2ecc71';
+      ctx.beginPath();
+      for (let i = 0; i < squadCoords.length; i += 2) {
+        const bx = squadCoords[i];
+        const bz = squadCoords[i + 1];
+        ctx.moveTo(bx + 2.2, bz);
+        ctx.arc(bx, bz, 2.2, 0, TAU);
+      }
+      ctx.fill();
+    }
+
+    if (downedCoords.length > 0) {
+      ctx.fillStyle = '#ff5252';
+      for (let i = 0; i < downedCoords.length; i += 2) {
+        const bx = downedCoords[i];
+        const bz = downedCoords[i + 1];
         ctx.fillRect(bx - 3, bz - 1, 6, 2);
         ctx.fillRect(bx - 1, bz - 3, 2, 6);
-      } else {
-        ctx.fillStyle = bot.inPlayerSquad ? '#2ecc71' : '#5dade2';
-        ctx.beginPath();
-        ctx.arc(bx, bz, 2.2, 0, Math.PI * 2);
-        ctx.fill();
       }
     }
 
@@ -208,7 +279,18 @@ export const MinimapRenderer = {
   },
 
   drawCommandTacticalMap(canvas) {
-    if (!canvas) return;
+    if (!canvas || !canvas.isConnected || canvas.style.display === 'none' || canvas.offsetParent === null) {
+      return;
+    }
+    const cmdModal = typeof this.el === 'function' ? this.el('command-modal') : document.getElementById('command-modal');
+    if (
+      !cmdModal ||
+      !cmdModal.isConnected ||
+      cmdModal.classList.contains('hidden') ||
+      cmdModal.style.display === 'none'
+    ) {
+      return;
+    }
     const ctx = this._getCachedContext2D(canvas, '_cmdMapCtx');
     if (!ctx) return;
     const w = canvas.width;

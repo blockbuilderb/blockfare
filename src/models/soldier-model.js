@@ -5,9 +5,9 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=90';
-import { WEAPON_DEFS } from '../assets/weapon-defs.js?v=90';
-import { createWeaponViewModel } from './weapon-model.js?v=90';
+import { TEXTURES } from '../assets/textures.js?v=91';
+import { WEAPON_DEFS } from '../assets/weapon-defs.js?v=91';
+import { createWeaponViewModel } from './weapon-model.js?v=91';
 
 export function getDefaultWeaponIdForRole(team = 'US', role = 'ASSAULT') {
   const r = String(role || 'ASSAULT').toUpperCase();
@@ -33,44 +33,137 @@ const sharedMats = {
   RU: null
 };
 
+function markShared(item) {
+  item.userData.shared = true;
+  return item;
+}
+
+const SHARED_MUZZLE_FLASH_MAT = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xffd166,
+    transparent: true,
+    opacity: 0.92,
+    depthWrite: false
+  })
+);
+
+const _boxGeoCache = new Map();
+const _cylGeoCache = new Map();
+const _coneGeoCache = new Map();
+const _sphereGeoCache = new Map();
+const _torusGeoCache = new Map();
+const _stdMatCache = new Map();
+const _basicMatCache = new Map();
+
+function getCachedBoxGeo(w, h, d) {
+  const k = `${w}|${h}|${d}`;
+  let g = _boxGeoCache.get(k);
+  if (!g) {
+    g = markShared(new THREE.BoxGeometry(w, h, d));
+    _boxGeoCache.set(k, g);
+  }
+  return g;
+}
+
+function getCachedCylGeo(rt, rb, h, seg = 8) {
+  const k = `${rt}|${rb}|${h}|${seg}`;
+  let g = _cylGeoCache.get(k);
+  if (!g) {
+    g = markShared(new THREE.CylinderGeometry(rt, rb, h, seg));
+    _cylGeoCache.set(k, g);
+  }
+  return g;
+}
+
+function getCachedConeGeo(r, h, seg = 6) {
+  const k = `${r}|${h}|${seg}`;
+  let g = _coneGeoCache.get(k);
+  if (!g) {
+    g = markShared(new THREE.ConeGeometry(r, h, seg));
+    _coneGeoCache.set(k, g);
+  }
+  return g;
+}
+
+function getCachedSphereGeo(r, ws = 8, hs = 8) {
+  const k = `${r}|${ws}|${hs}`;
+  let g = _sphereGeoCache.get(k);
+  if (!g) {
+    g = markShared(new THREE.SphereGeometry(r, ws, hs));
+    _sphereGeoCache.set(k, g);
+  }
+  return g;
+}
+
+function getCachedTorusGeo(r, tube, rs = 6, ts = 12, arc = Math.PI * 2) {
+  const k = `${r}|${tube}|${rs}|${ts}|${arc}`;
+  let g = _torusGeoCache.get(k);
+  if (!g) {
+    g = markShared(new THREE.TorusGeometry(r, tube, rs, ts, arc));
+    _torusGeoCache.set(k, g);
+  }
+  return g;
+}
+
+function getCachedStdMat(color, roughness = 0.8, metalness = 0, flatShading = false) {
+  const k = `${color}|${roughness}|${metalness}|${flatShading ? 1 : 0}`;
+  let m = _stdMatCache.get(k);
+  if (!m) {
+    m = markShared(
+      new THREE.MeshStandardMaterial({ color, roughness, metalness, flatShading })
+    );
+    _stdMatCache.set(k, m);
+  }
+  return m;
+}
+
+function getCachedBasicMat(color) {
+  let m = _basicMatCache.get(color);
+  if (!m) {
+    m = markShared(new THREE.MeshBasicMaterial({ color }));
+    _basicMatCache.set(color, m);
+  }
+  return m;
+}
+
 function getSharedGeometries() {
   if (!sharedGeos) {
-    const rpgLauncherTube = new THREE.CylinderGeometry(0.055, 0.065, 1.05, 8);
-    const rpgWarheadCone = new THREE.ConeGeometry(0.095, 0.32, 6);
+    const rpgLauncherTube = markShared(new THREE.CylinderGeometry(0.055, 0.065, 1.05, 8));
+    const rpgWarheadCone = markShared(new THREE.ConeGeometry(0.095, 0.32, 6));
     sharedGeos = {
-      belt: new THREE.BoxGeometry(0.54, 0.12, 0.32),
-      thigh: new THREE.BoxGeometry(0.22, 0.36, 0.22),
-      kneePad: new THREE.BoxGeometry(0.23, 0.1, 0.06),
-      shin: new THREE.BoxGeometry(0.2, 0.34, 0.2),
-      boot: new THREE.BoxGeometry(0.22, 0.14, 0.29),
-      torso: new THREE.BoxGeometry(0.52, 0.68, 0.28),
-      vest: new THREE.BoxGeometry(0.56, 0.48, 0.35),
-      magPouch: new THREE.BoxGeometry(0.11, 0.18, 0.06),
-      backpack: new THREE.BoxGeometry(0.38, 0.42, 0.18),
-      crossH: new THREE.BoxGeometry(0.18, 0.05, 0.02),
-      crossV: new THREE.BoxGeometry(0.05, 0.18, 0.02),
-      rpgBackTube: new THREE.BoxGeometry(0.09, 0.78, 0.09),
-      rpgBackCone: new THREE.ConeGeometry(0.08, 0.24, 6),
-      reconAntenna: new THREE.BoxGeometry(0.025, 0.55, 0.025),
-      slAntenna: new THREE.BoxGeometry(0.03, 0.72, 0.03),
-      slAntennaTip: new THREE.BoxGeometry(0.06, 0.08, 0.06),
-      neck: new THREE.BoxGeometry(0.24, 0.12, 0.24),
-      head: new THREE.BoxGeometry(0.36, 0.36, 0.36),
-      balaclava: new THREE.BoxGeometry(0.37, 0.17, 0.37),
-      goggles: new THREE.BoxGeometry(0.35, 0.11, 0.06),
-      helmet: new THREE.BoxGeometry(0.43, 0.21, 0.43),
-      nvgMount: new THREE.BoxGeometry(0.1, 0.09, 0.05),
-      rankBand: new THREE.BoxGeometry(0.445, 0.045, 0.445),
-      upperArm: new THREE.BoxGeometry(0.17, 0.32, 0.17),
-      forearm: new THREE.BoxGeometry(0.15, 0.32, 0.15),
-      gunReceiver: new THREE.BoxGeometry(0.075, 0.12, 0.48),
-      gunBarrel: new THREE.BoxGeometry(0.04, 0.04, 0.36),
-      gunMag: new THREE.BoxGeometry(0.055, 0.18, 0.09),
-      gunOptic: new THREE.BoxGeometry(0.06, 0.07, 0.11),
-      muzzleFlash: new THREE.OctahedronGeometry(0.14, 0),
+      belt: markShared(new THREE.BoxGeometry(0.54, 0.12, 0.32)),
+      thigh: markShared(new THREE.BoxGeometry(0.22, 0.36, 0.22)),
+      kneePad: markShared(new THREE.BoxGeometry(0.23, 0.1, 0.06)),
+      shin: markShared(new THREE.BoxGeometry(0.2, 0.34, 0.2)),
+      boot: markShared(new THREE.BoxGeometry(0.22, 0.14, 0.29)),
+      torso: markShared(new THREE.BoxGeometry(0.52, 0.68, 0.28)),
+      vest: markShared(new THREE.BoxGeometry(0.56, 0.48, 0.35)),
+      magPouch: markShared(new THREE.BoxGeometry(0.11, 0.18, 0.06)),
+      backpack: markShared(new THREE.BoxGeometry(0.38, 0.42, 0.18)),
+      crossH: markShared(new THREE.BoxGeometry(0.18, 0.05, 0.02)),
+      crossV: markShared(new THREE.BoxGeometry(0.05, 0.18, 0.02)),
+      rpgBackTube: markShared(new THREE.BoxGeometry(0.09, 0.78, 0.09)),
+      rpgBackCone: markShared(new THREE.ConeGeometry(0.08, 0.24, 6)),
+      reconAntenna: markShared(new THREE.BoxGeometry(0.025, 0.55, 0.025)),
+      slAntenna: markShared(new THREE.BoxGeometry(0.03, 0.72, 0.03)),
+      slAntennaTip: markShared(new THREE.BoxGeometry(0.06, 0.08, 0.06)),
+      neck: markShared(new THREE.BoxGeometry(0.24, 0.12, 0.24)),
+      head: markShared(new THREE.BoxGeometry(0.36, 0.36, 0.36)),
+      balaclava: markShared(new THREE.BoxGeometry(0.37, 0.17, 0.37)),
+      goggles: markShared(new THREE.BoxGeometry(0.35, 0.11, 0.06)),
+      helmet: markShared(new THREE.BoxGeometry(0.43, 0.21, 0.43)),
+      nvgMount: markShared(new THREE.BoxGeometry(0.1, 0.09, 0.05)),
+      rankBand: markShared(new THREE.BoxGeometry(0.445, 0.045, 0.445)),
+      upperArm: markShared(new THREE.BoxGeometry(0.17, 0.32, 0.17)),
+      forearm: markShared(new THREE.BoxGeometry(0.15, 0.32, 0.15)),
+      gunReceiver: markShared(new THREE.BoxGeometry(0.075, 0.12, 0.48)),
+      gunBarrel: markShared(new THREE.BoxGeometry(0.04, 0.04, 0.36)),
+      gunMag: markShared(new THREE.BoxGeometry(0.055, 0.18, 0.09)),
+      gunOptic: markShared(new THREE.BoxGeometry(0.06, 0.07, 0.11)),
+      muzzleFlash: markShared(new THREE.OctahedronGeometry(0.14, 0)),
       rpgLauncherTube,
       rpgWarheadCone,
-      marker: new THREE.OctahedronGeometry(0.12, 0)
+      marker: markShared(new THREE.OctahedronGeometry(0.12, 0))
     };
   }
   return sharedGeos;
@@ -79,18 +172,18 @@ function getSharedGeometries() {
 function getSharedMaterials(team) {
   if (!sharedMats.common) {
     sharedMats.common = {
-      skinMat: new THREE.MeshStandardMaterial({ color: 0xe0b899, roughness: 0.8, flatShading: true }),
-      gunMat: new THREE.MeshStandardMaterial({ color: 0x1e2226, roughness: 0.55, flatShading: true }),
-      bootMat: new THREE.MeshStandardMaterial({ color: 0x1b1e21, roughness: 0.9 }),
-      crossMat: new THREE.MeshBasicMaterial({ color: 0xffffff }),
-      warheadMat: new THREE.MeshStandardMaterial({ color: 0x4b6542, roughness: 0.7, flatShading: true }),
-      rpgTubeMat: new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.75, flatShading: true }),
-      rpgShoulderConeMat: new THREE.MeshStandardMaterial({ color: 0x4b6542, roughness: 0.65, flatShading: true }),
-      gogglesMat: new THREE.MeshBasicMaterial({ color: 0x161a20 }),
-      tipCmdMat: new THREE.MeshBasicMaterial({ color: 0xf1c40f }),
-      tipSlMat: new THREE.MeshBasicMaterial({ color: 0x2ecc71 }),
-      bandCmdMat: new THREE.MeshBasicMaterial({ color: 0xf1c40f }),
-      bandSlMat: new THREE.MeshBasicMaterial({ color: 0x00d2d3 })
+      skinMat: markShared(new THREE.MeshStandardMaterial({ color: 0xe0b899, roughness: 0.8, flatShading: true })),
+      gunMat: markShared(new THREE.MeshStandardMaterial({ color: 0x1e2226, roughness: 0.55, flatShading: true })),
+      bootMat: markShared(new THREE.MeshStandardMaterial({ color: 0x1b1e21, roughness: 0.9 })),
+      crossMat: markShared(new THREE.MeshBasicMaterial({ color: 0xffffff })),
+      warheadMat: markShared(new THREE.MeshStandardMaterial({ color: 0x4b6542, roughness: 0.7, flatShading: true })),
+      rpgTubeMat: markShared(new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.75, flatShading: true })),
+      rpgShoulderConeMat: markShared(new THREE.MeshStandardMaterial({ color: 0x4b6542, roughness: 0.65, flatShading: true })),
+      gogglesMat: markShared(new THREE.MeshBasicMaterial({ color: 0x161a20 })),
+      tipCmdMat: markShared(new THREE.MeshBasicMaterial({ color: 0xf1c40f })),
+      tipSlMat: markShared(new THREE.MeshBasicMaterial({ color: 0x2ecc71 })),
+      bandCmdMat: markShared(new THREE.MeshBasicMaterial({ color: 0xf1c40f })),
+      bandSlMat: markShared(new THREE.MeshBasicMaterial({ color: 0x00d2d3 }))
     };
   }
 
@@ -100,14 +193,16 @@ function getSharedMaterials(team) {
     const helmetColor = teamKey === 'US' ? 0x2980b9 : 0xc0392b;
     const pouchColor = teamKey === 'US' ? 0x1c2a38 : 0x33201a;
     sharedMats[teamKey] = {
-      uniformMat: new THREE.MeshStandardMaterial({
-        map: teamKey === 'US' ? TEXTURES.camoUS : TEXTURES.camoRU,
-        roughness: 0.85
-      }),
-      vestMat: new THREE.MeshStandardMaterial({ color: vestColor, roughness: 0.8, flatShading: true }),
-      pouchMat: new THREE.MeshStandardMaterial({ color: pouchColor, roughness: 0.85, flatShading: true }),
-      helmetMat: new THREE.MeshStandardMaterial({ color: helmetColor, roughness: 0.65, flatShading: true }),
-      markerMat: new THREE.MeshBasicMaterial({ color: teamKey === 'US' ? 0x3498db : 0xe74c3c })
+      uniformMat: markShared(
+        new THREE.MeshStandardMaterial({
+          map: teamKey === 'US' ? TEXTURES.camoUS : TEXTURES.camoRU,
+          roughness: 0.85
+        })
+      ),
+      vestMat: markShared(new THREE.MeshStandardMaterial({ color: vestColor, roughness: 0.8, flatShading: true })),
+      pouchMat: markShared(new THREE.MeshStandardMaterial({ color: pouchColor, roughness: 0.85, flatShading: true })),
+      helmetMat: markShared(new THREE.MeshStandardMaterial({ color: helmetColor, roughness: 0.65, flatShading: true })),
+      markerMat: markShared(new THREE.MeshBasicMaterial({ color: teamKey === 'US' ? 0x3498db : 0xe74c3c }))
     };
   }
 
@@ -336,12 +431,8 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
     gunBarrel.position.set(0, 0.02, 0.25);
   }
 
-  const flashMat = new THREE.MeshBasicMaterial({
-    color: 0xffd32a,
-    transparent: true,
-    opacity: 0
-  });
-  const muzzleFlash = new THREE.Mesh(geos.muzzleFlash, flashMat);
+  const muzzleFlash = new THREE.Mesh(geos.muzzleFlash, SHARED_MUZZLE_FLASH_MAT);
+  muzzleFlash.visible = false;
   muzzleFlash.position.set(0, 0.02, packRole === 'RECON' ? 0.72 : packRole === 'MEDIC' ? 0.44 : 0.56);
   muzzleFlash.userData.skipHitbox = true;
 
@@ -406,31 +497,19 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
     for (const p of magPouches) p.visible = false;
     for (const ex of modernGearExtras) ex.visible = false;
 
-    const steelMat = new THREE.MeshStandardMaterial({
-      color: 0xd0d7de,
-      metalness: 0.85,
-      roughness: 0.25,
-      flatShading: true
-    });
-    const goldMat = new THREE.MeshStandardMaterial({
-      color: 0xd4af37,
-      metalness: 0.8,
-      roughness: 0.3
-    });
-    const heraldMat = new THREE.MeshStandardMaterial({
-      color: team === 'US' ? 0x1d4ed8 : 0xb91c1c,
-      roughness: 0.65
-    });
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0x6b4226, roughness: 0.85 });
+    const steelMat = getCachedStdMat(0xd0d7de, 0.25, 0.85, true);
+    const goldMat = getCachedStdMat(0xd4af37, 0.3, 0.8, false);
+    const heraldMat = getCachedStdMat(team === 'US' ? 0x1d4ed8 : 0xb91c1c, 0.65, 0, false);
+    const woodMat = getCachedStdMat(0x6b4226, 0.85, 0, false);
 
     // Crusader Great Helm Visor Cross & Heraldic Plume
-    const helmVisor = new THREE.Mesh(new THREE.BoxGeometry(0.39, 0.32, 0.39), steelMat);
+    const helmVisor = new THREE.Mesh(getCachedBoxGeo(0.39, 0.32, 0.39), steelMat);
     helmVisor.position.set(0, 0.22, 0);
     helmVisor.userData.isHead = true;
-    const visorCross = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.04), goldMat);
+    const visorCross = new THREE.Mesh(getCachedBoxGeo(0.24, 0.24, 0.04), goldMat);
     visorCross.position.set(0, 0.22, 0.19);
     visorCross.userData.skipHitbox = true;
-    const plume = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.26, 0.32), heraldMat);
+    const plume = new THREE.Mesh(getCachedBoxGeo(0.1, 0.26, 0.32), heraldMat);
     plume.position.set(0, 0.44, -0.06);
     plume.userData.skipHitbox = true;
     headGroup.add(helmVisor, visorCross, plume);
@@ -440,13 +519,13 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
     swordScabbardGroup.name = 'swordScabbardGroup';
     swordScabbardGroup.position.set(0.23, 0.04, -0.08);
     swordScabbardGroup.rotation.set(0.72, 0.14, -0.22);
-    const scabbardSheath = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.78, 0.028), woodMat);
+    const scabbardSheath = new THREE.Mesh(getCachedBoxGeo(0.06, 0.78, 0.028), woodMat);
     scabbardSheath.position.set(0, -0.28, 0);
     scabbardSheath.userData.skipHitbox = true;
-    const scabbardLocket3p = new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.045, 0.036), goldMat);
+    const scabbardLocket3p = new THREE.Mesh(getCachedBoxGeo(0.072, 0.045, 0.036), goldMat);
     scabbardLocket3p.position.set(0, 0.09, 0);
     scabbardLocket3p.userData.skipHitbox = true;
-    const scabbardChape3p = new THREE.Mesh(new THREE.ConeGeometry(0.036, 0.12, 4), goldMat);
+    const scabbardChape3p = new THREE.Mesh(getCachedConeGeo(0.036, 0.12, 4), goldMat);
     scabbardChape3p.position.set(0, -0.71, 0);
     scabbardChape3p.rotation.x = Math.PI;
     scabbardChape3p.rotation.y = Math.PI / 4;
@@ -455,13 +534,13 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
 
     const slungSwordHiltGroup = new THREE.Group();
     slungSwordHiltGroup.name = 'slungSwordHiltGroup';
-    const slungCrossguard = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.032, 0.038), goldMat);
+    const slungCrossguard = new THREE.Mesh(getCachedBoxGeo(0.22, 0.032, 0.038), goldMat);
     slungCrossguard.position.set(0, 0.12, 0);
     slungCrossguard.userData.skipHitbox = true;
-    const slungGrip = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.02, 0.16, 8), woodMat);
+    const slungGrip = new THREE.Mesh(getCachedCylGeo(0.018, 0.02, 0.16, 8), woodMat);
     slungGrip.position.set(0, 0.21, 0);
     slungGrip.userData.skipHitbox = true;
-    const slungPommel = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 8), goldMat);
+    const slungPommel = new THREE.Mesh(getCachedSphereGeo(0.028, 8, 8), goldMat);
     slungPommel.position.set(0, 0.30, 0);
     slungPommel.userData.skipHitbox = true;
     slungSwordHiltGroup.add(slungCrossguard, slungGrip, slungPommel);
@@ -474,7 +553,7 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
 
     if (packRole === 'MOUNTED_KNIGHT') {
       // Curved English Yew Longbow in hands (with Broadsword visibly slung in hip scabbard!)
-      const bowArc = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.025, 6, 12, Math.PI), woodMat);
+      const bowArc = new THREE.Mesh(getCachedTorusGeo(0.42, 0.025, 6, 12, Math.PI), woodMat);
       bowArc.rotation.y = Math.PI / 2;
       bowArc.position.set(0, 0.05, 0.25);
       bowArc.userData.skipHitbox = true;
@@ -482,28 +561,29 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
 
       // 3D Armored Warhorse Mount underneath the Mounted Knight
       const horseGroup = new THREE.Group();
-      const horseBody = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.64, 1.54), woodMat);
+      const horseBody = new THREE.Mesh(getCachedBoxGeo(0.52, 0.64, 1.54), woodMat);
       horseBody.position.set(0, 0.88, 0);
       horseBody.userData.skipHitbox = true;
-      const horseBarding = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.56, 1.48), heraldMat);
+      const horseBarding = new THREE.Mesh(getCachedBoxGeo(0.56, 0.56, 1.48), heraldMat);
       horseBarding.position.set(0, 0.82, 0);
       horseBarding.userData.skipHitbox = true;
-      const horseNeck = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.72, 0.38), woodMat);
+      const horseNeck = new THREE.Mesh(getCachedBoxGeo(0.32, 0.72, 0.38), woodMat);
       horseNeck.position.set(0, 1.35, 0.68);
       horseNeck.rotation.x = -0.45;
       horseNeck.userData.skipHitbox = true;
-      const horseHead = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.32, 0.58), steelMat);
+      const horseHead = new THREE.Mesh(getCachedBoxGeo(0.28, 0.32, 0.58), steelMat);
       horseHead.position.set(0, 1.62, 0.98);
       horseHead.rotation.x = -0.35;
       horseHead.userData.skipHitbox = true;
       horseGroup.add(horseBody, horseBarding, horseNeck, horseHead);
+      const horseLegGeo = getCachedBoxGeo(0.15, 0.82, 0.15);
       for (const [lx, lz] of [
         [-0.21, -0.54],
         [0.21, -0.54],
         [-0.21, 0.54],
         [0.21, 0.54]
       ]) {
-        const hLeg = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.82, 0.15), woodMat);
+        const hLeg = new THREE.Mesh(horseLegGeo, woodMat);
         hLeg.position.set(lx, 0.41, lz);
         hLeg.userData.skipHitbox = true;
         horseGroup.add(hLeg);
@@ -514,62 +594,62 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
       marker.position.y += 0.58;
     } else if (packRole === 'ARCHER') {
       // Foot Longbow Archer: Curved English Yew Longbow + Back Arrow Quiver
-      const bowArc = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.026, 6, 12, Math.PI), woodMat);
+      const bowArc = new THREE.Mesh(getCachedTorusGeo(0.45, 0.026, 6, 12, Math.PI), woodMat);
       bowArc.rotation.y = Math.PI / 2;
       bowArc.position.set(0, 0.05, 0.25);
       bowArc.userData.skipHitbox = true;
       gunGroup.add(bowArc);
     } else if (packRole === 'CROSSBOWMAN') {
       // Rhodok Siege Crossbowman: Horizontal Arbalest Crossbow in hands + Large Pavise Tower Shield slung on back!
-      const xbowStock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.62), woodMat);
+      const xbowStock = new THREE.Mesh(getCachedBoxGeo(0.06, 0.08, 0.62), woodMat);
       xbowStock.position.set(0, 0.02, 0.22);
       xbowStock.userData.skipHitbox = true;
-      const xbowProd = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.035, 0.04), steelMat);
+      const xbowProd = new THREE.Mesh(getCachedBoxGeo(0.58, 0.035, 0.04), steelMat);
       xbowProd.position.set(0, 0.05, 0.48);
       xbowProd.userData.skipHitbox = true;
       gunGroup.add(xbowStock, xbowProd);
-      const backPavise = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.86, 0.045), heraldMat);
+      const backPavise = new THREE.Mesh(getCachedBoxGeo(0.58, 0.86, 0.045), heraldMat);
       backPavise.position.set(0, 0.38, -0.32);
       backPavise.userData.skipHitbox = true;
       upperBody.add(backPavise);
     } else if (packRole === 'POLEARM_KNIGHT') {
       // Knight with Long Spear / Polearm: 2.3m ash shaft + steel spearhead & halberd axe blade + heraldic pennant
-      const spearShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.028, 2.25, 8), woodMat);
+      const spearShaft = new THREE.Mesh(getCachedCylGeo(0.024, 0.028, 2.25, 8), woodMat);
       spearShaft.rotation.x = Math.PI / 2 - 0.18;
       spearShaft.position.set(0, 0.16, 0.58);
       spearShaft.userData.skipHitbox = true;
-      const spearHead = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.36, 4), steelMat);
+      const spearHead = new THREE.Mesh(getCachedConeGeo(0.05, 0.36, 4), steelMat);
       spearHead.rotation.x = Math.PI / 2 - 0.18;
       spearHead.position.set(0, 0.38, 1.72);
       spearHead.userData.skipHitbox = true;
-      const pennant = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.12, 0.01), heraldMat);
+      const pennant = new THREE.Mesh(getCachedBoxGeo(0.24, 0.12, 0.01), heraldMat);
       pennant.position.set(0.12, 0.32, 1.42);
       pennant.userData.skipHitbox = true;
       gunGroup.add(spearShaft, spearHead, pennant);
     } else if (packRole === 'GREATSWORD_KNIGHT') {
       // 2H Double-Handed Greatsword / Zweihänder (No Shield — Pure Two-Handed Shock Blade)
-      const greatBlade = new THREE.Mesh(new THREE.BoxGeometry(0.072, 1.28, 0.024), steelMat);
+      const greatBlade = new THREE.Mesh(getCachedBoxGeo(0.072, 1.28, 0.024), steelMat);
       greatBlade.name = 'thirdPersonSwordBlade';
       greatBlade.position.set(0, 0.56, 0.18);
       greatBlade.rotation.x = 0.32;
       greatBlade.userData.skipHitbox = true;
-      const greatGuard = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.045, 0.045), goldMat);
+      const greatGuard = new THREE.Mesh(getCachedBoxGeo(0.36, 0.045, 0.045), goldMat);
       greatGuard.name = 'thirdPersonCrossGuard';
       greatGuard.position.set(0, 0.04, 0.04);
       greatGuard.userData.skipHitbox = true;
       gunGroup.add(greatBlade, greatGuard);
     } else {
       // 1H Templar Arming Sword (Right Hand) + 1H Heraldic Heater Shield (Left Arm)
-      const swordBlade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.88, 0.02), steelMat);
+      const swordBlade = new THREE.Mesh(getCachedBoxGeo(0.05, 0.88, 0.02), steelMat);
       swordBlade.name = 'thirdPersonSwordBlade';
       swordBlade.position.set(0, 0.38, 0.18);
       swordBlade.rotation.x = 0.35;
       swordBlade.userData.skipHitbox = true;
-      const crossGuard = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.04, 0.04), goldMat);
+      const crossGuard = new THREE.Mesh(getCachedBoxGeo(0.24, 0.04, 0.04), goldMat);
       crossGuard.name = 'thirdPersonCrossGuard';
       crossGuard.position.set(0, 0.02, 0.04);
       crossGuard.userData.skipHitbox = true;
-      const kiteShield = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.68, 0.05), heraldMat);
+      const kiteShield = new THREE.Mesh(getCachedBoxGeo(0.46, 0.68, 0.05), heraldMat);
       kiteShield.name = 'thirdPersonKiteShield';
       kiteShield.position.set(-0.36, 0.02, 0.12);
       kiteShield.rotation.y = 0.35;
@@ -611,13 +691,9 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
       : isDilo
       ? 0x2e7d32
       : 0x3b6e35;
-    const dinoSkinMat = new THREE.MeshStandardMaterial({
-      color: dinoColor,
-      roughness: 0.78,
-      flatShading: true
-    });
-    const boneHornMat = new THREE.MeshStandardMaterial({ color: 0xf1ebd8, roughness: 0.5 });
-    const eyeGlowMat = new THREE.MeshBasicMaterial({ color: 0xffd32a });
+    const dinoSkinMat = getCachedStdMat(dinoColor, 0.78, 0, true);
+    const boneHornMat = getCachedStdMat(0xf1ebd8, 0.5, 0, false);
+    const eyeGlowMat = getCachedBasicMat(0xffd32a);
 
     torso.material = dinoSkinMat;
     torso.scale.set(1.25, 1.15, 1.65);
@@ -642,9 +718,10 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
     rightFore.position.set(-0.02, -0.26, 0.30);
     rightFore.rotation.set(-1.1, -0.08, 0);
 
+    const talonGeo = getCachedConeGeo(0.024, 0.18, 4);
     for (const clawFore of [leftFore, rightFore]) {
       for (const cx of [-0.04, 0, 0.04]) {
-        const talon = new THREE.Mesh(new THREE.ConeGeometry(0.024, 0.18, 4), boneHornMat);
+        const talon = new THREE.Mesh(talonGeo, boneHornMat);
         talon.rotation.x = Math.PI / 2.2;
         talon.position.set(cx, -0.16, 0.08);
         talon.userData.skipHitbox = true;
@@ -653,17 +730,18 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
     }
 
     // Elongated Dinosaur Snout, Jaws, Teeth & Glowing Predator Eyes on `headGroup`
-    const dinoSnout = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.38, 0.82), dinoSkinMat);
+    const dinoSnout = new THREE.Mesh(getCachedBoxGeo(0.48, 0.38, 0.82), dinoSkinMat);
     dinoSnout.position.set(0, 0.22, 0.36);
     dinoSnout.userData.isHead = true;
-    const dinoJaw = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.18, 0.74), boneHornMat);
+    const dinoJaw = new THREE.Mesh(getCachedBoxGeo(0.42, 0.18, 0.74), boneHornMat);
     dinoJaw.position.set(0, 0.04, 0.34);
     dinoJaw.rotation.x = 0.24;
     dinoJaw.userData.isHead = true;
-    const leftEye = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.12), eyeGlowMat);
+    const dinoEyeGeo = getCachedBoxGeo(0.08, 0.08, 0.12);
+    const leftEye = new THREE.Mesh(dinoEyeGeo, eyeGlowMat);
     leftEye.position.set(-0.25, 0.3, 0.25);
     leftEye.userData.skipHitbox = true;
-    const rightEye = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.12), eyeGlowMat);
+    const rightEye = new THREE.Mesh(dinoEyeGeo, eyeGlowMat);
     rightEye.position.set(0.25, 0.3, 0.25);
     rightEye.userData.skipHitbox = true;
     headGroup.add(dinoSnout, dinoJaw, leftEye, rightEye);
@@ -671,8 +749,8 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
     if (isDilo) {
       // Dilophosaurus Dual Venom Neck Frill
       const frill = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.55, 0.18, 0.08, 8),
-        new THREE.MeshStandardMaterial({ color: 0xe67e22, roughness: 0.6 })
+        getCachedCylGeo(0.55, 0.18, 0.08, 8),
+        getCachedStdMat(0xe67e22, 0.6, 0, false)
       );
       frill.rotation.x = Math.PI / 2;
       frill.position.set(0, 0.24, 0.05);
@@ -680,13 +758,14 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
       headGroup.add(frill);
     } else if (isTrike) {
       // Triceratops Brow Shield & 3 Ivory Horns
-      const shield = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.72, 0.12), dinoSkinMat);
+      const shield = new THREE.Mesh(getCachedBoxGeo(0.92, 0.72, 0.12), dinoSkinMat);
       shield.position.set(0, 0.42, -0.05);
       shield.rotation.x = -0.25;
       shield.userData.isHead = true;
       headGroup.add(shield);
+      const trikeHornGeo = getCachedConeGeo(0.07, 0.62, 5);
       for (const hx of [-0.26, 0.26]) {
-        const horn = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.62, 5), boneHornMat);
+        const horn = new THREE.Mesh(trikeHornGeo, boneHornMat);
         horn.rotation.x = Math.PI / 2.2;
         horn.position.set(hx, 0.38, 0.55);
         horn.userData.skipHitbox = true;
@@ -695,7 +774,7 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
     }
 
     // Long Counterbalancing Dinosaur Tail extending behind torso
-    const dinoTail = new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.85, 6), dinoSkinMat);
+    const dinoTail = new THREE.Mesh(getCachedConeGeo(0.28, 1.85, 6), dinoSkinMat);
     dinoTail.rotation.x = -Math.PI / 2 + 0.18;
     dinoTail.position.set(0, -0.05, -0.95);
     dinoTail.userData.skipHitbox = true;
@@ -713,7 +792,7 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
     }
   }
 
-  root.userData.parts = {
+  const parts = {
     pelvisGroup,
     leftLeg: leftLegPivot,
     rightLeg: rightLegPivot,
@@ -736,6 +815,22 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
     helmet,
     vest,
     marker
+  };
+  root.userData.parts = parts;
+
+  // Freeze static leaf Mesh matrices while keeping all Group pivots & dynamic parts auto-updating
+  const dynamicSet = new Set(Object.values(parts).filter(Boolean));
+  root.traverse((child) => {
+    if (child.isMesh && !dynamicSet.has(child)) {
+      child.updateMatrix();
+      child.matrixAutoUpdate = false;
+    }
+  });
+
+  root._culledOffFrustum = false;
+  root.updateMatrixWorld = function updateSoldierMatrixWorld(force) {
+    if (!this.visible || this._culledOffFrustum) return;
+    THREE.Group.prototype.updateMatrixWorld.call(this, force);
   };
 
   return root;
@@ -910,6 +1005,7 @@ export function updateSoldierEquippedWeapon(
     parts.muzzleFlash = vmFlash;
   } else if (parts.defaultMuzzleFlash) {
     parts.defaultMuzzleFlash.position.set(0, 0.04, isPistol ? 0.42 : 0.78);
+    parts.defaultMuzzleFlash.visible = false;
     gunGroup.add(parts.defaultMuzzleFlash);
     parts.muzzleFlash = parts.defaultMuzzleFlash;
   }

@@ -4,8 +4,8 @@
 // panning, distance air-absorption filtering, and procedural sub-bass layers.
 // ============================================================================
 
-import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=90';
-import { AUDIO } from '../config.js?v=90';
+import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=91';
+import { AUDIO } from '../config.js?v=91';
 
 const AUDIO_STORAGE_KEY = 'bb_audio_settings_v1';
 
@@ -23,6 +23,8 @@ export class SoundManager {
     this._lastAutocannonImpactTime = 0;
     this._lastSoldierVoiceTime = 0;
     this._activeVoices = 0;
+    this._sharedNoiseBuffer = null;
+    this._sharedNoiseCtx = null;
 
     this.volumes = {
       master: AUDIO.DEFAULT_MASTER_VOLUME ?? 80,
@@ -175,7 +177,87 @@ export class SoundManager {
     }
   }
 
-  playProfile(profileKey, distance = 0, pan = 0, startTimeOffset = 0, volumeMult = 1.0, pitchMult = 1.0) {
+  _getSharedNoiseBuffer() {
+    if (!this.ctx) return null;
+    if (this._sharedNoiseBuffer && this._sharedNoiseCtx === this.ctx) {
+      return this._sharedNoiseBuffer;
+    }
+    const sampleRate = this.ctx.sampleRate || 44100;
+    const frameCount = Math.floor(sampleRate * 1.0);
+    const buf = this.ctx.createBuffer(1, frameCount, sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < frameCount; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    this._sharedNoiseBuffer = buf;
+    this._sharedNoiseCtx = this.ctx;
+    return buf;
+  }
+
+  _bindOneShotCleanup(src, terminalNode, trackVoice = false) {
+    if (!src) return;
+    if (trackVoice) {
+      this._activeVoices++;
+    }
+    let cleaned = false;
+    src.onended = () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (trackVoice) {
+        this._activeVoices = Math.max(0, this._activeVoices - 1);
+      }
+      if (terminalNode) {
+        try {
+          terminalNode.disconnect();
+        } catch (_) {}
+      }
+      try {
+        src.disconnect();
+      } catch (_) {}
+    };
+  }
+
+  _bindMultiShotCleanup(sources, terminalNode, trackVoice = false) {
+    let remaining = sources ? sources.length : 0;
+    if (remaining <= 0) return;
+    if (trackVoice) {
+      this._activeVoices++;
+    }
+    let voiceDone = false;
+    for (let i = 0; i < sources.length; i++) {
+      const s = sources[i];
+      let oneDone = false;
+      s.onended = () => {
+        if (oneDone) return;
+        oneDone = true;
+        try {
+          s.disconnect();
+        } catch (_) {}
+        remaining--;
+        if (remaining <= 0) {
+          if (trackVoice && !voiceDone) {
+            voiceDone = true;
+            this._activeVoices = Math.max(0, this._activeVoices - 1);
+          }
+          if (terminalNode) {
+            try {
+              terminalNode.disconnect();
+            } catch (_) {}
+          }
+        }
+      };
+    }
+  }
+
+  playProfile(
+    profileKey,
+    distance = 0,
+    pan = 0,
+    startTimeOffset = 0,
+    volumeMult = 1.0,
+    pitchMult = 1.0,
+    trackVoice = false
+  ) {
     if (!this.ctx || !this.masterBus) return false;
     const prof = this.profiles[profileKey] || this.profiles.rifle;
     if (!prof) return false;
@@ -224,15 +306,18 @@ export class SoundManager {
     src.connect(filter);
     filter.connect(gain);
 
+    let terminalNode = gain;
     if (typeof this.ctx.createStereoPanner === 'function' && Math.abs(pan) > 0.01) {
       const panner = this.ctx.createStereoPanner();
       panner.pan.setValueAtTime(Math.max(-0.9, Math.min(0.9, pan)), now);
       gain.connect(panner);
       panner.connect(this.masterBus);
+      terminalNode = panner;
     } else {
       gain.connect(this.masterBus);
     }
 
+    this._bindOneShotCleanup(src, terminalNode, trackVoice);
     src.start(now, 0, dur + 0.01);
     src.stop(now + dur + 0.015);
     return true;
@@ -273,16 +358,9 @@ export class SoundManager {
     stringOsc.connect(lp);
     lp.connect(stringGain);
 
-    // 2. Feathered arrow / quarrel air-"whoosh" (soft bandpass-filtered air sweep)
+    // 2. Feathered arrow / quarrel air-"whoosh" using shared pre-allocated noise buffer
     const whooshDur = 0.09;
-    const sampleRate = this.ctx.sampleRate || 44100;
-    const frameCount = Math.floor(sampleRate * whooshDur);
-    const noiseBuf = this.ctx.createBuffer(1, frameCount, sampleRate);
-    const data = noiseBuf.getChannelData(0);
-    for (let i = 0; i < frameCount; i++) {
-      const env = Math.sin((i / frameCount) * Math.PI);
-      data[i] = (Math.random() * 2 - 1) * env;
-    }
+    const noiseBuf = this._getSharedNoiseBuffer();
     const noiseSrc = this.ctx.createBufferSource();
     noiseSrc.buffer = noiseBuf;
     const bp = this.ctx.createBiquadFilter();
@@ -292,7 +370,8 @@ export class SoundManager {
     bp.Q.setValueAtTime(2.2, now);
 
     const whooshGain = this.ctx.createGain();
-    whooshGain.gain.setValueAtTime(vol * 0.65, now);
+    whooshGain.gain.setValueAtTime(0.001, now);
+    whooshGain.gain.linearRampToValueAtTime(vol * 0.65, now + whooshDur * 0.35);
     whooshGain.gain.exponentialRampToValueAtTime(0.0008, now + whooshDur);
 
     noiseSrc.connect(bp);
@@ -304,14 +383,18 @@ export class SoundManager {
       stringGain.connect(panner);
       whooshGain.connect(panner);
       panner.connect(this.masterBus);
+      this._bindMultiShotCleanup([stringOsc, noiseSrc], panner, true);
     } else {
       stringGain.connect(this.masterBus);
       whooshGain.connect(this.masterBus);
+      this._bindOneShotCleanup(stringOsc, stringGain, true);
+      this._bindOneShotCleanup(noiseSrc, whooshGain, false);
     }
 
+    const noiseOffset = Math.random() * Math.max(0, 1.0 - whooshDur - 0.02);
     stringOsc.start(now);
     stringOsc.stop(now + (isCrossbow ? 0.1 : 0.125));
-    noiseSrc.start(now);
+    noiseSrc.start(now, noiseOffset, whooshDur);
     noiseSrc.stop(now + whooshDur + 0.01);
   }
 
@@ -331,14 +414,7 @@ export class SoundManager {
 
     const now = this.ctx.currentTime;
     const dur = isHeavy ? 0.16 : 0.11;
-    const sampleRate = this.ctx.sampleRate || 44100;
-    const frameCount = Math.floor(sampleRate * dur);
-    const noiseBuf = this.ctx.createBuffer(1, frameCount, sampleRate);
-    const data = noiseBuf.getChannelData(0);
-    for (let i = 0; i < frameCount; i++) {
-      const env = Math.sin((i / frameCount) * Math.PI);
-      data[i] = (Math.random() * 2 - 1) * env;
-    }
+    const noiseBuf = this._getSharedNoiseBuffer();
     const noiseSrc = this.ctx.createBufferSource();
     noiseSrc.buffer = noiseBuf;
     const bp = this.ctx.createBiquadFilter();
@@ -348,22 +424,27 @@ export class SoundManager {
     bp.Q.setValueAtTime(1.8, now);
 
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(vol, now);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(vol, now + dur * 0.35);
     gain.gain.exponentialRampToValueAtTime(0.0008, now + dur);
 
     noiseSrc.connect(bp);
     bp.connect(gain);
 
+    let terminalNode = gain;
     if (typeof this.ctx.createStereoPanner === 'function' && Math.abs(pan) > 0.01) {
       const panner = this.ctx.createStereoPanner();
       panner.pan.setValueAtTime(Math.max(-0.9, Math.min(0.9, pan)), now);
       gain.connect(panner);
       panner.connect(this.masterBus);
+      terminalNode = panner;
     } else {
       gain.connect(this.masterBus);
     }
 
-    noiseSrc.start(now);
+    const noiseOffset = Math.random() * Math.max(0, 1.0 - dur - 0.02);
+    this._bindOneShotCleanup(noiseSrc, terminalNode, false);
+    noiseSrc.start(now, noiseOffset, dur);
     noiseSrc.stop(now + dur + 0.01);
   }
 
@@ -384,13 +465,14 @@ export class SoundManager {
     if (vol <= 0.008) return;
 
     const now = this.ctx.currentTime;
-    let outNode = this.masterBus;
+    let panner = null;
     if (typeof this.ctx.createStereoPanner === 'function' && Math.abs(pan) > 0.01) {
-      const panner = this.ctx.createStereoPanner();
+      panner = this.ctx.createStereoPanner();
       panner.pan.setValueAtTime(Math.max(-0.9, Math.min(0.9, pan)), now);
       panner.connect(this.masterBus);
-      outNode = panner;
     }
+    const outNode = panner || this.masterBus;
+    const sources = [];
 
     if (isSwordParry) {
       // High-carbon steel Zweihänder blade-on-blade parry ring (dual harmonic chime + metallic transient)
@@ -405,6 +487,8 @@ export class SoundManager {
         g.gain.exponentialRampToValueAtTime(0.0008, now + dur);
         osc.connect(g);
         g.connect(outNode);
+        if (!panner) this._bindOneShotCleanup(osc, g, false);
+        sources.push(osc);
         osc.start(now);
         osc.stop(now + dur + 0.01);
       });
@@ -419,6 +503,8 @@ export class SoundManager {
       thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
       thudOsc.connect(thudGain);
       thudGain.connect(outNode);
+      if (!panner) this._bindOneShotCleanup(thudOsc, thudGain, false);
+      sources.push(thudOsc);
       thudOsc.start(now);
       thudOsc.stop(now + 0.17);
 
@@ -431,8 +517,14 @@ export class SoundManager {
       rimGain.gain.exponentialRampToValueAtTime(0.001, now + 0.085);
       rimOsc.connect(rimGain);
       rimGain.connect(outNode);
+      if (!panner) this._bindOneShotCleanup(rimOsc, rimGain, false);
+      sources.push(rimOsc);
       rimOsc.start(now);
       rimOsc.stop(now + 0.09);
+    }
+
+    if (panner) {
+      this._bindMultiShotCleanup(sources, panner, false);
     }
   }
 
@@ -518,17 +610,12 @@ export class SoundManager {
     f2.frequency.setValueAtTime(kind === 'shield_wall' ? 1080 : 1320, now);
     f2.Q.setValueAtTime(3.5, now);
 
-    // Vocal breath/grit noise layer so the voice sounds rugged and human rather than a pure synth wave
-    const sampleRate = this.ctx.sampleRate || 44100;
-    const frameCount = Math.floor(sampleRate * dur);
-    const noiseBuf = this.ctx.createBuffer(1, frameCount, sampleRate);
-    const data = noiseBuf.getChannelData(0);
-    for (let i = 0; i < frameCount; i++) {
-      const env = Math.sin((i / frameCount) * Math.PI);
-      data[i] = (Math.random() * 2 - 1) * env * 0.55;
-    }
+    // Vocal breath/grit noise layer using shared pre-allocated noise buffer
+    const noiseBuf = this._getSharedNoiseBuffer();
     const breathSrc = this.ctx.createBufferSource();
     breathSrc.buffer = noiseBuf;
+    const breathGain = this.ctx.createGain();
+    breathGain.gain.setValueAtTime(0.42, now);
 
     const voiceGain = this.ctx.createGain();
     voiceGain.gain.setValueAtTime(0.001, now);
@@ -542,25 +629,31 @@ export class SoundManager {
 
     glottal.connect(f1);
     glottal.connect(f2);
-    breathSrc.connect(f1);
-    breathSrc.connect(f2);
+    breathSrc.connect(breathGain);
+    breathGain.connect(f1);
+    breathGain.connect(f2);
     f1.connect(voiceGain);
     f2.connect(voiceGain);
 
-    let outNode = voiceGain;
+    let panner = null;
     if (typeof this.ctx.createStereoPanner === 'function' && Math.abs(pan) > 0.01) {
-      const panner = this.ctx.createStereoPanner();
+      panner = this.ctx.createStereoPanner();
       panner.pan.setValueAtTime(Math.max(-0.9, Math.min(0.9, pan)), now);
       voiceGain.connect(panner);
       panner.connect(this.masterBus);
-      outNode = panner;
     } else {
       voiceGain.connect(this.masterBus);
     }
 
+    const sources = [glottal, breathSrc];
+    if (!panner) {
+      this._bindMultiShotCleanup([glottal, breathSrc], voiceGain, false);
+    }
+
+    const noiseOffset = Math.random() * Math.max(0, 1.0 - dur - 0.02);
     glottal.start(now);
     glottal.stop(now + dur + 0.015);
-    breathSrc.start(now);
+    breathSrc.start(now, noiseOffset, dur);
     breathSrc.stop(now + dur + 0.015);
 
     // Add physical oak-and-iron shield slam on 'shield_wall' or sword-on-shield clash on 'battle_cry'/'charge'
@@ -573,7 +666,9 @@ export class SoundManager {
       thudGain.gain.setValueAtTime(vol * 1.15, now + 0.04);
       thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
       thudOsc.connect(thudGain);
-      thudGain.connect(outNode === voiceGain ? this.masterBus : outNode);
+      thudGain.connect(panner || this.masterBus);
+      if (!panner) this._bindOneShotCleanup(thudOsc, thudGain, false);
+      sources.push(thudOsc);
       thudOsc.start(now + 0.04);
       thudOsc.stop(now + 0.2);
     } else if (kind === 'battle_cry' || kind === 'charge') {
@@ -585,9 +680,15 @@ export class SoundManager {
       clangGain.gain.setValueAtTime(vol * 0.28, now + 0.06);
       clangGain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
       clangOsc.connect(clangGain);
-      clangGain.connect(outNode === voiceGain ? this.masterBus : outNode);
+      clangGain.connect(panner || this.masterBus);
+      if (!panner) this._bindOneShotCleanup(clangOsc, clangGain, false);
+      sources.push(clangOsc);
       clangOsc.start(now + 0.06);
       clangOsc.stop(now + 0.17);
+    }
+
+    if (panner) {
+      this._bindMultiShotCleanup(sources, panner, false);
     }
   }
 
@@ -641,6 +742,7 @@ export class SoundManager {
     hornOsc2.connect(hornFilter);
     hornFilter.connect(hornGain);
     hornGain.connect(this.masterBus);
+    this._bindMultiShotCleanup([hornOsc1, hornOsc2], hornGain, false);
 
     hornOsc1.start(now);
     hornOsc2.start(now);
@@ -689,21 +791,16 @@ export class SoundManager {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
       osc.connect(gain);
       gain.connect(this.masterBus);
+      this._bindOneShotCleanup(osc, gain, true);
       osc.start(now);
       osc.stop(now + 0.065);
       return;
     }
 
     const profileKey = this.profiles[type] ? type : 'rifle';
-    const played = this.playProfile(profileKey, distance, pan, 0, catMult);
+    const played = this.playProfile(profileKey, distance, pan, 0, catMult, 1.0, true);
 
     if (played) {
-      this._activeVoices++;
-      const durMs = Math.round(((this.profiles[profileKey] && this.profiles[profileKey].maxDuration) || 0.22) * 1000);
-      setTimeout(() => {
-        this._activeVoices = Math.max(0, this._activeVoices - 1);
-      }, durMs);
-
       if (type === 'sniper' && distance === 0) {
         this.playProfile('reload_sniper', 0, 0, 0.28, catMult);
       }
@@ -736,14 +833,17 @@ export class SoundManager {
     subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
     subOsc.connect(subGain);
 
+    let subTerm = subGain;
     if (typeof this.ctx.createStereoPanner === 'function' && Math.abs(pan) > 0.01) {
       const panner = this.ctx.createStereoPanner();
       panner.pan.setValueAtTime(Math.max(-0.9, Math.min(0.9, pan)), now);
       subGain.connect(panner);
       panner.connect(this.masterBus);
+      subTerm = panner;
     } else {
       subGain.connect(this.masterBus);
     }
+    this._bindOneShotCleanup(subOsc, subTerm, false);
     subOsc.start(now);
     subOsc.stop(now + 0.29);
 
@@ -798,6 +898,7 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.58);
     osc.connect(gain);
     gain.connect(this.masterBus);
+    this._bindOneShotCleanup(osc, gain, false);
     osc.start(now);
     osc.stop(now + 0.6);
   }
@@ -861,6 +962,7 @@ export class SoundManager {
     subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
     subOsc.connect(subGain);
     subGain.connect(this.masterBus);
+    this._bindOneShotCleanup(subOsc, subGain, false);
     subOsc.start(now);
     subOsc.stop(now + 0.36);
 
@@ -892,6 +994,7 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.002, now + 0.038);
     osc.connect(gain);
     gain.connect(this.masterBus);
+    this._bindOneShotCleanup(osc, gain, false);
     osc.start(now);
     osc.stop(now + 0.04);
   }
@@ -934,6 +1037,7 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.002, now + 0.075);
     osc.connect(gain);
     gain.connect(this.masterBus);
+    this._bindOneShotCleanup(osc, gain, false);
     osc.start(now);
     osc.stop(now + 0.08);
   }
@@ -953,6 +1057,7 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
     osc.connect(gain);
     gain.connect(this.masterBus);
+    this._bindOneShotCleanup(osc, gain, false);
     osc.start(now);
     osc.stop(now + 0.05);
   }
@@ -973,6 +1078,7 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.002, now + 0.22);
     osc.connect(gain);
     gain.connect(this.masterBus);
+    this._bindOneShotCleanup(osc, gain, false);
     osc.start(now);
     osc.stop(now + 0.23);
   }
@@ -1012,6 +1118,7 @@ export class SoundManager {
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.036);
     osc.connect(gain);
     gain.connect(this.masterBus);
+    this._bindOneShotCleanup(osc, gain, false);
     osc.start(now);
     osc.stop(now + 0.038);
 
@@ -1025,6 +1132,7 @@ export class SoundManager {
     snapGain.gain.exponentialRampToValueAtTime(0.001, now + 0.016);
     snapOsc.connect(snapGain);
     snapGain.connect(this.masterBus);
+    this._bindOneShotCleanup(snapOsc, snapGain, false);
     snapOsc.start(now);
     snapOsc.stop(now + 0.018);
   }
@@ -1048,6 +1156,7 @@ export class SoundManager {
       g.gain.exponentialRampToValueAtTime(0.001, t0 + (isGold ? 0.38 : 0.24));
       osc.connect(g);
       g.connect(this.masterBus);
+      this._bindOneShotCleanup(osc, g, false);
       osc.start(t0);
       osc.stop(t0 + (isGold ? 0.4 : 0.26));
     });
@@ -1058,16 +1167,12 @@ export class SoundManager {
     const catMult = this.getCategoryMult('weapons');
     if (catMult <= 0.001) return;
 
+    const noiseBuf = this._getSharedNoiseBuffer();
+    if (!noiseBuf) return;
     const now = this.ctx.currentTime;
     const dur = 0.08;
-    const len = Math.floor(this.ctx.sampleRate * dur);
-    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.8);
-    }
     const src = this.ctx.createBufferSource();
-    src.buffer = buf;
+    src.buffer = noiseBuf;
     const bp = this.ctx.createBiquadFilter();
     bp.type = 'bandpass';
     bp.frequency.value = distance > 40 ? 900 : 1400;
@@ -1077,7 +1182,10 @@ export class SoundManager {
     src.connect(bp);
     bp.connect(g);
     g.connect(this.masterBus);
-    src.start(now);
+    const offset = Math.random() * Math.max(0, 1.0 - dur - 0.02);
+    this._bindOneShotCleanup(src, g, false);
+    src.start(now, offset, dur);
+    src.stop(now + dur + 0.01);
   }
 
   /**

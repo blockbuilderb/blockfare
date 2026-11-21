@@ -1,102 +1,392 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=90';
-import { TERRAIN } from '../config.js?v=90';
-import { events } from '../events.js?v=90';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=90';
+import { sound } from '../audio.js?v=91';
+import { TERRAIN } from '../config.js?v=91';
+import { events } from '../events.js?v=91';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=91';
 
 const VOXEL_SIZE = 1.25;
+const DEBRIS_POOL_CAPACITY = 384;
+const FX_POOL_CAPACITY = 384;
+const SHOCKWAVE_POOL_CAPACITY = 24;
 
-// Pre-allocated reusable THREE.Color & BufferGeometry instances (Zero GPU geometry leak)
+function markShared(asset) {
+  if (asset) {
+    if (!asset.userData) asset.userData = {};
+    asset.userData.shared = true;
+  }
+  return asset;
+}
+
+function disposeNonSharedMeshResources(root) {
+  if (!root) return;
+  if (root.isMesh || root.isLine) {
+    if (root.geometry && !root.geometry.userData?.shared) {
+      root.geometry.dispose();
+    }
+    if (root.material) {
+      if (Array.isArray(root.material)) {
+        for (let i = 0; i < root.material.length; i++) {
+          const m = root.material[i];
+          if (m && !m.userData?.shared) m.dispose();
+        }
+      } else if (!root.material.userData?.shared) {
+        root.material.dispose();
+      }
+    }
+  }
+  if (root.children && root.children.length > 0) {
+    for (let i = 0; i < root.children.length; i++) {
+      disposeNonSharedMeshResources(root.children[i]);
+    }
+  }
+}
+
+// Pre-allocated reusable THREE.Color & BufferGeometry instances (userData.shared = true)
 const _debrisDarkColor = new THREE.Color(0x2d3436);
 const _debrisOrangeColor = new THREE.Color(0xe67e22);
 const _airstrikeTrailColor = new THREE.Color(0xff7675);
 const _rocketTrailColor = new THREE.Color(0x95a5a6);
-const _sharedDebrisGeo = new THREE.BoxGeometry(0.32, 0.32, 0.32);
-const _sharedSparkGeo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
-const _sharedChipGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
-const _sharedUnitBoxGeo = new THREE.BoxGeometry(1, 1, 1);
-const _sharedRingGeo = new THREE.RingGeometry(0.3, 0.5, 24);
+const _sparkFlashColor = new THREE.Color(0xffeaa7);
+const _coreFlashColor = new THREE.Color(0xfff3b0);
+const _fireballColor = new THREE.Color(0xff6b00);
+const _smokeDarkColor = new THREE.Color(0x2f3640);
+const _smokeMidColor = new THREE.Color(0x4b4b4b);
+const _fallbackChipColor = new THREE.Color(0x95a5a6);
+const _poolColor = new THREE.Color();
+
+const _sharedUnitBoxGeo = markShared(new THREE.BoxGeometry(1, 1, 1));
+const _sharedRingGeo = markShared(new THREE.RingGeometry(0.3, 0.5, 24));
 _sharedRingGeo.rotateX(-Math.PI / 2);
 
+const _debrisPoolMat = markShared(
+  new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.86,
+    flatShading: true
+  })
+);
+const _fxPoolMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.88,
+    depthWrite: false
+  })
+);
+
+// Shared Enemy Loot Pack geometries & materials (userData.shared = true)
+const _lootPackGeo = markShared(new THREE.BoxGeometry(0.62, 0.36, 0.48));
+const _lootPouchGeo = markShared(new THREE.BoxGeometry(0.46, 0.22, 0.56));
+const _lootRingGeo = markShared(new THREE.RingGeometry(0.55, 0.72, 16));
+_lootRingGeo.rotateX(-Math.PI / 2);
+const _lootPackMatRU = markShared(new THREE.MeshStandardMaterial({ color: 0x3b4d3b, roughness: 0.78 }));
+const _lootPackMatUS = markShared(new THREE.MeshStandardMaterial({ color: 0x5c5346, roughness: 0.78 }));
+const _lootPouchMat = markShared(new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.7 }));
+const _lootRingMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xf1c40f,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.55
+  })
+);
+
+// Reusable scratch structures for zero-allocation structural integrity & projectile stepping
+const _NDX = [0, 1, -1, 0, 0, 0];
+const _NDY = [1, 0, 0, 0, 0, -1];
+const _NDZ = [0, 0, 0, 1, -1, 0];
+const _integrityVoxels = [];
+const _integrityQueue = [];
+const _integritySpanMap = new Map();
+
+const _tmpGrid = { gx: 0, gy: 0, gz: 0 };
+const _projPrevPos = new THREE.Vector3();
+const _projSegVec = new THREE.Vector3();
+const _projSegDir = new THREE.Vector3();
+const _projToTarget = new THREE.Vector3();
+const _projCurDir = new THREE.Vector3();
+const _projLookAt = new THREE.Vector3();
+const _poolDummy = new THREE.Object3D();
+const _audioResult = { dist: 0, pan: 0 };
+
+function extractRGB(col, fallbackR = 0.6, fallbackG = 0.6, fallbackB = 0.6) {
+  if (!col) {
+    _poolColor.setRGB(fallbackR, fallbackG, fallbackB);
+  } else if (col.isColor) {
+    _poolColor.copy(col);
+  } else if (typeof col === 'number') {
+    _poolColor.setHex(col);
+  } else {
+    _poolColor.setRGB(fallbackR, fallbackG, fallbackB);
+  }
+  return _poolColor;
+}
+
 export const ProjectileManager = {
+  _ensureParticlePools() {
+    if (this._debrisPool && this._fxPool) return;
+    if (!this.scene) return;
+
+    const dCap = DEBRIS_POOL_CAPACITY;
+    const dMesh = new THREE.InstancedMesh(_sharedUnitBoxGeo, _debrisPoolMat, dCap);
+    dMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    _poolColor.setRGB(1, 1, 1);
+    dMesh.setColorAt(0, _poolColor);
+    if (dMesh.instanceColor) dMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    dMesh.frustumCulled = false;
+    dMesh.matrixAutoUpdate = false;
+    dMesh.castShadow = false;
+    dMesh.receiveShadow = false;
+    dMesh.count = 0;
+    this.scene.add(dMesh);
+
+    this._debrisPool = {
+      mesh: dMesh,
+      count: 0,
+      capacity: dCap,
+      px: new Float32Array(dCap),
+      py: new Float32Array(dCap),
+      pz: new Float32Array(dCap),
+      vx: new Float32Array(dCap),
+      vy: new Float32Array(dCap),
+      vz: new Float32Array(dCap),
+      rx: new Float32Array(dCap),
+      ry: new Float32Array(dCap),
+      rz: new Float32Array(dCap),
+      rvx: new Float32Array(dCap),
+      rvy: new Float32Array(dCap),
+      rvz: new Float32Array(dCap),
+      sx: new Float32Array(dCap),
+      sy: new Float32Array(dCap),
+      sz: new Float32Array(dCap),
+      cr: new Float32Array(dCap),
+      cg: new Float32Array(dCap),
+      cb: new Float32Array(dCap),
+      life: new Float32Array(dCap)
+    };
+
+    const fCap = FX_POOL_CAPACITY;
+    const fMesh = new THREE.InstancedMesh(_sharedUnitBoxGeo, _fxPoolMat, fCap);
+    fMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    fMesh.setColorAt(0, _poolColor);
+    if (fMesh.instanceColor) fMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    fMesh.frustumCulled = false;
+    fMesh.matrixAutoUpdate = false;
+    fMesh.castShadow = false;
+    fMesh.receiveShadow = false;
+    fMesh.count = 0;
+    this.scene.add(fMesh);
+
+    this._fxPool = {
+      mesh: fMesh,
+      count: 0,
+      capacity: fCap,
+      px: new Float32Array(fCap),
+      py: new Float32Array(fCap),
+      pz: new Float32Array(fCap),
+      vx: new Float32Array(fCap),
+      vy: new Float32Array(fCap),
+      vz: new Float32Array(fCap),
+      rx: new Float32Array(fCap),
+      ry: new Float32Array(fCap),
+      rz: new Float32Array(fCap),
+      rvx: new Float32Array(fCap),
+      rvy: new Float32Array(fCap),
+      rvz: new Float32Array(fCap),
+      scale: new Float32Array(fCap),
+      growRate: new Float32Array(fCap),
+      cr: new Float32Array(fCap),
+      cg: new Float32Array(fCap),
+      cb: new Float32Array(fCap),
+      life: new Float32Array(fCap),
+      maxLife: new Float32Array(fCap)
+    };
+
+    this._shockwaveFree = [];
+    this._shockwaveActive = [];
+  },
+
+  _disposeParticlePools() {
+    if (this._debrisPool && this._debrisPool.mesh) {
+      if (this.scene) this.scene.remove(this._debrisPool.mesh);
+      this._debrisPool.mesh.dispose?.();
+      this._debrisPool = null;
+    }
+    if (this._fxPool && this._fxPool.mesh) {
+      if (this.scene) this.scene.remove(this._fxPool.mesh);
+      this._fxPool.mesh.dispose?.();
+      this._fxPool = null;
+    }
+    if (this._shockwaveActive) {
+      for (let i = 0; i < this._shockwaveActive.length; i++) {
+        const sw = this._shockwaveActive[i];
+        if (sw.mesh) {
+          if (this.scene) this.scene.remove(sw.mesh);
+          if (sw.mesh.material && !sw.mesh.material.userData?.shared) sw.mesh.material.dispose();
+        }
+      }
+      this._shockwaveActive.length = 0;
+    }
+    if (this._shockwaveFree) {
+      for (let i = 0; i < this._shockwaveFree.length; i++) {
+        const sw = this._shockwaveFree[i];
+        if (sw.mesh) {
+          if (this.scene) this.scene.remove(sw.mesh);
+          if (sw.mesh.material && !sw.mesh.material.userData?.shared) sw.mesh.material.dispose();
+        }
+      }
+      this._shockwaveFree.length = 0;
+    }
+  },
+
+  spawnCustomDebris(px, py, pz, vx, vy, vz, rvx, rvy, rvz, sx, sy, sz, color, life) {
+    this._ensureParticlePools();
+    const pool = this._debrisPool;
+    if (!pool || pool.count >= pool.capacity) return;
+    const id = pool.count++;
+    const c = extractRGB(color);
+    pool.px[id] = px;
+    pool.py[id] = py;
+    pool.pz[id] = pz;
+    pool.vx[id] = vx;
+    pool.vy[id] = vy;
+    pool.vz[id] = vz;
+    pool.rx[id] = Math.random() * 3.14;
+    pool.ry[id] = Math.random() * 3.14;
+    pool.rz[id] = Math.random() * 3.14;
+    pool.rvx[id] = rvx;
+    pool.rvy[id] = rvy;
+    pool.rvz[id] = rvz;
+    pool.sx[id] = sx;
+    pool.sy[id] = sy;
+    pool.sz[id] = sz;
+    pool.cr[id] = c.r;
+    pool.cg[id] = c.g;
+    pool.cb[id] = c.b;
+    pool.life[id] = life;
+  },
+
+  _spawnFxSlot(px, py, pz, vx, vy, vz, rvx, rvy, rvz, initScale, growRate, color, life) {
+    this._ensureParticlePools();
+    const pool = this._fxPool;
+    if (!pool || pool.count >= pool.capacity) return;
+    const id = pool.count++;
+    const c = extractRGB(color, 1, 0.8, 0.4);
+    pool.px[id] = px;
+    pool.py[id] = py;
+    pool.pz[id] = pz;
+    pool.vx[id] = vx;
+    pool.vy[id] = vy;
+    pool.vz[id] = vz;
+    pool.rx[id] = Math.random() * 3.14;
+    pool.ry[id] = Math.random() * 3.14;
+    pool.rz[id] = 0;
+    pool.rvx[id] = rvx;
+    pool.rvy[id] = rvy;
+    pool.rvz[id] = rvz;
+    pool.scale[id] = initScale;
+    pool.growRate[id] = growRate;
+    pool.cr[id] = c.r;
+    pool.cg[id] = c.g;
+    pool.cb[id] = c.b;
+    pool.life[id] = life;
+    pool.maxLife[id] = life;
+  },
+
+  _spawnShockwaveRing(x, y, z, initScale, shockSpeed, maxLife) {
+    this._ensureParticlePools();
+    if (!this.scene || !this._shockwaveActive) return;
+    if (this._shockwaveActive.length >= SHOCKWAVE_POOL_CAPACITY) return;
+
+    let entry = this._shockwaveFree.pop();
+    if (!entry) {
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xffb142,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.88,
+        depthWrite: false
+      });
+      const ringMesh = new THREE.Mesh(_sharedRingGeo, ringMat);
+      entry = { mesh: ringMesh, life: 0, maxLife: 0.42, shockSpeed: 16 };
+    }
+    entry.life = maxLife;
+    entry.maxLife = maxLife;
+    entry.shockSpeed = shockSpeed;
+    entry.mesh.position.set(x, y, z);
+    entry.mesh.scale.setScalar(initScale);
+    entry.mesh.material.opacity = 0.88;
+    entry.mesh.visible = true;
+    if (entry.mesh.parent !== this.scene) {
+      this.scene.add(entry.mesh);
+    }
+    this._shockwaveActive.push(entry);
+  },
+
   /**
    * Structural Integrity & Gravity Collapse Solver:
-   * Propagates load-bearing support from ground-anchored voxels upward (cost 0)
-   * and across limited horizontal cantilevers/lintels (max span 3).
-   * Any upper blocks or building sections that lose their vertical support
-   * collapse under gravity instead of floating in mid-air!
+   * Zero-allocation BFS index-pointer queue using direct voxel object references.
    */
   checkStructuralIntegrity(centerGx, centerGy, centerGz, radius = 8, broadcastFn = null) {
     const MAX_SPAN = TERRAIN.MAX_SPAN;
-    const minGx = centerGx - radius;
-    const maxGx = centerGx + radius;
-    const minGz = centerGz - radius;
-    const maxGz = centerGz + radius;
+    const minGx = (centerGx - radius) | 0;
+    const maxGx = (centerGx + radius) | 0;
+    const minGz = (centerGz - radius) | 0;
+    const maxGz = (centerGz + radius) | 0;
 
-    const localVoxels = [];
-    const spanMap = new Map(); // key -> min cantilever span distance from ground pillar
-    const queue = [];
+    _integrityVoxels.length = 0;
+    _integrityQueue.length = 0;
+    _integritySpanMap.clear();
 
     for (let gx = minGx; gx <= maxGx; gx++) {
       for (let gz = minGz; gz <= maxGz; gz++) {
         const groundGy = this.getBaseGy(gx, gz);
+        const isBoundary = gx === minGx || gx === maxGx || gz === minGz || gz === maxGz;
         for (let gy = -1; gy <= 18; gy++) {
-          const k = this.key(gx, gy, gz);
-          const v = this.voxels.get(k);
+          const v = this.getVoxel(gx, gy, gz);
           if (!v) continue;
-          localVoxels.push(v);
+          _integrityVoxels.push(v);
 
           // Ground-contact voxels or boundary anchor voxels start with span = 0
-          const isBoundary =
-            gx === minGx || gx === maxGx || gz === minGz || gz === maxGz;
-          if (gy <= groundGy || (isBoundary && this.voxels.has(this.key(gx, gy - 1, gz)))) {
-            spanMap.set(k, 0);
-            queue.push(v);
+          if (gy <= groundGy || (isBoundary && this.hasVoxel(gx, gy - 1, gz))) {
+            _integritySpanMap.set(v.key, 0);
+            _integrityQueue.push(v);
           }
         }
       }
     }
 
-    if (localVoxels.length === 0) return 0;
+    if (_integrityVoxels.length === 0) return 0;
 
     let head = 0;
-    while (head < queue.length) {
-      const cur = queue[head++];
-      const curSpan = spanMap.get(cur.key);
+    while (head < _integrityQueue.length) {
+      const cur = _integrityQueue[head++];
+      const curSpan = _integritySpanMap.get(cur.key);
+      const cgx = cur.gx;
+      const cgy = cur.gy;
+      const cgz = cur.gz;
 
-      // 6-neighbors: Up, Left/Right/Front/Back, Down
-      const neighbors = [
-        // Straight up: vertical pillar carries load with 0 extra span if curSpan === 0, else +1
-        { gx: cur.gx, gy: cur.gy + 1, gz: cur.gz, cost: curSpan === 0 ? 0 : 1 },
-        // Horizontal cantilevers (floors, lintels, arches) add +1 span
-        { gx: cur.gx + 1, gy: cur.gy, gz: cur.gz, cost: 1 },
-        { gx: cur.gx - 1, gy: cur.gy, gz: cur.gz, cost: 1 },
-        { gx: cur.gx, gy: cur.gy, gz: cur.gz + 1, cost: 1 },
-        { gx: cur.gx, gy: cur.gy, gz: cur.gz - 1, cost: 1 },
-        // Downward hanging costs +2 so walls cannot hang upside-down from roofs!
-        { gx: cur.gx, gy: cur.gy - 1, gz: cur.gz, cost: 2 }
-      ];
-
-      for (const n of neighbors) {
-        const nextSpan = curSpan + n.cost;
+      for (let dir = 0; dir < 6; dir++) {
+        const cost = dir === 0 ? (curSpan === 0 ? 0 : 1) : dir === 5 ? 2 : 1;
+        const nextSpan = curSpan + cost;
         if (nextSpan > MAX_SPAN) continue;
 
-        const nk = this.key(n.gx, n.gy, n.gz);
-        const nv = this.voxels.get(nk);
+        const nv = this.getVoxel(cgx + _NDX[dir], cgy + _NDY[dir], cgz + _NDZ[dir]);
         if (!nv) continue;
 
-        const prevBest = spanMap.get(nk);
+        const prevBest = _integritySpanMap.get(nv.key);
         if (prevBest === undefined || nextSpan < prevBest) {
-          spanMap.set(nk, nextSpan);
-          queue.push(nv);
+          _integritySpanMap.set(nv.key, nextSpan);
+          _integrityQueue.push(nv);
         }
       }
     }
 
     // Any local voxel not reached within MAX_SPAN has lost structural support -> COLLAPSE!
     let collapsed = 0;
-    for (const v of localVoxels) {
-      if (!spanMap.has(v.key)) {
+    for (let i = 0; i < _integrityVoxels.length; i++) {
+      const v = _integrityVoxels[i];
+      if (!_integritySpanMap.has(v.key)) {
         this.destroyVoxel(v.gx, v.gy, v.gz, false, true);
         if (broadcastFn) {
           broadcastFn({ type: 'voxel_destroy', gx: v.gx, gy: v.gy, gz: v.gz });
@@ -104,6 +394,10 @@ export const ProjectileManager = {
         collapsed++;
       }
     }
+
+    _integrityVoxels.length = 0;
+    _integrityQueue.length = 0;
+    _integritySpanMap.clear();
 
     // Check if any multi-story building near the breach lost >55% of its foundation walls
     collapsed += this.checkBuildingClusterCollapse(centerGx, centerGz, broadcastFn);
@@ -118,8 +412,10 @@ export const ProjectileManager = {
    */
   checkBuildingClusterCollapse(centerGx, centerGz, broadcastFn = null) {
     let totalCollapsed = 0;
-    for (const bld of this.buildings) {
+    for (let bIdx = 0; bIdx < this.buildings.length; bIdx++) {
+      const bld = this.buildings[bIdx];
       if (bld.collapsed) continue;
+      if (!Array.isArray(bld.foundationKeys) || bld.foundationKeys.length === 0) continue;
       if (
         centerGx < bld.startGx - 6 ||
         centerGx > bld.startGx + bld.width + 6 ||
@@ -130,11 +426,12 @@ export const ProjectileManager = {
       }
 
       let remainingFoundation = 0;
-      for (const k of bld.foundationKeys) {
-        if (this.voxels.has(k)) remainingFoundation++;
+      const fKeys = bld.foundationKeys;
+      for (let i = 0; i < fKeys.length; i++) {
+        if (this.voxels.has(fKeys[i])) remainingFoundation++;
       }
 
-      const ratio = bld.foundationKeys.length > 0 ? remainingFoundation / bld.foundationKeys.length : 1;
+      const ratio = remainingFoundation / fKeys.length;
       if (ratio <= TERRAIN.BUILDING_COLLAPSE_THRESHOLD) {
         bld.collapsed = true;
         totalCollapsed += this.triggerBuildingCollapse(bld, broadcastFn);
@@ -145,13 +442,13 @@ export const ProjectileManager = {
 
   triggerBuildingCollapse(bld, broadcastFn = null) {
     let collapsedCount = 0;
-    const topGy = bld.groundGy + bld.floors * 4 + 1;
+    const baseGy = bld.groundGy ?? bld.baseGy ?? 0;
+    const topGy = bld.topGy ?? baseGy + (bld.floors || 2) * 4 + 1;
 
     for (let gx = bld.startGx - 1; gx <= bld.startGx + bld.width; gx++) {
       for (let gz = bld.startGz - 1; gz <= bld.startGz + bld.depth; gz++) {
-        for (let gy = bld.groundGy + 1; gy <= topGy; gy++) {
-          if (this.voxels.has(this.key(gx, gy, gz))) {
-            // Spawn falling block for every ~3rd voxel to keep FPS high during massive collapse
+        for (let gy = baseGy + 1; gy <= topGy; gy++) {
+          if (this.hasVoxel(gx, gy, gz)) {
             const spawnFall = (gx + gy + gz) % 3 === 0;
             this.destroyVoxel(gx, gy, gz, false, spawnFall);
             if (broadcastFn) {
@@ -167,16 +464,16 @@ export const ProjectileManager = {
           gz >= bld.startGz &&
           gz < bld.startGz + bld.depth &&
           (gx * 7 + gz * 13) % 5 === 0 &&
-          !this.voxels.has(this.key(gx, bld.groundGy, gz))
+          !this.hasVoxel(gx, baseGy, gz)
         ) {
-          this.addVoxel(gx, bld.groundGy, gz, 'darkConcrete');
+          this.addVoxel(gx, baseGy, gz, 'darkConcrete');
         }
       }
     }
 
     const centerWorld = new THREE.Vector3(
       (bld.startGx + bld.width * 0.5) * VOXEL_SIZE,
-      (bld.groundGy + 2) * VOXEL_SIZE,
+      (baseGy + 2) * VOXEL_SIZE,
       (bld.startGz + bld.depth * 0.5) * VOXEL_SIZE
     );
     this.spawnExplosionVisual(centerWorld, Math.max(bld.width, bld.depth) * VOXEL_SIZE * 0.55);
@@ -196,59 +493,62 @@ export const ProjectileManager = {
   },
 
   spawnFallingBlock(origin, color) {
-    if (this.debrisParticles.length > 65) {
-      return;
-    }
-    if (!this._fallingBlockGeo) {
-      this._fallingBlockGeo = new THREE.BoxGeometry(
-        VOXEL_SIZE * 0.88,
-        VOXEL_SIZE * 0.88,
-        VOXEL_SIZE * 0.88
-      );
-    }
-    const mat = new THREE.MeshStandardMaterial({
+    this._ensureParticlePools();
+    if (!this._debrisPool || this._debrisPool.count > DEBRIS_POOL_CAPACITY - 32) return;
+    const s = VOXEL_SIZE * 0.88;
+    this.spawnCustomDebris(
+      origin.x,
+      origin.y,
+      origin.z,
+      (Math.random() - 0.5) * 3.5,
+      -1.5 - Math.random() * 2,
+      (Math.random() - 0.5) * 3.5,
+      (Math.random() - 0.5) * 3,
+      (Math.random() - 0.5) * 3,
+      (Math.random() - 0.5) * 3,
+      s,
+      s,
+      s,
       color,
-      roughness: 0.9,
-      flatShading: true
-    });
-    const mesh = new THREE.Mesh(this._fallingBlockGeo, mat);
-    mesh.position.copy(origin);
-    mesh.castShadow = false;
-    this.scene.add(mesh);
-
-    this.debrisParticles.push({
-      mesh,
-      vel: new THREE.Vector3(
-        (Math.random() - 0.5) * 3.5,
-        -1.5 - Math.random() * 2,
-        (Math.random() - 0.5) * 3.5
-      ),
-      rotVel: new THREE.Vector3(
-        (Math.random() - 0.5) * 3,
-        (Math.random() - 0.5) * 3,
-        (Math.random() - 0.5) * 3
-      ),
-      life: 1.4 + Math.random() * 0.5
-    });
+      1.4 + Math.random() * 0.5
+    );
   },
 
   explodeAt(worldPos, radius = 4.6, maxDamage = 210, onEntityDamage = null, broadcastFn = null) {
-    const gCenter = this.worldToGrid(worldPos.x, worldPos.y, worldPos.z);
+    const gCenter = this.worldToGrid(worldPos.x, worldPos.y, worldPos.z, _tmpGrid);
+    const cgx = gCenter.gx;
+    const cgy = gCenter.gy;
+    const cgz = gCenter.gz;
     const gRad = Math.ceil(radius / VOXEL_SIZE) + 1;
+    const rGrid = radius / VOXEL_SIZE + 0.9;
+    const rGridSq = rGrid * rGrid;
+    const radiusSq = radius * radius;
+    const invFalloffDenom = 1 / (radius + 0.6);
+    const wx = worldPos.x;
+    const wy = worldPos.y;
+    const wz = worldPos.z;
     let destroyedCount = 0;
 
     for (let dx = -gRad; dx <= gRad; dx++) {
+      const dxSq = dx * dx;
       for (let dy = -gRad; dy <= gRad; dy++) {
+        const dxySq = dxSq + dy * dy;
+        if (dxySq > rGridSq) continue;
         for (let dz = -gRad; dz <= gRad; dz++) {
-          const gx = gCenter.gx + dx;
-          const gy = gCenter.gy + dy;
-          const gz = gCenter.gz + dz;
-          const v = this.voxels.get(this.key(gx, gy, gz));
+          if (dxySq + dz * dz > rGridSq) continue;
+          const gx = cgx + dx;
+          const gy = cgy + dy;
+          const gz = cgz + dz;
+          const v = this.getVoxel(gx, gy, gz);
           if (!v) continue;
 
-          const dist = v.pos.distanceTo(worldPos);
-          if (dist <= radius) {
-            const falloff = 1 - dist / (radius + 0.6);
+          const vdx = v.pos.x - wx;
+          const vdy = v.pos.y - wy;
+          const vdz = v.pos.z - wz;
+          const distSq = vdx * vdx + vdy * vdy + vdz * vdz;
+          if (distSq <= radiusSq) {
+            const dist = Math.sqrt(distSq);
+            const falloff = 1 - dist * invFalloffDenom;
             if (this.damageVoxel(gx, gy, gz, maxDamage * falloff * 1.45, broadcastFn, true)) {
               destroyedCount++;
             }
@@ -258,13 +558,7 @@ export const ProjectileManager = {
     }
 
     if (destroyedCount > 0) {
-      const collapsed = this.checkStructuralIntegrity(
-        gCenter.gx,
-        gCenter.gy,
-        gCenter.gz,
-        9,
-        broadcastFn
-      );
+      const collapsed = this.checkStructuralIntegrity(cgx, cgy, cgz, 9, broadcastFn);
       destroyedCount += collapsed;
     }
 
@@ -277,21 +571,39 @@ export const ProjectileManager = {
 
   /** Airstrike area damage — damages voxels in radius without visual explosion per-hit */
   damageAreaVoxels(worldPos, radius = 7, maxDamage = 140) {
-    const gCenter = this.worldToGrid(worldPos.x, worldPos.y, worldPos.z);
+    const gCenter = this.worldToGrid(worldPos.x, worldPos.y, worldPos.z, _tmpGrid);
+    const cgx = gCenter.gx;
+    const cgy = gCenter.gy;
+    const cgz = gCenter.gz;
     const gRad = Math.ceil(radius / VOXEL_SIZE) + 1;
+    const rGrid = radius / VOXEL_SIZE + 0.9;
+    const rGridSq = rGrid * rGrid;
+    const radiusSq = radius * radius;
+    const invFalloffDenom = 1 / (radius + 0.5);
+    const wx = worldPos.x;
+    const wy = worldPos.y;
+    const wz = worldPos.z;
     let destroyed = 0;
 
     for (let dx = -gRad; dx <= gRad; dx++) {
+      const dxSq = dx * dx;
       for (let dy = -gRad; dy <= gRad; dy++) {
+        const dxySq = dxSq + dy * dy;
+        if (dxySq > rGridSq) continue;
         for (let dz = -gRad; dz <= gRad; dz++) {
-          const gx = gCenter.gx + dx;
-          const gy = gCenter.gy + dy;
-          const gz = gCenter.gz + dz;
-          const v = this.voxels.get(this.key(gx, gy, gz));
+          if (dxySq + dz * dz > rGridSq) continue;
+          const gx = cgx + dx;
+          const gy = cgy + dy;
+          const gz = cgz + dz;
+          const v = this.getVoxel(gx, gy, gz);
           if (!v) continue;
-          const dist = v.pos.distanceTo(worldPos);
-          if (dist <= radius) {
-            const falloff = 1 - dist / (radius + 0.5);
+          const vdx = v.pos.x - wx;
+          const vdy = v.pos.y - wy;
+          const vdz = v.pos.z - wz;
+          const distSq = vdx * vdx + vdy * vdy + vdz * vdz;
+          if (distSq <= radiusSq) {
+            const dist = Math.sqrt(distSq);
+            const falloff = 1 - dist * invFalloffDenom;
             if (this.damageVoxel(gx, gy, gz, maxDamage * falloff, null, true)) {
               destroyed++;
             }
@@ -301,183 +613,134 @@ export const ProjectileManager = {
     }
 
     if (destroyed > 0) {
-      this.checkStructuralIntegrity(gCenter.gx, gCenter.gy, gCenter.gz, 10, null);
+      this.checkStructuralIntegrity(cgx, cgy, cgz, 10, null);
     }
     this.spawnExplosionVisual(worldPos, radius * 0.8);
   },
 
   spawnDebris(origin, color, count = 4) {
-    if (this.debrisParticles.length > 140) return;
+    this._ensureParticlePools();
+    const pool = this._debrisPool;
+    if (!pool) return;
     for (let i = 0; i < count; i++) {
-      const mat = new THREE.MeshStandardMaterial({
+      if (pool.count >= pool.capacity) break;
+      this.spawnCustomDebris(
+        origin.x + (Math.random() - 0.5) * 0.8,
+        origin.y + (Math.random() - 0.5) * 0.8,
+        origin.z + (Math.random() - 0.5) * 0.8,
+        (Math.random() - 0.5) * 13,
+        3.5 + Math.random() * 8,
+        (Math.random() - 0.5) * 13,
+        Math.random() * 9,
+        Math.random() * 9,
+        Math.random() * 9,
+        0.32,
+        0.32,
+        0.32,
         color,
-        roughness: 0.85,
-        flatShading: true
-      });
-      const mesh = new THREE.Mesh(_sharedDebrisGeo, mat);
-      mesh.position.copy(origin).add(
-        new THREE.Vector3(
-          (Math.random() - 0.5) * 0.8,
-          (Math.random() - 0.5) * 0.8,
-          (Math.random() - 0.5) * 0.8
-        )
+        1.2 + Math.random() * 0.7
       );
-      this.scene.add(mesh);
-      this.debrisParticles.push({
-        mesh,
-        vel: new THREE.Vector3(
-          (Math.random() - 0.5) * 13,
-          3.5 + Math.random() * 8,
-          (Math.random() - 0.5) * 13
-        ),
-        rotVel: new THREE.Vector3(
-          Math.random() * 9,
-          Math.random() * 9,
-          Math.random() * 9
-        ),
-        life: 1.2 + Math.random() * 0.7
-      });
     }
   },
 
   /**
    * Pinpoint bullet impact flash + tiny surface chip at the exact raycast hit point
-   * (zero random position offset so impacts match the ADS aiming dot pixel-for-pixel).
+   * (zero allocations via pre-allocated InstancedMesh particle pools).
    */
   spawnBulletImpact(hitPoint, normal, color) {
-    if (this.debrisParticles.length > 160) return;
+    const nx = normal ? normal.x : 0;
+    const ny = normal ? normal.y : 1;
+    const nz = normal ? normal.z : 0;
+    const sx = hitPoint.x + nx * 0.04;
+    const sy = hitPoint.y + ny * 0.04;
+    const sz = hitPoint.z + nz * 0.04;
 
     // 1. Stationary pinpoint spark at exact hit coordinate
-    const sparkMat = new THREE.MeshBasicMaterial({
-      color: 0xffeaa7,
-      transparent: true,
-      opacity: 0.95
-    });
-    const sparkMesh = new THREE.Mesh(_sharedSparkGeo, sparkMat);
-    sparkMesh.position.copy(hitPoint);
-    if (normal) {
-      sparkMesh.position.addScaledVector(normal, 0.04);
-    }
-    this.scene.add(sparkMesh);
-    this.debrisParticles.push({
-      mesh: sparkMesh,
-      vel: new THREE.Vector3(0, 0, 0),
-      rotVel: new THREE.Vector3(8, 8, 8),
-      life: 0.11,
-      isFlash: true
-    });
+    this._spawnFxSlot(sx, sy, sz, 0, 0, 0, 8, 8, 8, 0.14, 7.0, _sparkFlashColor, 0.11);
 
     // 2. Tiny surface chip bouncing out from exact hit point
-    const chipMat = new THREE.MeshStandardMaterial({
-      color: color || 0x95a5a6,
-      roughness: 0.85,
-      flatShading: true
-    });
-    const chipMesh = new THREE.Mesh(_sharedChipGeo, chipMat);
-    chipMesh.position.copy(sparkMesh.position);
-    this.scene.add(chipMesh);
-    const n = normal || new THREE.Vector3(0, 1, 0);
-    this.debrisParticles.push({
-      mesh: chipMesh,
-      vel: new THREE.Vector3(
-        n.x * 3.2 + (Math.random() - 0.5) * 2.2,
-        Math.max(1.5, n.y * 3.2) + Math.random() * 2.5,
-        n.z * 3.2 + (Math.random() - 0.5) * 2.2
-      ),
-      rotVel: new THREE.Vector3(9, 9, 9),
-      life: 0.55
-    });
+    this.spawnCustomDebris(
+      sx,
+      sy,
+      sz,
+      nx * 3.2 + (Math.random() - 0.5) * 2.2,
+      Math.max(1.5, ny * 3.2) + Math.random() * 2.5,
+      nz * 3.2 + (Math.random() - 0.5) * 2.2,
+      9,
+      9,
+      9,
+      0.12,
+      0.12,
+      0.12,
+      color || _fallbackChipColor,
+      0.55
+    );
   },
 
   spawnExplosionVisual(pos, radius) {
     // 1. White-hot inner detonation core
-    const coreMat = new THREE.MeshBasicMaterial({
-      color: 0xfff3b0,
-      transparent: true,
-      opacity: 0.98
-    });
-    const coreMesh = new THREE.Mesh(_sharedUnitBoxGeo, coreMat);
-    coreMesh.scale.setScalar(radius * 0.55);
-    coreMesh.position.copy(pos);
-    this.scene.add(coreMesh);
-    this.debrisParticles.push({
-      mesh: coreMesh,
-      vel: new THREE.Vector3(0, 1.0, 0),
-      rotVel: new THREE.Vector3(5, 5, 5),
-      life: 0.18,
-      isFlash: true
-    });
+    this._spawnFxSlot(
+      pos.x,
+      pos.y,
+      pos.z,
+      0,
+      1.0,
+      0,
+      5,
+      5,
+      5,
+      radius * 0.55,
+      7.0,
+      _coreFlashColor,
+      0.18
+    );
 
     // 2. Expanding fiery orange-red fireball
-    const flashMat = new THREE.MeshBasicMaterial({
-      color: 0xff6b00,
-      transparent: true,
-      opacity: 0.92
-    });
-    const flashMesh = new THREE.Mesh(_sharedUnitBoxGeo, flashMat);
-    flashMesh.scale.setScalar(radius * 0.95);
-    flashMesh.position.copy(pos);
-    this.scene.add(flashMesh);
-    this.debrisParticles.push({
-      mesh: flashMesh,
-      vel: new THREE.Vector3(0, 2.2, 0),
-      rotVel: new THREE.Vector3(3, 3, 3),
-      life: 0.34,
-      isFlash: true
-    });
+    this._spawnFxSlot(
+      pos.x,
+      pos.y,
+      pos.z,
+      0,
+      2.2,
+      0,
+      3,
+      3,
+      3,
+      radius * 0.95,
+      7.0,
+      _fireballColor,
+      0.34
+    );
 
-    // 3. Expanding horizontal ground shockwave ring
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xffb142,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.88
-    });
-    const ringMesh = new THREE.Mesh(_sharedRingGeo, ringMat);
-    ringMesh.scale.setScalar(Math.max(1.5, radius * 0.85));
+    // 3. Expanding horizontal ground shockwave ring (pooled mesh, 0 allocations)
     const groundY = this.getGroundHeightAt(pos.x, pos.z);
-    ringMesh.position.set(pos.x, Math.max(pos.y, groundY) + 0.25, pos.z);
-    this.scene.add(ringMesh);
-    this.debrisParticles.push({
-      mesh: ringMesh,
-      vel: new THREE.Vector3(0, 0, 0),
-      rotVel: new THREE.Vector3(0, 0, 0),
-      life: 0.42,
-      maxLife: 0.42,
-      shockSpeed: Math.max(12, radius * 2.6),
-      isShockwave: true
-    });
+    this._spawnShockwaveRing(
+      pos.x,
+      Math.max(pos.y, groundY) + 0.25,
+      pos.z,
+      Math.max(1.5, radius * 0.85),
+      Math.max(12, radius * 2.6),
+      0.42
+    );
 
     // 4. Rising dark mushroom smoke plume blocks
     const smokeCount = radius >= 8 ? 5 : 2;
     for (let s = 0; s < smokeCount; s++) {
-      const smokeMat = new THREE.MeshBasicMaterial({
-        color: s % 2 === 0 ? 0x2f3640 : 0x4b4b4b,
-        transparent: true,
-        opacity: 0.72
-      });
-      const smokeMesh = new THREE.Mesh(_sharedUnitBoxGeo, smokeMat);
-      smokeMesh.scale.setScalar(radius * 0.48);
-      smokeMesh.position.copy(pos).add(
-        new THREE.Vector3(
-          (Math.random() - 0.5) * radius * 0.5,
-          0.6 + s * 0.4,
-          (Math.random() - 0.5) * radius * 0.5
-        )
+      this._spawnFxSlot(
+        pos.x + (Math.random() - 0.5) * radius * 0.5,
+        pos.y + 0.6 + s * 0.4,
+        pos.z + (Math.random() - 0.5) * radius * 0.5,
+        (Math.random() - 0.5) * 3.5,
+        4.5 + Math.random() * 4.5,
+        (Math.random() - 0.5) * 3.5,
+        1.2,
+        1.5,
+        1.0,
+        radius * 0.48,
+        1.65,
+        s % 2 === 0 ? _smokeDarkColor : _smokeMidColor,
+        1.35 + Math.random() * 0.5
       );
-      this.scene.add(smokeMesh);
-      this.debrisParticles.push({
-        mesh: smokeMesh,
-        vel: new THREE.Vector3(
-          (Math.random() - 0.5) * 3.5,
-          4.5 + Math.random() * 4.5,
-          (Math.random() - 0.5) * 3.5
-        ),
-        rotVel: new THREE.Vector3(1.2, 1.5, 1.0),
-        life: 1.35 + Math.random() * 0.5,
-        maxLife: 1.85,
-        isSmoke: true
-      });
     }
 
     const chunkMult = radius >= 8 ? 2 : 1;
@@ -491,6 +754,9 @@ export const ProjectileManager = {
     const group = createAmmoStashMesh(permanent);
     group.position.copy(pos);
     this.scene.add(group);
+    if (permanent && this._ownedWorldObjects) {
+      this._ownedWorldObjects.push(group);
+    }
 
     const crateEntry = {
       pos,
@@ -511,41 +777,202 @@ export const ProjectileManager = {
   },
 
   updateDebris(dt) {
-    for (let i = this.debrisParticles.length - 1; i >= 0; i--) {
-      const p = this.debrisParticles[i];
-      p.life -= dt;
-      if (p.life <= 0) {
-        this.scene.remove(p.mesh);
-        if (p.mesh.material) p.mesh.material.dispose();
-        this.debrisParticles.splice(i, 1);
-        continue;
-      }
+    // 1. Update Instanced Shaded Box Debris Pool
+    const dPool = this._debrisPool;
+    if (dPool && dPool.count > 0) {
+      let i = 0;
+      while (i < dPool.count) {
+        const nextLife = dPool.life[i] - dt;
+        if (nextLife <= 0) {
+          const last = --dPool.count;
+          if (i < last) {
+            dPool.px[i] = dPool.px[last];
+            dPool.py[i] = dPool.py[last];
+            dPool.pz[i] = dPool.pz[last];
+            dPool.vx[i] = dPool.vx[last];
+            dPool.vy[i] = dPool.vy[last];
+            dPool.vz[i] = dPool.vz[last];
+            dPool.rx[i] = dPool.rx[last];
+            dPool.ry[i] = dPool.ry[last];
+            dPool.rz[i] = dPool.rz[last];
+            dPool.rvx[i] = dPool.rvx[last];
+            dPool.rvy[i] = dPool.rvy[last];
+            dPool.rvz[i] = dPool.rvz[last];
+            dPool.sx[i] = dPool.sx[last];
+            dPool.sy[i] = dPool.sy[last];
+            dPool.sz[i] = dPool.sz[last];
+            dPool.cr[i] = dPool.cr[last];
+            dPool.cg[i] = dPool.cg[last];
+            dPool.cb[i] = dPool.cb[last];
+            dPool.life[i] = dPool.life[last];
+          }
+          continue;
+        }
+        dPool.life[i] = nextLife;
+        dPool.vy[i] -= 24 * dt;
+        const nx = dPool.px[i] + dPool.vx[i] * dt;
+        let ny = dPool.py[i] + dPool.vy[i] * dt;
+        const nz = dPool.pz[i] + dPool.vz[i] * dt;
+        dPool.rx[i] += dPool.rvx[i] * dt;
+        dPool.ry[i] += dPool.rvy[i] * dt;
+        dPool.rz[i] += dPool.rvz[i] * dt;
 
-      if (p.isShockwave) {
-        const sDelta = (p.shockSpeed || 16) * dt;
-        p.mesh.scale.x += sDelta;
-        p.mesh.scale.z += sDelta;
-        p.mesh.material.opacity = Math.max(0, (p.life / (p.maxLife || 0.42)) * 0.88);
-      } else if (p.isSmoke) {
-        p.mesh.position.addScaledVector(p.vel, dt);
-        p.mesh.scale.addScalar(dt * 1.65);
-        p.mesh.rotation.x += p.rotVel.x * dt;
-        p.mesh.rotation.y += p.rotVel.y * dt;
-        p.mesh.material.opacity = Math.max(0, (p.life / (p.maxLife || 1.8)) * 0.68);
-      } else if (p.isFlash) {
-        p.mesh.scale.addScalar(dt * 7);
-        p.mesh.material.opacity = Math.max(0, p.life * 3.2);
-      } else {
-        p.vel.y -= 24 * dt;
-        p.mesh.position.addScaledVector(p.vel, dt);
-        p.mesh.rotation.x += p.rotVel.x * dt;
-        p.mesh.rotation.y += p.rotVel.y * dt;
-        const groundY = this.getGroundHeightAt(p.mesh.position.x, p.mesh.position.z) + 0.15;
-        if (p.mesh.position.y < groundY) {
-          p.mesh.position.y = groundY;
-          p.vel.y *= -0.35;
-          p.vel.x *= 0.7;
-          p.vel.z *= 0.7;
+        const groundY = this.getGroundHeightAt(nx, nz) + 0.15;
+        if (ny < groundY) {
+          ny = groundY;
+          dPool.vy[i] *= -0.35;
+          dPool.vx[i] *= 0.7;
+          dPool.vz[i] *= 0.7;
+        }
+        dPool.px[i] = nx;
+        dPool.py[i] = ny;
+        dPool.pz[i] = nz;
+
+        _poolDummy.position.set(nx, ny, nz);
+        _poolDummy.rotation.set(dPool.rx[i], dPool.ry[i], dPool.rz[i]);
+        _poolDummy.scale.set(dPool.sx[i], dPool.sy[i], dPool.sz[i]);
+        _poolDummy.updateMatrix();
+        dPool.mesh.setMatrixAt(i, _poolDummy.matrix);
+        _poolColor.setRGB(dPool.cr[i], dPool.cg[i], dPool.cb[i]);
+        dPool.mesh.setColorAt(i, _poolColor);
+        i++;
+      }
+      dPool.mesh.count = dPool.count;
+      if (dPool.count > 0) {
+        dPool.mesh.instanceMatrix.clearUpdateRanges();
+        dPool.mesh.instanceMatrix.addUpdateRange(0, dPool.count * 16);
+        dPool.mesh.instanceMatrix.needsUpdate = true;
+        if (dPool.mesh.instanceColor) {
+          dPool.mesh.instanceColor.clearUpdateRanges();
+          dPool.mesh.instanceColor.addUpdateRange(0, dPool.count * 3);
+          dPool.mesh.instanceColor.needsUpdate = true;
+        }
+      }
+    }
+
+    // 2. Update Instanced Flash / Spark / Smoke Pool
+    const fPool = this._fxPool;
+    if (fPool && fPool.count > 0) {
+      let i = 0;
+      while (i < fPool.count) {
+        const nextLife = fPool.life[i] - dt;
+        if (nextLife <= 0) {
+          const last = --fPool.count;
+          if (i < last) {
+            fPool.px[i] = fPool.px[last];
+            fPool.py[i] = fPool.py[last];
+            fPool.pz[i] = fPool.pz[last];
+            fPool.vx[i] = fPool.vx[last];
+            fPool.vy[i] = fPool.vy[last];
+            fPool.vz[i] = fPool.vz[last];
+            fPool.rx[i] = fPool.rx[last];
+            fPool.ry[i] = fPool.ry[last];
+            fPool.rz[i] = fPool.rz[last];
+            fPool.rvx[i] = fPool.rvx[last];
+            fPool.rvy[i] = fPool.rvy[last];
+            fPool.rvz[i] = fPool.rvz[last];
+            fPool.scale[i] = fPool.scale[last];
+            fPool.growRate[i] = fPool.growRate[last];
+            fPool.cr[i] = fPool.cr[last];
+            fPool.cg[i] = fPool.cg[last];
+            fPool.cb[i] = fPool.cb[last];
+            fPool.life[i] = fPool.life[last];
+            fPool.maxLife[i] = fPool.maxLife[last];
+          }
+          continue;
+        }
+        fPool.life[i] = nextLife;
+        const nx = fPool.px[i] + fPool.vx[i] * dt;
+        const ny = fPool.py[i] + fPool.vy[i] * dt;
+        const nz = fPool.pz[i] + fPool.vz[i] * dt;
+        fPool.px[i] = nx;
+        fPool.py[i] = ny;
+        fPool.pz[i] = nz;
+        fPool.rx[i] += fPool.rvx[i] * dt;
+        fPool.ry[i] += fPool.rvy[i] * dt;
+        fPool.scale[i] += fPool.growRate[i] * dt;
+
+        const lifeFrac = nextLife / Math.max(0.05, fPool.maxLife[i]);
+        const fadeScale = lifeFrac < 0.28 ? fPool.scale[i] * (lifeFrac / 0.28) : fPool.scale[i];
+
+        _poolDummy.position.set(nx, ny, nz);
+        _poolDummy.rotation.set(fPool.rx[i], fPool.ry[i], 0);
+        _poolDummy.scale.setScalar(Math.max(0.01, fadeScale));
+        _poolDummy.updateMatrix();
+        fPool.mesh.setMatrixAt(i, _poolDummy.matrix);
+        _poolColor.setRGB(fPool.cr[i], fPool.cg[i], fPool.cb[i]);
+        fPool.mesh.setColorAt(i, _poolColor);
+        i++;
+      }
+      fPool.mesh.count = fPool.count;
+      if (fPool.count > 0) {
+        fPool.mesh.instanceMatrix.clearUpdateRanges();
+        fPool.mesh.instanceMatrix.addUpdateRange(0, fPool.count * 16);
+        fPool.mesh.instanceMatrix.needsUpdate = true;
+        if (fPool.mesh.instanceColor) {
+          fPool.mesh.instanceColor.clearUpdateRanges();
+          fPool.mesh.instanceColor.addUpdateRange(0, fPool.count * 3);
+          fPool.mesh.instanceColor.needsUpdate = true;
+        }
+      }
+    }
+
+    // 3. Update Pooled Ground Shockwave Rings
+    if (this._shockwaveActive && this._shockwaveActive.length > 0) {
+      for (let i = this._shockwaveActive.length - 1; i >= 0; i--) {
+        const sw = this._shockwaveActive[i];
+        sw.life -= dt;
+        if (sw.life <= 0) {
+          sw.mesh.visible = false;
+          this._shockwaveFree.push(sw);
+          this._shockwaveActive.splice(i, 1);
+          continue;
+        }
+        const sDelta = sw.shockSpeed * dt;
+        sw.mesh.scale.x += sDelta;
+        sw.mesh.scale.z += sDelta;
+        sw.mesh.material.opacity = Math.max(0, (sw.life / sw.maxLife) * 0.88);
+      }
+    }
+
+    // 4. Backwards-compatible fallback for any external meshes pushed directly to `this.debrisParticles`
+    if (this.debrisParticles.length > 0) {
+      for (let i = this.debrisParticles.length - 1; i >= 0; i--) {
+        const p = this.debrisParticles[i];
+        p.life -= dt;
+        if (p.life <= 0) {
+          this.scene.remove(p.mesh);
+          disposeNonSharedMeshResources(p.mesh);
+          this.debrisParticles.splice(i, 1);
+          continue;
+        }
+
+        if (p.isShockwave) {
+          const sDelta = (p.shockSpeed || 16) * dt;
+          p.mesh.scale.x += sDelta;
+          p.mesh.scale.z += sDelta;
+          p.mesh.material.opacity = Math.max(0, (p.life / (p.maxLife || 0.42)) * 0.88);
+        } else if (p.isSmoke) {
+          p.mesh.position.addScaledVector(p.vel, dt);
+          p.mesh.scale.addScalar(dt * 1.65);
+          p.mesh.rotation.x += p.rotVel.x * dt;
+          p.mesh.rotation.y += p.rotVel.y * dt;
+          p.mesh.material.opacity = Math.max(0, (p.life / (p.maxLife || 1.8)) * 0.68);
+        } else if (p.isFlash) {
+          p.mesh.scale.addScalar(dt * 7);
+          p.mesh.material.opacity = Math.max(0, p.life * 3.2);
+        } else {
+          p.vel.y -= 24 * dt;
+          p.mesh.position.addScaledVector(p.vel, dt);
+          p.mesh.rotation.x += p.rotVel.x * dt;
+          p.mesh.rotation.y += p.rotVel.y * dt;
+          const groundY = this.getGroundHeightAt(p.mesh.position.x, p.mesh.position.z) + 0.15;
+          if (p.mesh.position.y < groundY) {
+            p.mesh.position.y = groundY;
+            p.vel.y *= -0.35;
+            p.vel.x *= 0.7;
+            p.vel.z *= 0.7;
+          }
         }
       }
     }
@@ -553,16 +980,26 @@ export const ProjectileManager = {
 
   updateProjectiles(dt, units, onExplosionDamage, broadcastFn, vehicles = []) {
     const listener = units && units[0] && units[0].pos ? units[0] : null;
+    const bm =
+      this.botManager ||
+      (typeof window !== 'undefined' && window.game ? window.game.botManager : null);
+    const botGrid = bm && bm.spatialGrid && bm.spatialGrid.count > 0 ? bm.spatialGrid : null;
+
     const getListenerAudio = (pos) => {
-      if (!listener || !listener.pos) return { dist: 0, pan: 0 };
-      const dist = listener.pos.distanceTo(pos);
+      if (!listener || !listener.pos) {
+        _audioResult.dist = 0;
+        _audioResult.pan = 0;
+        return _audioResult;
+      }
       const dx = pos.x - listener.pos.x;
+      const dy = pos.y - listener.pos.y;
       const dz = pos.z - listener.pos.z;
-      const len = Math.hypot(dx, dz) || 1;
+      _audioResult.dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const lenXZ = Math.sqrt(dx * dx + dz * dz) || 1;
       const rightX = Math.cos(listener.yaw || 0);
       const rightZ = -Math.sin(listener.yaw || 0);
-      const pan = (dx * rightX + dz * rightZ) / len;
-      return { dist, pan };
+      _audioResult.pan = (dx * rightX + dz * rightZ) / lenXZ;
+      return _audioResult;
     };
 
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
@@ -593,25 +1030,25 @@ export const ProjectileManager = {
           broadcastFn
         );
         this.scene.remove(proj.mesh);
+        disposeNonSharedMeshResources(proj.mesh);
         this.projectiles.splice(i, 1);
         continue;
       }
 
       if (proj.life <= 0) {
         this.scene.remove(proj.mesh);
+        disposeNonSharedMeshResources(proj.mesh);
         this.projectiles.splice(i, 1);
         continue;
       }
 
-      const prevPos = proj.mesh.position.clone();
+      _projPrevPos.copy(proj.mesh.position);
 
       // Proportional Navigation Homing for AIM-9X / R-73 Air-to-Air & Stinger SAM Missiles
       if (proj.type === 'a2a_missile' && proj.targetVehicle && !proj.targetVehicle.dead) {
         const tgt = proj.targetVehicle;
         const tgtGroundY = this.getGroundHeightAt(tgt.pos.x, tgt.pos.z);
         const tgtAltAgl = Math.max(0, tgt.pos.y - tgtGroundY);
-        // Low-Altitude Ground-Effect / Terrain Clutter Evasion (< 28m AGL):
-        // Diving below 28m AGL masks the aircraft in radar ground clutter and breaks active missile lock!
         if (tgt.isAircraft && tgtAltAgl < 28.0 && (tgt.airborneRadarTimer || 0) >= 2.0) {
           proj.targetVehicle = null;
           if (tgt.driver && typeof tgt.driver.onActionPopup === 'function') {
@@ -628,94 +1065,117 @@ export const ProjectileManager = {
         !(proj.targetVehicle.flareActiveTimer > 0)
       ) {
         const curSpeed = Math.max(160, proj.vel.length());
-        const toTarget = proj.targetVehicle.pos
-          .clone()
-          .add(new THREE.Vector3(0, 1.4, 0))
-          .sub(proj.mesh.position);
-        if (toTarget.lengthSq() > 1) {
-          toTarget.normalize();
-          const curDir = proj.vel.clone().normalize();
+        _projToTarget.set(
+          proj.targetVehicle.pos.x - proj.mesh.position.x,
+          proj.targetVehicle.pos.y + 1.4 - proj.mesh.position.y,
+          proj.targetVehicle.pos.z - proj.mesh.position.z
+        );
+        if (_projToTarget.lengthSq() > 1) {
+          _projToTarget.normalize();
+          _projCurDir.copy(proj.vel).normalize();
           const steerRate = Math.min(1, (proj.turnRate || 4.2) * dt);
-          curDir.lerp(toTarget, steerRate).normalize();
-          proj.vel.copy(curDir.multiplyScalar(curSpeed));
-          proj.mesh.lookAt(proj.mesh.position.clone().add(curDir));
+          _projCurDir.lerp(_projToTarget, steerRate).normalize();
+          proj.vel.copy(_projCurDir).multiplyScalar(curSpeed);
+          _projLookAt.copy(proj.mesh.position).add(_projCurDir);
+          proj.mesh.lookAt(_projLookAt);
         }
       }
 
       proj.vel.y -= proj.gravity * dt;
       proj.mesh.position.addScaledVector(proj.vel, dt);
 
-      if (
-        proj.type === 'rpg' ||
-        proj.type === 'autocannon' ||
-        proj.type === 'tank_shell' ||
-        proj.type === 'airstrike_bomb' ||
-        proj.type === 'air_rocket' ||
-        proj.type === 'a2a_missile' ||
-        proj.type === 'jdam_bomb' ||
-        proj.type === 'gbu28_bomb' ||
-        proj.type === 'mortar_shell' ||
-        proj.type === 'ac130_40mm' ||
-        proj.type === 'ac130_105mm'
-      ) {
-        this.spawnDebris(
-          prevPos,
-          proj.type === 'airstrike_bomb' ||
-            proj.type === 'jdam_bomb' ||
-            proj.type === 'gbu28_bomb' ||
-            proj.type === 'a2a_missile' ||
-            proj.type === 'ac130_105mm'
-            ? _airstrikeTrailColor
-            : _rocketTrailColor,
-          proj.type === 'gbu28_bomb' || proj.type === 'ac130_105mm' ? 2 : 1
-        );
-      }
+      const curPos = proj.mesh.position;
+      const pType = proj.type;
+      const isExplosiveDirect =
+        pType === 'rpg' ||
+        pType === 'tank_shell' ||
+        pType === 'autocannon' ||
+        pType === 'airstrike_bomb' ||
+        pType === 'air_rocket' ||
+        pType === 'a2a_missile' ||
+        pType === 'jdam_bomb' ||
+        pType === 'gbu28_bomb' ||
+        pType === 'mortar_shell' ||
+        pType === 'ac130_40mm' ||
+        pType === 'ac130_105mm';
 
-      const segVec = proj.mesh.position.clone().sub(prevPos);
-      const segLen = segVec.length();
-      const segDir = segLen > 0.0001 ? segVec.clone().divideScalar(segLen) : new THREE.Vector3(0, 0, -1);
-
-      const g = this.worldToGrid(
-        proj.mesh.position.x,
-        proj.mesh.position.y,
-        proj.mesh.position.z
-      );
-      let hitVoxel = this.voxels.get(this.key(g.gx, g.gy, g.gz));
-      if (!hitVoxel && segLen > 0.4 && typeof this.raycastVoxel === 'function') {
-        const segVoxelHit = this.raycastVoxel(prevPos, segDir, segLen);
-        if (segVoxelHit && segVoxelHit.voxel) {
-          hitVoxel = segVoxelHit.voxel;
-          proj.mesh.position.copy(segVoxelHit.point);
+      // Distance-gated rocket/shell smoke trail emission (>= 2.2m between puffs)
+      if (isExplosiveDirect) {
+        if (proj._lastTrailX === undefined) {
+          proj._lastTrailX = _projPrevPos.x;
+          proj._lastTrailY = _projPrevPos.y;
+          proj._lastTrailZ = _projPrevPos.z;
+        } else {
+          const tdx = curPos.x - proj._lastTrailX;
+          const tdy = curPos.y - proj._lastTrailY;
+          const tdz = curPos.z - proj._lastTrailZ;
+          if (tdx * tdx + tdy * tdy + tdz * tdz >= 4.84) {
+            proj._lastTrailX = curPos.x;
+            proj._lastTrailY = curPos.y;
+            proj._lastTrailZ = curPos.z;
+            const trailCol =
+              pType === 'airstrike_bomb' ||
+              pType === 'jdam_bomb' ||
+              pType === 'gbu28_bomb' ||
+              pType === 'a2a_missile' ||
+              pType === 'ac130_105mm'
+                ? _airstrikeTrailColor
+                : _rocketTrailColor;
+            this._spawnFxSlot(
+              _projPrevPos.x,
+              _projPrevPos.y,
+              _projPrevPos.z,
+              (Math.random() - 0.5) * 1.4,
+              0.8 + Math.random() * 1.2,
+              (Math.random() - 0.5) * 1.4,
+              1.5,
+              1.5,
+              0,
+              pType === 'gbu28_bomb' || pType === 'ac130_105mm' ? 0.55 : 0.34,
+              0.9,
+              trailCol,
+              0.42
+            );
+          }
         }
       }
-      const groundY = this.getGroundHeightAt(proj.mesh.position.x, proj.mesh.position.z);
-      const hitGround = proj.mesh.position.y <= groundY + 0.15;
+
+      _projSegVec.subVectors(curPos, _projPrevPos);
+      const segLen = _projSegVec.length();
+      if (segLen > 0.0001) {
+        _projSegDir.copy(_projSegVec).multiplyScalar(1 / segLen);
+      } else {
+        _projSegDir.set(0, 0, -1);
+      }
+
+      const g = this.worldToGrid(curPos.x, curPos.y, curPos.z, _tmpGrid);
+      let hitVoxel = this.getVoxel(g.gx, g.gy, g.gz);
+      if (!hitVoxel && segLen > 0.4 && typeof this.raycastVoxel === 'function') {
+        const segVoxelHit = this.raycastVoxel(_projPrevPos, _projSegDir, segLen);
+        if (segVoxelHit && segVoxelHit.voxel) {
+          hitVoxel = segVoxelHit.voxel;
+          curPos.copy(segVoxelHit.point);
+        }
+      }
+      const groundY = this.getGroundHeightAt(curPos.x, curPos.z);
+      const hitGround = curPos.y <= groundY + 0.15;
 
       // Direct anti-armor, anti-aircraft & anti-personnel projectile collision
       let hitVehicle = false;
       let hitSoldier = false;
-      const isExplosiveDirect =
-        proj.type === 'rpg' ||
-        proj.type === 'tank_shell' ||
-        proj.type === 'autocannon' ||
-        proj.type === 'airstrike_bomb' ||
-        proj.type === 'air_rocket' ||
-        proj.type === 'a2a_missile' ||
-        proj.type === 'jdam_bomb' ||
-        proj.type === 'gbu28_bomb' ||
-        proj.type === 'mortar_shell' ||
-        proj.type === 'ac130_40mm' ||
-        proj.type === 'ac130_105mm';
 
       if (isExplosiveDirect) {
         const ownerTeam = proj.owner ? proj.owner.team : null;
         if (vehicles.length > 0) {
-          for (const v of vehicles) {
+          for (let vIdx = 0; vIdx < vehicles.length; vIdx++) {
+            const v = vehicles[vIdx];
             if (v.dead || (ownerTeam && v.team === ownerTeam)) continue;
             if (proj.owner && proj.owner.activeVehicle === v) continue;
-            const vCenter = v.pos.clone().add(new THREE.Vector3(0, 1.35, 0));
+            const vcx = v.pos.x;
+            const vcy = v.pos.y + 1.35;
+            const vcz = v.pos.z;
             const hullRad = v.isAircraft
-              ? proj.type === 'a2a_missile'
+              ? pType === 'a2a_missile'
                 ? 11.5
                 : proj.isAaProximity
                 ? 10.5
@@ -725,9 +1185,12 @@ export const ProjectileManager = {
               : v.type === 'apc' || v.type === 'aa'
               ? 3.1
               : 2.5;
-            if (proj.mesh.position.distanceTo(vCenter) <= hullRad) {
+            const dx = curPos.x - vcx;
+            const dy = curPos.y - vcy;
+            const dz = curPos.z - vcz;
+            if (dx * dx + dy * dy + dz * dz <= hullRad * hullRad) {
               hitVehicle = true;
-              proj.mesh.position.copy(vCenter);
+              curPos.set(vcx, vcy, vcz);
               break;
             }
           }
@@ -736,41 +1199,64 @@ export const ProjectileManager = {
           !hitVehicle &&
           Array.isArray(units) &&
           units.length > 0 &&
-          proj.type !== 'airstrike_bomb' &&
-          proj.type !== 'a2a_missile'
+          pType !== 'airstrike_bomb' &&
+          pType !== 'a2a_missile'
         ) {
           const hitRadius =
-            proj.type === 'tank_shell' || proj.type === 'air_rocket'
+            pType === 'tank_shell' || pType === 'air_rocket'
               ? 1.55
-              : proj.type === 'autocannon'
+              : pType === 'autocannon'
               ? 1.25
               : 1.15;
-          for (let uIdx = 0; uIdx < units.length; uIdx++) {
-            const u = units[uIdx];
+          const hitRadSq = hitRadius * hitRadius;
+          const allowFF = Boolean(proj.owner && proj.owner.friendlyFireEnabled);
+
+          const checkSoldierHit = (u) => {
             if (
               !u ||
               u.dead ||
               u.downed ||
               u === proj.owner ||
-              (ownerTeam && u.team === ownerTeam && !(proj.owner && proj.owner.friendlyFireEnabled))
+              (ownerTeam && u.team === ownerTeam && !allowFF)
             ) {
-              continue;
+              return false;
             }
-            const ux = u.pos.x - prevPos.x;
-            const uy = u.pos.y + 0.95 - prevPos.y;
-            const uz = u.pos.z - prevPos.z;
-            const projDist = Math.max(0, Math.min(segLen, ux * segDir.x + uy * segDir.y + uz * segDir.z));
-            const cx = prevPos.x + segDir.x * projDist;
-            const cy = prevPos.y + segDir.y * projDist;
-            const cz = prevPos.z + segDir.z * projDist;
+            const ux = u.pos.x - _projPrevPos.x;
+            const uy = u.pos.y + 0.95 - _projPrevPos.y;
+            const uz = u.pos.z - _projPrevPos.z;
+            let projDist = ux * _projSegDir.x + uy * _projSegDir.y + uz * _projSegDir.z;
+            if (projDist < 0) projDist = 0;
+            else if (projDist > segLen) projDist = segLen;
+            const cx = _projPrevPos.x + _projSegDir.x * projDist;
+            const cy = _projPrevPos.y + _projSegDir.y * projDist;
+            const cz = _projPrevPos.z + _projSegDir.z * projDist;
             const dSq =
               (u.pos.x - cx) * (u.pos.x - cx) +
               (u.pos.y + 0.95 - cy) * (u.pos.y + 0.95 - cy) +
               (u.pos.z - cz) * (u.pos.z - cz);
-            if (dSq <= hitRadius * hitRadius) {
+            if (dSq <= hitRadSq) {
               hitSoldier = true;
-              proj.mesh.position.set(cx, cy, cz);
-              break;
+              curPos.set(cx, cy, cz);
+              return true;
+            }
+            return false;
+          };
+
+          if (botGrid) {
+            if (units[0] && checkSoldierHit(units[0])) {
+              // Hit player
+            } else {
+              const minX = (_projPrevPos.x < curPos.x ? _projPrevPos.x : curPos.x) - hitRadius;
+              const maxX = (_projPrevPos.x > curPos.x ? _projPrevPos.x : curPos.x) + hitRadius;
+              const minZ = (_projPrevPos.z < curPos.z ? _projPrevPos.z : curPos.z) - hitRadius;
+              const maxZ = (_projPrevPos.z > curPos.z ? _projPrevPos.z : curPos.z) + hitRadius;
+              botGrid.forEachInAABB(minX, maxX, minZ, maxZ, (b) => {
+                if (checkSoldierHit(b)) return false;
+              });
+            }
+          } else {
+            for (let uIdx = 0; uIdx < units.length; uIdx++) {
+              if (checkSoldierHit(units[uIdx])) break;
             }
           }
         }
@@ -778,52 +1264,52 @@ export const ProjectileManager = {
 
       if (hitVoxel || hitGround || hitVehicle || hitSoldier) {
         if (isExplosiveDirect) {
-          const hitPos = proj.mesh.position.clone();
+          const hitPos = curPos.clone();
           const rad =
             proj.blastRadius ||
-            (proj.type === 'gbu28_bomb'
+            (pType === 'gbu28_bomb'
               ? 16.5
-              : proj.type === 'ac130_105mm'
+              : pType === 'ac130_105mm'
               ? 14.5
-              : proj.type === 'airstrike_bomb' || proj.type === 'jdam_bomb' || proj.type === 'mortar_shell'
+              : pType === 'airstrike_bomb' || pType === 'jdam_bomb' || pType === 'mortar_shell'
               ? 12.0
-              : proj.type === 'a2a_missile'
+              : pType === 'a2a_missile'
               ? 10.5
-              : proj.type === 'ac130_40mm'
+              : pType === 'ac130_40mm'
               ? 7.5
-              : proj.type === 'tank_shell'
+              : pType === 'tank_shell'
               ? 6.2
-              : proj.type === 'air_rocket'
+              : pType === 'air_rocket'
               ? 5.6
-              : proj.type === 'rpg'
+              : pType === 'rpg'
               ? 5.0
               : 2.8);
           const dmg =
             proj.blastDamage ||
-            (proj.type === 'ac130_105mm'
+            (pType === 'ac130_105mm'
               ? 620
-              : proj.type === 'gbu28_bomb'
+              : pType === 'gbu28_bomb'
               ? 560
-              : proj.type === 'a2a_missile'
+              : pType === 'a2a_missile'
               ? 540
-              : proj.type === 'airstrike_bomb' || proj.type === 'jdam_bomb'
+              : pType === 'airstrike_bomb' || pType === 'jdam_bomb'
               ? 420
-              : proj.type === 'mortar_shell'
+              : pType === 'mortar_shell'
               ? 340
-              : proj.type === 'tank_shell'
+              : pType === 'tank_shell'
               ? 320
-              : proj.type === 'ac130_40mm' || proj.type === 'air_rocket'
+              : pType === 'ac130_40mm' || pType === 'air_rocket'
               ? 240
-              : proj.type === 'rpg'
+              : pType === 'rpg'
               ? 235
               : 95);
           const aud = getListenerAudio(hitPos);
           const soundScale =
-            proj.type === 'autocannon'
+            pType === 'autocannon'
               ? 0.42
-              : proj.type === 'ac130_105mm' || proj.type === 'gbu28_bomb' || proj.type === 'airstrike_bomb' || proj.type === 'jdam_bomb'
+              : pType === 'ac130_105mm' || pType === 'gbu28_bomb' || pType === 'airstrike_bomb' || pType === 'jdam_bomb'
               ? 1.35
-              : proj.type === 'mortar_shell' || proj.type === 'tank_shell' || proj.type === 'a2a_missile'
+              : pType === 'mortar_shell' || pType === 'tank_shell' || pType === 'a2a_missile'
               ? 1.15
               : 0.95;
           const wepLabel = proj.weaponName || proj.weaponLabel || null;
@@ -849,10 +1335,11 @@ export const ProjectileManager = {
             broadcastFn
           );
           this.scene.remove(proj.mesh);
+          disposeNonSharedMeshResources(proj.mesh);
           this.projectiles.splice(i, 1);
-        } else if (proj.type === 'grenade') {
+        } else if (pType === 'grenade') {
           if (hitGround) {
-            proj.mesh.position.y = groundY + 0.16;
+            curPos.y = groundY + 0.16;
             proj.vel.y *= -0.45;
             proj.vel.x *= 0.68;
             proj.vel.z *= 0.68;
@@ -860,10 +1347,10 @@ export const ProjectileManager = {
             proj.vel.x *= -0.5;
             proj.vel.z *= -0.5;
           }
-        } else if (proj.type === 'c4') {
+        } else if (pType === 'c4') {
           proj.vel.set(0, 0, 0);
           proj.gravity = 0;
-          if (hitGround) proj.mesh.position.y = groundY + 0.15;
+          if (hitGround) curPos.y = groundY + 0.15;
         }
       }
     }
@@ -872,12 +1359,18 @@ export const ProjectileManager = {
   updateAmmoCrates(dt, units) {
     // Ammo & Kit Stash Resupply Tick (Squad / BattleBit inspired)
     const playerUnit = units && units[0] ? units[0] : null;
+    const bm =
+      this.botManager ||
+      (typeof window !== 'undefined' && window.game ? window.game.botManager : null);
+    const botGrid = bm && bm.spatialGrid && bm.spatialGrid.count > 0 ? bm.spatialGrid : null;
+
     for (let i = this.ammoCrates.length - 1; i >= 0; i--) {
       const crate = this.ammoCrates[i];
       if (!crate.permanent && typeof crate.timer === 'number') {
         crate.timer -= dt;
         if (crate.timer <= 0) {
           this.scene.remove(crate.mesh);
+          disposeNonSharedMeshResources(crate.mesh);
           this.ammoCrates.splice(i, 1);
           continue;
         }
@@ -887,59 +1380,69 @@ export const ProjectileManager = {
       if (crate._resupplyTick >= 2.0) {
         crate._resupplyTick = 0;
         const radius = crate.resupplyRadius || 5.5;
+        const radiusSq = radius * radius;
         let resuppliedTeammate = false;
-        for (const u of units) {
-          if (!u || u.dead || u.downed) continue;
-          if (crate.team && u.team !== crate.team) continue;
-          const dist = u.pos.distanceTo(crate.pos);
-          if (dist <= radius) {
-            let gaveAmmo = false;
-            // Resupply ammo & backpack loose rounds for all weapon slots
-            if (u.slots) {
-              for (const slot of u.slots) {
-                if (slot.reserve < slot.def.reserveAmmo) {
-                  const amount = Math.ceil(slot.def.clipSize * 0.5);
-                  slot.reserve = Math.min(slot.def.reserveAmmo, slot.reserve + amount);
-                  if (slot.mags) {
-                    slot.mags.push(Math.min(slot.def.clipSize, amount));
-                  }
-                  gaveAmmo = true;
+
+        const resupplyUnit = (u) => {
+          if (!u || u.dead || u.downed) return;
+          if (crate.team && u.team !== crate.team) return;
+          if (u.pos.distanceToSquared(crate.pos) > radiusSq) return;
+
+          let gaveAmmo = false;
+          if (u.slots) {
+            for (let sIdx = 0; sIdx < u.slots.length; sIdx++) {
+              const slot = u.slots[sIdx];
+              if (slot.reserve < slot.def.reserveAmmo) {
+                const amount = Math.ceil(slot.def.clipSize * 0.5);
+                slot.reserve = Math.min(slot.def.reserveAmmo, slot.reserve + amount);
+                if (slot.mags) {
+                  slot.mags.push(Math.min(slot.def.clipSize, amount));
                 }
-                if (slot.maxLooseAmmo > 0 && (slot.looseAmmo || 0) < slot.maxLooseAmmo) {
-                  const looseAmt = Math.ceil(slot.def.clipSize * 0.75);
-                  slot.looseAmmo = Math.min(slot.maxLooseAmmo, (slot.looseAmmo || 0) + looseAmt);
-                  gaveAmmo = true;
-                }
+                gaveAmmo = true;
               }
-            }
-            // Resupply grenades, Squad Field Dressings (9 for Medics, 2+bonus for others), and Medic Bag trauma supply!
-            if (typeof u.grenades === 'number' && u.grenades < 2) {
-              u.grenades = Math.min(2, u.grenades + 1);
-              gaveAmmo = true;
-            }
-            const maxDressings = u.maxBandages || (u.role === 'medic' ? 9 : 3);
-            if (typeof u.bandages === 'number' && u.bandages < maxDressings) {
-              u.bandages = Math.min(maxDressings, u.bandages + 2);
-              gaveAmmo = true;
-            }
-            if (typeof u.medicBagSupply === 'number' && u.maxMedicBagSupply > 0 && u.medicBagSupply < u.maxMedicBagSupply) {
-              u.medicBagSupply = Math.min(u.maxMedicBagSupply, u.medicBagSupply + 200);
-              gaveAmmo = true;
-            }
-            // Resupply AI Bot Field Dressings (9 for Medics, 2 for others) & Medic Bag supply
-            if (typeof u.fieldDressings === 'number') {
-              const botMaxDressings = u.maxFieldDressings || (u.role === 'MEDIC' ? 9 : 2);
-              if (u.fieldDressings < botMaxDressings) {
-                u.fieldDressings = Math.min(botMaxDressings, u.fieldDressings + 3);
+              if (slot.maxLooseAmmo > 0 && (slot.looseAmmo || 0) < slot.maxLooseAmmo) {
+                const looseAmt = Math.ceil(slot.def.clipSize * 0.75);
+                slot.looseAmmo = Math.min(slot.maxLooseAmmo, (slot.looseAmmo || 0) + looseAmt);
                 gaveAmmo = true;
               }
             }
-            if (gaveAmmo && u !== playerUnit) {
-              resuppliedTeammate = true;
+          }
+          if (typeof u.grenades === 'number' && u.grenades < 2) {
+            u.grenades = Math.min(2, u.grenades + 1);
+            gaveAmmo = true;
+          }
+          const maxDressings = u.maxBandages || (u.role === 'medic' ? 9 : 3);
+          if (typeof u.bandages === 'number' && u.bandages < maxDressings) {
+            u.bandages = Math.min(maxDressings, u.bandages + 2);
+            gaveAmmo = true;
+          }
+          if (typeof u.medicBagSupply === 'number' && u.maxMedicBagSupply > 0 && u.medicBagSupply < u.maxMedicBagSupply) {
+            u.medicBagSupply = Math.min(u.maxMedicBagSupply, u.medicBagSupply + 200);
+            gaveAmmo = true;
+          }
+          if (typeof u.fieldDressings === 'number') {
+            const botMaxDressings = u.maxFieldDressings || (u.role === 'MEDIC' ? 9 : 2);
+            if (u.fieldDressings < botMaxDressings) {
+              u.fieldDressings = Math.min(botMaxDressings, u.fieldDressings + 3);
+              gaveAmmo = true;
             }
           }
+          if (gaveAmmo && u !== playerUnit) {
+            resuppliedTeammate = true;
+          }
+        };
+
+        if (botGrid && units) {
+          if (playerUnit) resupplyUnit(playerUnit);
+          botGrid.forEachInRadius(crate.pos.x, crate.pos.z, radius, (b) => {
+            if (b !== playerUnit) resupplyUnit(b);
+          });
+        } else if (units) {
+          for (let uIdx = 0; uIdx < units.length; uIdx++) {
+            resupplyUnit(units[uIdx]);
+          }
         }
-        // Award XP + Match Cash to the player when their field-deployed Ammo & Kit Stash resupplies allies
+
         if (
           resuppliedTeammate &&
           playerUnit &&
@@ -961,27 +1464,23 @@ export const ProjectileManager = {
   },
 
   /**
-   * Spawns a 3D Tarkov-style Enemy Backpack & Rig Loot Pack at the fallen enemy's position,
-   * populated with role-specific firearms, spare magazines, loose bullet boxes, field dressings,
-   * grenades/rockets, armor/backpack upgrades, and dogtags!
+   * Spawns a 3D Tarkov-style Enemy Backpack & Rig Loot Pack at the fallen enemy's position
    */
   spawnEnemyLootPack(bot) {
     if (!bot) return null;
     const playerTeam = window.game?.player?.team || 'US';
-    // Never spawn a loot pack for friendly teammates!
     if (bot.team === playerTeam) return null;
     if (!this.lootPacks) this.lootPacks = [];
 
-    // Reuse existing pack if already attached to this downed bot
     if (bot.lootPack && this.lootPacks.includes(bot.lootPack) && bot.lootPack.items.length > 0) {
       return bot.lootPack;
     }
 
-    // Cap active battlefield loot packs to 28 to keep rendering fast
     while (this.lootPacks.length >= 28) {
       const oldest = this.lootPacks.shift();
       if (oldest && oldest.mesh) {
         this.scene.remove(oldest.mesh);
+        disposeNonSharedMeshResources(oldest.mesh);
       }
     }
 
@@ -989,7 +1488,6 @@ export const ProjectileManager = {
     const isMedic = role === 'MEDIC';
     const isEng = role === 'ENGINEER';
     const isSupport = role === 'SUPPORT';
-    const isRecon = role === 'RECON';
 
     const roleWeapons = {
       ASSAULT: bot.team === 'RU' ? { id: 'ak15', name: 'AK-15 7.62MM RIFLE', cal: '7.62x39mm' } : { id: 'm4a1', name: 'M4A1 TACTICAL CARBINE', cal: '5.56x45mm' },
@@ -1138,36 +1636,20 @@ export const ProjectileManager = {
       }
     ];
 
-    // Build 3D Dropped Tactical Backpack & Rig Mesh on ground
+    // Build 3D Dropped Tactical Backpack & Rig Mesh on ground using shared geometries/materials
     const group = new THREE.Group();
     const gy = this.getGroundHeightAt(bot.pos.x, bot.pos.z);
     group.position.set(bot.pos.x, gy, bot.pos.z);
 
-    const packMat = new THREE.MeshStandardMaterial({
-      color: bot.team === 'RU' ? 0x3b4d3b : 0x5c5346,
-      roughness: 0.78
-    });
-    const pouchMat = new THREE.MeshStandardMaterial({
-      color: 0x2c3e50,
-      roughness: 0.7
-    });
-    const packMesh = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.36, 0.48), packMat);
+    const packMesh = new THREE.Mesh(_lootPackGeo, bot.team === 'RU' ? _lootPackMatRU : _lootPackMatUS);
     packMesh.position.y = 0.18;
     group.add(packMesh);
 
-    const pouchMesh = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.22, 0.56), pouchMat);
+    const pouchMesh = new THREE.Mesh(_lootPouchGeo, _lootPouchMat);
     pouchMesh.position.set(0, 0.26, 0);
     group.add(pouchMesh);
 
-    const ringGeo = new THREE.RingGeometry(0.55, 0.72, 16);
-    ringGeo.rotateX(-Math.PI / 2);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xf1c40f,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.55
-    });
-    const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+    const ringMesh = new THREE.Mesh(_lootRingGeo, _lootRingMat);
     ringMesh.position.y = 0.05;
     group.add(ringMesh);
 
@@ -1197,6 +1679,7 @@ export const ProjectileManager = {
 
   updateLootPacks(dt) {
     if (!this.lootPacks || this.lootPacks.length === 0) return;
+    _lootRingMat.opacity = 0.35 + Math.sin(performance.now() * 0.005) * 0.2;
     for (let i = this.lootPacks.length - 1; i >= 0; i--) {
       const pack = this.lootPacks[i];
       pack.timer -= dt;
@@ -1206,13 +1689,14 @@ export const ProjectileManager = {
         pack.pos.y = this.getGroundHeightAt(pack.pos.x, pack.pos.z);
       }
       if (pack.timer <= 0 || !pack.items || pack.items.length === 0) {
-        if (pack.mesh) this.scene.remove(pack.mesh);
+        if (pack.mesh) {
+          this.scene.remove(pack.mesh);
+          disposeNonSharedMeshResources(pack.mesh);
+        }
         if (pack.botRef && pack.botRef.lootPack === pack) {
           pack.botRef.lootPack = null;
         }
         this.lootPacks.splice(i, 1);
-      } else if (pack.ringMesh && pack.ringMesh.material) {
-        pack.ringMesh.material.opacity = 0.35 + Math.sin(performance.now() * 0.005) * 0.2;
       }
     }
   }

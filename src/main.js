@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=90';
-import { VehicleManager } from './vehicles.js?v=90';
-import { BotManager } from './bots.js?v=90';
-import { PlayerController } from './player.js?v=90';
-import { NetworkManager } from './network.js?v=90';
-import { UIManager } from './ui.js?v=90';
-import { TelemetryLogger } from './telemetry.js?v=90';
-import { sound } from './audio.js?v=90';
-import { CAMERA, LIGHTING, MATCH, WEATHER, SKY_FOG_COLOR } from './config.js?v=90';
-import { events, makeEventBridge } from './events.js?v=90';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=90';
+import { VoxelWorld } from './world.js?v=91';
+import { VehicleManager } from './vehicles.js?v=91';
+import { BotManager } from './bots.js?v=91';
+import { PlayerController } from './player.js?v=91';
+import { NetworkManager } from './network.js?v=91';
+import { UIManager } from './ui.js?v=91';
+import { TelemetryLogger } from './telemetry.js?v=91';
+import { sound } from './audio.js?v=91';
+import { CAMERA, LIGHTING, MATCH, WEATHER, SKY_FOG_COLOR } from './config.js?v=91';
+import { events, makeEventBridge } from './events.js?v=91';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=91';
 
 class BattleBitGame {
   constructor() {
@@ -73,6 +73,7 @@ class BattleBitGame {
     this.matchTimeRemaining = MATCH.DURATION;
     this.matchEnded = false;
     this.orbitAngle = 0;
+    this._allUnits = [];
 
     // Core Subsystems + Live Telemetry Logger
     const initParams = new URLSearchParams(window.location.search);
@@ -160,16 +161,50 @@ class BattleBitGame {
       this.player.downed = false;
       this.player.thirdPersonSoldierMesh = null;
       this.player.targetRingMesh = null;
+      this.player.parachuteMesh = null;
+      this.player.uavDroneMesh = null;
+      this.player.uavSweepRingMesh = null;
       this.player.rallyPoint = null;
       this.player.insertionBeacon = null;
       this.player.plantedC4 = [];
       this.player.activeBullets = [];
     }
 
+    if (typeof this.world?.dispose === 'function') {
+      this.world.dispose();
+    }
+    if (typeof this.vehicleManager?.dispose === 'function') {
+      this.vehicleManager.dispose();
+    }
+    if (typeof this.botManager?.dispose === 'function') {
+      this.botManager.dispose();
+    }
+
+    const disposeSubtree = (root) => {
+      if (!root || typeof root.traverse !== 'function') return;
+      root.traverse((obj) => {
+        if (obj.geometry && !obj.geometry.userData?.shared) {
+          obj.geometry.dispose();
+        }
+        const mat = obj.material;
+        if (mat) {
+          if (Array.isArray(mat)) {
+            for (let mIdx = 0; mIdx < mat.length; mIdx++) {
+              const m = mat[mIdx];
+              if (m && !m.userData?.shared) m.dispose();
+            }
+          } else if (!mat.userData?.shared) {
+            mat.dispose();
+          }
+        }
+      });
+    };
+
     // Remove all previous world/vehicle/bot meshes from the scene while keeping lighting & camera
     for (let i = this.scene.children.length - 1; i >= 0; i--) {
       const child = this.scene.children[i];
       if (!this._coreSceneChildren || !this._coreSceneChildren.has(child)) {
+        disposeSubtree(child);
         this.scene.remove(child);
       }
     }
@@ -1302,8 +1337,14 @@ class BattleBitGame {
   }
 
   computeTeamBleedRates() {
-    const usFlags = this.world.flags.filter((f) => f.owner === 'US').length;
-    const ruFlags = this.world.flags.filter((f) => f.owner === 'RU').length;
+    let usFlags = 0;
+    let ruFlags = 0;
+    const flags = this.world.flags;
+    for (let i = 0; i < flags.length; i++) {
+      const owner = flags[i].owner;
+      if (owner === 'US') usFlags++;
+      else if (owner === 'RU') ruFlags++;
+    }
 
     let bleedUSPerMin = 0;
     let bleedRUPerMin = 0;
@@ -1363,7 +1404,18 @@ class BattleBitGame {
     const dt = Math.min(0.05, rawDt);
     this.lastTime = now;
 
-    const allUnits = [this.player, ...this.botManager.bots, ...this.network.remotePlayers.values()];
+    const allUnits = this._allUnits || (this._allUnits = []);
+    allUnits.length = 0;
+    allUnits.push(this.player);
+    const botsList = this.botManager.bots;
+    for (let i = 0; i < botsList.length; i++) {
+      allUnits.push(botsList[i]);
+    }
+    if (this.network.remotePlayers.size > 0) {
+      for (const rp of this.network.remotePlayers.values()) {
+        allUnits.push(rp);
+      }
+    }
 
     this.world.update(
       dt,

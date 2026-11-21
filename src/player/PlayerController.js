@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=90';
-import { sound } from '../audio.js?v=90';
-import { PLAYER, DISTANCES, CLASS_TRAITS, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=90';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=90';
-import { events, makeEventBridge } from '../events.js?v=90';
-import { GunsmithMethods } from './GunsmithState.js?v=90';
-import { FortificationMethods } from './FortificationBuilder.js?v=90';
-import { CommanderMethods } from './CommanderAbilities.js?v=90';
-import { VehicleControlMethods } from './VehicleControl.js?v=90';
-import { CombatMethods } from './PlayerCombat.js?v=90';
+import { VOXEL_SIZE } from '../world.js?v=91';
+import { sound } from '../audio.js?v=91';
+import { PLAYER, DISTANCES, CLASS_TRAITS, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=91';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=91';
+import { events, makeEventBridge } from '../events.js?v=91';
+import { GunsmithMethods } from './GunsmithState.js?v=91';
+import { FortificationMethods } from './FortificationBuilder.js?v=91';
+import { CommanderMethods } from './CommanderAbilities.js?v=91';
+import { VehicleControlMethods } from './VehicleControl.js?v=91';
+import { CombatMethods } from './PlayerCombat.js?v=91';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -16,7 +16,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=90';
+} from '../core/StateMachines.js?v=91';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -342,17 +342,83 @@ export class PlayerController {
     return true;
   }
 
-  isModalOpen() {
+  _getModalEl(id) {
+    if (!this._persistentModalEls) {
+      this._persistentModalEls = new Map();
+    }
+    if (id === 'deploy-screen' || id === 'victory-screen') {
+      let cached = this._persistentModalEls.get(id);
+      if (!cached || !cached.isConnected) {
+        cached = document.getElementById(id);
+        if (cached) this._persistentModalEls.set(id, cached);
+      }
+      return cached;
+    }
+    const uiCache = window.game?.ui?._domCache;
+    if (uiCache) {
+      const cached = uiCache.get(id);
+      if (cached && cached.isConnected) return cached;
+    }
+    return document.getElementById(id);
+  }
+
+  _closePopoutModals() {
+    this._modalCacheTime = 0;
+    const uiCache = window.game?.ui?._domCache;
+    for (const id of ['command-modal', 'mp-invite-modal']) {
+      const el = document.getElementById(id);
+      if (el) el.remove();
+      if (uiCache) uiCache.delete(id);
+    }
+    if (uiCache) uiCache.delete('cmd-tactical-map-canvas');
+    for (const id of ['multiplayer-modal', 'settings-modal']) {
+      const el = document.getElementById(id);
+      if (el && !el.classList.contains('hidden')) el.classList.add('hidden');
+    }
+  }
+
+  isModalOpen(useFastCache = false) {
+    const locked = document.pointerLockElement === document.body;
+    const now = performance.now();
+    if (useFastCache && this._modalCacheTime > 0 && this._modalCacheLocked === locked) {
+      const ttl = locked ? 100 : 20;
+      if (now - this._modalCacheTime < ttl) {
+        return this._modalCacheVal;
+      }
+    }
     const ids = [
       'gunsmith-modal',
       'command-modal',
+      'mp-invite-modal',
       'multiplayer-modal',
       'settings-modal',
       'deploy-screen',
       'victory-screen'
     ];
-    for (const id of ids) {
-      const el = document.getElementById(id);
+    let open = false;
+    for (let i = 0; i < ids.length; i++) {
+      const el = this._getModalEl(ids[i]);
+      if (el && !el.classList.contains('hidden') && el.style.display !== 'none') {
+        open = true;
+        break;
+      }
+    }
+    this._modalCacheVal = open;
+    this._modalCacheLocked = locked;
+    this._modalCacheTime = now;
+    return open;
+  }
+
+  isPopoutModalOpen() {
+    const ids = [
+      'gunsmith-modal',
+      'command-modal',
+      'mp-invite-modal',
+      'multiplayer-modal',
+      'settings-modal'
+    ];
+    for (let i = 0; i < ids.length; i++) {
+      const el = this._getModalEl(ids[i]);
       if (el && !el.classList.contains('hidden') && el.style.display !== 'none') {
         return true;
       }
@@ -360,15 +426,43 @@ export class PlayerController {
     return false;
   }
 
-  isPopoutModalOpen() {
-    const ids = ['gunsmith-modal', 'command-modal', 'multiplayer-modal', 'settings-modal'];
-    for (const id of ids) {
-      const el = document.getElementById(id);
-      if (el && !el.classList.contains('hidden') && el.style.display !== 'none') {
-        return true;
-      }
+  _getWeaponAnimRefs(mesh) {
+    if (!mesh) return null;
+    let refs = mesh.userData._animRefs;
+    if (
+      refs &&
+      ((refs.mag && !refs.mag.parent) || (refs.opticSight && !refs.opticSight.parent))
+    ) {
+      refs = null;
     }
-    return false;
+    if (!refs) {
+      const mag = mesh.getObjectByName('magazineMesh') || null;
+      const knifePivot = mesh.getObjectByName('knifePivotGroup') || null;
+      const swordPivot = mesh.getObjectByName('swordPivot') || null;
+      refs = {
+        mag,
+        magTopBrass: mag ? mag.getObjectByName('magTopBrass') || null : null,
+        leftArm: mesh.getObjectByName('leftArmGroup') || null,
+        rightArm: mesh.getObjectByName('rightArmGroup') || null,
+        bolt: mesh.getObjectByName('boltCarrierMesh') || null,
+        packBullet: mesh.getObjectByName('packingBulletMesh') || null,
+        rpgWarhead: mesh.getObjectByName('rpgWarhead') || null,
+        knifePivot,
+        baliSafeHandle: knifePivot ? knifePivot.getObjectByName('baliSafeHandle') || null : null,
+        baliBiteHandle: knifePivot ? knifePivot.getObjectByName('baliBiteHandle') || null : null,
+        swordPivot,
+        shieldPivot: mesh.getObjectByName('shieldPivot') || null,
+        scabbardPivot: mesh.getObjectByName('scabbardPivot') || null,
+        swordSwingTrail: swordPivot ? swordPivot.getObjectByName('swordSwingTrail') || null : null,
+        opticSight: mesh.getObjectByName('opticSightGroup') || null,
+        muzzleFlash: mesh.getObjectByName('muzzleFlash') || null,
+        bowString: mesh.getObjectByName('bowStringGroup') || null,
+        arrow: mesh.getObjectByName('nockedProjectile') || null,
+        fireTip: mesh.getObjectByName('fireTipMesh') || null
+      };
+      mesh.userData._animRefs = refs;
+    }
+    return refs;
   }
 
   callMenToSetupTrebuchet(preferredTreb = null) {
@@ -379,7 +473,12 @@ export class PlayerController {
   }
 
   setupInputs() {
+    document.addEventListener('pointerlockchange', () => {
+      this._modalCacheTime = 0;
+    });
+
     window.addEventListener('keydown', (e) => {
+      this._modalCacheTime = 0;
       this.keys[e.code] = true;
       if (!e.repeat) {
         if (this._konamiReadyForA && e.code === 'KeyA') {
@@ -453,12 +552,10 @@ export class PlayerController {
             const gsEl = document.getElementById('gunsmith-modal');
             if (gsEl && !gsEl.classList.contains('hidden')) {
               window.game.ui.toggleGunsmithModal(false);
+              this._modalCacheTime = 0;
               return;
             }
-            ['command-modal', 'multiplayer-modal', 'settings-modal'].forEach((id) => {
-              const el = document.getElementById(id);
-              if (el && !el.classList.contains('hidden')) el.classList.add('hidden');
-            });
+            this._closePopoutModals();
             try {
               const p = document.body.requestPointerLock();
               if (p && typeof p.catch === 'function') p.catch(() => {});
@@ -766,7 +863,7 @@ export class PlayerController {
     });
 
     window.addEventListener('wheel', (e) => {
-      if (this.dead || this.downed || this.isModalOpen()) return;
+      if (this.dead || this.downed || this.isModalOpen(true)) return;
       if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
         if (this.activeVehicle.type === 'tank' || this.activeVehicle.type === 'apc') {
           const nextSlot = (this.activeVehicle.activeWeaponSlot || 0) === 0 ? 1 : 0;
@@ -782,7 +879,7 @@ export class PlayerController {
 
     window.addEventListener('mousemove', (e) => {
       if (this.dead) return;
-      if (this.isModalOpen()) {
+      if (this.isModalOpen(true)) {
         this._lastMouseClientX = e.clientX;
         this._lastMouseClientY = e.clientY;
         return;
@@ -803,13 +900,16 @@ export class PlayerController {
             'need_medic',
             'affirmative'
           ];
-          this.commoSelectedId = ids[idx];
-          const btns = document.querySelectorAll('.commo-rose-btn');
-          btns.forEach((b) => {
-            const active = b.dataset.cmd === this.commoSelectedId;
-            b.style.background = active ? 'rgba(46, 204, 113, 0.85)' : 'rgba(44, 62, 80, 0.85)';
-            b.style.borderColor = active ? '#2ecc71' : 'rgba(255,255,255,0.18)';
-          });
+          const nextSelected = ids[idx];
+          if (this.commoSelectedId !== nextSelected) {
+            this.commoSelectedId = nextSelected;
+            const btns = document.querySelectorAll('.commo-rose-btn');
+            btns.forEach((b) => {
+              const active = b.dataset.cmd === this.commoSelectedId;
+              b.style.background = active ? 'rgba(46, 204, 113, 0.85)' : 'rgba(44, 62, 80, 0.85)';
+              b.style.borderColor = active ? '#2ecc71' : 'rgba(255,255,255,0.18)';
+            });
+          }
         }
         return;
       }
@@ -856,12 +956,13 @@ export class PlayerController {
     });
 
     window.addEventListener('mousedown', (e) => {
+      this._modalCacheTime = 0;
       if (this.dead) return;
       const clickedModalOrUi =
         e.target &&
         typeof e.target.closest === 'function' &&
         e.target.closest(
-          '#gunsmith-modal, #command-modal, #multiplayer-modal, #settings-modal, #deploy-screen, #victory-screen, button, input, select, label, .hud-clickable'
+          '#gunsmith-modal, #command-modal, #mp-invite-modal, #multiplayer-modal, #settings-modal, #deploy-screen, #victory-screen, button, input, select, label, .hud-clickable'
         );
 
       // Never steal pointer lock or fire weapon when clicking inside any UI modal or button!
@@ -879,11 +980,9 @@ export class PlayerController {
           const gsEl = document.getElementById('gunsmith-modal');
           if (gsEl && !gsEl.classList.contains('hidden')) {
             window.game.ui.toggleGunsmithModal(false);
+            this._modalCacheTime = 0;
           } else {
-            ['command-modal', 'multiplayer-modal', 'settings-modal'].forEach((id) => {
-              const el = document.getElementById(id);
-              if (el && !el.classList.contains('hidden')) el.classList.add('hidden');
-            });
+            this._closePopoutModals();
           }
         }
         try {
@@ -1465,7 +1564,7 @@ export class PlayerController {
         }
         this.reloading = false;
         this.fastReload = false;
-        const warhead = cur.mesh.getObjectByName('rpgWarhead');
+        const warhead = this._getWeaponAnimRefs(cur.mesh)?.rpgWarhead;
         if (warhead) warhead.visible = true;
         events.emit('player:reloaded', {
           weapon: cur.def,
@@ -1917,15 +2016,16 @@ export class PlayerController {
       );
       cur.mesh.position.lerpVectors(hipPos, adsPos, this.adsAmount);
 
-      const magMesh = cur.mesh.getObjectByName('magazineMesh');
-      const magTopBrass = magMesh ? magMesh.getObjectByName('magTopBrass') : null;
+      const animRefs = this._getWeaponAnimRefs(cur.mesh);
+      const magMesh = animRefs.mag;
+      const magTopBrass = animRefs.magTopBrass;
       if (magTopBrass) {
         magTopBrass.visible = Boolean(this.reloading || this.slowReloading);
       }
-      const leftArm = cur.mesh.getObjectByName('leftArmGroup');
-      const rightArm = cur.mesh.getObjectByName('rightArmGroup');
-      const boltMesh = cur.mesh.getObjectByName('boltCarrierMesh');
-      const packBulletMesh = cur.mesh.getObjectByName('packingBulletMesh');
+      const leftArm = animRefs.leftArm;
+      const rightArm = animRefs.rightArm;
+      const boltMesh = animRefs.bolt;
+      const packBulletMesh = animRefs.packBullet;
       const cantedRoll = isCantedActive ? -0.68 * this.adsAmount : 0;
 
       const baseMagY = magMesh && magMesh.userData.baseY !== undefined ? magMesh.userData.baseY : isPistol ? -0.082 : -0.105;
@@ -2074,7 +2174,7 @@ export class PlayerController {
         if (packBulletMesh) packBulletMesh.visible = false;
         const totalInsp = this.inspectTotalTime || 3.2;
         const p = THREE.MathUtils.clamp(1 - this.inspectTimer / totalInsp, 0, 1);
-        const knifePivot = cur.mesh.getObjectByName('knifePivotGroup');
+        const knifePivot = animRefs.knifePivot;
 
         if (cur.def.type === 'hammer' && cur.def.skinFinish === 'karambit' && knifePivot) {
           // CS2 Karambit Finger-Ring Spin Inspect (720° double spin around index finger ring!)
@@ -2098,8 +2198,8 @@ export class PlayerController {
             bRot.y + p * Math.PI * 2,
             bRot.z
           );
-          const safeH = knifePivot.getObjectByName('baliSafeHandle');
-          const biteH = knifePivot.getObjectByName('baliBiteHandle');
+          const safeH = animRefs.baliSafeHandle;
+          const biteH = animRefs.baliBiteHandle;
           if (safeH) safeH.rotation.x = Math.max(0, flipWave) * 2.2 * env;
           if (biteH) biteH.rotation.x = -Math.max(0, -flipWave) * 2.4 * env;
         } else {
@@ -2139,11 +2239,11 @@ export class PlayerController {
         }
       } else {
         this.inspectTimer = 0;
-        const knifePivot = cur.mesh.getObjectByName('knifePivotGroup');
+        const knifePivot = animRefs.knifePivot;
         if (knifePivot && knifePivot.userData.baseRot) {
           knifePivot.rotation.copy(knifePivot.userData.baseRot);
-          const safeH = knifePivot.getObjectByName('baliSafeHandle');
-          const biteH = knifePivot.getObjectByName('baliBiteHandle');
+          const safeH = animRefs.baliSafeHandle;
+          const biteH = animRefs.baliBiteHandle;
           if (safeH) safeH.rotation.x = 0;
           if (biteH) biteH.rotation.x = 0;
         }
@@ -2192,10 +2292,10 @@ export class PlayerController {
 
       // ─── MOUNT & BLADE ZWEIHÄNDER, LONGSWORD, POLEARM & SHIELD WALL KINEMATICS ───
       if (cur.def && cur.def.type === 'melee_sword') {
-        const swordPivot = cur.mesh.getObjectByName('swordPivot');
-        const shieldPivot = cur.mesh.getObjectByName('shieldPivot');
-        const scabbardPivot = cur.mesh.getObjectByName('scabbardPivot');
-        const swingTrail = swordPivot ? swordPivot.getObjectByName('swordSwingTrail') : null;
+        const swordPivot = animRefs.swordPivot;
+        const shieldPivot = animRefs.shieldPivot;
+        const scabbardPivot = animRefs.scabbardPivot;
+        const swingTrail = animRefs.swordSwingTrail;
         const is2HSword = Boolean(cur.def.isTwoHandedSword);
         const isPolearm = Boolean(cur.def.isPolearm);
         const is2HShield = Boolean(cur.def.isTwoHandedShield);
@@ -2598,12 +2698,12 @@ export class PlayerController {
       // Keep the 3D weapon body (receiver, Picatinny rail, handguard, barrel, iron sights & hands) visible
       // in ADS view while hiding only the 3D sight box once a mounted 2D optic overlay takes over!
       cur.mesh.visible = true;
-      const opticSight = cur.mesh.getObjectByName('opticSightGroup');
+      const opticSight = animRefs.opticSight;
       if (opticSight) {
         opticSight.visible = !(cur.def.opticType && this.adsAmount > 0.55);
       }
 
-      const flash = cur.mesh.getObjectByName('muzzleFlash');
+      const flash = animRefs.muzzleFlash;
       if (flash) {
         const fMult = cur.def.flashMult !== undefined ? cur.def.flashMult : 1.0;
         if (this.muzzleFlashTimer > 0 && fMult > 0) {
@@ -2747,14 +2847,28 @@ export class PlayerController {
    * Returns the highest walkable surface height (terrain or top of a voxel below the player's knees)
    * at (x, z) so standing on top of a Chest Wall keeps `pos.y` at `v.maxY` (1.25m) instead of sinking!
    */
+  _getVoxel(gx, gy, gz) {
+    return this.world.getVoxel
+      ? this.world.getVoxel(gx, gy, gz)
+      : this.world.voxels.get(this.world.key(gx, gy, gz));
+  }
+
+  _hasVoxel(gx, gy, gz) {
+    return this.world.hasVoxel
+      ? this.world.hasVoxel(gx, gy, gz)
+      : this.world.voxels.has(this.world.key(gx, gy, gz));
+  }
+
   getSupportSurfaceY(x, y, z, r) {
-    let bestY = this.world.getGroundHeightAt(x, z);
-    const minCoord = this.world.worldToGrid(x - r, bestY - 0.5, z - r);
-    const maxCoord = this.world.worldToGrid(x + r, y + 0.35, z + r);
+    const world = this.world;
+    const hasGetVoxel = typeof world.getVoxel === 'function';
+    let bestY = world.getGroundHeightAt(x, z);
+    const minCoord = world.worldToGrid(x - r, bestY - 0.5, z - r);
+    const maxCoord = world.worldToGrid(x + r, y + 0.35, z + r);
     for (let gx = minCoord.gx; gx <= maxCoord.gx; gx++) {
       for (let gy = minCoord.gy; gy <= maxCoord.gy; gy++) {
         for (let gz = minCoord.gz; gz <= maxCoord.gz; gz++) {
-          const v = this.world.voxels.get(this.world.key(gx, gy, gz));
+          const v = hasGetVoxel ? world.getVoxel(gx, gy, gz) : world.voxels.get(world.key(gx, gy, gz));
           if (!v) continue;
           if (x + r > v.minX && x - r < v.maxX && z + r > v.minZ && z - r < v.maxZ) {
             if (v.maxY <= y + 0.32 && v.maxY > bestY) {
@@ -2772,13 +2886,15 @@ export class PlayerController {
    * so low chest walls at foot/waist level never block a player from jumping up and out!
    */
   checkOverheadCeilingOverlap(x, nextY, z, r, h) {
+    const world = this.world;
+    const hasGetVoxel = typeof world.getVoxel === 'function';
     const minCeilingY = this.pos.y + 0.85;
-    const minCoord = this.world.worldToGrid(x - r, minCeilingY, z - r);
-    const maxCoord = this.world.worldToGrid(x + r, nextY + h, z + r);
+    const minCoord = world.worldToGrid(x - r, minCeilingY, z - r);
+    const maxCoord = world.worldToGrid(x + r, nextY + h, z + r);
     for (let gx = minCoord.gx; gx <= maxCoord.gx; gx++) {
       for (let gy = minCoord.gy; gy <= maxCoord.gy; gy++) {
         for (let gz = minCoord.gz; gz <= maxCoord.gz; gz++) {
-          const v = this.world.voxels.get(this.world.key(gx, gy, gz));
+          const v = hasGetVoxel ? world.getVoxel(gx, gy, gz) : world.voxels.get(world.key(gx, gy, gz));
           if (!v) continue;
           if (
             v.minY >= minCeilingY &&
@@ -2802,13 +2918,15 @@ export class PlayerController {
    * or `null` if none.
    */
   getHighestOverlappingVoxelTop(x, y, z, r, maxCheckH = 1.45) {
-    const minCoord = this.world.worldToGrid(x - r, y + 0.05, z - r);
-    const maxCoord = this.world.worldToGrid(x + r, y + maxCheckH, z + r);
+    const world = this.world;
+    const hasGetVoxel = typeof world.getVoxel === 'function';
+    const minCoord = world.worldToGrid(x - r, y + 0.05, z - r);
+    const maxCoord = world.worldToGrid(x + r, y + maxCheckH, z + r);
     let highestTop = null;
     for (let gx = minCoord.gx; gx <= maxCoord.gx; gx++) {
       for (let gy = minCoord.gy; gy <= maxCoord.gy; gy++) {
         for (let gz = minCoord.gz; gz <= maxCoord.gz; gz++) {
-          const v = this.world.voxels.get(this.world.key(gx, gy, gz));
+          const v = hasGetVoxel ? world.getVoxel(gx, gy, gz) : world.voxels.get(world.key(gx, gy, gz));
           if (!v) continue;
           if (
             x + r > v.minX &&
@@ -2834,19 +2952,21 @@ export class PlayerController {
    * Prevents players from ever automatically jumping/stepping up onto Chest Walls, sandbags, or HESCO barriers!
    */
   isInteriorStairStep(x, y, z, r) {
+    const world = this.world;
     if (
-      !this.world.isInsideBuildingOrContainer ||
-      !this.world.isInsideBuildingOrContainer(x, z, 0.25)
+      !world.isInsideBuildingOrContainer ||
+      !world.isInsideBuildingOrContainer(x, z, 0.25)
     ) {
       return false;
     }
-    const minCoord = this.world.worldToGrid(x - r, y + 0.2, z - r);
-    const maxCoord = this.world.worldToGrid(x + r, y + VOXEL_SIZE + 0.05, z + r);
+    const hasGetVoxel = typeof world.getVoxel === 'function';
+    const minCoord = world.worldToGrid(x - r, y + 0.2, z - r);
+    const maxCoord = world.worldToGrid(x + r, y + VOXEL_SIZE + 0.05, z + r);
     let foundWoodStair = false;
     for (let gx = minCoord.gx; gx <= maxCoord.gx; gx++) {
       for (let gy = minCoord.gy; gy <= maxCoord.gy; gy++) {
         for (let gz = minCoord.gz; gz <= maxCoord.gz; gz++) {
-          const v = this.world.voxels.get(this.world.key(gx, gy, gz));
+          const v = hasGetVoxel ? world.getVoxel(gx, gy, gz) : world.voxels.get(world.key(gx, gy, gz));
           if (!v) continue;
           if (
             x + r > v.minX &&
@@ -2917,13 +3037,17 @@ export class PlayerController {
   }
 
   checkBodyOverlap(x, y, z, r, h) {
-    const minCoord = this.world.worldToGrid(x - r, y + 0.25, z - r);
-    const maxCoord = this.world.worldToGrid(x + r, y + h, z + r);
+    const world = this.world;
+    const hasGetVoxel = typeof world.getVoxel === 'function';
+    const hasHasVoxel = typeof world.hasVoxel === 'function';
+    const minCoord = world.worldToGrid(x - r, y + 0.25, z - r);
+    const maxCoord = world.worldToGrid(x + r, y + h, z + r);
 
     for (let gx = minCoord.gx; gx <= maxCoord.gx; gx++) {
       for (let gy = minCoord.gy; gy <= maxCoord.gy; gy++) {
         for (let gz = minCoord.gz; gz <= maxCoord.gz; gz++) {
-          const v = this.world.voxels.get(this.world.key(gx, gy, gz));
+          if (hasHasVoxel && !world.hasVoxel(gx, gy, gz)) continue;
+          const v = hasGetVoxel ? world.getVoxel(gx, gy, gz) : world.voxels.get(world.key(gx, gy, gz));
           if (!v) continue;
           if (
             x + r > v.minX &&

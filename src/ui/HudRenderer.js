@@ -1,6 +1,31 @@
-import { UI, getEraRoles } from '../config.js?v=90';
+import { UI, getEraRoles } from '../config.js?v=91';
 
 export const HudRenderer = {
+  _setText(el, str) {
+    if (!el) return;
+    const s = String(str);
+    if (el._lastText !== s) {
+      el._lastText = s;
+      el.textContent = s;
+    }
+  },
+
+  _setDisplay(el, val) {
+    if (!el) return;
+    if (el._lastDisplay !== val) {
+      el._lastDisplay = val;
+      el.style.display = val;
+    }
+  },
+
+  _setWidth(el, widthStr) {
+    if (!el) return;
+    if (el._lastWidth !== widthStr) {
+      el._lastWidth = widthStr;
+      el.style.width = widthStr;
+    }
+  },
+
   toggleFpsCounter(forceState) {
     this.showFps = typeof forceState === 'boolean' ? forceState : !this.showFps;
     if (this.fpsPillEl) {
@@ -179,14 +204,20 @@ export const HudRenderer = {
     }, 2200);
   },
 
-  updateTelemetryPanel() {
+  updateTelemetryPanel(force = false) {
     if (
       !this.telemetryPanelEl ||
       this.telemetryPanelEl.classList.contains('hidden') ||
+      this.telemetryPanelEl.style.display === 'none' ||
       !this.telemetry
     ) {
       return;
     }
+    const now = performance.now();
+    if (!force && this._lastTelemUiAt && now - this._lastTelemUiAt < 250) {
+      return;
+    }
+    this._lastTelemUiAt = now;
     const snap = this.telemetry.buildSnapshot();
     if (!snap) return;
 
@@ -307,16 +338,17 @@ export const HudRenderer = {
         const topBtn = this.el('deploy-top-btn');
         const botBtn = this.el('deploy-btn');
         const remaining = Math.ceil(this.player.respawnTimer);
-        if (topBtn) topBtn.textContent = `RESPAWNING IN ${remaining}s...`;
-        if (botBtn) botBtn.textContent = `RESPAWNING IN ${remaining}s...`;
+        const waitText = `RESPAWNING IN ${remaining}s...`;
+        this._setText(topBtn, waitText);
+        this._setText(botBtn, waitText);
       } else {
         const topBtn = this.el('deploy-top-btn');
         const botBtn = this.el('deploy-btn');
         if (topBtn && topBtn.textContent.includes('RESPAWNING')) {
-          topBtn.textContent = 'DEPLOY [ENTER / SPACE]';
+          this._setText(topBtn, 'DEPLOY [ENTER / SPACE]');
         }
         if (botBtn && botBtn.textContent.includes('RESPAWNING')) {
-          botBtn.textContent = 'DEPLOY [ENTER / SPACE]';
+          this._setText(botBtn, 'DEPLOY [ENTER / SPACE]');
         }
       }
       this.drawDeployMap();
@@ -324,23 +356,27 @@ export const HudRenderer = {
     }
 
     if (this.nvgOverlayEl) {
-      this.nvgOverlayEl.classList.toggle('hidden', !this.player.nvgActive);
+      const hideNvg = !this.player.nvgActive;
+      if (this.nvgOverlayEl.classList.contains('hidden') !== hideNvg) {
+        this.nvgOverlayEl.classList.toggle('hidden', hideNvg);
+      }
     }
 
     // Downed State Overlay
     if (this.player.downed) {
-      this.downedOverlayEl.classList.remove('hidden');
-      this.scopeOverlayEl.classList.add('hidden');
-      this.crosshairEl.style.opacity = '0';
-      if (this.downedKillerEl) {
-        this.downedKillerEl.textContent = `HIT BY ${this.player.downedKiller}`;
+      if (this.downedOverlayEl.classList.contains('hidden')) {
+        this.downedOverlayEl.classList.remove('hidden');
       }
-      if (this.downedTimerValEl) {
-        this.downedTimerValEl.textContent = Math.max(0, Math.ceil(this.player.downedTimer));
+      if (!this.scopeOverlayEl.classList.contains('hidden')) {
+        this.scopeOverlayEl.classList.add('hidden');
       }
-      if (this.giveupBarFillEl) {
-        this.giveupBarFillEl.style.width = `${Math.min(100, this.player.giveUpProgress * 100)}%`;
+      if (this.crosshairEl._lastOpacity !== '0') {
+        this.crosshairEl._lastOpacity = '0';
+        this.crosshairEl.style.opacity = '0';
       }
+      this._setText(this.downedKillerEl, `HIT BY ${this.player.downedKiller}`);
+      this._setText(this.downedTimerValEl, Math.max(0, Math.ceil(this.player.downedTimer)));
+      this._setWidth(this.giveupBarFillEl, `${Math.min(100, this.player.giveUpProgress * 100).toFixed(1)}%`);
       // Find nearest friendly Medic or Squadmate distance who still has Field Dressings (> 0) to revive!
       let bestMedicDist = Infinity;
       let bestMedicName = null;
@@ -358,28 +394,34 @@ export const HudRenderer = {
           }
         }
       }
-      if (this.downedMedicDistEl) {
-        this.downedMedicDistEl.textContent = bestMedicName
+      this._setText(
+        this.downedMedicDistEl,
+        bestMedicName
           ? `NEAREST MEDIC: ${bestMedicName} (${Math.round(bestMedicDist)}m • ${bestMedicDressings}/${bestMedicMaxDressings} DRESSINGS) — EN ROUTE`
-          : 'NEAREST MEDIC: NONE WITH FIELD DRESSINGS IN RANGE';
-      }
-    } else if (this.downedOverlayEl) {
+          : 'NEAREST MEDIC: NONE WITH FIELD DRESSINGS IN RANGE'
+      );
+    } else if (this.downedOverlayEl && !this.downedOverlayEl.classList.contains('hidden')) {
       this.downedOverlayEl.classList.add('hidden');
     }
 
     const tUS = Math.max(0, Math.floor(ticketsUS));
     const tRU = Math.max(0, Math.floor(ticketsRU));
-    this.ticketsUsEl.textContent = tUS;
-    this.ticketsRuEl.textContent = tRU;
+    this._setText(this.ticketsUsEl, tUS);
+    this._setText(this.ticketsRuEl, tRU);
 
     // Update Top Match Clock, Lead Status & Momentum Tug-of-War Bar
     const mins = Math.floor(matchTimeRemaining / 60);
     const secs = Math.floor(matchTimeRemaining % 60);
     const clockStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-    if (this.matchClockEl) this.matchClockEl.textContent = clockStr;
+    this._setText(this.matchClockEl, clockStr);
 
-    const usFlagsHeld = this.world.flags.filter((f) => f.owner === 'US').length;
-    const ruFlagsHeld = this.world.flags.filter((f) => f.owner === 'RU').length;
+    let usFlagsHeld = 0;
+    let ruFlagsHeld = 0;
+    for (let i = 0; i < this.world.flags.length; i++) {
+      const owner = this.world.flags[i].owner;
+      if (owner === 'US') usFlagsHeld++;
+      else if (owner === 'RU') ruFlagsHeld++;
+    }
 
     // Squad AAS Territory Bleed & Mercy Bleed Calculation for Top Conquest Bar
     const usBleedPerMin =
@@ -388,27 +430,41 @@ export const HudRenderer = {
       usFlagsHeld >= 5 ? 60 : usFlagsHeld === 4 ? 15 : usFlagsHeld === 3 && usFlagsHeld > ruFlagsHeld ? 6 : 0;
 
     if (this.ticketRateUsEl) {
+      let rateTxt;
+      let rateCol;
       if (usBleedPerMin >= 60) {
-        this.ticketRateUsEl.textContent = `⚠️ -60/m MERCY (${usFlagsHeld}F)`;
-        this.ticketRateUsEl.style.color = '#ff3838';
+        rateTxt = `⚠️ -60/m MERCY (${usFlagsHeld}F)`;
+        rateCol = '#ff3838';
       } else if (usBleedPerMin > 0) {
-        this.ticketRateUsEl.textContent = `-${usBleedPerMin}/m BLEED (${usFlagsHeld}F)`;
-        this.ticketRateUsEl.style.color = '#ff9f43';
+        rateTxt = `-${usBleedPerMin}/m BLEED (${usFlagsHeld}F)`;
+        rateCol = '#ff9f43';
       } else {
-        this.ticketRateUsEl.textContent = `HOLD ${usFlagsHeld}/5F`;
-        this.ticketRateUsEl.style.color = usFlagsHeld >= 3 ? '#2ecc71' : '#74b9ff';
+        rateTxt = `HOLD ${usFlagsHeld}/5F`;
+        rateCol = usFlagsHeld >= 3 ? '#2ecc71' : '#74b9ff';
+      }
+      this._setText(this.ticketRateUsEl, rateTxt);
+      if (this.ticketRateUsEl._lastCol !== rateCol) {
+        this.ticketRateUsEl._lastCol = rateCol;
+        this.ticketRateUsEl.style.color = rateCol;
       }
     }
     if (this.ticketRateRuEl) {
+      let rateTxt;
+      let rateCol;
       if (ruBleedPerMin >= 60) {
-        this.ticketRateRuEl.textContent = `⚠️ -60/m MERCY (${ruFlagsHeld}F)`;
-        this.ticketRateRuEl.style.color = '#ff3838';
+        rateTxt = `⚠️ -60/m MERCY (${ruFlagsHeld}F)`;
+        rateCol = '#ff3838';
       } else if (ruBleedPerMin > 0) {
-        this.ticketRateRuEl.textContent = `-${ruBleedPerMin}/m BLEED (${ruFlagsHeld}F)`;
-        this.ticketRateRuEl.style.color = '#ff9f43';
+        rateTxt = `-${ruBleedPerMin}/m BLEED (${ruFlagsHeld}F)`;
+        rateCol = '#ff9f43';
       } else {
-        this.ticketRateRuEl.textContent = `HOLD ${ruFlagsHeld}/5F`;
-        this.ticketRateRuEl.style.color = ruFlagsHeld >= 3 ? '#2ecc71' : '#ec7063';
+        rateTxt = `HOLD ${ruFlagsHeld}/5F`;
+        rateCol = ruFlagsHeld >= 3 ? '#2ecc71' : '#ec7063';
+      }
+      this._setText(this.ticketRateRuEl, rateTxt);
+      if (this.ticketRateRuEl._lastCol !== rateCol) {
+        this.ticketRateRuEl._lastCol = rateCol;
+        this.ticketRateRuEl.style.color = rateCol;
       }
     }
 
@@ -425,44 +481,61 @@ export const HudRenderer = {
         : ` • FLAGS ${usFlagsHeld}-${ruFlagsHeld} (NO BLEED)`;
 
     if (this.matchLeadTextEl) {
+      let leadTxt;
+      let leadCol;
       if (diff > 5) {
-        this.matchLeadTextEl.textContent = `US LEADING +${diff}${bleedText}`;
-        this.matchLeadTextEl.style.color = '#70bdff';
+        leadTxt = `US LEADING +${diff}${bleedText}`;
+        leadCol = '#70bdff';
       } else if (diff < -5) {
-        this.matchLeadTextEl.textContent = `RU LEADING +${Math.abs(diff)}${bleedText}`;
-        this.matchLeadTextEl.style.color = '#ff7878';
+        leadTxt = `RU LEADING +${Math.abs(diff)}${bleedText}`;
+        leadCol = '#ff7878';
       } else {
-        this.matchLeadTextEl.textContent = `CONTESTED MATCH (${tUS}-${tRU})${bleedText}`;
-        this.matchLeadTextEl.style.color = '#f1c40f';
+        leadTxt = `CONTESTED MATCH (${tUS}-${tRU})${bleedText}`;
+        leadCol = '#f1c40f';
+      }
+      this._setText(this.matchLeadTextEl, leadTxt);
+      if (this.matchLeadTextEl._lastCol !== leadCol) {
+        this.matchLeadTextEl._lastCol = leadCol;
+        this.matchLeadTextEl.style.color = leadCol;
       }
     }
 
     if (this.momentumBarUsEl) {
       const totalT = Math.max(1, tUS + tRU);
       const usPct = Math.max(8, Math.min(92, (tUS / totalT) * 100));
-      this.momentumBarUsEl.style.width = `${usPct}%`;
+      this._setWidth(this.momentumBarUsEl, `${usPct.toFixed(1)}%`);
     }
 
     if (!this.scoreboardEl.classList.contains('hidden')) {
-      this.renderScoreboard();
+      this._scoreboardTimer = (this._scoreboardTimer || 0) - dt;
+      if (this._scoreboardTimer <= 0) {
+        this._scoreboardTimer = 0.25; // 4 Hz while [Tab] is held
+        this.renderScoreboard(true);
+      }
     }
 
-    // Update 5 Flag Badges (using cached DOM lookups)
+    // Update 5 Flag Badges (using cached DOM lookups & dirty checks)
     let activeCaptureFlag = null;
     for (const flag of this.world.flags) {
       const badge = this.el(`flag-ui-${flag.id}`);
       const fill = this.el(`flag-fill-${flag.id}`);
       if (badge && fill) {
-        const pct = Math.abs(flag.captureProgress);
-        fill.style.height = `${pct}%`;
+        const pctStr = `${Math.round(Math.abs(flag.captureProgress))}%`;
+        if (fill._lastHeight !== pctStr) {
+          fill._lastHeight = pctStr;
+          fill.style.height = pctStr;
+        }
         const col =
           flag.captureProgress > 15
             ? '#3498db'
             : flag.captureProgress < -15
             ? '#e74c3c'
             : '#7f8c8d';
-        fill.style.backgroundColor = col;
-        badge.style.borderColor = col;
+        if (fill._lastBg !== col) {
+          fill._lastBg = col;
+          fill.style.backgroundColor = col;
+          badge.style.borderColor = col;
+        }
       }
 
       const d = Math.hypot(this.player.pos.x - flag.pos.x, this.player.pos.z - flag.pos.z);
@@ -485,19 +558,35 @@ export const HudRenderer = {
         : null;
 
     if (distToEnemyBase <= 58 && enemyBaseInfo) {
-      this.captureStatusEl.classList.remove('hidden');
+      if (this.captureStatusEl.classList.contains('hidden')) {
+        this.captureStatusEl.classList.remove('hidden');
+      }
       if (enemyBaseInfo.contested) {
-        this.captureTitleEl.textContent = `⚠️ ${enemyTeam} MAIN BASE CONTESTED — ALL DEFENDERS ELIMINATED (SPAWNS LOCKED!)`;
-        this.captureBarEl.style.width = '100%';
-        this.captureBarEl.style.backgroundColor = '#f39c12';
+        this._setText(
+          this.captureTitleEl,
+          `⚠️ ${enemyTeam} MAIN BASE CONTESTED — ALL DEFENDERS ELIMINATED (SPAWNS LOCKED!)`
+        );
+        this._setWidth(this.captureBarEl, '100%');
+        if (this.captureBarEl._lastBg !== '#f39c12') {
+          this.captureBarEl._lastBg = '#f39c12';
+          this.captureBarEl.style.backgroundColor = '#f39c12';
+        }
       } else {
-        this.captureTitleEl.textContent = `${enemyTeam} MAIN BASE PERIMETER — ELIMINATE ${enemyBaseInfo.defenders} DEFENDERS TO LOCK SPAWNS`;
+        this._setText(
+          this.captureTitleEl,
+          `${enemyTeam} MAIN BASE PERIMETER — ELIMINATE ${enemyBaseInfo.defenders} DEFENDERS TO LOCK SPAWNS`
+        );
         const clearPct = Math.max(15, 100 - enemyBaseInfo.defenders * 18);
-        this.captureBarEl.style.width = `${clearPct}%`;
-        this.captureBarEl.style.backgroundColor = '#e74c3c';
+        this._setWidth(this.captureBarEl, `${clearPct}%`);
+        if (this.captureBarEl._lastBg !== '#e74c3c') {
+          this.captureBarEl._lastBg = '#e74c3c';
+          this.captureBarEl.style.backgroundColor = '#e74c3c';
+        }
       }
     } else if (activeCaptureFlag) {
-      this.captureStatusEl.classList.remove('hidden');
+      if (this.captureStatusEl.classList.contains('hidden')) {
+        this.captureStatusEl.classList.remove('hidden');
+      }
       const isFriendlyHeld = activeCaptureFlag.owner === this.player.team;
       const defStage = activeCaptureFlag.defenseStage || 0;
       const absPct = Math.round(Math.abs(activeCaptureFlag.captureProgress));
@@ -525,9 +614,9 @@ export const HudRenderer = {
       } else {
         statusLabel = ` (${activeCaptureFlag.owner} HELD ${absPct}%${downedNote}${garSquad} • 🛡️ DEFENDER ADVANTAGE: -${defDmgPct}% DMG, -30% RECOIL, +HP/ARMOR TRIAGE, ${holdMult}× HOLD • FORT ${defStage}/4 [F])`;
       }
-      this.captureTitleEl.textContent = `${activeCaptureFlag.name}${statusLabel}`;
-      this.captureBarEl.style.width = `${absPct}%`;
-      this.captureBarEl.style.backgroundColor =
+      this._setText(this.captureTitleEl, `${activeCaptureFlag.name}${statusLabel}`);
+      this._setWidth(this.captureBarEl, `${absPct}%`);
+      const capCol =
         enemyCount > 0 && myCount > 0
           ? '#f39c12'
           : activeCaptureFlag.captureProgress > 5
@@ -535,7 +624,11 @@ export const HudRenderer = {
           : activeCaptureFlag.captureProgress < -5
           ? '#e74c3c'
           : '#95a5a6';
-    } else {
+      if (this.captureBarEl._lastBg !== capCol) {
+        this.captureBarEl._lastBg = capCol;
+        this.captureBarEl.style.backgroundColor = capCol;
+      }
+    } else if (!this.captureStatusEl.classList.contains('hidden')) {
       this.captureStatusEl.classList.add('hidden');
     }
 
@@ -544,7 +637,7 @@ export const HudRenderer = {
     if (deg < 0) deg += 360;
     const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     const dirStr = dirs[Math.round(deg / 45) % 8];
-    this.compassHeadingEl.textContent = `${String(deg).padStart(3, '0')}° ${dirStr}`;
+    this._setText(this.compassHeadingEl, `${String(deg).padStart(3, '0')}° ${dirStr}`);
 
     // Dynamic Weather Status (Battlefield 2042 inspired)
     const weatherStatus = this.world.getWeatherStatus ? this.world.getWeatherStatus() : null;
@@ -563,10 +656,10 @@ export const HudRenderer = {
         document.body.appendChild(weatherEl);
         if (this._domCache) this._domCache.set('weather-status', weatherEl);
       }
-      weatherEl.textContent = weatherStatus;
-      weatherEl.style.display = 'block';
+      this._setText(weatherEl, weatherStatus);
+      this._setDisplay(weatherEl, 'block');
     } else if (weatherEl) {
-      weatherEl.style.display = 'none';
+      this._setDisplay(weatherEl, 'none');
     }
 
     // Hitmarker decay
@@ -773,143 +866,152 @@ export const HudRenderer = {
             : '';
       }
 
-      // Check proximity to Downed Friendlies ([F] Revive / [E] Drag), Vehicles ([E] Enter),
-      // Injured Allies ([F] Heal), Ammo Crates ([F] Pick Up Ammo), or Captured Objectives ([F] Build Chest Wall)
-      const downedMate = this.botManager.findNearestDownedFriendly(
-        this.player.pos,
-        this.player.team,
-        4.5
-      );
-      const injuredMate =
-        typeof this.player.findNearestInjuredFriendly === 'function'
-          ? this.player.findNearestInjuredFriendly(4.5)
-          : null;
-      const nearFriendlyMedic =
-        (this.player.hp < 100 || this.player.bleeding) &&
-        typeof this.player.findNearestFriendlyMedic === 'function'
-          ? this.player.findNearestFriendlyMedic(6.5)
-          : null;
-      const nearVeh = this.vehicleManager.findNearestEnterable(
-        this.player.pos,
-        6.5,
-        this.player.team
-      );
-      let nearCrate = false;
-      for (const crate of this.world.ammoCrates) {
-        if (crate.pos.distanceTo(this.player.pos) <= 4.5) {
-          nearCrate = true;
-          break;
-        }
-      }
-      const nearEnemyLoot =
-        typeof this.player.findNearestEnemyLoot === 'function'
-          ? this.player.findNearestEnemyLoot(4.8)
-          : null;
-      const nearBuildingKey =
-        typeof this.player.findNearestBuildingKey === 'function'
-          ? this.player.findNearestBuildingKey(5.2)
-          : null;
+      // Rotate nearby building keys smoothly at 60Hz while throttling proximity scans to 10Hz
       if (this.world && Array.isArray(this.world.buildingKeys)) {
-        for (const kObj of this.world.buildingKeys) {
+        for (let i = 0; i < this.world.buildingKeys.length; i++) {
+          const kObj = this.world.buildingKeys[i];
           if (!kObj.collected && kObj.mesh) {
             kObj.mesh.rotation.y += dt * 1.8;
           }
         }
       }
-      const nearFlag =
-        typeof this.player.findNearbyFlag === 'function'
-          ? this.player.findNearbyFlag(18)
-          : activeCaptureFlag;
-      const damagedBld =
-        typeof this.world.findNearestDamagedBuilding === 'function'
-          ? this.world.findNearestDamagedBuilding(this.player.pos, 14.0)
-          : null;
-      const bpName =
-        typeof this.player.getBlueprintName === 'function'
-          ? this.player.getBlueprintName()
-          : 'CHEST WALL';
 
-      const maxDressings =
-        this.player.maxBandages || (this.player.role === 'medic' ? 9 : 2);
-      if (this.player.parachuting) {
-        this.interactPromptEl.textContent =
-          '🪂 PARACHUTE ACTIVE — STEER [WASD] • PRESS [C] OR [X] TO CUT PARACHUTE (FAST DROP)';
-        this.interactPromptEl.classList.remove('hidden');
-      } else if (this.player.parachuteCut && !this.player.grounded) {
-        this.interactPromptEl.textContent =
-          '⚡ PARACHUTE CUT (FREEFALL) — PRESS [SPACE] BEFORE GROUND IMPACT TO PULL RESERVE CHUTE!';
-        this.interactPromptEl.classList.remove('hidden');
-      } else if (this.player.draggedBot) {
-        this.interactPromptEl.textContent =
-          (this.player.bandages || 0) > 0
-            ? `DRAGGING ${this.player.draggedBot.name} TO COVER • HOLD [F] TO REVIVE (-1 DRESSING • ${this.player.bandages}/${maxDressings}) • [E] DROP`
-            : `DRAGGING ${this.player.draggedBot.name} • ⚠️ 0/${maxDressings} DRESSINGS LEFT (RESUPPLY AT STASH TO REVIVE!) • [E] DROP`;
-        this.interactPromptEl.classList.remove('hidden');
-      } else if (downedMate) {
-        this.interactPromptEl.textContent =
-          (this.player.bandages || 0) > 0
-            ? `🩹 HOLD [F] TO REVIVE ${downedMate.name} (-1 DRESSING • ${this.player.bandages}/${maxDressings} LEFT) • PRESS [E] TO DRAG TO COVER`
-            : `⚠️ 0/${maxDressings} FIELD DRESSINGS LEFT — RESUPPLY AT AMMO STASH [7] TO REVIVE ${downedMate.name} • [E] DRAG`;
-        this.interactPromptEl.classList.remove('hidden');
-      } else if (nearVeh) {
-        const isModernEra = (this.world?.era || 'modern') === 'modern';
-        const needsPilot = Boolean(nearVeh.isAircraft && isModernEra && this.player.role !== 'pilot');
-        const vehPrompt = needsPilot
-          ? `🔒 ${nearVeh.name} — ONLY [PILOT] CLASS CAN FLY AIRCRAFT! (SWITCH TO PILOT AT AMMO STASH [L] / DEPLOY)`
-          : nearVeh.npcDriver
-          ? `PRESS [E] TO COMMANDEER ${nearVeh.name} FROM ${nearVeh.npcDriver.name}`
-          : `PRESS [E] TO ENTER ${nearVeh.name}`;
-        const fSuffix = nearCrate
-          ? ' • [F] RESUPPLY ALL • [L] ROLE/GUN/GUNSMITH'
-          : damagedBld
-          ? ` • [F] REPAIR BUILDING (${damagedBld.info.integrityPct}%)`
-          : nearFlag && nearFlag.owner === this.player.team
-          ? ` • [F] BUILD ${bpName}`
-          : '';
-        this.interactPromptEl.textContent = `${vehPrompt}${fSuffix}`;
-        this.interactPromptEl.classList.remove('hidden');
-      } else if (nearFriendlyMedic) {
-        this.interactPromptEl.textContent = `🏥 MEDIC ${nearFriendlyMedic.name} TREATING YOUR INJURIES (${Math.ceil(
-          this.player.hp
-        )}/100 HP) • PRESS [F] FOR INSTANT MAX HEAL`;
-        this.interactPromptEl.classList.remove('hidden');
-      } else if (injuredMate) {
-        this.interactPromptEl.textContent = `PRESS [F] TO HEAL ${injuredMate.name} (${Math.ceil(
-          injuredMate.hp
-        )}/100 HP)`;
-        this.interactPromptEl.classList.remove('hidden');
-      } else if (nearCrate) {
-        this.interactPromptEl.textContent =
-          '📦 AMMO & KIT STASH — PRESS [F] TO RESUPPLY ALL • PRESS [L] FOR ROLE, WEAPON & GUNSMITH MENU';
-        this.interactPromptEl.classList.remove('hidden');
-      } else if (nearBuildingKey) {
-        this.interactPromptEl.textContent =
-          '🔑 ARMORY CASE KEY FOUND IN BUILDING ROOM — PRESS [F] OR WALK OVER TO COLLECT (+1 🔑 KEY & +50 XP)!';
-        this.interactPromptEl.classList.remove('hidden');
-      } else if (nearEnemyLoot) {
-        const remItems = (nearEnemyLoot.items || []).filter((it) => !it.looted).length;
-        const cashTag = nearEnemyLoot.cashAutoLooted
-          ? `💵 +$${nearEnemyLoot.halfLootCash || 140} (50% CASH LOOTED)`
-          : `💵 +$${nearEnemyLoot.halfLootCash || 140} (50% OF $${nearEnemyLoot.ownerMatchCash || 280} CASH)`;
-        this.interactPromptEl.textContent = `🎒 ENEMY LOOT: ${nearEnemyLoot.ownerRank} ${nearEnemyLoot.ownerName} • ${cashTag} • TAP [F] AUTO-LOOT GEAR & 50% CASH • HOLD [F] / [I] MANUAL LOOT (${remItems} ITEMS)`;
-        this.interactPromptEl.classList.remove('hidden');
-      } else if (damagedBld) {
-        this.interactPromptEl.textContent = `🔨 BUILDING COVER DAMAGED (${damagedBld.info.integrityPct}% INTACT) — PRESS [F] OR [T] TO REPAIR BUILDING (+75 XP)`;
-        this.interactPromptEl.classList.remove('hidden');
-      } else if (nearFlag && nearFlag.owner === this.player.team) {
-        const defSt = nearFlag.defenseStage || 0;
-        this.interactPromptEl.textContent =
-          defSt < 4
-            ? `PRESS [F] TO BUILD ${bpName} & FORTIFY OBJ ${nearFlag.id} DEFENSES (${defSt}/4) • [B] CYCLE`
-            : `PRESS [F] TO BUILD ${bpName} AT OBJ ${nearFlag.id} • [B] CYCLE`;
-        this.interactPromptEl.classList.remove('hidden');
-      } else {
-        this.interactPromptEl.classList.add('hidden');
+      // Throttle #interact-prompt proximity scan to ~10 Hz (0.10s) instead of scanning all vehicles, bots, crates & loot at 60 Hz
+      this._interactScanTimer = (this._interactScanTimer || 0) - dt;
+      if (this._interactScanTimer <= 0) {
+        this._interactScanTimer = 0.10;
+        const downedMate = this.botManager.findNearestDownedFriendly(
+          this.player.pos,
+          this.player.team,
+          4.5
+        );
+        const injuredMate =
+          typeof this.player.findNearestInjuredFriendly === 'function'
+            ? this.player.findNearestInjuredFriendly(4.5)
+            : null;
+        const nearFriendlyMedic =
+          (this.player.hp < 100 || this.player.bleeding) &&
+          typeof this.player.findNearestFriendlyMedic === 'function'
+            ? this.player.findNearestFriendlyMedic(6.5)
+            : null;
+        const nearVeh = this.vehicleManager.findNearestEnterable(
+          this.player.pos,
+          6.5,
+          this.player.team
+        );
+        let nearCrate = false;
+        for (const crate of this.world.ammoCrates) {
+          if (crate.pos.distanceTo(this.player.pos) <= 4.5) {
+            nearCrate = true;
+            break;
+          }
+        }
+        const nearEnemyLoot =
+          typeof this.player.findNearestEnemyLoot === 'function'
+            ? this.player.findNearestEnemyLoot(4.8)
+            : null;
+        const nearBuildingKey =
+          typeof this.player.findNearestBuildingKey === 'function'
+            ? this.player.findNearestBuildingKey(5.2)
+            : null;
+        const nearFlag =
+          typeof this.player.findNearbyFlag === 'function'
+            ? this.player.findNearbyFlag(18)
+            : activeCaptureFlag;
+        const damagedBld =
+          typeof this.world.findNearestDamagedBuilding === 'function'
+            ? this.world.findNearestDamagedBuilding(this.player.pos, 14.0)
+            : null;
+        const bpName =
+          typeof this.player.getBlueprintName === 'function'
+            ? this.player.getBlueprintName()
+            : 'CHEST WALL';
+
+        const maxDressings =
+          this.player.maxBandages || (this.player.role === 'medic' ? 9 : 2);
+        let promptTxt = null;
+        if (this.player.parachuting) {
+          promptTxt =
+            '🪂 PARACHUTE ACTIVE — STEER [WASD] • PRESS [C] OR [X] TO CUT PARACHUTE (FAST DROP)';
+        } else if (this.player.parachuteCut && !this.player.grounded) {
+          promptTxt =
+            '⚡ PARACHUTE CUT (FREEFALL) — PRESS [SPACE] BEFORE GROUND IMPACT TO PULL RESERVE CHUTE!';
+        } else if (this.player.draggedBot) {
+          promptTxt =
+            (this.player.bandages || 0) > 0
+              ? `DRAGGING ${this.player.draggedBot.name} TO COVER • HOLD [F] TO REVIVE (-1 DRESSING • ${this.player.bandages}/${maxDressings}) • [E] DROP`
+              : `DRAGGING ${this.player.draggedBot.name} • ⚠️ 0/${maxDressings} DRESSINGS LEFT (RESUPPLY AT STASH TO REVIVE!) • [E] DROP`;
+        } else if (downedMate) {
+          promptTxt =
+            (this.player.bandages || 0) > 0
+              ? `🩹 HOLD [F] TO REVIVE ${downedMate.name} (-1 DRESSING • ${this.player.bandages}/${maxDressings} LEFT) • PRESS [E] TO DRAG TO COVER`
+              : `⚠️ 0/${maxDressings} FIELD DRESSINGS LEFT — RESUPPLY AT AMMO STASH [7] TO REVIVE ${downedMate.name} • [E] DRAG`;
+        } else if (nearVeh) {
+          const isModernEra = (this.world?.era || 'modern') === 'modern';
+          const needsPilot = Boolean(nearVeh.isAircraft && isModernEra && this.player.role !== 'pilot');
+          const vehPrompt = needsPilot
+            ? `🔒 ${nearVeh.name} — ONLY [PILOT] CLASS CAN FLY AIRCRAFT! (SWITCH TO PILOT AT AMMO STASH [L] / DEPLOY)`
+            : nearVeh.npcDriver
+            ? `PRESS [E] TO COMMANDEER ${nearVeh.name} FROM ${nearVeh.npcDriver.name}`
+            : `PRESS [E] TO ENTER ${nearVeh.name}`;
+          const fSuffix = nearCrate
+            ? ' • [F] RESUPPLY ALL • [L] ROLE/GUN/GUNSMITH'
+            : damagedBld
+            ? ` • [F] REPAIR BUILDING (${damagedBld.info.integrityPct}%)`
+            : nearFlag && nearFlag.owner === this.player.team
+            ? ` • [F] BUILD ${bpName}`
+            : '';
+          promptTxt = `${vehPrompt}${fSuffix}`;
+        } else if (nearFriendlyMedic) {
+          promptTxt = `🏥 MEDIC ${nearFriendlyMedic.name} TREATING YOUR INJURIES (${Math.ceil(
+            this.player.hp
+          )}/100 HP) • PRESS [F] FOR INSTANT MAX HEAL`;
+        } else if (injuredMate) {
+          promptTxt = `PRESS [F] TO HEAL ${injuredMate.name} (${Math.ceil(
+            injuredMate.hp
+          )}/100 HP)`;
+        } else if (nearCrate) {
+          promptTxt =
+            '📦 AMMO & KIT STASH — PRESS [F] TO RESUPPLY ALL • PRESS [L] FOR ROLE, WEAPON & GUNSMITH MENU';
+        } else if (nearBuildingKey) {
+          promptTxt =
+            '🔑 ARMORY CASE KEY FOUND IN BUILDING ROOM — PRESS [F] OR WALK OVER TO COLLECT (+1 🔑 KEY & +50 XP)!';
+        } else if (nearEnemyLoot) {
+          let remItems = 0;
+          const lItems = nearEnemyLoot.items || [];
+          for (let i = 0; i < lItems.length; i++) {
+            if (!lItems[i].looted) remItems++;
+          }
+          const cashTag = nearEnemyLoot.cashAutoLooted
+            ? `💵 +$${nearEnemyLoot.halfLootCash || 140} (50% CASH LOOTED)`
+            : `💵 +$${nearEnemyLoot.halfLootCash || 140} (50% OF $${nearEnemyLoot.ownerMatchCash || 280} CASH)`;
+          promptTxt = `🎒 ENEMY LOOT: ${nearEnemyLoot.ownerRank} ${nearEnemyLoot.ownerName} • ${cashTag} • TAP [F] AUTO-LOOT GEAR & 50% CASH • HOLD [F] / [I] MANUAL LOOT (${remItems} ITEMS)`;
+        } else if (damagedBld) {
+          promptTxt = `🔨 BUILDING COVER DAMAGED (${damagedBld.info.integrityPct}% INTACT) — PRESS [F] OR [T] TO REPAIR BUILDING (+75 XP)`;
+        } else if (nearFlag && nearFlag.owner === this.player.team) {
+          const defSt = nearFlag.defenseStage || 0;
+          promptTxt =
+            defSt < 4
+              ? `PRESS [F] TO BUILD ${bpName} & FORTIFY OBJ ${nearFlag.id} DEFENSES (${defSt}/4) • [B] CYCLE`
+              : `PRESS [F] TO BUILD ${bpName} AT OBJ ${nearFlag.id} • [B] CYCLE`;
+        }
+
+        if (promptTxt && !this.player.reloading && !this.player.slowReloading) {
+          this._setText(this.interactPromptEl, promptTxt);
+          if (this.interactPromptEl.classList.contains('hidden')) {
+            this.interactPromptEl.classList.remove('hidden');
+          }
+        } else if (!this.interactPromptEl.classList.contains('hidden')) {
+          this.interactPromptEl.classList.add('hidden');
+        }
+
+        // Render Squad-style Field Role & Kit Switcher Bar whenever standing near an Ammo & Kit Stash
+        this._cachedNearCrate = nearCrate;
       }
-
-      // Render Squad-style Field Role & Kit Switcher Bar whenever standing near an Ammo & Kit Stash
-      this.updateFieldKitBar(nearCrate);
+      this.updateFieldKitBar(Boolean(this._cachedNearCrate));
     } else {
+      this._interactScanTimer = 0;
+      this._cachedNearCrate = false;
       this.updateFieldKitBar(false);
     }
 
@@ -1001,34 +1103,44 @@ export const HudRenderer = {
         this.armorBadgeEl.textContent = `${armorPrefix}: ${Math.ceil(activeVeh.hp)}/${activeVeh.maxHp}`;
       }
     } else {
-      if (this.vehicleVitalsRowEl) this.vehicleVitalsRowEl.classList.add('hidden');
-      if (this.crewHpLabelEl) this.crewHpLabelEl.textContent = 'HP';
-      this.armorBadgeEl.textContent = `ARMOR: ${Math.ceil(this.player.armor)}/${
-        this.player.maxArmor || 50
-      }`;
+      if (this.vehicleVitalsRowEl && !this.vehicleVitalsRowEl.classList.contains('hidden')) {
+        this.vehicleVitalsRowEl.classList.add('hidden');
+      }
+      this._setText(this.crewHpLabelEl, 'HP');
+      this._setText(this.armorBadgeEl, `ARMOR: ${Math.ceil(this.player.armor)}/${this.player.maxArmor || 50}`);
     }
 
-    this.hpValEl.textContent = Math.ceil(this.player.hp);
-    this.hpFillEl.style.width = `${Math.max(0, this.player.hp)}%`;
+    this._setText(this.hpValEl, Math.ceil(this.player.hp));
+    this._setWidth(this.hpFillEl, `${Math.max(0, Math.round(this.player.hp))}%`);
     const isMedicTreating = Boolean(
       !this.player.bleeding && this.player.medicHealTimer > 0 && this.player.beingHealedByMedic
     );
-    this.bleedBadgeEl.classList.toggle('hidden', !this.player.bleeding && !isMedicTreating);
+    const hideBleed = !this.player.bleeding && !isMedicTreating;
+    if (this.bleedBadgeEl.classList.contains('hidden') !== hideBleed) {
+      this.bleedBadgeEl.classList.toggle('hidden', hideBleed);
+    }
     if (this.player.bleeding) {
       const approxBleedSecs = Math.ceil((Math.max(1, this.player.hp) / 2) * 2.5);
-      this.bleedBadgeEl.textContent = `BLEEDING [HOLD H] (~${approxBleedSecs}s)`;
-      this.bleedBadgeEl.style.background = '';
-      this.bleedBadgeEl.style.color = '';
+      this._setText(this.bleedBadgeEl, `BLEEDING [HOLD H] (~${approxBleedSecs}s)`);
+      if (this.bleedBadgeEl._lastMode !== 'bleed') {
+        this.bleedBadgeEl._lastMode = 'bleed';
+        this.bleedBadgeEl.style.background = '';
+        this.bleedBadgeEl.style.color = '';
+      }
     } else if (isMedicTreating) {
-      this.bleedBadgeEl.textContent = `🏥 MEDIC ${this.player.beingHealedByMedic} HEALING (${Math.ceil(
-        this.player.hp
-      )}/100 HP)`;
-      this.bleedBadgeEl.style.background = 'rgba(46, 204, 113, 0.28)';
-      this.bleedBadgeEl.style.color = '#7bed9f';
+      this._setText(
+        this.bleedBadgeEl,
+        `🏥 MEDIC ${this.player.beingHealedByMedic} HEALING (${Math.ceil(this.player.hp)}/100 HP)`
+      );
+      if (this.bleedBadgeEl._lastMode !== 'medic') {
+        this.bleedBadgeEl._lastMode = 'medic';
+        this.bleedBadgeEl.style.background = 'rgba(46, 204, 113, 0.28)';
+        this.bleedBadgeEl.style.color = '#7bed9f';
+      }
     }
     const curSpeedMps = this.player.horizSpeed || Math.hypot(this.player.vel?.x || 0, this.player.vel?.z || 0);
     const isBhopping = !activeVeh && !this.player.parachuting && !this.player.downed && curSpeedMps > 10.3;
-    this.stanceBadgeEl.textContent = activeVeh
+    const stanceStr = activeVeh
       ? activeVeh.isAircraft
         ? '✈️ PILOT [E EJECT]'
         : activeVeh.type === 'bike' || activeVeh.type === 'atv'
@@ -1057,17 +1169,18 @@ export const HudRenderer = {
       : this.player.crouching
       ? 'CROUCHED [C]'
       : 'STANDING';
+    this._setText(this.stanceBadgeEl, stanceStr);
     const maxPlayerDressings =
       this.player.maxBandages || (this.player.role === 'medic' ? 9 : 2);
     if (this.player.role === 'medic') {
       const bagPct = Math.round(
         ((this.player.medicBagSupply ?? 600) / (this.player.maxMedicBagSupply || 600)) * 100
       );
-      this.bandageBadgeEl.textContent = `DRESSINGS: ${this.player.bandages}/${maxPlayerDressings} • BAG: ${bagPct}%`;
+      this._setText(this.bandageBadgeEl, `DRESSINGS: ${this.player.bandages}/${maxPlayerDressings} • BAG: ${bagPct}%`);
     } else {
-      this.bandageBadgeEl.textContent = `DRESSINGS: ${this.player.bandages}/${maxPlayerDressings}`;
+      this._setText(this.bandageBadgeEl, `DRESSINGS: ${this.player.bandages}/${maxPlayerDressings}`);
     }
-    this.grenadeBadgeEl.textContent = `FRAGS [G]: ${this.player.grenades}`;
+    this._setText(this.grenadeBadgeEl, `FRAGS [G]: ${this.player.grenades}`);
     const backpackBadgeEl = this.el('backpack-hud-badge');
     if (backpackBadgeEl) {
       const curWep = this.player.currentWeapon ? this.player.currentWeapon() : null;
@@ -1075,28 +1188,37 @@ export const HudRenderer = {
       const lootCount = Array.isArray(this.player.backpackItems)
         ? this.player.backpackItems.length
         : 0;
-      backpackBadgeEl.textContent =
+      this._setText(
+        backpackBadgeEl,
         lootCount > 0
           ? `🎒 PACK [I]: +${looseRds}R • ${lootCount} LOOT`
-          : `🎒 PACK [I]: +${looseRds} RDS`;
+          : `🎒 PACK [I]: +${looseRds} RDS`
+      );
     }
 
-    if (this.player.reloading || this.player.slowReloading) {
+    if ((this.player.reloading || this.player.slowReloading) && !this.interactPromptEl.classList.contains('hidden')) {
       this.interactPromptEl.classList.add('hidden');
     }
     this.updateReloadAnimationHud(cur);
 
     if (this.player.reviveProgress > 0 && this.player.reviveTargetBot) {
-      this.actionProgressEl.classList.remove('hidden');
-      this.actionLabelEl.textContent = this.player.isDraggingAlly
-        ? `DRAGGING ${this.player.reviveTargetBot.name} TO SAFE COVER (STOP TO REVIVE)...`
-        : `WRAPPING BANDAGE — REVIVING ${this.player.reviveTargetBot.name}...`;
-      this.actionFillEl.style.width = `${Math.min(100, this.player.reviveProgress * 100)}%`;
+      if (this.actionProgressEl.classList.contains('hidden')) {
+        this.actionProgressEl.classList.remove('hidden');
+      }
+      this._setText(
+        this.actionLabelEl,
+        this.player.isDraggingAlly
+          ? `DRAGGING ${this.player.reviveTargetBot.name} TO SAFE COVER (STOP TO REVIVE)...`
+          : `WRAPPING BANDAGE — REVIVING ${this.player.reviveTargetBot.name}...`
+      );
+      this._setWidth(this.actionFillEl, `${Math.min(100, this.player.reviveProgress * 100).toFixed(1)}%`);
     } else if (this.player.bandageProgress > 0) {
-      this.actionProgressEl.classList.remove('hidden');
-      this.actionLabelEl.textContent = 'WRAPPING BANDAGE...';
-      this.actionFillEl.style.width = `${Math.min(100, this.player.bandageProgress * 100)}%`;
-    } else {
+      if (this.actionProgressEl.classList.contains('hidden')) {
+        this.actionProgressEl.classList.remove('hidden');
+      }
+      this._setText(this.actionLabelEl, 'WRAPPING BANDAGE...');
+      this._setWidth(this.actionFillEl, `${Math.min(100, this.player.bandageProgress * 100).toFixed(1)}%`);
+    } else if (!this.actionProgressEl.classList.contains('hidden')) {
       // Reloading & slow bullet-packing now display the animated cutaway visualizer (#reload-anim-hud)
       this.actionProgressEl.classList.add('hidden');
     }
@@ -1201,19 +1323,20 @@ export const HudRenderer = {
       }
       if (this.magBarsRowEl) this.magBarsRowEl.innerHTML = '';
     } else if (cur) {
-      this.weaponNameEl.textContent = cur.def.name;
-      this.ammoClipEl.textContent = cur.clip;
-      this.ammoReserveEl.textContent = cur.reserve;
+      this._setText(this.weaponNameEl, cur.def.name);
+      this._setText(this.ammoClipEl, cur.clip);
+      this._setText(this.ammoReserveEl, cur.reserve);
+      let fireModeStr;
       if (cur.def.type === 'stinger') {
         const sTgt = this.player.stingerLockTarget;
         const sPct = Math.round((this.player.stingerLockProgress || 0) * 100);
-        this.fireModeEl.textContent = sTgt
+        fireModeStr = sTgt
           ? sPct >= 100
             ? `🔒 IR LOCKED ON ${sTgt.name.split(' ')[0]} — FIRE [LMB]! • [3] SWAP TO RPG-7 AT`
             : `📡 SEEKING ${sTgt.name.split(' ')[0]} (${sPct}%) • [3] SWAP TO RPG-7 AT`
           : 'IR ANTI-AIR SAM (AIM AT ENEMY JET) • PRESS [3] AGAIN TO SWAP TO RPG-7 AT';
       } else if (cur.def.type === 'rpg') {
-        this.fireModeEl.textContent = `${cur.def.caliber} • PRESS [3] AGAIN TO SWAP TO STINGER AA`;
+        fireModeStr = `${cur.def.caliber} • PRESS [3] AGAIN TO SWAP TO STINGER AA`;
       } else if (cur.def.type === 'melee_sword') {
         const dirIconMap = {
           UP: '▴ OVERHEAD CLEAVE',
@@ -1246,11 +1369,12 @@ export const HudRenderer = {
           : this.player.isAds
           ? `⚔️ RMB ${gDir} PARRY: ACTIVE (-60% MELEE / -25% ARROW)`
           : 'HOLD RMB: 4-DIR ZWEIHÄNDER PARRY (-60% DMG)';
-        this.fireModeEl.textContent = `${dirTag} • ${blockTag}`;
+        fireModeStr = `${dirTag} • ${blockTag}`;
       } else {
         const mv = cur.def.muzzleVelocity ? ` • ${cur.def.muzzleVelocity} M/S` : '';
-        this.fireModeEl.textContent = `${cur.def.caliber}${mv} • [F/V] INSPECT`;
+        fireModeStr = `${cur.def.caliber}${mv} • [F/V] INSPECT`;
       }
+      this._setText(this.fireModeEl, fireModeStr);
       this.updateMagBars(cur);
     }
 
@@ -1260,28 +1384,35 @@ export const HudRenderer = {
         (cur && cur.def && (cur.def.isBow || cur.def.isCrossbow))
     );
     if (this.zeroBadgeEl) {
-      this.zeroBadgeEl.textContent = isBowOrXbowActive
-        ? `ELEV [X]: ${this.player.zeroDistance || 50}M`
-        : `ZERO [X]: ${this.player.zeroDistance}m`;
+      this._setText(
+        this.zeroBadgeEl,
+        isBowOrXbowActive
+          ? `ELEV [X]: ${this.player.zeroDistance || 50}M`
+          : `ZERO [X]: ${this.player.zeroDistance}m`
+      );
     }
     if (this.cantedBadgeEl && (cur || (activeVeh && activeVeh.type === 'warhorse'))) {
+      let cantedTxt;
+      let cantedCol = '';
       if (isBowOrXbowActive) {
         const isFire = Boolean(this.player.fireArrowsActive);
-        this.cantedBadgeEl.textContent = isFire
+        cantedTxt = isFire
           ? '🔥 [V] ARROW: FIRE ARROW (+BURN)'
           : '🏹 [V] ARROW: REGULAR BODKIN';
-        this.cantedBadgeEl.style.color = isFire ? '#ff7f50' : '#7bed9f';
+        cantedCol = isFire ? '#ff7f50' : '#7bed9f';
+      } else if (!cur.def.opticType) {
+        cantedTxt = 'OPTIC: IRON SIGHTS';
+      } else if (cur.def.hasCantedSight) {
+        cantedTxt = `OPTIC [V]: ${
+          this.player.useCantedSight ? 'CANTED 45°' : cur.def.opticType.toUpperCase()
+        }`;
       } else {
-        this.cantedBadgeEl.style.color = '';
-        if (!cur.def.opticType) {
-          this.cantedBadgeEl.textContent = 'OPTIC: IRON SIGHTS';
-        } else if (cur.def.hasCantedSight) {
-          this.cantedBadgeEl.textContent = `OPTIC [V]: ${
-            this.player.useCantedSight ? 'CANTED 45°' : cur.def.opticType.toUpperCase()
-          }`;
-        } else {
-          this.cantedBadgeEl.textContent = `OPTIC: ${cur.def.opticType.toUpperCase()}`;
-        }
+        cantedTxt = `OPTIC: ${cur.def.opticType.toUpperCase()}`;
+      }
+      this._setText(this.cantedBadgeEl, cantedTxt);
+      if (this.cantedBadgeEl._lastCol !== cantedCol) {
+        this.cantedBadgeEl._lastCol = cantedCol;
+        this.cantedBadgeEl.style.color = cantedCol;
       }
     }
     if (this.blueprintBadgeEl) {
@@ -1292,9 +1423,12 @@ export const HudRenderer = {
       const stashCd = Math.ceil(this.player.ammoStashCooldown || 0);
       const stashText = stashCd > 0 ? `STASH [7]: ${stashCd}s` : 'STASH [7]: RDY';
       const isModernEra = (this.world?.era || 'modern') === 'modern';
-      this.blueprintBadgeEl.textContent = isModernEra
-        ? `BUILD [F/T/B]: ${bpName} • 🏰 EMPLACE [8] • ✈️ JET/AC-130 [9] • ${stashText}`
-        : `BUILD [F/T/B]: ${bpName} • 🏰 FORTIFY [8] • ${stashText}`;
+      this._setText(
+        this.blueprintBadgeEl,
+        isModernEra
+          ? `BUILD [F/T/B]: ${bpName} • 🏰 EMPLACE [8] • ✈️ JET/AC-130 [9] • ${stashText}`
+          : `BUILD [F/T/B]: ${bpName} • 🏰 FORTIFY [8] • ${stashText}`
+      );
     }
 
     const selWepIndNameEl = this.el('selected-weapon-indicator-name');
@@ -1309,13 +1443,15 @@ export const HudRenderer = {
       } else if (activeVeh && activeVeh.type === 'warhorse') {
         const wSlot = activeVeh.activeWeaponSlot || 0;
         const arrTag = this.player.fireArrowsActive ? '🔥 FIRE ARROWS' : 'BODKIN ARROWS';
-        selWepIndNameEl.textContent =
+        this._setText(
+          selWepIndNameEl,
           wSlot === 1
             ? '[2] COUCHED CAVALRY LANCE (PRESS [1] FOR LONGBOW)'
-            : `[1] ROYAL YEW LONGBOW (${arrTag} • [V] TOGGLE FIRE • [2] LANCE)`;
+            : `[1] ROYAL YEW LONGBOW (${arrTag} • [V] TOGGLE FIRE • [2] LANCE)`
+        );
       } else if (activeVeh) {
         const vSlot = (activeVeh.activeWeaponSlot || 0) + 1;
-        selWepIndNameEl.textContent = `[VEHICLE SLOT ${vSlot}] ${activeVeh.name}`;
+        this._setText(selWepIndNameEl, `[VEHICLE SLOT ${vSlot}] ${activeVeh.name}`);
       } else if (cur && cur.def) {
         const sIdx = (this.player.currentSlotIndex || 0) + 1;
         const wId = cur.def.id;
@@ -1333,7 +1469,7 @@ export const HudRenderer = {
             : eqSkin === 'butterfly'
             ? ' • ★ BUTTERFLY SAPPHIRE'
             : '';
-        selWepIndNameEl.textContent = `[SLOT ${sIdx}] ${cur.def.name}${skinSuffix}`;
+        this._setText(selWepIndNameEl, `[SLOT ${sIdx}] ${cur.def.name}${skinSuffix}`);
       }
     }
 
@@ -1341,7 +1477,9 @@ export const HudRenderer = {
       const slotEl = this.el(`slot-${i + 1}`);
       if (slotEl) {
         const isActiveSlot = i === this.player.currentSlotIndex && !activeVeh;
-        slotEl.classList.toggle('active', isActiveSlot);
+        if (slotEl.classList.contains('active') !== isActiveSlot) {
+          slotEl.classList.toggle('active', isActiveSlot);
+        }
         const sDef = this.player.slots[i]?.def;
         if (sDef) {
           const isEngSlot3 = i === 2 && this.player.role === 'engineer';
@@ -1383,9 +1521,19 @@ export const HudRenderer = {
     if (this._minimapTimer <= 0) {
       this._minimapTimer = UI.MINIMAP_UPDATE_INTERVAL; // 15 Hz
       this.drawMinimap();
-      const cmdMapCanvas = this.el('cmd-tactical-map-canvas');
-      if (cmdMapCanvas) {
-        this.drawCommandTacticalMap(cmdMapCanvas);
+      const cmdModalVisible =
+        typeof this.isCommandModalVisible === 'function'
+          ? this.isCommandModalVisible()
+          : Boolean(
+              this.el('command-modal') &&
+                !this.el('command-modal').classList.contains('hidden') &&
+                this.el('command-modal').style.display !== 'none'
+            );
+      if (cmdModalVisible) {
+        const cmdMapCanvas = this.el('cmd-tactical-map-canvas');
+        if (cmdMapCanvas && cmdMapCanvas.offsetParent !== null) {
+          this.drawCommandTacticalMap(cmdMapCanvas);
+        }
       }
     }
 
@@ -2962,15 +3110,19 @@ export const HudRenderer = {
         if (this._domCache) this._domCache.set('kill-streak-badge', el);
       }
       const inAircraft = Boolean(this.player.activeVehicle && this.player.activeVehicle.isAircraft);
-      el.style.bottom = inAircraft ? '252px' : '165px';
-      el.textContent = `🔥 STREAK: ${this.player.killStreak}`;
-      el.style.display = 'block';
+      const bottomStr = inAircraft ? '252px' : '165px';
+      if (el._lastBottom !== bottomStr) {
+        el._lastBottom = bottomStr;
+        el.style.bottom = bottomStr;
+      }
+      this._setText(el, `🔥 STREAK: ${this.player.killStreak}`);
+      this._setDisplay(el, 'block');
     } else if (el) {
-      el.style.display = 'none';
+      this._setDisplay(el, 'none');
     }
   },
 
-  // Forward Base Entrenched Defender Advantage Badge (shows active real-life & tactical shooter defensive buffs)
+  // Forward Base Entrenched Defender Advantage Badge (dirty-checked so innerHTML updates ONLY when state changes)
   updateForwardBaseDefenseBadge() {
     let el = this.el('fob-defense-badge');
     const sbOpen = this.scoreboardEl && !this.scoreboardEl.classList.contains('hidden');
@@ -2998,23 +3150,27 @@ export const HudRenderer = {
         document.body.appendChild(el);
         if (this._domCache) this._domCache.set('fob-defense-badge', el);
       }
+      const flagId = this.player.defendedFlagId || 'BASE';
       const stg = this.player.defendedFlagStage || 0;
-      const dmgRed = Math.min(42, 25 + stg * 4);
-      const holdMult = (1.35 + stg * 0.075).toFixed(2);
-      const garSq = this.player.defendedFlagGarrisonSquad
-        ? ` • GARRISON: ${this.player.defendedFlagGarrisonSquad}`
-        : '';
-      el.innerHTML = `
-        <div style="color:#2ecc71;font-size:12px;">🏰 OBJ ${this.player.defendedFlagId || 'BASE'} ENTRENCHED DEFENSE (STAGE ${stg}/4${garSq})</div>
-        <div style="color:#dfe6e9;font-size:10.5px;font-weight:800;">🛡️ -${dmgRed}% DMG TAKEN • 🎯 -30% RECOIL • ⚖️ ${holdMult}× HOLD • 🏥 +HP/ARMOR/AMMO</div>
-      `;
-      el.style.display = 'block';
+      const garSqVal = this.player.defendedFlagGarrisonSquad || '';
+      const sig = `${flagId}|${stg}|${garSqVal}`;
+      if (el._lastSig !== sig) {
+        el._lastSig = sig;
+        const dmgRed = Math.min(42, 25 + stg * 4);
+        const holdMult = (1.35 + stg * 0.075).toFixed(2);
+        const garSq = garSqVal ? ` • GARRISON: ${garSqVal}` : '';
+        el.innerHTML = `
+          <div style="color:#2ecc71;font-size:12px;">🏰 OBJ ${flagId} ENTRENCHED DEFENSE (STAGE ${stg}/4${garSq})</div>
+          <div style="color:#dfe6e9;font-size:10.5px;font-weight:800;">🛡️ -${dmgRed}% DMG TAKEN • 🎯 -30% RECOIL • ⚖️ ${holdMult}× HOLD • 🏥 +HP/ARMOR/AMMO</div>
+        `;
+      }
+      this._setDisplay(el, 'block');
     } else if (el) {
-      el.style.display = 'none';
+      this._setDisplay(el, 'none');
     }
   },
 
-  // War Crimes HUD Badge (shows enemy Medics eliminated by the player)
+  // War Crimes HUD Badge (dirty-checked so text/display update ONLY when count/state changes)
   updateWarCrimeBadge() {
     let el = this.el('war-crime-badge');
     const crimes = this.player.medicKills || 0;
@@ -3037,11 +3193,15 @@ export const HudRenderer = {
         if (this._domCache) this._domCache.set('war-crime-badge', el);
       }
       const inAircraft = Boolean(this.player.activeVehicle && this.player.activeVehicle.isAircraft);
-      el.style.bottom = inAircraft ? '275px' : '188px';
-      el.textContent = `⚠️ WAR CRIMES (MEDICS KILLED): ${crimes}`;
-      el.style.display = 'block';
+      const bottomStr = inAircraft ? '275px' : '188px';
+      if (el._lastBottom !== bottomStr) {
+        el._lastBottom = bottomStr;
+        el.style.bottom = bottomStr;
+      }
+      this._setText(el, `⚠️ WAR CRIMES (MEDICS KILLED): ${crimes}`);
+      this._setDisplay(el, 'block');
     } else if (el) {
-      el.style.display = 'none';
+      this._setDisplay(el, 'none');
     }
   },
 
@@ -3123,16 +3283,27 @@ export const HudRenderer = {
         document.body.appendChild(el);
         if (this._domCache) this._domCache.set('uav-hud', el);
       }
-      const infCount = (this.player.uavRevealedBots || []).filter((b) => !b.dead).length;
-      const vehCount = (this.player.uavRevealedVehicles || []).filter((v) => !v.dead).length;
+      let infCount = 0;
+      const revBots = this.player.uavRevealedBots || [];
+      for (let i = 0; i < revBots.length; i++) {
+        if (!revBots[i].dead) infCount++;
+      }
+      let vehCount = 0;
+      const revVehs = this.player.uavRevealedVehicles || [];
+      for (let i = 0; i < revVehs.length; i++) {
+        if (!revVehs[i].dead) vehCount++;
+      }
       const hotspot = this.player.uavHotspotFlag ? ` • HOTSPOT: OBJ ${this.player.uavHotspotFlag}` : '';
       const assists = this.player.uavAssists ? ` • ASSISTS: ${this.player.uavAssists}` : '';
-      el.textContent = `📡 MQ-9 UAV DATALINK ACTIVE — ${Math.ceil(
-        this.player.uavTimer
-      )}s • ${infCount} INF / ${vehCount} ARMOR PAINTED${hotspot}${assists}`;
-      el.style.display = 'block';
+      this._setText(
+        el,
+        `📡 MQ-9 UAV DATALINK ACTIVE — ${Math.ceil(
+          this.player.uavTimer
+        )}s • ${infCount} INF / ${vehCount} ARMOR PAINTED${hotspot}${assists}`
+      );
+      this._setDisplay(el, 'block');
     } else if (el) {
-      el.style.display = 'none';
+      this._setDisplay(el, 'none');
     }
   },
 
@@ -3164,10 +3335,10 @@ export const HudRenderer = {
           ? '🌧️ 155MM ARTILLERY BARRAGE'
           : '✈️ F-15E JDAM CARPET RUN';
       const secs = Math.max(0, this.player.airstrikeTarget.timer).toFixed(1);
-      el.textContent = `💥 ${patLabel} INBOUND — ${secs}s`;
-      el.style.display = 'block';
+      this._setText(el, `💥 ${patLabel} INBOUND — ${secs}s`);
+      this._setDisplay(el, 'block');
     } else if (el) {
-      el.style.display = 'none';
+      this._setDisplay(el, 'none');
     }
   },
 
@@ -3175,7 +3346,7 @@ export const HudRenderer = {
   updateFieldKitBar(nearCrate) {
     let el = this.el('field-kit-bar');
     if (!nearCrate || this.player.dead || this.player.downed || this.player.activeVehicle) {
-      if (el) el.style.display = 'none';
+      if (el) this._setDisplay(el, 'none');
       return;
     }
 
@@ -3250,18 +3421,142 @@ export const HudRenderer = {
         });
       });
     }
-    el.style.display = 'flex';
+    this._setDisplay(el, 'flex');
   },
 
-  // ─── ANIMATED HUD RELOAD & BULLET-PACKING CUTAWAY VISUALIZER ────────
+  // ─── ANIMATED HUD RELOAD & BULLET-PACKING CUTAWAY VISUALIZER (CACHED SVG DOM) ────────
+  _ensureReloadSvgStructure(el, mode) {
+    if (el._reloadMode === mode && el._refs) {
+      return el._refs;
+    }
+    el._reloadMode = mode;
+
+    if (mode === 'mag_swap') {
+      el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span data-ref="title" style="font-size:11.5px;font-weight:900;color:#f1c40f;letter-spacing:0.6px;">
+            🔄 FAST MAG-SWAP RELOAD [R]
+          </span>
+          <span data-ref="pct" style="font-size:10.5px;font-weight:900;color:#7bed9f;">0%</span>
+        </div>
+        <svg viewBox="0 0 280 76" style="width:100%;height:72px;display:block;background:rgba(6,10,16,0.75);border-radius:4px;border:1px solid rgba(255,255,255,0.08);">
+          <!-- Receiver & Barrel Cutaway Silhouette -->
+          <rect x="65" y="14" width="125" height="18" rx="2" fill="#2c3e50" stroke="#74b9ff" stroke-width="1.2"/>
+          <rect x="190" y="19" width="62" height="7" rx="1" fill="#34495e" stroke="#74b9ff" stroke-width="1"/>
+          <rect x="34" y="16" width="31" height="14" rx="2" fill="#1e272e" stroke="#576574" stroke-width="1"/>
+          <!-- Magwell Housing -->
+          <path d="M118 32 L144 32 L141 44 L116 44 Z" fill="#1e272e" stroke="#74b9ff" stroke-width="1"/>
+
+          <!-- Animated Bolt Carrier & Chambering Brass Round -->
+          <g data-ref="boltGroup" transform="translate(0, 0)">
+            <rect data-ref="boltRect" x="108" y="16" width="34" height="8" rx="1.5" fill="#95a5a6" stroke="#111" stroke-width="1"/>
+            <line x1="108" y1="12" x2="116" y2="16" stroke="#f1c40f" stroke-width="2"/>
+          </g>
+          <g data-ref="chamberGroup" transform="translate(-14, 0)" style="display:none;">
+            <rect x="132" y="20" width="11" height="4" rx="1" fill="#f1c40f"/>
+            <polygon points="143,20 149,22 143,24" fill="#e67e22"/>
+          </g>
+
+          <!-- Stage 1: Ejecting Old Magazine (Slides Down & Out) -->
+          <g data-ref="oldMagGroup" transform="translate(88, 28) rotate(0)" opacity="1">
+            <rect x="0" y="0" width="16" height="28" rx="2" fill="#3d3d3d" stroke="#e74c3c" stroke-width="1.2"/>
+            <text x="2" y="18" fill="#ff7675" font-size="7.5" font-weight="900">OLD</text>
+          </g>
+
+          <!-- Stage 2: Fresh Brass-Topped Magazine Rising into Magwell -->
+          <g data-ref="newMagGroup" transform="translate(121, 62)">
+            <rect x="0" y="0" width="18" height="30" rx="2" fill="#22313f" stroke="#2ecc71" stroke-width="1.5"/>
+            <rect x="3" y="2" width="12" height="3.5" rx="1" fill="#f1c40f"/>
+            <rect x="3" y="7" width="12" height="3.5" rx="1" fill="#f1c40f"/>
+            <rect x="3" y="12" width="12" height="3.5" rx="1" fill="#f1c40f"/>
+            <rect x="3" y="17" width="12" height="3.5" rx="1" fill="#f1c40f"/>
+          </g>
+
+          <!-- Stage Callout Text & Progress Stroke -->
+          <text data-ref="stageText" x="10" y="67" fill="#f1c40f" font-size="9.5" font-weight="900" font-family="Rajdhani, sans-serif">1. UNLATCH &amp; EJECT MAGAZINE</text>
+          <line x1="10" y1="73" x2="270" y2="73" stroke="rgba(255,255,255,0.12)" stroke-width="2" stroke-linecap="round"/>
+          <line data-ref="progStroke" x1="10" y1="73" x2="270" y2="73" stroke="#2ecc71" stroke-width="2" stroke-linecap="round" stroke-dasharray="260" stroke-dashoffset="260"/>
+        </svg>
+      `;
+      el._refs = {
+        titleEl: el.querySelector('[data-ref="title"]'),
+        pctEl: el.querySelector('[data-ref="pct"]'),
+        boltGroup: el.querySelector('[data-ref="boltGroup"]'),
+        boltRect: el.querySelector('[data-ref="boltRect"]'),
+        chamberGroup: el.querySelector('[data-ref="chamberGroup"]'),
+        oldMagGroup: el.querySelector('[data-ref="oldMagGroup"]'),
+        newMagGroup: el.querySelector('[data-ref="newMagGroup"]'),
+        stageText: el.querySelector('[data-ref="stageText"]'),
+        progStroke: el.querySelector('[data-ref="progStroke"]')
+      };
+    } else {
+      let stackSlotsHtml = '';
+      for (let i = 0; i < 6; i++) {
+        stackSlotsHtml += `
+          <g data-stack="${i}" transform="translate(202, ${56 - i * 6})">
+            <rect x="0" y="0" width="22" height="4.5" rx="1.5" fill="#f1c40f" stroke="#b7950b" stroke-width="0.6"/>
+            <polygon points="22,0 28,2.25 22,4.5" fill="#e67e22"/>
+          </g>
+        `;
+      }
+      el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+          <span style="font-size:11.5px;font-weight:900;color:#7bed9f;letter-spacing:0.6px;">
+            🎒 TARKOV SLOW RELOAD — PRESSING BULLETS [P]
+          </span>
+          <span data-ref="packed" style="font-size:10.5px;font-weight:900;color:#f1c40f;">+0 RDS PACKED</span>
+        </div>
+        <svg viewBox="0 0 280 76" style="width:100%;height:72px;display:block;background:rgba(6,10,16,0.75);border-radius:4px;border:1px solid rgba(255,255,255,0.08);">
+          <!-- Cutaway Magazine Body -->
+          <rect x="196" y="22" width="38" height="48" rx="3" fill="#18222c" stroke="#2ecc71" stroke-width="1.6"/>
+          <!-- Magazine Follower Spring at Bottom -->
+          <polyline points="202,67 228,64 202,61 228,58" fill="none" stroke="#95a5a6" stroke-width="1.4"/>
+
+          <!-- Pre-allocated Stacked Brass Cartridges Inside Magazine -->
+          ${stackSlotsHtml}
+
+          <!-- Animated Thumb + Loose Brass Cartridge Pressing Down into Feed Lips -->
+          <g data-ref="thumbGroup" transform="translate(200, 4)">
+            <rect x="-14" y="-6" width="24" height="9" rx="4" fill="#2ecc71" opacity="0.85"/>
+            <rect x="2" y="4" width="22" height="5" rx="1.5" fill="#ffeaa7" stroke="#f1c40f" stroke-width="1"/>
+            <polygon points="24,4 31,6.5 24,9" fill="#e67e22"/>
+          </g>
+
+          <!-- Live Telemetry Callouts & Pack Progress Stroke -->
+          <text data-ref="fillText" x="12" y="30" fill="#7bed9f" font-size="10.5" font-weight="900" font-family="Rajdhani, sans-serif">MAG FILL: 0 / 30 RDS</text>
+          <text data-ref="looseText" x="12" y="47" fill="#f1c40f" font-size="10" font-weight="900" font-family="Rajdhani, sans-serif">🎒 LOOSE POOL: 0 RDS</text>
+          <text x="12" y="64" fill="#95a5a6" font-size="8.5" font-weight="800" font-family="Rajdhani, sans-serif">[LMB] FIRE NOW • [R] FAST SWAP</text>
+          <line x1="12" y1="72" x2="184" y2="72" stroke="rgba(255,255,255,0.12)" stroke-width="2" stroke-linecap="round"/>
+          <line data-ref="packStroke" x1="12" y1="72" x2="184" y2="72" stroke="#2ecc71" stroke-width="2" stroke-linecap="round" stroke-dasharray="172" stroke-dashoffset="172"/>
+        </svg>
+      `;
+      const stackGroups = [];
+      for (let i = 0; i < 6; i++) {
+        stackGroups.push(el.querySelector(`[data-stack="${i}"]`));
+      }
+      el._refs = {
+        packedEl: el.querySelector('[data-ref="packed"]'),
+        stackGroups,
+        thumbGroup: el.querySelector('[data-ref="thumbGroup"]'),
+        fillText: el.querySelector('[data-ref="fillText"]'),
+        looseText: el.querySelector('[data-ref="looseText"]'),
+        packStroke: el.querySelector('[data-ref="packStroke"]')
+      };
+    }
+    return el._refs;
+  },
+
   updateReloadAnimationHud(cur) {
     let el = this.el('reload-anim-hud');
     const isReloading = Boolean(
-      cur && !this.player.dead && !this.player.downed && !this.player.activeVehicle &&
-      (this.player.reloading || this.player.slowReloading)
+      cur &&
+        !this.player.dead &&
+        !this.player.downed &&
+        !this.player.activeVehicle &&
+        (this.player.reloading || this.player.slowReloading)
     );
     if (!isReloading) {
-      if (el) el.style.display = 'none';
+      if (el) this._setDisplay(el, 'none');
       return;
     }
 
@@ -3279,9 +3574,10 @@ export const HudRenderer = {
       document.body.appendChild(el);
       if (this._domCache) this._domCache.set('reload-anim-hud', el);
     }
-    el.style.display = 'block';
+    this._setDisplay(el, 'block');
 
     if (this.player.reloading) {
+      const refs = this._ensureReloadSvgStructure(el, 'mag_swap');
       const totalTime =
         (this.player.reloadTotalTime || cur.def.reloadTime) * (this.player.fastReload ? 0.62 : 1.0);
       const pct = Math.max(0, Math.min(1, 1 - this.player.reloadTimer / Math.max(0.2, totalTime)));
@@ -3290,13 +3586,12 @@ export const HudRenderer = {
       const s2 = stage === 2 ? (pct - 0.36) / 0.38 : stage > 2 ? 1 : 0;
       const s3 = stage === 3 ? (pct - 0.74) / 0.26 : 0;
 
-      // Old mag drops out in stage 1; Fresh mag rises in stage 2; Bolt racks in stage 3
       const oldMagY = Math.round(28 + s1 * 32);
+      const oldMagRot = Math.round(s1 * 16);
       const oldMagOp = stage === 1 ? (1 - s1 * 0.65).toFixed(2) : '0.15';
       const newMagY = stage === 1 ? 62 : Math.round(62 - s2 * 34);
       const boltX = stage === 3 ? Math.round(Math.sin(s3 * Math.PI) * 18) : 0;
       const chamberRoundX = stage === 3 ? Math.round((1 - s3) * 14) : 14;
-
       const stageTitle =
         stage === 1
           ? '1. UNLATCH & EJECT MAGAZINE'
@@ -3304,57 +3599,62 @@ export const HudRenderer = {
           ? '2. INSERT FRESH MAG FROM RIG'
           : '3. RELEASE BOLT & CHAMBER ROUND';
 
-      el.style.borderColor = this.player.fastReload ? '#e67e22' : '#f1c40f';
-      el.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-          <span style="font-size:11.5px;font-weight:900;color:${this.player.fastReload ? '#ff9f43' : '#f1c40f'};letter-spacing:0.6px;">
-            ${this.player.fastReload ? '⚡ EMERGENCY DROP RELOAD' : '🔄 FAST MAG-SWAP RELOAD [R]'}
-          </span>
-          <span style="font-size:10.5px;font-weight:900;color:#7bed9f;">${Math.round(pct * 100)}%</span>
-        </div>
-        <svg viewBox="0 0 280 76" style="width:100%;height:72px;display:block;background:rgba(6,10,16,0.75);border-radius:4px;border:1px solid rgba(255,255,255,0.08);">
-          <!-- Receiver & Barrel Cutaway Silhouette -->
-          <rect x="65" y="14" width="125" height="18" rx="2" fill="#2c3e50" stroke="#74b9ff" stroke-width="1.2"/>
-          <rect x="190" y="19" width="62" height="7" rx="1" fill="#34495e" stroke="#74b9ff" stroke-width="1"/>
-          <rect x="34" y="16" width="31" height="14" rx="2" fill="#1e272e" stroke="#576574" stroke-width="1"/>
-          <!-- Magwell Housing -->
-          <path d="M118 32 L144 32 L141 44 L116 44 Z" fill="#1e272e" stroke="#74b9ff" stroke-width="1"/>
+      const borderCol = this.player.fastReload ? '#e67e22' : '#f1c40f';
+      if (el._lastBorderCol !== borderCol) {
+        el._lastBorderCol = borderCol;
+        el.style.borderColor = borderCol;
+      }
+      const titleCol = this.player.fastReload ? '#ff9f43' : '#f1c40f';
+      if (refs.titleEl && refs.titleEl._lastCol !== titleCol) {
+        refs.titleEl._lastCol = titleCol;
+        refs.titleEl.style.color = titleCol;
+      }
+      this._setText(
+        refs.titleEl,
+        this.player.fastReload ? '⚡ EMERGENCY DROP RELOAD' : '🔄 FAST MAG-SWAP RELOAD [R]'
+      );
+      this._setText(refs.pctEl, `${Math.round(pct * 100)}%`);
+      this._setText(refs.stageText, stageTitle);
 
-          <!-- Animated Bolt Carrier & Chambering Brass Round -->
-          <g transform="translate(${-boltX}, 0)">
-            <rect x="108" y="16" width="34" height="8" rx="1.5" fill="${stage === 3 ? '#2ecc71' : '#95a5a6'}" stroke="#111" stroke-width="1"/>
-            <line x1="108" y1="12" x2="116" y2="16" stroke="#f1c40f" stroke-width="2"/>
-          </g>
-          ${
-            stage >= 2
-              ? `<g transform="translate(${-chamberRoundX}, 0)">
-                  <rect x="132" y="20" width="11" height="4" rx="1" fill="#f1c40f"/>
-                  <polygon points="143,20 149,22 143,24" fill="#e67e22"/>
-                </g>`
-              : ''
-          }
-
-          <!-- Stage 1: Ejecting Old Magazine (Slides Down & Out) -->
-          <g transform="translate(88, ${oldMagY}) rotate(${Math.round(s1 * 16)})" opacity="${oldMagOp}">
-            <rect x="0" y="0" width="16" height="28" rx="2" fill="#3d3d3d" stroke="#e74c3c" stroke-width="1.2"/>
-            <text x="2" y="18" fill="#ff7675" font-size="7.5" font-weight="900">OLD</text>
-          </g>
-
-          <!-- Stage 2: Fresh Brass-Topped Magazine Rising into Magwell -->
-          <g transform="translate(121, ${newMagY})">
-            <rect x="0" y="0" width="18" height="30" rx="2" fill="#22313f" stroke="#2ecc71" stroke-width="1.5"/>
-            <!-- Stacked Brass Cartridges in Fresh Mag -->
-            <rect x="3" y="2" width="12" height="3.5" rx="1" fill="#f1c40f"/>
-            <rect x="3" y="7" width="12" height="3.5" rx="1" fill="#f1c40f"/>
-            <rect x="3" y="12" width="12" height="3.5" rx="1" fill="#f1c40f"/>
-            <rect x="3" y="17" width="12" height="3.5" rx="1" fill="#f1c40f"/>
-          </g>
-
-          <!-- Stage Callout Text -->
-          <text x="10" y="69" fill="#f1c40f" font-size="9.5" font-weight="900" font-family="Rajdhani, sans-serif">${stageTitle}</text>
-        </svg>
-      `;
+      const boltTr = `translate(${-boltX}, 0)`;
+      if (refs.boltGroup._lastTr !== boltTr) {
+        refs.boltGroup._lastTr = boltTr;
+        refs.boltGroup.setAttribute('transform', boltTr);
+      }
+      const boltFill = stage === 3 ? '#2ecc71' : '#95a5a6';
+      if (refs.boltRect._lastFill !== boltFill) {
+        refs.boltRect._lastFill = boltFill;
+        refs.boltRect.setAttribute('fill', boltFill);
+      }
+      this._setDisplay(refs.chamberGroup, stage >= 2 ? '' : 'none');
+      if (stage >= 2) {
+        const chTr = `translate(${-chamberRoundX}, 0)`;
+        if (refs.chamberGroup._lastTr !== chTr) {
+          refs.chamberGroup._lastTr = chTr;
+          refs.chamberGroup.setAttribute('transform', chTr);
+        }
+      }
+      const oldTr = `translate(88, ${oldMagY}) rotate(${oldMagRot})`;
+      if (refs.oldMagGroup._lastTr !== oldTr) {
+        refs.oldMagGroup._lastTr = oldTr;
+        refs.oldMagGroup.setAttribute('transform', oldTr);
+      }
+      if (refs.oldMagGroup._lastOp !== oldMagOp) {
+        refs.oldMagGroup._lastOp = oldMagOp;
+        refs.oldMagGroup.setAttribute('opacity', oldMagOp);
+      }
+      const newTr = `translate(121, ${newMagY})`;
+      if (refs.newMagGroup._lastTr !== newTr) {
+        refs.newMagGroup._lastTr = newTr;
+        refs.newMagGroup.setAttribute('transform', newTr);
+      }
+      const dashOff = String(Math.round(260 * (1 - pct)));
+      if (refs.progStroke._lastOff !== dashOff) {
+        refs.progStroke._lastOff = dashOff;
+        refs.progStroke.setAttribute('stroke-dashoffset', dashOff);
+      }
     } else if (this.player.slowReloading) {
+      const refs = this._ensureReloadSvgStructure(el, 'slow_pack');
       const bp = Math.max(0, Math.min(1, this.player.magPackProgress || 0));
       const pressY = Math.round(bp * 16);
       const bestRigMag = cur.mags && cur.mags.length > 0 ? cur.mags[0] : 0;
@@ -3362,50 +3662,42 @@ export const HudRenderer = {
       const targetMax = cur.def.clipSize || 30;
       const fillRatio = Math.max(0, Math.min(1, targetRounds / targetMax));
       const visibleStackCount = Math.max(1, Math.min(6, Math.ceil(fillRatio * 6)));
+      const stackShift = Math.round(bp * 3);
 
-      let stackSvg = '';
-      for (let i = 0; i < visibleStackCount; i++) {
-        const ry = 56 - i * 6 + Math.round(bp * 3);
-        stackSvg += `
-          <g transform="translate(202, ${ry})">
-            <rect x="0" y="0" width="22" height="4.5" rx="1.5" fill="#f1c40f" stroke="#b7950b" stroke-width="0.6"/>
-            <polygon points="22,0 28,2.25 22,4.5" fill="#e67e22"/>
-          </g>
-        `;
+      if (el._lastBorderCol !== '#2ecc71') {
+        el._lastBorderCol = '#2ecc71';
+        el.style.borderColor = '#2ecc71';
+      }
+      this._setText(refs.packedEl, `+${this.player.slowReloadRoundsPacked || 0} RDS PACKED`);
+      this._setText(refs.fillText, `MAG FILL: ${targetRounds} / ${targetMax} RDS`);
+      this._setText(refs.looseText, `🎒 LOOSE POOL: ${cur.looseAmmo || 0} RDS`);
+
+      for (let i = 0; i < 6; i++) {
+        const sg = refs.stackGroups[i];
+        if (!sg) continue;
+        if (i < visibleStackCount) {
+          this._setDisplay(sg, '');
+          const ry = 56 - i * 6 + stackShift;
+          const sTr = `translate(202, ${ry})`;
+          if (sg._lastTr !== sTr) {
+            sg._lastTr = sTr;
+            sg.setAttribute('transform', sTr);
+          }
+        } else {
+          this._setDisplay(sg, 'none');
+        }
       }
 
-      el.style.borderColor = '#2ecc71';
-      el.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-          <span style="font-size:11.5px;font-weight:900;color:#7bed9f;letter-spacing:0.6px;">
-            🎒 TARKOV SLOW RELOAD — PRESSING BULLETS [P]
-          </span>
-          <span style="font-size:10.5px;font-weight:900;color:#f1c40f;">+${this.player.slowReloadRoundsPacked || 0} RDS PACKED</span>
-        </div>
-        <svg viewBox="0 0 280 76" style="width:100%;height:72px;display:block;background:rgba(6,10,16,0.75);border-radius:4px;border:1px solid rgba(255,255,255,0.08);">
-          <!-- Cutaway Magazine Body -->
-          <rect x="196" y="22" width="38" height="48" rx="3" fill="#18222c" stroke="#2ecc71" stroke-width="1.6"/>
-          <!-- Magazine Follower Spring at Bottom -->
-          <polyline points="202,67 228,64 202,61 228,58" fill="none" stroke="#95a5a6" stroke-width="1.4"/>
-
-          <!-- Stacked Brass Cartridges Inside Magazine -->
-          ${stackSvg}
-
-          <!-- Animated Thumb + Loose Brass Cartridge Pressing Down into Feed Lips -->
-          <g transform="translate(200, ${4 + pressY})">
-            <!-- Gloved Thumb Pressing Down -->
-            <rect x="-14" y="-6" width="24" height="9" rx="4" fill="#2ecc71" opacity="0.85"/>
-            <!-- Gleaming Brass Cartridge Being Pressed In -->
-            <rect x="2" y="4" width="22" height="5" rx="1.5" fill="#ffeaa7" stroke="#f1c40f" stroke-width="1"/>
-            <polygon points="24,4 31,6.5 24,9" fill="#e67e22"/>
-          </g>
-
-          <!-- Live Telemetry Callouts -->
-          <text x="12" y="30" fill="#7bed9f" font-size="10.5" font-weight="900" font-family="Rajdhani, sans-serif">MAG FILL: ${targetRounds} / ${targetMax} RDS</text>
-          <text x="12" y="47" fill="#f1c40f" font-size="10" font-weight="900" font-family="Rajdhani, sans-serif">🎒 LOOSE POOL: ${cur.looseAmmo || 0} RDS</text>
-          <text x="12" y="64" fill="#95a5a6" font-size="8.5" font-weight="800" font-family="Rajdhani, sans-serif">[LMB] FIRE NOW • [R] FAST SWAP</text>
-        </svg>
-      `;
+      const thumbTr = `translate(200, ${4 + pressY})`;
+      if (refs.thumbGroup._lastTr !== thumbTr) {
+        refs.thumbGroup._lastTr = thumbTr;
+        refs.thumbGroup.setAttribute('transform', thumbTr);
+      }
+      const packOff = String(Math.round(172 * (1 - fillRatio)));
+      if (refs.packStroke._lastOff !== packOff) {
+        refs.packStroke._lastOff = packOff;
+        refs.packStroke.setAttribute('stroke-dashoffset', packOff);
+      }
     }
   },
 

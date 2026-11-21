@@ -1,4 +1,35 @@
-import { events } from '../events.js?v=90';
+import { events } from '../events.js?v=91';
+
+const EMPTY_PAYLOAD = Object.freeze({});
+const NO_RESTORE_LOCK_PAYLOAD = Object.freeze({ restorePointerLock: false });
+
+/**
+ * Pre-computes `_allowedSet` per state once at module initialization so creating
+ * hundreds of bot/vehicle FSM instances shares immutable transition Sets with zero allocations.
+ */
+function compileStateGraph(states) {
+  if (!states || states._compiled) return states;
+  for (const stateKey of Object.keys(states)) {
+    const def = states[stateKey];
+    if (def && !def._allowedSet && (def.on || def.transitions)) {
+      const set = new Set();
+      if (Array.isArray(def.transitions)) {
+        for (let i = 0; i < def.transitions.length; i++) {
+          set.add(def.transitions[i]);
+        }
+      }
+      if (def.on) {
+        const vals = Object.values(def.on);
+        for (let i = 0; i < vals.length; i++) {
+          set.add(vals[i]);
+        }
+      }
+      Object.defineProperty(def, '_allowedSet', { value: set, enumerable: false });
+    }
+  }
+  Object.defineProperty(states, '_compiled', { value: true, enumerable: false });
+  return states;
+}
 
 /**
  * Lightweight, zero-allocation-friendly Finite State Machine (FSM) designed to elevate:
@@ -26,28 +57,12 @@ export class FiniteStateMachine {
     this.lastTransitionAt = typeof performance !== 'undefined' ? performance.now() : 0;
     this.transitionCount = 0;
 
-    // Pre-compute allowed transition Sets per state so `can(nextState)` does zero per-frame allocations
-    for (const stateKey of Object.keys(this.states)) {
-      const def = this.states[stateKey];
-      if (def && (def.on || def.transitions)) {
-        const set = new Set();
-        if (Array.isArray(def.transitions)) {
-          for (let i = 0; i < def.transitions.length; i++) {
-            set.add(def.transitions[i]);
-          }
-        }
-        if (def.on) {
-          const vals = Object.values(def.on);
-          for (let i = 0; i < vals.length; i++) {
-            set.add(vals[i]);
-          }
-        }
-        def._allowedSet = set;
-      }
+    if (!this.states._compiled) {
+      compileStateGraph(this.states);
     }
   }
 
-  _recordRejection(fromState, attemptedState, reason, payload = {}) {
+  _recordRejection(fromState, attemptedState, reason, payload = EMPTY_PAYLOAD) {
     this.rejectedCount++;
     const entry = {
       from: fromState,
@@ -70,7 +85,10 @@ export class FiniteStateMachine {
    */
   is(stateName) {
     if (Array.isArray(stateName)) {
-      return stateName.includes(this.state);
+      for (let i = 0; i < stateName.length; i++) {
+        if (stateName[i] === this.state) return true;
+      }
+      return false;
     }
     return this.state === stateName;
   }
@@ -97,7 +115,7 @@ export class FiniteStateMachine {
    * Transitions to `nextState` if valid (or if `force === true`), executing `onExit` and `onEnter` hooks
    * to enforce state invariants.
    */
-  transition(nextState, payload = {}, force = false) {
+  transition(nextState, payload = EMPTY_PAYLOAD, force = false) {
     if (!this.states[nextState]) {
       this._recordRejection(this.state, nextState, 'UNKNOWN_STATE', payload);
       return false;
@@ -191,31 +209,33 @@ export const MATCH_STATES = {
   ROUND_VICTORY: 'ROUND_VICTORY'
 };
 
+const MATCH_GRAPH = compileStateGraph({
+  [MATCH_STATES.DEPLOY_LOBBY]: {
+    transitions: [MATCH_STATES.ACTIVE_COMBAT, MATCH_STATES.ROUND_VICTORY],
+    onEnter(g) {
+      if (g) g.matchEnded = false;
+    }
+  },
+  [MATCH_STATES.ACTIVE_COMBAT]: {
+    transitions: [MATCH_STATES.DEPLOY_LOBBY, MATCH_STATES.ROUND_VICTORY],
+    onEnter(g) {
+      if (g) g.matchEnded = false;
+    }
+  },
+  [MATCH_STATES.ROUND_VICTORY]: {
+    transitions: [MATCH_STATES.DEPLOY_LOBBY],
+    onEnter(g) {
+      if (g) g.matchEnded = true;
+    }
+  }
+});
+
 export function createMatchFSM(game) {
   return new FiniteStateMachine({
     id: 'match',
     context: game,
     initial: MATCH_STATES.DEPLOY_LOBBY,
-    states: {
-      [MATCH_STATES.DEPLOY_LOBBY]: {
-        transitions: [MATCH_STATES.ACTIVE_COMBAT, MATCH_STATES.ROUND_VICTORY],
-        onEnter(g) {
-          if (g) g.matchEnded = false;
-        }
-      },
-      [MATCH_STATES.ACTIVE_COMBAT]: {
-        transitions: [MATCH_STATES.DEPLOY_LOBBY, MATCH_STATES.ROUND_VICTORY],
-        onEnter(g) {
-          if (g) g.matchEnded = false;
-        }
-      },
-      [MATCH_STATES.ROUND_VICTORY]: {
-        transitions: [MATCH_STATES.DEPLOY_LOBBY],
-        onEnter(g) {
-          if (g) g.matchEnded = true;
-        }
-      }
-    }
+    states: MATCH_GRAPH
   });
 }
 
@@ -241,82 +261,84 @@ const POPOUT_MODAL_DOM_IDS = {
   [UI_MODAL_STATES.MODAL_SETTINGS]: 'settings-modal'
 };
 
+const UI_MODAL_GRAPH = compileStateGraph({
+  [UI_MODAL_STATES.DEPLOY_SCREEN]: {
+    transitions: ['*'],
+    onEnter(u) {
+      if (u?.player) {
+        u.player.isFiring = false;
+        u.player.isAds = false;
+      }
+    }
+  },
+  [UI_MODAL_STATES.HUD_LOCKED]: {
+    transitions: ['*'],
+    onEnter(u, fromState, payload) {
+      if (u?.player) {
+        u.player.isFiring = false;
+        // Suppress accidental left-click weapon discharge for 180ms when closing any modal
+        if (fromState && fromState !== UI_MODAL_STATES.HUD_LOCKED && fromState !== UI_MODAL_STATES.COMMO_ROSE) {
+          u.player._suppressFireUntil =
+            (typeof performance !== 'undefined' ? performance.now() : 0) + 180;
+        }
+        if (payload.restorePointerLock !== false && !u.player.dead && typeof document !== 'undefined') {
+          try {
+            if (typeof window !== 'undefined') window.focus();
+            if (document.pointerLockElement !== document.body) {
+              const p = document.body.requestPointerLock();
+              if (p && typeof p.catch === 'function') p.catch(() => {});
+            }
+          } catch (_) {}
+        }
+      }
+    }
+  },
+  [UI_MODAL_STATES.COMMO_ROSE]: {
+    transitions: ['*']
+  },
+  [UI_MODAL_STATES.MODAL_GUNSMITH_LOOT]: {
+    transitions: ['*'],
+    onEnter(u) {
+      hideOtherPopoutModals(UI_MODAL_STATES.MODAL_GUNSMITH_LOOT);
+      disarmPlayerCombatOnModalOpen(u);
+    }
+  },
+  [UI_MODAL_STATES.MODAL_COMMAND_MAP]: {
+    transitions: ['*'],
+    onEnter(u) {
+      hideOtherPopoutModals(UI_MODAL_STATES.MODAL_COMMAND_MAP);
+      disarmPlayerCombatOnModalOpen(u);
+    }
+  },
+  [UI_MODAL_STATES.MODAL_MULTIPLAYER]: {
+    transitions: ['*'],
+    onEnter(u) {
+      hideOtherPopoutModals(UI_MODAL_STATES.MODAL_MULTIPLAYER);
+      disarmPlayerCombatOnModalOpen(u);
+    }
+  },
+  [UI_MODAL_STATES.MODAL_SETTINGS]: {
+    transitions: ['*'],
+    onEnter(u) {
+      hideOtherPopoutModals(UI_MODAL_STATES.MODAL_SETTINGS);
+      disarmPlayerCombatOnModalOpen(u);
+    }
+  },
+  [UI_MODAL_STATES.VICTORY_SCREEN]: {
+    transitions: ['*'],
+    onEnter(u) {
+      hideOtherPopoutModals(null);
+      disarmPlayerCombatOnModalOpen(u);
+    }
+  }
+});
+
 export function createUIModalFSM(ui) {
   return new FiniteStateMachine({
     id: 'uiModal',
     context: ui,
     initial: UI_MODAL_STATES.DEPLOY_SCREEN,
-    states: {
-      [UI_MODAL_STATES.DEPLOY_SCREEN]: {
-        transitions: ['*'],
-        onEnter(u) {
-          if (u?.player) {
-            u.player.isFiring = false;
-            u.player.isAds = false;
-          }
-        }
-      },
-      [UI_MODAL_STATES.HUD_LOCKED]: {
-        transitions: ['*'],
-        onEnter(u, fromState, payload) {
-          if (u?.player) {
-            u.player.isFiring = false;
-            // Suppress accidental left-click weapon discharge for 180ms when closing any modal
-            if (fromState && fromState !== UI_MODAL_STATES.HUD_LOCKED && fromState !== UI_MODAL_STATES.COMMO_ROSE) {
-              u.player._suppressFireUntil =
-                (typeof performance !== 'undefined' ? performance.now() : 0) + 180;
-            }
-            if (payload.restorePointerLock !== false && !u.player.dead && typeof document !== 'undefined') {
-              try {
-                if (typeof window !== 'undefined') window.focus();
-                if (document.pointerLockElement !== document.body) {
-                  const p = document.body.requestPointerLock();
-                  if (p && typeof p.catch === 'function') p.catch(() => {});
-                }
-              } catch (_) {}
-            }
-          }
-        }
-      },
-      [UI_MODAL_STATES.COMMO_ROSE]: {
-        transitions: ['*']
-      },
-      [UI_MODAL_STATES.MODAL_GUNSMITH_LOOT]: {
-        transitions: ['*'],
-        onEnter(u) {
-          hideOtherPopoutModals(UI_MODAL_STATES.MODAL_GUNSMITH_LOOT);
-          disarmPlayerCombatOnModalOpen(u);
-        }
-      },
-      [UI_MODAL_STATES.MODAL_COMMAND_MAP]: {
-        transitions: ['*'],
-        onEnter(u) {
-          hideOtherPopoutModals(UI_MODAL_STATES.MODAL_COMMAND_MAP);
-          disarmPlayerCombatOnModalOpen(u);
-        }
-      },
-      [UI_MODAL_STATES.MODAL_MULTIPLAYER]: {
-        transitions: ['*'],
-        onEnter(u) {
-          hideOtherPopoutModals(UI_MODAL_STATES.MODAL_MULTIPLAYER);
-          disarmPlayerCombatOnModalOpen(u);
-        }
-      },
-      [UI_MODAL_STATES.MODAL_SETTINGS]: {
-        transitions: ['*'],
-        onEnter(u) {
-          hideOtherPopoutModals(UI_MODAL_STATES.MODAL_SETTINGS);
-          disarmPlayerCombatOnModalOpen(u);
-        }
-      },
-      [UI_MODAL_STATES.VICTORY_SCREEN]: {
-        transitions: ['*'],
-        onEnter(u) {
-          hideOtherPopoutModals(null);
-          disarmPlayerCombatOnModalOpen(u);
-        }
-      }
-    }
+    states: UI_MODAL_GRAPH
   });
 }
 
@@ -377,86 +399,88 @@ export const PLAYER_VITALITY_STATES = {
   DEAD_AWAITING_RESPAWN: 'DEAD_AWAITING_RESPAWN'
 };
 
+const PLAYER_VITALITY_GRAPH = compileStateGraph({
+  [PLAYER_VITALITY_STATES.UNDEPLOYED]: {
+    transitions: [PLAYER_VITALITY_STATES.ALIVE, PLAYER_VITALITY_STATES.IN_VEHICLE]
+  },
+  [PLAYER_VITALITY_STATES.ALIVE]: {
+    transitions: [
+      PLAYER_VITALITY_STATES.IN_VEHICLE,
+      PLAYER_VITALITY_STATES.DOWNED_BLEEDING_OUT,
+      PLAYER_VITALITY_STATES.DEAD_AWAITING_RESPAWN,
+      PLAYER_VITALITY_STATES.UNDEPLOYED
+    ],
+    onEnter(p) {
+      if (!p) return;
+      p.dead = false;
+      p.downed = false;
+    }
+  },
+  [PLAYER_VITALITY_STATES.IN_VEHICLE]: {
+    transitions: [
+      PLAYER_VITALITY_STATES.ALIVE,
+      PLAYER_VITALITY_STATES.DOWNED_BLEEDING_OUT,
+      PLAYER_VITALITY_STATES.DEAD_AWAITING_RESPAWN,
+      PLAYER_VITALITY_STATES.UNDEPLOYED
+    ],
+    onEnter(p) {
+      if (!p) return;
+      p.dead = false;
+      p.downed = false;
+      p.crouching = false;
+      p.prone = false;
+      p.reloading = false;
+      p.slowReloading = false;
+      p.draggedBot = null;
+      p.isDraggingAlly = false;
+    }
+  },
+  [PLAYER_VITALITY_STATES.DOWNED_BLEEDING_OUT]: {
+    // Cannot transition from DOWNED_BLEEDING_OUT directly into IN_VEHICLE!
+    transitions: [
+      PLAYER_VITALITY_STATES.ALIVE,
+      PLAYER_VITALITY_STATES.DEAD_AWAITING_RESPAWN,
+      PLAYER_VITALITY_STATES.UNDEPLOYED
+    ],
+    onEnter(p) {
+      if (!p) return;
+      p.dead = false;
+      p.downed = true;
+      p.isFiring = false;
+      p.isAds = false;
+      p.reloading = false;
+      p.fastReload = false;
+      p.slowReloading = false;
+      p.magPackProgress = 0;
+      p.bandageProgress = 0;
+      p.reviveProgress = 0;
+      p.draggedBot = null;
+      p.isDraggingAlly = false;
+    }
+  },
+  [PLAYER_VITALITY_STATES.DEAD_AWAITING_RESPAWN]: {
+    // Cannot transition from DEAD_AWAITING_RESPAWN directly into IN_VEHICLE or DOWNED_BLEEDING_OUT!
+    transitions: [PLAYER_VITALITY_STATES.UNDEPLOYED, PLAYER_VITALITY_STATES.ALIVE],
+    onEnter(p) {
+      if (!p) return;
+      p.dead = true;
+      p.downed = false;
+      p.isFiring = false;
+      p.isAds = false;
+      p.reloading = false;
+      p.slowReloading = false;
+      p.draggedBot = null;
+      p.isDraggingAlly = false;
+    }
+  }
+});
+
 export function createPlayerVitalityFSM(player) {
   return new FiniteStateMachine({
     id: 'playerVitality',
     context: player,
     initial: PLAYER_VITALITY_STATES.UNDEPLOYED,
-    states: {
-      [PLAYER_VITALITY_STATES.UNDEPLOYED]: {
-        transitions: [PLAYER_VITALITY_STATES.ALIVE, PLAYER_VITALITY_STATES.IN_VEHICLE]
-      },
-      [PLAYER_VITALITY_STATES.ALIVE]: {
-        transitions: [
-          PLAYER_VITALITY_STATES.IN_VEHICLE,
-          PLAYER_VITALITY_STATES.DOWNED_BLEEDING_OUT,
-          PLAYER_VITALITY_STATES.DEAD_AWAITING_RESPAWN,
-          PLAYER_VITALITY_STATES.UNDEPLOYED
-        ],
-        onEnter(p) {
-          if (!p) return;
-          p.dead = false;
-          p.downed = false;
-        }
-      },
-      [PLAYER_VITALITY_STATES.IN_VEHICLE]: {
-        transitions: [
-          PLAYER_VITALITY_STATES.ALIVE,
-          PLAYER_VITALITY_STATES.DOWNED_BLEEDING_OUT,
-          PLAYER_VITALITY_STATES.DEAD_AWAITING_RESPAWN,
-          PLAYER_VITALITY_STATES.UNDEPLOYED
-        ],
-        onEnter(p) {
-          if (!p) return;
-          p.dead = false;
-          p.downed = false;
-          p.crouching = false;
-          p.prone = false;
-          p.reloading = false;
-          p.slowReloading = false;
-          p.draggedBot = null;
-          p.isDraggingAlly = false;
-        }
-      },
-      [PLAYER_VITALITY_STATES.DOWNED_BLEEDING_OUT]: {
-        // Cannot transition from DOWNED_BLEEDING_OUT directly into IN_VEHICLE!
-        transitions: [
-          PLAYER_VITALITY_STATES.ALIVE,
-          PLAYER_VITALITY_STATES.DEAD_AWAITING_RESPAWN,
-          PLAYER_VITALITY_STATES.UNDEPLOYED
-        ],
-        onEnter(p) {
-          if (!p) return;
-          p.dead = false;
-          p.downed = true;
-          p.isFiring = false;
-          p.isAds = false;
-          p.reloading = false;
-          p.fastReload = false;
-          p.slowReloading = false;
-          p.magPackProgress = 0;
-          p.bandageProgress = 0;
-          p.reviveProgress = 0;
-          p.draggedBot = null;
-          p.isDraggingAlly = false;
-        }
-      },
-      [PLAYER_VITALITY_STATES.DEAD_AWAITING_RESPAWN]: {
-        // Cannot transition from DEAD_AWAITING_RESPAWN directly into IN_VEHICLE or DOWNED_BLEEDING_OUT!
-        transitions: [PLAYER_VITALITY_STATES.UNDEPLOYED, PLAYER_VITALITY_STATES.ALIVE],
-        onEnter(p) {
-          if (!p) return;
-          p.dead = true;
-          p.downed = false;
-          p.isFiring = false;
-          p.isAds = false;
-          p.reloading = false;
-          p.slowReloading = false;
-          p.draggedBot = null;
-          p.isDraggingAlly = false;
-        }
-      }
-    }
+    states: PLAYER_VITALITY_GRAPH
   });
 }
 
@@ -485,70 +509,72 @@ const ACTIVE_INFANTRY_STANCES = [
   PLAYER_STANCE_STATES.INCAPACITATED
 ];
 
+const PLAYER_STANCE_GRAPH = compileStateGraph({
+  [PLAYER_STANCE_STATES.STANDING]: {
+    transitions: ACTIVE_INFANTRY_STANCES,
+    onEnter(p) {
+      if (!p) return;
+      p.crouching = false;
+      p.prone = false;
+    }
+  },
+  [PLAYER_STANCE_STATES.CROUCHING]: {
+    transitions: ACTIVE_INFANTRY_STANCES,
+    onEnter(p) {
+      if (!p) return;
+      p.crouching = true;
+      p.prone = false;
+    }
+  },
+  [PLAYER_STANCE_STATES.PRONE]: {
+    transitions: ACTIVE_INFANTRY_STANCES,
+    onEnter(p) {
+      if (!p) return;
+      p.prone = true;
+      p.crouching = false;
+    }
+  },
+  [PLAYER_STANCE_STATES.SPRINTING]: {
+    transitions: ACTIVE_INFANTRY_STANCES,
+    onEnter(p) {
+      if (!p) return;
+      p.crouching = false;
+      p.prone = false;
+    }
+  },
+  [PLAYER_STANCE_STATES.AIRBORNE]: { transitions: ACTIVE_INFANTRY_STANCES },
+  [PLAYER_STANCE_STATES.DRAGGING_ALLY]: { transitions: ACTIVE_INFANTRY_STANCES },
+  [PLAYER_STANCE_STATES.VEHICLE_SEATED]: {
+    // Seated vehicle crew can only exit to STANDING / AIRBORNE (eject) or become INCAPACITATED
+    transitions: [
+      PLAYER_STANCE_STATES.STANDING,
+      PLAYER_STANCE_STATES.AIRBORNE,
+      PLAYER_STANCE_STATES.INCAPACITATED
+    ],
+    onEnter(p) {
+      if (!p) return;
+      p.crouching = false;
+      p.prone = false;
+    }
+  },
+  [PLAYER_STANCE_STATES.INCAPACITATED]: {
+    // Incapacitated players cannot jump straight to SPRINTING, DRAGGING_ALLY, or VEHICLE_SEATED
+    transitions: [
+      PLAYER_STANCE_STATES.STANDING,
+      PLAYER_STANCE_STATES.CROUCHING,
+      PLAYER_STANCE_STATES.PRONE,
+      PLAYER_STANCE_STATES.AIRBORNE
+    ]
+  }
+});
+
 export function createPlayerStanceFSM(player) {
   return new FiniteStateMachine({
     id: 'playerStance',
     context: player,
     initial: PLAYER_STANCE_STATES.STANDING,
     emitEvents: false, // High-frequency locomotion transitions don't spam global bus
-    states: {
-      [PLAYER_STANCE_STATES.STANDING]: {
-        transitions: ACTIVE_INFANTRY_STANCES,
-        onEnter(p) {
-          if (!p) return;
-          p.crouching = false;
-          p.prone = false;
-        }
-      },
-      [PLAYER_STANCE_STATES.CROUCHING]: {
-        transitions: ACTIVE_INFANTRY_STANCES,
-        onEnter(p) {
-          if (!p) return;
-          p.crouching = true;
-          p.prone = false;
-        }
-      },
-      [PLAYER_STANCE_STATES.PRONE]: {
-        transitions: ACTIVE_INFANTRY_STANCES,
-        onEnter(p) {
-          if (!p) return;
-          p.prone = true;
-          p.crouching = false;
-        }
-      },
-      [PLAYER_STANCE_STATES.SPRINTING]: {
-        transitions: ACTIVE_INFANTRY_STANCES,
-        onEnter(p) {
-          if (!p) return;
-          p.crouching = false;
-          p.prone = false;
-        }
-      },
-      [PLAYER_STANCE_STATES.AIRBORNE]: { transitions: ACTIVE_INFANTRY_STANCES },
-      [PLAYER_STANCE_STATES.DRAGGING_ALLY]: { transitions: ACTIVE_INFANTRY_STANCES },
-      [PLAYER_STANCE_STATES.VEHICLE_SEATED]: {
-        // Seated vehicle crew can only exit to STANDING / AIRBORNE (eject) or become INCAPACITATED
-        transitions: [
-          PLAYER_STANCE_STATES.STANDING,
-          PLAYER_STANCE_STATES.AIRBORNE,
-          PLAYER_STANCE_STATES.INCAPACITATED
-        ],
-        onEnter(p) {
-          if (!p) return;
-          p.crouching = false;
-          p.prone = false;
-        }
-      },
-      [PLAYER_STANCE_STATES.INCAPACITATED]: {
-        // Incapacitated players cannot jump straight to SPRINTING, DRAGGING_ALLY, or VEHICLE_SEATED
-        transitions: [
-          PLAYER_STANCE_STATES.STANDING,
-          PLAYER_STANCE_STATES.CROUCHING,
-          PLAYER_STANCE_STATES.PRONE,
-          PLAYER_STANCE_STATES.AIRBORNE
-        ]
-      }
-    }
+    states: PLAYER_STANCE_GRAPH
   });
 }
 
@@ -579,105 +605,107 @@ const ACTIVE_WEAPON_STATES = [
   PLAYER_WEAPON_STATES.DISABLED
 ];
 
+const PLAYER_WEAPON_GRAPH = compileStateGraph({
+  [PLAYER_WEAPON_STATES.READY]: { transitions: ACTIVE_WEAPON_STATES },
+  [PLAYER_WEAPON_STATES.FIRING]: {
+    transitions: [
+      PLAYER_WEAPON_STATES.READY,
+      PLAYER_WEAPON_STATES.TACTICAL_RELOAD,
+      PLAYER_WEAPON_STATES.SPEED_RELOAD,
+      PLAYER_WEAPON_STATES.BANDAGING_SELF,
+      PLAYER_WEAPON_STATES.REVIVING_ALLY,
+      PLAYER_WEAPON_STATES.DISABLED
+    ],
+    onEnter(p) {
+      if (p) {
+        p.reloading = false;
+        p.fastReload = false;
+        p.slowReloading = false;
+        p.magPackProgress = 0;
+      }
+    }
+  },
+  [PLAYER_WEAPON_STATES.TACTICAL_RELOAD]: {
+    // Cannot jump from TACTICAL_RELOAD directly into SLOW_MAG_PACK
+    transitions: [
+      PLAYER_WEAPON_STATES.READY,
+      PLAYER_WEAPON_STATES.SPEED_RELOAD,
+      PLAYER_WEAPON_STATES.BANDAGING_SELF,
+      PLAYER_WEAPON_STATES.REVIVING_ALLY,
+      PLAYER_WEAPON_STATES.DISABLED
+    ],
+    onEnter(p) {
+      if (p) {
+        p.slowReloading = false;
+        p.magPackProgress = 0;
+      }
+    }
+  },
+  [PLAYER_WEAPON_STATES.SPEED_RELOAD]: {
+    transitions: [
+      PLAYER_WEAPON_STATES.READY,
+      PLAYER_WEAPON_STATES.BANDAGING_SELF,
+      PLAYER_WEAPON_STATES.REVIVING_ALLY,
+      PLAYER_WEAPON_STATES.DISABLED
+    ],
+    onEnter(p) {
+      if (p) {
+        p.slowReloading = false;
+        p.magPackProgress = 0;
+      }
+    }
+  },
+  [PLAYER_WEAPON_STATES.SLOW_MAG_PACK]: {
+    transitions: [
+      PLAYER_WEAPON_STATES.READY,
+      PLAYER_WEAPON_STATES.FIRING,
+      PLAYER_WEAPON_STATES.TACTICAL_RELOAD,
+      PLAYER_WEAPON_STATES.SPEED_RELOAD,
+      PLAYER_WEAPON_STATES.BANDAGING_SELF,
+      PLAYER_WEAPON_STATES.REVIVING_ALLY,
+      PLAYER_WEAPON_STATES.DISABLED
+    ],
+    onEnter(p) {
+      if (p) {
+        p.reloading = false;
+        p.fastReload = false;
+      }
+    }
+  },
+  [PLAYER_WEAPON_STATES.BANDAGING_SELF]: {
+    transitions: [
+      PLAYER_WEAPON_STATES.READY,
+      PLAYER_WEAPON_STATES.REVIVING_ALLY,
+      PLAYER_WEAPON_STATES.DISABLED
+    ]
+  },
+  [PLAYER_WEAPON_STATES.REVIVING_ALLY]: {
+    transitions: [PLAYER_WEAPON_STATES.READY, PLAYER_WEAPON_STATES.DISABLED]
+  },
+  [PLAYER_WEAPON_STATES.LOOTING_HOLD]: {
+    transitions: [PLAYER_WEAPON_STATES.READY, PLAYER_WEAPON_STATES.DISABLED]
+  },
+  [PLAYER_WEAPON_STATES.DISABLED]: {
+    // Incapacitated/Dead weapon state can ONLY return to READY upon revival or respawn!
+    transitions: [PLAYER_WEAPON_STATES.READY],
+    onEnter(p) {
+      if (!p) return;
+      p.isFiring = false;
+      p.reloading = false;
+      p.fastReload = false;
+      p.slowReloading = false;
+      p.magPackProgress = 0;
+    }
+  }
+});
+
 export function createPlayerWeaponFSM(player) {
   return new FiniteStateMachine({
     id: 'playerWeapon',
     context: player,
     initial: PLAYER_WEAPON_STATES.READY,
     emitEvents: false,
-    states: {
-      [PLAYER_WEAPON_STATES.READY]: { transitions: ACTIVE_WEAPON_STATES },
-      [PLAYER_WEAPON_STATES.FIRING]: {
-        transitions: [
-          PLAYER_WEAPON_STATES.READY,
-          PLAYER_WEAPON_STATES.TACTICAL_RELOAD,
-          PLAYER_WEAPON_STATES.SPEED_RELOAD,
-          PLAYER_WEAPON_STATES.BANDAGING_SELF,
-          PLAYER_WEAPON_STATES.REVIVING_ALLY,
-          PLAYER_WEAPON_STATES.DISABLED
-        ],
-        onEnter(p) {
-          if (p) {
-            p.reloading = false;
-            p.fastReload = false;
-            p.slowReloading = false;
-            p.magPackProgress = 0;
-          }
-        }
-      },
-      [PLAYER_WEAPON_STATES.TACTICAL_RELOAD]: {
-        // Cannot jump from TACTICAL_RELOAD directly into SLOW_MAG_PACK
-        transitions: [
-          PLAYER_WEAPON_STATES.READY,
-          PLAYER_WEAPON_STATES.SPEED_RELOAD,
-          PLAYER_WEAPON_STATES.BANDAGING_SELF,
-          PLAYER_WEAPON_STATES.REVIVING_ALLY,
-          PLAYER_WEAPON_STATES.DISABLED
-        ],
-        onEnter(p) {
-          if (p) {
-            p.slowReloading = false;
-            p.magPackProgress = 0;
-          }
-        }
-      },
-      [PLAYER_WEAPON_STATES.SPEED_RELOAD]: {
-        transitions: [
-          PLAYER_WEAPON_STATES.READY,
-          PLAYER_WEAPON_STATES.BANDAGING_SELF,
-          PLAYER_WEAPON_STATES.REVIVING_ALLY,
-          PLAYER_WEAPON_STATES.DISABLED
-        ],
-        onEnter(p) {
-          if (p) {
-            p.slowReloading = false;
-            p.magPackProgress = 0;
-          }
-        }
-      },
-      [PLAYER_WEAPON_STATES.SLOW_MAG_PACK]: {
-        transitions: [
-          PLAYER_WEAPON_STATES.READY,
-          PLAYER_WEAPON_STATES.FIRING,
-          PLAYER_WEAPON_STATES.TACTICAL_RELOAD,
-          PLAYER_WEAPON_STATES.SPEED_RELOAD,
-          PLAYER_WEAPON_STATES.BANDAGING_SELF,
-          PLAYER_WEAPON_STATES.REVIVING_ALLY,
-          PLAYER_WEAPON_STATES.DISABLED
-        ],
-        onEnter(p) {
-          if (p) {
-            p.reloading = false;
-            p.fastReload = false;
-          }
-        }
-      },
-      [PLAYER_WEAPON_STATES.BANDAGING_SELF]: {
-        transitions: [
-          PLAYER_WEAPON_STATES.READY,
-          PLAYER_WEAPON_STATES.REVIVING_ALLY,
-          PLAYER_WEAPON_STATES.DISABLED
-        ]
-      },
-      [PLAYER_WEAPON_STATES.REVIVING_ALLY]: {
-        transitions: [PLAYER_WEAPON_STATES.READY, PLAYER_WEAPON_STATES.DISABLED]
-      },
-      [PLAYER_WEAPON_STATES.LOOTING_HOLD]: {
-        transitions: [PLAYER_WEAPON_STATES.READY, PLAYER_WEAPON_STATES.DISABLED]
-      },
-      [PLAYER_WEAPON_STATES.DISABLED]: {
-        // Incapacitated/Dead weapon state can ONLY return to READY upon revival or respawn!
-        transitions: [PLAYER_WEAPON_STATES.READY],
-        onEnter(p) {
-          if (!p) return;
-          p.isFiring = false;
-          p.reloading = false;
-          p.fastReload = false;
-          p.slowReloading = false;
-          p.magPackProgress = 0;
-        }
-      }
-    }
+    states: PLAYER_WEAPON_GRAPH
   });
 }
 
@@ -692,33 +720,35 @@ export const PLAYER_INTERACT_STATES = {
   MANUAL_LOOT_MODAL_OPEN: 'MANUAL_LOOT_MODAL_OPEN'
 };
 
+const PLAYER_INTERACT_GRAPH = compileStateGraph({
+  [PLAYER_INTERACT_STATES.IDLE]: {
+    transitions: [
+      PLAYER_INTERACT_STATES.HOLDING_REVIVE,
+      PLAYER_INTERACT_STATES.HOLDING_ENEMY_LOOT,
+      PLAYER_INTERACT_STATES.MANUAL_LOOT_MODAL_OPEN
+    ]
+  },
+  [PLAYER_INTERACT_STATES.HOLDING_REVIVE]: {
+    // Cannot transition directly from HOLDING_REVIVE into MANUAL_LOOT_MODAL_OPEN!
+    transitions: [PLAYER_INTERACT_STATES.IDLE]
+  },
+  [PLAYER_INTERACT_STATES.HOLDING_ENEMY_LOOT]: {
+    transitions: [
+      PLAYER_INTERACT_STATES.IDLE,
+      PLAYER_INTERACT_STATES.MANUAL_LOOT_MODAL_OPEN
+    ]
+  },
+  [PLAYER_INTERACT_STATES.MANUAL_LOOT_MODAL_OPEN]: {
+    transitions: [PLAYER_INTERACT_STATES.IDLE]
+  }
+});
+
 export function createPlayerInteractFSM(player) {
   return new FiniteStateMachine({
     id: 'playerInteract',
     context: player,
     initial: PLAYER_INTERACT_STATES.IDLE,
-    states: {
-      [PLAYER_INTERACT_STATES.IDLE]: {
-        transitions: [
-          PLAYER_INTERACT_STATES.HOLDING_REVIVE,
-          PLAYER_INTERACT_STATES.HOLDING_ENEMY_LOOT,
-          PLAYER_INTERACT_STATES.MANUAL_LOOT_MODAL_OPEN
-        ]
-      },
-      [PLAYER_INTERACT_STATES.HOLDING_REVIVE]: {
-        // Cannot transition directly from HOLDING_REVIVE into MANUAL_LOOT_MODAL_OPEN!
-        transitions: [PLAYER_INTERACT_STATES.IDLE]
-      },
-      [PLAYER_INTERACT_STATES.HOLDING_ENEMY_LOOT]: {
-        transitions: [
-          PLAYER_INTERACT_STATES.IDLE,
-          PLAYER_INTERACT_STATES.MANUAL_LOOT_MODAL_OPEN
-        ]
-      },
-      [PLAYER_INTERACT_STATES.MANUAL_LOOT_MODAL_OPEN]: {
-        transitions: [PLAYER_INTERACT_STATES.IDLE]
-      }
-    }
+    states: PLAYER_INTERACT_GRAPH
   });
 }
 
@@ -777,88 +807,92 @@ export const MEDIC_RESCUE_EVENTS = {
  *   REVIVE --> IDLE : COMPLETE_REVIVE / ABORT_RESCUE
  * ```
  */
+const MEDIC_RESCUE_GRAPH = compileStateGraph({
+  [MEDIC_RESCUE_STATES.IDLE]: {
+    on: {
+      [MEDIC_RESCUE_EVENTS.CLAIM_CASUALTY]: MEDIC_RESCUE_STATES.ASSESS_THREAT
+    },
+    onEnter(b) {
+      if (!b) return;
+      if (b.rescueTarget && b.rescueTarget !== 'PLAYER' && b.rescueTarget.rescuer === b) {
+        b.rescueTarget.rescuer = null;
+      }
+      b.rescueTarget = null;
+      b.rescueState = null;
+      b.medicRescueState = MEDIC_RESCUE_STATES.IDLE;
+      b.assessThreatEnemy = null;
+    }
+  },
+  [MEDIC_RESCUE_STATES.ASSESS_THREAT]: {
+    on: {
+      [MEDIC_RESCUE_EVENTS.SECTOR_CLEAR_APPROACH]: MEDIC_RESCUE_STATES.APPROACH,
+      [MEDIC_RESCUE_EVENTS.ABORT_RESCUE]: MEDIC_RESCUE_STATES.IDLE
+    },
+    onEnter(b, fromState, payload) {
+      if (!b) return;
+      const target = payload?.target ?? b.rescueTarget;
+      if (target && target !== 'PLAYER') {
+        if (target.rescuer && target.rescuer !== b) {
+          const prev = target.rescuer;
+          if (prev.medicRescueFSM) {
+            if (prev.medicRescueFSM.state !== MEDIC_RESCUE_STATES.IDLE) {
+              prev.medicRescueFSM.send(MEDIC_RESCUE_EVENTS.ABORT_RESCUE);
+            }
+          } else {
+            prev.rescueTarget = null;
+            prev.rescueState = null;
+          }
+        }
+        target.rescuer = b;
+      }
+      if (target) b.rescueTarget = target;
+      b.rescueState = MEDIC_RESCUE_STATES.ASSESS_THREAT;
+      b.medicRescueState = MEDIC_RESCUE_STATES.ASSESS_THREAT;
+    }
+  },
+  [MEDIC_RESCUE_STATES.APPROACH]: {
+    on: {
+      [MEDIC_RESCUE_EVENTS.AMBUSH_REASSESS]: MEDIC_RESCUE_STATES.ASSESS_THREAT,
+      [MEDIC_RESCUE_EVENTS.REACHED_CASUALTY_DRAG]: MEDIC_RESCUE_STATES.DRAG,
+      [MEDIC_RESCUE_EVENTS.ABORT_RESCUE]: MEDIC_RESCUE_STATES.IDLE
+    },
+    onEnter(b) {
+      if (!b) return;
+      b.rescueState = MEDIC_RESCUE_STATES.APPROACH;
+      b.medicRescueState = MEDIC_RESCUE_STATES.APPROACH;
+    }
+  },
+  [MEDIC_RESCUE_STATES.DRAG]: {
+    on: {
+      [MEDIC_RESCUE_EVENTS.REACHED_COVER_REVIVE]: MEDIC_RESCUE_STATES.REVIVE,
+      [MEDIC_RESCUE_EVENTS.ABORT_RESCUE]: MEDIC_RESCUE_STATES.IDLE
+    },
+    onEnter(b) {
+      if (!b) return;
+      b.rescueState = MEDIC_RESCUE_STATES.DRAG;
+      b.medicRescueState = MEDIC_RESCUE_STATES.DRAG;
+    }
+  },
+  [MEDIC_RESCUE_STATES.REVIVE]: {
+    on: {
+      [MEDIC_RESCUE_EVENTS.COMPLETE_REVIVE]: MEDIC_RESCUE_STATES.IDLE,
+      [MEDIC_RESCUE_EVENTS.ABORT_RESCUE]: MEDIC_RESCUE_STATES.IDLE
+    },
+    onEnter(b) {
+      if (!b) return;
+      b.rescueState = MEDIC_RESCUE_STATES.REVIVE;
+      b.medicRescueState = MEDIC_RESCUE_STATES.REVIVE;
+    }
+  }
+});
+
 export function createMedicRescueFSM(bot) {
   const fsm = new FiniteStateMachine({
     id: `medicRescue:${bot?.id || bot?.name || 'bot'}`,
     context: bot,
     initial: MEDIC_RESCUE_STATES.IDLE,
     emitEvents: false,
-    states: {
-      [MEDIC_RESCUE_STATES.IDLE]: {
-        on: {
-          [MEDIC_RESCUE_EVENTS.CLAIM_CASUALTY]: MEDIC_RESCUE_STATES.ASSESS_THREAT
-        },
-        onEnter(b) {
-          if (!b) return;
-          if (b.rescueTarget && b.rescueTarget !== 'PLAYER' && b.rescueTarget.rescuer === b) {
-            b.rescueTarget.rescuer = null;
-          }
-          b.rescueTarget = null;
-          b.rescueState = null;
-          b.medicRescueState = MEDIC_RESCUE_STATES.IDLE;
-          b.assessThreatEnemy = null;
-        }
-      },
-      [MEDIC_RESCUE_STATES.ASSESS_THREAT]: {
-        on: {
-          [MEDIC_RESCUE_EVENTS.SECTOR_CLEAR_APPROACH]: MEDIC_RESCUE_STATES.APPROACH,
-          [MEDIC_RESCUE_EVENTS.ABORT_RESCUE]: MEDIC_RESCUE_STATES.IDLE
-        },
-        onEnter(b, fromState, payload) {
-          if (!b) return;
-          const target = payload?.target ?? b.rescueTarget;
-          if (target && target !== 'PLAYER') {
-            if (target.rescuer && target.rescuer !== b) {
-              const prev = target.rescuer;
-              if (prev.medicRescueFSM) {
-                prev.medicRescueFSM.send(MEDIC_RESCUE_EVENTS.ABORT_RESCUE);
-              } else {
-                prev.rescueTarget = null;
-                prev.rescueState = null;
-              }
-            }
-            target.rescuer = b;
-          }
-          if (target) b.rescueTarget = target;
-          b.rescueState = MEDIC_RESCUE_STATES.ASSESS_THREAT;
-          b.medicRescueState = MEDIC_RESCUE_STATES.ASSESS_THREAT;
-        }
-      },
-      [MEDIC_RESCUE_STATES.APPROACH]: {
-        on: {
-          [MEDIC_RESCUE_EVENTS.AMBUSH_REASSESS]: MEDIC_RESCUE_STATES.ASSESS_THREAT,
-          [MEDIC_RESCUE_EVENTS.REACHED_CASUALTY_DRAG]: MEDIC_RESCUE_STATES.DRAG,
-          [MEDIC_RESCUE_EVENTS.ABORT_RESCUE]: MEDIC_RESCUE_STATES.IDLE
-        },
-        onEnter(b) {
-          if (!b) return;
-          b.rescueState = MEDIC_RESCUE_STATES.APPROACH;
-          b.medicRescueState = MEDIC_RESCUE_STATES.APPROACH;
-        }
-      },
-      [MEDIC_RESCUE_STATES.DRAG]: {
-        on: {
-          [MEDIC_RESCUE_EVENTS.REACHED_COVER_REVIVE]: MEDIC_RESCUE_STATES.REVIVE,
-          [MEDIC_RESCUE_EVENTS.ABORT_RESCUE]: MEDIC_RESCUE_STATES.IDLE
-        },
-        onEnter(b) {
-          if (!b) return;
-          b.rescueState = MEDIC_RESCUE_STATES.DRAG;
-          b.medicRescueState = MEDIC_RESCUE_STATES.DRAG;
-        }
-      },
-      [MEDIC_RESCUE_STATES.REVIVE]: {
-        on: {
-          [MEDIC_RESCUE_EVENTS.COMPLETE_REVIVE]: MEDIC_RESCUE_STATES.IDLE,
-          [MEDIC_RESCUE_EVENTS.ABORT_RESCUE]: MEDIC_RESCUE_STATES.IDLE
-        },
-        onEnter(b) {
-          if (!b) return;
-          b.rescueState = MEDIC_RESCUE_STATES.REVIVE;
-          b.medicRescueState = MEDIC_RESCUE_STATES.REVIVE;
-        }
-      }
-    }
+    states: MEDIC_RESCUE_GRAPH
   });
   if (bot) {
     bot.medicRescueFSM = fsm;
@@ -1043,6 +1077,121 @@ export const AIRCRAFT_FLIGHT_EVENTS = {
   RESPAWN_RUNWAY: 'RESPAWN_RUNWAY'
 };
 
+const AIRCRAFT_FLIGHT_GRAPH = compileStateGraph({
+  [AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY]: {
+    on: {
+      [AIRCRAFT_FLIGHT_EVENTS.START_AI_PREFLIGHT]: AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT,
+      [AIRCRAFT_FLIGHT_EVENTS.BOARD_RUNWAY]: AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL,
+      [AIRCRAFT_FLIGHT_EVENTS.LIFTOFF]: AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE,
+      [AIRCRAFT_FLIGHT_EVENTS.AI_LAUNCH_SORTIE]: AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE,
+      [AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.flightState = AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY;
+      v.dead = false;
+      v.isShotDown = false;
+      v.isStalling = false;
+      v.stallSinkVel = 0;
+      v.aiPilotActive = false;
+    }
+  },
+  [AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT]: {
+    on: {
+      [AIRCRAFT_FLIGHT_EVENTS.AI_LAUNCH_SORTIE]: AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE,
+      [AIRCRAFT_FLIGHT_EVENTS.BOARD_RUNWAY]: AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL,
+      [AIRCRAFT_FLIGHT_EVENTS.CANCEL_AI_SORTIE]: AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY,
+      [AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.flightState = AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT;
+      v.dead = false;
+      v.isShotDown = false;
+      v.isStalling = false;
+      v.stallSinkVel = 0;
+      v.aiPilotActive = false;
+    }
+  },
+  [AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL]: {
+    on: {
+      [AIRCRAFT_FLIGHT_EVENTS.LIFTOFF]: AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE,
+      [AIRCRAFT_FLIGHT_EVENTS.PARK_STOP]: AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY,
+      [AIRCRAFT_FLIGHT_EVENTS.SHOT_DOWN_AIRBORNE]: AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL,
+      [AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.flightState = AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL;
+      v.dead = false;
+      v.isShotDown = false;
+      v.isStalling = false;
+      v.stallSinkVel = 0;
+    }
+  },
+  [AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE]: {
+    on: {
+      [AIRCRAFT_FLIGHT_EVENTS.ENTER_STALL]: AIRCRAFT_FLIGHT_STATES.AERODYNAMIC_STALL,
+      [AIRCRAFT_FLIGHT_EVENTS.TOUCHDOWN]: AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL,
+      [AIRCRAFT_FLIGHT_EVENTS.PARK_STOP]: AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY,
+      [AIRCRAFT_FLIGHT_EVENTS.SHOT_DOWN_AIRBORNE]: AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL,
+      [AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.flightState = AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE;
+      v.dead = false;
+      v.isShotDown = false;
+      v.isStalling = false;
+      v.stallSinkVel = 0;
+    }
+  },
+  [AIRCRAFT_FLIGHT_STATES.AERODYNAMIC_STALL]: {
+    on: {
+      [AIRCRAFT_FLIGHT_EVENTS.RECOVER_STALL]: AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE,
+      [AIRCRAFT_FLIGHT_EVENTS.TOUCHDOWN]: AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL,
+      [AIRCRAFT_FLIGHT_EVENTS.PARK_STOP]: AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY,
+      [AIRCRAFT_FLIGHT_EVENTS.SHOT_DOWN_AIRBORNE]: AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL,
+      [AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.flightState = AIRCRAFT_FLIGHT_STATES.AERODYNAMIC_STALL;
+      v.dead = false;
+      v.isShotDown = false;
+      v.isStalling = true;
+    }
+  },
+  [AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL]: {
+    on: {
+      [AIRCRAFT_FLIGHT_EVENTS.CRASH_IMPACT]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.flightState = AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL;
+      v.dead = false;
+      v.isShotDown = true;
+      v.isStalling = false;
+      v.stallSinkVel = 0;
+      v.aiPilotActive = false;
+    }
+  },
+  [AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING]: {
+    on: {
+      [AIRCRAFT_FLIGHT_EVENTS.RESPAWN_RUNWAY]: AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.flightState = AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING;
+      v.dead = true;
+      v.isShotDown = false;
+      v.isStalling = false;
+      v.stallSinkVel = 0;
+      v.aiPilotActive = false;
+    }
+  }
+});
+
 export function createAircraftFlightFSM(vehicle) {
   const initial = vehicle?.dead
     ? AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
@@ -1052,120 +1201,7 @@ export function createAircraftFlightFSM(vehicle) {
     context: vehicle,
     initial,
     emitEvents: false,
-    states: {
-      [AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY]: {
-        on: {
-          [AIRCRAFT_FLIGHT_EVENTS.START_AI_PREFLIGHT]: AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT,
-          [AIRCRAFT_FLIGHT_EVENTS.BOARD_RUNWAY]: AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL,
-          [AIRCRAFT_FLIGHT_EVENTS.LIFTOFF]: AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE,
-          [AIRCRAFT_FLIGHT_EVENTS.AI_LAUNCH_SORTIE]: AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE,
-          [AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.flightState = AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY;
-          v.dead = false;
-          v.isShotDown = false;
-          v.isStalling = false;
-          v.stallSinkVel = 0;
-          v.aiPilotActive = false;
-        }
-      },
-      [AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT]: {
-        on: {
-          [AIRCRAFT_FLIGHT_EVENTS.AI_LAUNCH_SORTIE]: AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE,
-          [AIRCRAFT_FLIGHT_EVENTS.BOARD_RUNWAY]: AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL,
-          [AIRCRAFT_FLIGHT_EVENTS.CANCEL_AI_SORTIE]: AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY,
-          [AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.flightState = AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT;
-          v.dead = false;
-          v.isShotDown = false;
-          v.isStalling = false;
-          v.stallSinkVel = 0;
-          v.aiPilotActive = false;
-        }
-      },
-      [AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL]: {
-        on: {
-          [AIRCRAFT_FLIGHT_EVENTS.LIFTOFF]: AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE,
-          [AIRCRAFT_FLIGHT_EVENTS.PARK_STOP]: AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY,
-          [AIRCRAFT_FLIGHT_EVENTS.SHOT_DOWN_AIRBORNE]: AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL,
-          [AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.flightState = AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL;
-          v.dead = false;
-          v.isShotDown = false;
-          v.isStalling = false;
-          v.stallSinkVel = 0;
-        }
-      },
-      [AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE]: {
-        on: {
-          [AIRCRAFT_FLIGHT_EVENTS.ENTER_STALL]: AIRCRAFT_FLIGHT_STATES.AERODYNAMIC_STALL,
-          [AIRCRAFT_FLIGHT_EVENTS.TOUCHDOWN]: AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL,
-          [AIRCRAFT_FLIGHT_EVENTS.PARK_STOP]: AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY,
-          [AIRCRAFT_FLIGHT_EVENTS.SHOT_DOWN_AIRBORNE]: AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL,
-          [AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.flightState = AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE;
-          v.dead = false;
-          v.isShotDown = false;
-          v.isStalling = false;
-          v.stallSinkVel = 0;
-        }
-      },
-      [AIRCRAFT_FLIGHT_STATES.AERODYNAMIC_STALL]: {
-        on: {
-          [AIRCRAFT_FLIGHT_EVENTS.RECOVER_STALL]: AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE,
-          [AIRCRAFT_FLIGHT_EVENTS.TOUCHDOWN]: AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL,
-          [AIRCRAFT_FLIGHT_EVENTS.PARK_STOP]: AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY,
-          [AIRCRAFT_FLIGHT_EVENTS.SHOT_DOWN_AIRBORNE]: AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL,
-          [AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.flightState = AIRCRAFT_FLIGHT_STATES.AERODYNAMIC_STALL;
-          v.dead = false;
-          v.isShotDown = false;
-          v.isStalling = true;
-        }
-      },
-      [AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL]: {
-        on: {
-          [AIRCRAFT_FLIGHT_EVENTS.CRASH_IMPACT]: AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.flightState = AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL;
-          v.dead = false;
-          v.isShotDown = true;
-          v.isStalling = false;
-          v.stallSinkVel = 0;
-          v.aiPilotActive = false;
-        }
-      },
-      [AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING]: {
-        on: {
-          [AIRCRAFT_FLIGHT_EVENTS.RESPAWN_RUNWAY]: AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.flightState = AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING;
-          v.dead = true;
-          v.isShotDown = false;
-          v.isStalling = false;
-          v.stallSinkVel = 0;
-          v.aiPilotActive = false;
-        }
-      }
-    }
+    states: AIRCRAFT_FLIGHT_GRAPH
   });
   if (vehicle) {
     vehicle.flightFSM = fsm;
@@ -1177,59 +1213,83 @@ export function createAircraftFlightFSM(vehicle) {
 /**
  * Ensures an aircraft has a `flightFSM` instance and synchronizes/enforces its invariants.
  */
-export function syncAircraftFlightFSM(vehicle, opts = {}) {
+export function syncAircraftFlightFSM(vehicle, opts = EMPTY_PAYLOAD) {
   if (!vehicle || !vehicle.isAircraft) return null;
   if (!vehicle.flightFSM) {
     createAircraftFlightFSM(vehicle);
   }
   const fsm = vehicle.flightFSM;
+  const st = fsm.state;
   const onRunway = Boolean(opts.onRunway);
 
   if (vehicle.dead) {
-    if (!fsm.is(AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING)) {
-      if (fsm.is(AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL)) {
+    if (st !== AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING) {
+      if (st === AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL) {
         fsm.send(AIRCRAFT_FLIGHT_EVENTS.CRASH_IMPACT);
       } else {
         fsm.send(AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND);
       }
     }
   } else if (vehicle.isShotDown) {
-    if (!fsm.is(AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL)) {
-      fsm.send(AIRCRAFT_FLIGHT_EVENTS.SHOT_DOWN_AIRBORNE);
+    if (st !== AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL) {
+      if (
+        st === AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY ||
+        st === AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT
+      ) {
+        fsm.send(AIRCRAFT_FLIGHT_EVENTS.LIFTOFF);
+      } else if (st === AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING) {
+        fsm.send(AIRCRAFT_FLIGHT_EVENTS.RESPAWN_RUNWAY);
+        fsm.send(AIRCRAFT_FLIGHT_EVENTS.LIFTOFF);
+      }
+      if (fsm.state !== AIRCRAFT_FLIGHT_STATES.SHOT_DOWN_MAYDAY_SPIRAL) {
+        fsm.send(AIRCRAFT_FLIGHT_EVENTS.SHOT_DOWN_AIRBORNE);
+      }
     }
     // Enforce mutual exclusion: shot-down aircraft cannot be stalling or AI-piloted
     vehicle.isStalling = false;
     vehicle.stallSinkVel = 0;
     vehicle.aiPilotActive = false;
   } else if (vehicle.isStalling) {
-    if (fsm.is(AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE)) {
+    if (st === AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE) {
       fsm.send(AIRCRAFT_FLIGHT_EVENTS.ENTER_STALL);
     }
   } else if (vehicle.aiPilotActive) {
-    if (!fsm.is(AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE)) {
+    if (
+      st === AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY ||
+      st === AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT
+    ) {
+      fsm.send(AIRCRAFT_FLIGHT_EVENTS.AI_LAUNCH_SORTIE);
+    } else if (st === AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL) {
+      fsm.send(AIRCRAFT_FLIGHT_EVENTS.LIFTOFF);
+    } else if (st === AIRCRAFT_FLIGHT_STATES.AERODYNAMIC_STALL) {
+      fsm.send(AIRCRAFT_FLIGHT_EVENTS.RECOVER_STALL);
+    } else if (st === AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING) {
+      fsm.send(AIRCRAFT_FLIGHT_EVENTS.RESPAWN_RUNWAY);
       fsm.send(AIRCRAFT_FLIGHT_EVENTS.AI_LAUNCH_SORTIE);
     }
   } else if (vehicle.driver) {
     if (onRunway) {
-      if (fsm.is([AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY, AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT])) {
+      if (
+        st === AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY ||
+        st === AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT
+      ) {
         fsm.send(AIRCRAFT_FLIGHT_EVENTS.BOARD_RUNWAY);
       } else if (
-        fsm.is([AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE, AIRCRAFT_FLIGHT_STATES.AERODYNAMIC_STALL])
+        st === AIRCRAFT_FLIGHT_STATES.AIRBORNE_CRUISE ||
+        st === AIRCRAFT_FLIGHT_STATES.AERODYNAMIC_STALL
       ) {
         fsm.send(AIRCRAFT_FLIGHT_EVENTS.TOUCHDOWN);
       }
     } else if (
-      fsm.is([
-        AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY,
-        AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT,
-        AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL
-      ])
+      st === AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY ||
+      st === AIRCRAFT_FLIGHT_STATES.AI_SORTIE_PREFLIGHT ||
+      st === AIRCRAFT_FLIGHT_STATES.TAXI_TAKEOFF_ROLL
     ) {
       fsm.send(AIRCRAFT_FLIGHT_EVENTS.LIFTOFF);
-    } else if (fsm.is(AIRCRAFT_FLIGHT_STATES.AERODYNAMIC_STALL)) {
+    } else if (st === AIRCRAFT_FLIGHT_STATES.AERODYNAMIC_STALL) {
       fsm.send(AIRCRAFT_FLIGHT_EVENTS.RECOVER_STALL);
     }
-  } else if (fsm.is(AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING)) {
+  } else if (st === AIRCRAFT_FLIGHT_STATES.DESTROYED_RESPAWNING) {
     fsm.send(AIRCRAFT_FLIGHT_EVENTS.RESPAWN_RUNWAY);
   }
 
@@ -1282,94 +1342,96 @@ export const PLAYER_PARACHUTE_EVENTS = {
   RESET_DEPLOY: 'RESET_DEPLOY'
 };
 
+const PLAYER_PARACHUTE_GRAPH = compileStateGraph({
+  [PLAYER_PARACHUTE_STATES.GROUNDED]: {
+    on: {
+      [PLAYER_PARACHUTE_EVENTS.JUMP_OR_FALL]: PLAYER_PARACHUTE_STATES.STANDARD_AIRBORNE,
+      [PLAYER_PARACHUTE_EVENTS.EJECT_DEPLOY]: PLAYER_PARACHUTE_STATES.PARACHUTE_GLIDING
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.parachuteState = PLAYER_PARACHUTE_STATES.GROUNDED;
+      p.parachuting = false;
+      p.parachuteCut = false;
+      if (p.parachuteMesh) p.parachuteMesh.visible = false;
+    }
+  },
+  [PLAYER_PARACHUTE_STATES.STANDARD_AIRBORNE]: {
+    on: {
+      [PLAYER_PARACHUTE_EVENTS.LAND_GROUND]: PLAYER_PARACHUTE_STATES.GROUNDED,
+      [PLAYER_PARACHUTE_EVENTS.BOARD_VEHICLE]: PLAYER_PARACHUTE_STATES.GROUNDED,
+      [PLAYER_PARACHUTE_EVENTS.RESET_DEPLOY]: PLAYER_PARACHUTE_STATES.GROUNDED,
+      [PLAYER_PARACHUTE_EVENTS.EJECT_DEPLOY]: PLAYER_PARACHUTE_STATES.PARACHUTE_GLIDING,
+      [PLAYER_PARACHUTE_EVENTS.PULL_RESERVE]: PLAYER_PARACHUTE_STATES.RESERVE_CHUTE_GLIDING
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.parachuteState = PLAYER_PARACHUTE_STATES.STANDARD_AIRBORNE;
+      p.parachuting = false;
+      p.parachuteCut = false;
+      if (p.parachuteMesh) p.parachuteMesh.visible = false;
+    }
+  },
+  [PLAYER_PARACHUTE_STATES.PARACHUTE_GLIDING]: {
+    on: {
+      [PLAYER_PARACHUTE_EVENTS.CUT_CANOPY]: PLAYER_PARACHUTE_STATES.CUT_CANOPY_FREEFALL,
+      [PLAYER_PARACHUTE_EVENTS.LAND_GROUND]: PLAYER_PARACHUTE_STATES.GROUNDED,
+      [PLAYER_PARACHUTE_EVENTS.BOARD_VEHICLE]: PLAYER_PARACHUTE_STATES.GROUNDED,
+      [PLAYER_PARACHUTE_EVENTS.RESET_DEPLOY]: PLAYER_PARACHUTE_STATES.GROUNDED
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.parachuteState = PLAYER_PARACHUTE_STATES.PARACHUTE_GLIDING;
+      p.parachuting = true;
+      p.parachuteCut = false;
+      p.isGrounded = false;
+      p.onGround = false;
+      if (p.parachuteMesh) p.parachuteMesh.visible = true;
+    }
+  },
+  [PLAYER_PARACHUTE_STATES.CUT_CANOPY_FREEFALL]: {
+    on: {
+      [PLAYER_PARACHUTE_EVENTS.PULL_RESERVE]: PLAYER_PARACHUTE_STATES.RESERVE_CHUTE_GLIDING,
+      [PLAYER_PARACHUTE_EVENTS.LAND_GROUND]: PLAYER_PARACHUTE_STATES.GROUNDED,
+      [PLAYER_PARACHUTE_EVENTS.BOARD_VEHICLE]: PLAYER_PARACHUTE_STATES.GROUNDED,
+      [PLAYER_PARACHUTE_EVENTS.RESET_DEPLOY]: PLAYER_PARACHUTE_STATES.GROUNDED
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.parachuteState = PLAYER_PARACHUTE_STATES.CUT_CANOPY_FREEFALL;
+      p.parachuting = false;
+      p.parachuteCut = true;
+      p.isGrounded = false;
+      p.onGround = false;
+      if (p.parachuteMesh) p.parachuteMesh.visible = false;
+    }
+  },
+  [PLAYER_PARACHUTE_STATES.RESERVE_CHUTE_GLIDING]: {
+    on: {
+      [PLAYER_PARACHUTE_EVENTS.CUT_CANOPY]: PLAYER_PARACHUTE_STATES.CUT_CANOPY_FREEFALL,
+      [PLAYER_PARACHUTE_EVENTS.LAND_GROUND]: PLAYER_PARACHUTE_STATES.GROUNDED,
+      [PLAYER_PARACHUTE_EVENTS.BOARD_VEHICLE]: PLAYER_PARACHUTE_STATES.GROUNDED,
+      [PLAYER_PARACHUTE_EVENTS.RESET_DEPLOY]: PLAYER_PARACHUTE_STATES.GROUNDED
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.parachuteState = PLAYER_PARACHUTE_STATES.RESERVE_CHUTE_GLIDING;
+      p.parachuting = true;
+      p.parachuteCut = false;
+      p.isGrounded = false;
+      p.onGround = false;
+      if (p.parachuteMesh) p.parachuteMesh.visible = true;
+    }
+  }
+});
+
 export function createPlayerParachuteFSM(player) {
   const fsm = new FiniteStateMachine({
     id: 'playerParachute',
     context: player,
     initial: PLAYER_PARACHUTE_STATES.GROUNDED,
     emitEvents: false,
-    states: {
-      [PLAYER_PARACHUTE_STATES.GROUNDED]: {
-        on: {
-          [PLAYER_PARACHUTE_EVENTS.JUMP_OR_FALL]: PLAYER_PARACHUTE_STATES.STANDARD_AIRBORNE,
-          [PLAYER_PARACHUTE_EVENTS.EJECT_DEPLOY]: PLAYER_PARACHUTE_STATES.PARACHUTE_GLIDING
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.parachuteState = PLAYER_PARACHUTE_STATES.GROUNDED;
-          p.parachuting = false;
-          p.parachuteCut = false;
-          if (p.parachuteMesh) p.parachuteMesh.visible = false;
-        }
-      },
-      [PLAYER_PARACHUTE_STATES.STANDARD_AIRBORNE]: {
-        on: {
-          [PLAYER_PARACHUTE_EVENTS.LAND_GROUND]: PLAYER_PARACHUTE_STATES.GROUNDED,
-          [PLAYER_PARACHUTE_EVENTS.BOARD_VEHICLE]: PLAYER_PARACHUTE_STATES.GROUNDED,
-          [PLAYER_PARACHUTE_EVENTS.RESET_DEPLOY]: PLAYER_PARACHUTE_STATES.GROUNDED,
-          [PLAYER_PARACHUTE_EVENTS.EJECT_DEPLOY]: PLAYER_PARACHUTE_STATES.PARACHUTE_GLIDING,
-          [PLAYER_PARACHUTE_EVENTS.PULL_RESERVE]: PLAYER_PARACHUTE_STATES.RESERVE_CHUTE_GLIDING
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.parachuteState = PLAYER_PARACHUTE_STATES.STANDARD_AIRBORNE;
-          p.parachuting = false;
-          p.parachuteCut = false;
-          if (p.parachuteMesh) p.parachuteMesh.visible = false;
-        }
-      },
-      [PLAYER_PARACHUTE_STATES.PARACHUTE_GLIDING]: {
-        on: {
-          [PLAYER_PARACHUTE_EVENTS.CUT_CANOPY]: PLAYER_PARACHUTE_STATES.CUT_CANOPY_FREEFALL,
-          [PLAYER_PARACHUTE_EVENTS.LAND_GROUND]: PLAYER_PARACHUTE_STATES.GROUNDED,
-          [PLAYER_PARACHUTE_EVENTS.BOARD_VEHICLE]: PLAYER_PARACHUTE_STATES.GROUNDED,
-          [PLAYER_PARACHUTE_EVENTS.RESET_DEPLOY]: PLAYER_PARACHUTE_STATES.GROUNDED
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.parachuteState = PLAYER_PARACHUTE_STATES.PARACHUTE_GLIDING;
-          p.parachuting = true;
-          p.parachuteCut = false;
-          p.isGrounded = false;
-          p.onGround = false;
-          if (p.parachuteMesh) p.parachuteMesh.visible = true;
-        }
-      },
-      [PLAYER_PARACHUTE_STATES.CUT_CANOPY_FREEFALL]: {
-        on: {
-          [PLAYER_PARACHUTE_EVENTS.PULL_RESERVE]: PLAYER_PARACHUTE_STATES.RESERVE_CHUTE_GLIDING,
-          [PLAYER_PARACHUTE_EVENTS.LAND_GROUND]: PLAYER_PARACHUTE_STATES.GROUNDED,
-          [PLAYER_PARACHUTE_EVENTS.BOARD_VEHICLE]: PLAYER_PARACHUTE_STATES.GROUNDED,
-          [PLAYER_PARACHUTE_EVENTS.RESET_DEPLOY]: PLAYER_PARACHUTE_STATES.GROUNDED
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.parachuteState = PLAYER_PARACHUTE_STATES.CUT_CANOPY_FREEFALL;
-          p.parachuting = false;
-          p.parachuteCut = true;
-          p.isGrounded = false;
-          p.onGround = false;
-          if (p.parachuteMesh) p.parachuteMesh.visible = false;
-        }
-      },
-      [PLAYER_PARACHUTE_STATES.RESERVE_CHUTE_GLIDING]: {
-        on: {
-          [PLAYER_PARACHUTE_EVENTS.CUT_CANOPY]: PLAYER_PARACHUTE_STATES.CUT_CANOPY_FREEFALL,
-          [PLAYER_PARACHUTE_EVENTS.LAND_GROUND]: PLAYER_PARACHUTE_STATES.GROUNDED,
-          [PLAYER_PARACHUTE_EVENTS.BOARD_VEHICLE]: PLAYER_PARACHUTE_STATES.GROUNDED,
-          [PLAYER_PARACHUTE_EVENTS.RESET_DEPLOY]: PLAYER_PARACHUTE_STATES.GROUNDED
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.parachuteState = PLAYER_PARACHUTE_STATES.RESERVE_CHUTE_GLIDING;
-          p.parachuting = true;
-          p.parachuteCut = false;
-          p.isGrounded = false;
-          p.onGround = false;
-          if (p.parachuteMesh) p.parachuteMesh.visible = true;
-        }
-      }
-    }
+    states: PLAYER_PARACHUTE_GRAPH
   });
   if (player) {
     player.parachuteFSM = fsm;
@@ -1431,6 +1493,114 @@ export const GROUND_VEHICLE_EVENTS = {
   RESPAWN_READY: 'RESPAWN_READY'
 };
 
+const GROUND_VEHICLE_GRAPH = compileStateGraph({
+  [GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY]: {
+    on: {
+      [GROUND_VEHICLE_EVENTS.SPAWN_READY]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED,
+      [GROUND_VEHICLE_EVENTS.RESPAWN_READY]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.occupancyState = GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY;
+      v.dead = true;
+      v.driver = null;
+      v.npcDriver = null;
+      if (v.mesh?.userData?.riderGroup) v.mesh.userData.riderGroup.visible = false;
+    }
+  },
+  [GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED]: {
+    on: {
+      [GROUND_VEHICLE_EVENTS.PLAYER_BOARD]: GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE,
+      [GROUND_VEHICLE_EVENTS.PLAYER_COMMANDEER]: GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE,
+      [GROUND_VEHICLE_EVENTS.NPC_BOARD]: GROUND_VEHICLE_STATES.AI_CREWED_PATROL,
+      [GROUND_VEHICLE_EVENTS.DESTROY]: GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.occupancyState = GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED;
+      v.dead = false;
+      v.driver = null;
+      v.npcDriver = null;
+      v.wheeliePitch = 0;
+      if (v.mesh?.userData?.riderGroup) v.mesh.userData.riderGroup.visible = false;
+    }
+  },
+  [GROUND_VEHICLE_STATES.AI_CREWED_PATROL]: {
+    on: {
+      [GROUND_VEHICLE_EVENTS.NPC_EXIT]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED,
+      [GROUND_VEHICLE_EVENTS.PLAYER_COMMANDEER]: GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE,
+      [GROUND_VEHICLE_EVENTS.PLAYER_BOARD]: GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE,
+      [GROUND_VEHICLE_EVENTS.DESTROY]: GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.occupancyState = GROUND_VEHICLE_STATES.AI_CREWED_PATROL;
+      v.dead = false;
+      v.driver = null;
+      if (v.mesh?.userData?.riderGroup) {
+        v.mesh.userData.riderGroup.visible = Boolean(v.npcDriver);
+      }
+    }
+  },
+  [GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE]: {
+    on: {
+      [GROUND_VEHICLE_EVENTS.ENTER_WHEELIE_BOOST]:
+        GROUND_VEHICLE_STATES.PLAYER_DRIVEN_WHEELIE_BOOST,
+      [GROUND_VEHICLE_EVENTS.PLAYER_EXIT]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED,
+      [GROUND_VEHICLE_EVENTS.DESTROY]: GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.occupancyState = GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE;
+      v.dead = false;
+      if (v.npcDriver) {
+        v.npcDriver.drivingVehicle = null;
+        v.npcDriver = null;
+      }
+      if (v.mesh?.userData?.riderGroup) {
+        v.mesh.userData.riderGroup.visible = Boolean(v.driver?.thirdPersonVehicle ?? true);
+      }
+    }
+  },
+  [GROUND_VEHICLE_STATES.PLAYER_DRIVEN_WHEELIE_BOOST]: {
+    on: {
+      [GROUND_VEHICLE_EVENTS.EXIT_WHEELIE_BOOST]: GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE,
+      [GROUND_VEHICLE_EVENTS.PLAYER_EXIT]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED,
+      [GROUND_VEHICLE_EVENTS.DESTROY]: GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.occupancyState = GROUND_VEHICLE_STATES.PLAYER_DRIVEN_WHEELIE_BOOST;
+      v.dead = false;
+      if (v.npcDriver) {
+        v.npcDriver.drivingVehicle = null;
+        v.npcDriver = null;
+      }
+      if (v.mesh?.userData?.riderGroup) {
+        v.mesh.userData.riderGroup.visible = Boolean(v.driver?.thirdPersonVehicle ?? true);
+      }
+    }
+  },
+  [GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN]: {
+    on: {
+      [GROUND_VEHICLE_EVENTS.RESPAWN_READY]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED,
+      [GROUND_VEHICLE_EVENTS.SPAWN_READY]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.occupancyState = GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN;
+      v.dead = true;
+      v.driver = null;
+      if (v.npcDriver) {
+        v.npcDriver.drivingVehicle = null;
+        v.npcDriver = null;
+      }
+      v.wheeliePitch = 0;
+      if (v.mesh?.userData?.riderGroup) v.mesh.userData.riderGroup.visible = false;
+    }
+  }
+});
+
 export function createGroundVehicleFSM(vehicle) {
   const initial = vehicle?.dead
     ? vehicle.respawnTimer > 0 && !vehicle.replacementTicketPaid
@@ -1443,113 +1613,7 @@ export function createGroundVehicleFSM(vehicle) {
     context: vehicle,
     initial,
     emitEvents: false,
-    states: {
-      [GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY]: {
-        on: {
-          [GROUND_VEHICLE_EVENTS.SPAWN_READY]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED,
-          [GROUND_VEHICLE_EVENTS.RESPAWN_READY]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.occupancyState = GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY;
-          v.dead = true;
-          v.driver = null;
-          v.npcDriver = null;
-          if (v.mesh?.userData?.riderGroup) v.mesh.userData.riderGroup.visible = false;
-        }
-      },
-      [GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED]: {
-        on: {
-          [GROUND_VEHICLE_EVENTS.PLAYER_BOARD]: GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE,
-          [GROUND_VEHICLE_EVENTS.PLAYER_COMMANDEER]: GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE,
-          [GROUND_VEHICLE_EVENTS.NPC_BOARD]: GROUND_VEHICLE_STATES.AI_CREWED_PATROL,
-          [GROUND_VEHICLE_EVENTS.DESTROY]: GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.occupancyState = GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED;
-          v.dead = false;
-          v.driver = null;
-          v.npcDriver = null;
-          v.wheeliePitch = 0;
-          if (v.mesh?.userData?.riderGroup) v.mesh.userData.riderGroup.visible = false;
-        }
-      },
-      [GROUND_VEHICLE_STATES.AI_CREWED_PATROL]: {
-        on: {
-          [GROUND_VEHICLE_EVENTS.NPC_EXIT]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED,
-          [GROUND_VEHICLE_EVENTS.PLAYER_COMMANDEER]: GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE,
-          [GROUND_VEHICLE_EVENTS.PLAYER_BOARD]: GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE,
-          [GROUND_VEHICLE_EVENTS.DESTROY]: GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.occupancyState = GROUND_VEHICLE_STATES.AI_CREWED_PATROL;
-          v.dead = false;
-          v.driver = null;
-          if (v.mesh?.userData?.riderGroup) {
-            v.mesh.userData.riderGroup.visible = Boolean(v.npcDriver);
-          }
-        }
-      },
-      [GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE]: {
-        on: {
-          [GROUND_VEHICLE_EVENTS.ENTER_WHEELIE_BOOST]:
-            GROUND_VEHICLE_STATES.PLAYER_DRIVEN_WHEELIE_BOOST,
-          [GROUND_VEHICLE_EVENTS.PLAYER_EXIT]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED,
-          [GROUND_VEHICLE_EVENTS.DESTROY]: GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.occupancyState = GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE;
-          v.dead = false;
-          if (v.npcDriver) {
-            v.npcDriver.drivingVehicle = null;
-            v.npcDriver = null;
-          }
-          if (v.mesh?.userData?.riderGroup) {
-            v.mesh.userData.riderGroup.visible = Boolean(v.driver?.thirdPersonVehicle ?? true);
-          }
-        }
-      },
-      [GROUND_VEHICLE_STATES.PLAYER_DRIVEN_WHEELIE_BOOST]: {
-        on: {
-          [GROUND_VEHICLE_EVENTS.EXIT_WHEELIE_BOOST]: GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE,
-          [GROUND_VEHICLE_EVENTS.PLAYER_EXIT]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED,
-          [GROUND_VEHICLE_EVENTS.DESTROY]: GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.occupancyState = GROUND_VEHICLE_STATES.PLAYER_DRIVEN_WHEELIE_BOOST;
-          v.dead = false;
-          if (v.npcDriver) {
-            v.npcDriver.drivingVehicle = null;
-            v.npcDriver = null;
-          }
-          if (v.mesh?.userData?.riderGroup) {
-            v.mesh.userData.riderGroup.visible = Boolean(v.driver?.thirdPersonVehicle ?? true);
-          }
-        }
-      },
-      [GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN]: {
-        on: {
-          [GROUND_VEHICLE_EVENTS.RESPAWN_READY]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED,
-          [GROUND_VEHICLE_EVENTS.SPAWN_READY]: GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.occupancyState = GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN;
-          v.dead = true;
-          v.driver = null;
-          if (v.npcDriver) {
-            v.npcDriver.drivingVehicle = null;
-            v.npcDriver = null;
-          }
-          v.wheeliePitch = 0;
-          if (v.mesh?.userData?.riderGroup) v.mesh.userData.riderGroup.visible = false;
-        }
-      }
-    }
+    states: GROUND_VEHICLE_GRAPH
   });
 
   if (vehicle) {
@@ -1559,19 +1623,18 @@ export function createGroundVehicleFSM(vehicle) {
   return fsm;
 }
 
-export function syncGroundVehicleFSM(vehicle, opts = {}) {
+export function syncGroundVehicleFSM(vehicle, opts = EMPTY_PAYLOAD) {
   if (!vehicle || vehicle.isAircraft) return null;
   if (!vehicle.occupancyFSM) {
     createGroundVehicleFSM(vehicle);
   }
   const fsm = vehicle.occupancyFSM;
+  const st = fsm.state;
 
   if (vehicle.dead) {
     if (
-      !fsm.is([
-        GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN,
-        GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY
-      ])
+      st !== GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN &&
+      st !== GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY
     ) {
       fsm.send(GROUND_VEHICLE_EVENTS.DESTROY);
     }
@@ -1589,23 +1652,22 @@ export function syncGroundVehicleFSM(vehicle, opts = {}) {
       vehicle.npcDriver = null;
     }
     if (
-      fsm.is([
-        GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY,
-        GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
-      ])
+      st === GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY ||
+      st === GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
     ) {
       fsm.send(GROUND_VEHICLE_EVENTS.RESPAWN_READY);
     }
-    if (fsm.is(GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED)) {
+    const curSt = fsm.state;
+    if (curSt === GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED) {
       fsm.send(GROUND_VEHICLE_EVENTS.PLAYER_BOARD);
-    } else if (fsm.is(GROUND_VEHICLE_STATES.AI_CREWED_PATROL)) {
+    } else if (curSt === GROUND_VEHICLE_STATES.AI_CREWED_PATROL) {
       fsm.send(GROUND_VEHICLE_EVENTS.PLAYER_COMMANDEER);
     }
-    if (opts.wheelieBoost === true && fsm.is(GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE)) {
+    if (opts.wheelieBoost === true && fsm.state === GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE) {
       fsm.send(GROUND_VEHICLE_EVENTS.ENTER_WHEELIE_BOOST);
     } else if (
       opts.wheelieBoost === false &&
-      fsm.is(GROUND_VEHICLE_STATES.PLAYER_DRIVEN_WHEELIE_BOOST)
+      fsm.state === GROUND_VEHICLE_STATES.PLAYER_DRIVEN_WHEELIE_BOOST
     ) {
       fsm.send(GROUND_VEHICLE_EVENTS.EXIT_WHEELIE_BOOST);
     }
@@ -1614,14 +1676,12 @@ export function syncGroundVehicleFSM(vehicle, opts = {}) {
     }
   } else if (vehicle.npcDriver) {
     if (
-      fsm.is([
-        GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY,
-        GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
-      ])
+      st === GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY ||
+      st === GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
     ) {
       fsm.send(GROUND_VEHICLE_EVENTS.RESPAWN_READY);
     }
-    if (fsm.is(GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED)) {
+    if (fsm.state === GROUND_VEHICLE_STATES.PARKED_UNOCCUPIED) {
       fsm.send(GROUND_VEHICLE_EVENTS.NPC_BOARD);
     }
     if (vehicle.mesh?.userData?.riderGroup) {
@@ -1629,20 +1689,16 @@ export function syncGroundVehicleFSM(vehicle, opts = {}) {
     }
   } else {
     if (
-      fsm.is([
-        GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY,
-        GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
-      ])
+      st === GROUND_VEHICLE_STATES.INITIAL_REINFORCEMENT_DELAY ||
+      st === GROUND_VEHICLE_STATES.DESTROYED_RESPAWN_COUNTDOWN
     ) {
       fsm.send(GROUND_VEHICLE_EVENTS.RESPAWN_READY);
     } else if (
-      fsm.is([
-        GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE,
-        GROUND_VEHICLE_STATES.PLAYER_DRIVEN_WHEELIE_BOOST
-      ])
+      st === GROUND_VEHICLE_STATES.PLAYER_DRIVEN_CRUISE ||
+      st === GROUND_VEHICLE_STATES.PLAYER_DRIVEN_WHEELIE_BOOST
     ) {
       fsm.send(GROUND_VEHICLE_EVENTS.PLAYER_EXIT);
-    } else if (fsm.is(GROUND_VEHICLE_STATES.AI_CREWED_PATROL)) {
+    } else if (st === GROUND_VEHICLE_STATES.AI_CREWED_PATROL) {
       fsm.send(GROUND_VEHICLE_EVENTS.NPC_EXIT);
     }
     if (vehicle.mesh?.userData?.riderGroup) {
@@ -1706,6 +1762,88 @@ export const NETWORK_TRANSPORT_EVENTS = {
   HTTP_SYNC_DONE_FALLBACK: 'HTTP_SYNC_DONE_FALLBACK'
 };
 
+const NETWORK_TRANSPORT_GRAPH = compileStateGraph({
+  [NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER]: {
+    on: {
+      [NETWORK_TRANSPORT_EVENTS.ENABLE_MP]: NETWORK_TRANSPORT_STATES.MP_WS_CONNECTING,
+      [NETWORK_TRANSPORT_EVENTS.ENABLE_MP_WS_READY]: NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED,
+      [NETWORK_TRANSPORT_EVENTS.ENABLE_MP_HTTP_FALLBACK]:
+        NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE
+    },
+    onEnter(n) {
+      if (!n) return;
+      n.transportState = NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER;
+      n.gameMode = 'SINGLEPLAYER';
+      n.httpSyncInFlight = false;
+      n._syncEpoch = (n._syncEpoch || 0) + 1;
+    }
+  },
+  [NETWORK_TRANSPORT_STATES.MP_WS_CONNECTING]: {
+    on: {
+      [NETWORK_TRANSPORT_EVENTS.WS_OPEN]: NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED,
+      [NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR]:
+        NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE,
+      [NETWORK_TRANSPORT_EVENTS.HTTP_SYNC_START]:
+        NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT,
+      [NETWORK_TRANSPORT_EVENTS.DISABLE_MP]: NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER
+    },
+    onEnter(n) {
+      if (!n) return;
+      n.transportState = NETWORK_TRANSPORT_STATES.MP_WS_CONNECTING;
+      n.gameMode = 'MULTIPLAYER';
+      n.httpSyncInFlight = false;
+    }
+  },
+  [NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED]: {
+    on: {
+      [NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR]:
+        NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE,
+      [NETWORK_TRANSPORT_EVENTS.HTTP_SYNC_START]:
+        NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT,
+      [NETWORK_TRANSPORT_EVENTS.DISABLE_MP]: NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER
+    },
+    onEnter(n) {
+      if (!n) return;
+      n.transportState = NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED;
+      n.gameMode = 'MULTIPLAYER';
+      n.wsConnected = true;
+      n.httpSyncInFlight = false;
+    }
+  },
+  [NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE]: {
+    on: {
+      [NETWORK_TRANSPORT_EVENTS.HTTP_SYNC_START]:
+        NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT,
+      [NETWORK_TRANSPORT_EVENTS.WS_OPEN]: NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED,
+      [NETWORK_TRANSPORT_EVENTS.DISABLE_MP]: NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER
+    },
+    onEnter(n) {
+      if (!n) return;
+      n.transportState = NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE;
+      n.gameMode = 'MULTIPLAYER';
+      n.wsConnected = false;
+      n.httpSyncInFlight = false;
+    }
+  },
+  [NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT]: {
+    on: {
+      [NETWORK_TRANSPORT_EVENTS.HTTP_SYNC_DONE_WS]: NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED,
+      [NETWORK_TRANSPORT_EVENTS.HTTP_SYNC_DONE_FALLBACK]:
+        NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE,
+      [NETWORK_TRANSPORT_EVENTS.WS_OPEN]: NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT,
+      [NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR]:
+        NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT,
+      [NETWORK_TRANSPORT_EVENTS.DISABLE_MP]: NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER
+    },
+    onEnter(n) {
+      if (!n) return;
+      n.transportState = NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT;
+      n.gameMode = 'MULTIPLAYER';
+      n.httpSyncInFlight = true;
+    }
+  }
+});
+
 export function createNetworkTransportFSM(net) {
   const initial =
     net?.gameMode === 'MULTIPLAYER'
@@ -1719,87 +1857,7 @@ export function createNetworkTransportFSM(net) {
     context: net,
     initial,
     emitEvents: false,
-    states: {
-      [NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER]: {
-        on: {
-          [NETWORK_TRANSPORT_EVENTS.ENABLE_MP]: NETWORK_TRANSPORT_STATES.MP_WS_CONNECTING,
-          [NETWORK_TRANSPORT_EVENTS.ENABLE_MP_WS_READY]: NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED,
-          [NETWORK_TRANSPORT_EVENTS.ENABLE_MP_HTTP_FALLBACK]:
-            NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE
-        },
-        onEnter(n) {
-          if (!n) return;
-          n.transportState = NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER;
-          n.gameMode = 'SINGLEPLAYER';
-          n.httpSyncInFlight = false;
-          n._syncEpoch = (n._syncEpoch || 0) + 1;
-        }
-      },
-      [NETWORK_TRANSPORT_STATES.MP_WS_CONNECTING]: {
-        on: {
-          [NETWORK_TRANSPORT_EVENTS.WS_OPEN]: NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED,
-          [NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR]:
-            NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE,
-          [NETWORK_TRANSPORT_EVENTS.HTTP_SYNC_START]:
-            NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT,
-          [NETWORK_TRANSPORT_EVENTS.DISABLE_MP]: NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER
-        },
-        onEnter(n) {
-          if (!n) return;
-          n.transportState = NETWORK_TRANSPORT_STATES.MP_WS_CONNECTING;
-          n.gameMode = 'MULTIPLAYER';
-          n.httpSyncInFlight = false;
-        }
-      },
-      [NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED]: {
-        on: {
-          [NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR]:
-            NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE,
-          [NETWORK_TRANSPORT_EVENTS.HTTP_SYNC_START]:
-            NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT,
-          [NETWORK_TRANSPORT_EVENTS.DISABLE_MP]: NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER
-        },
-        onEnter(n) {
-          if (!n) return;
-          n.transportState = NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED;
-          n.gameMode = 'MULTIPLAYER';
-          n.wsConnected = true;
-          n.httpSyncInFlight = false;
-        }
-      },
-      [NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE]: {
-        on: {
-          [NETWORK_TRANSPORT_EVENTS.HTTP_SYNC_START]:
-            NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT,
-          [NETWORK_TRANSPORT_EVENTS.WS_OPEN]: NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED,
-          [NETWORK_TRANSPORT_EVENTS.DISABLE_MP]: NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER
-        },
-        onEnter(n) {
-          if (!n) return;
-          n.transportState = NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE;
-          n.gameMode = 'MULTIPLAYER';
-          n.wsConnected = false;
-          n.httpSyncInFlight = false;
-        }
-      },
-      [NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT]: {
-        on: {
-          [NETWORK_TRANSPORT_EVENTS.HTTP_SYNC_DONE_WS]: NETWORK_TRANSPORT_STATES.MP_WS_CONNECTED,
-          [NETWORK_TRANSPORT_EVENTS.HTTP_SYNC_DONE_FALLBACK]:
-            NETWORK_TRANSPORT_STATES.MP_HTTP_FALLBACK_IDLE,
-          [NETWORK_TRANSPORT_EVENTS.WS_OPEN]: NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT,
-          [NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR]:
-            NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT,
-          [NETWORK_TRANSPORT_EVENTS.DISABLE_MP]: NETWORK_TRANSPORT_STATES.OFFLINE_SINGLEPLAYER
-        },
-        onEnter(n) {
-          if (!n) return;
-          n.transportState = NETWORK_TRANSPORT_STATES.MP_HTTP_SYNC_IN_FLIGHT;
-          n.gameMode = 'MULTIPLAYER';
-          n.httpSyncInFlight = true;
-        }
-      }
-    }
+    states: NETWORK_TRANSPORT_GRAPH
   });
 
   if (net) {
@@ -1859,52 +1917,54 @@ function cleanupUavMeshes(p) {
   }
 }
 
+const COMMANDER_UAV_GRAPH = compileStateGraph({
+  [COMMANDER_UAV_STATES.UAV_READY]: {
+    on: {
+      [COMMANDER_UAV_EVENTS.CALL_UAV]: COMMANDER_UAV_STATES.UAV_ACTIVE_ORBIT,
+      [COMMANDER_UAV_EVENTS.RESET]: COMMANDER_UAV_STATES.UAV_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.uavState = COMMANDER_UAV_STATES.UAV_READY;
+      p.uavActive = false;
+      p.uavTimer = 0;
+      cleanupUavMeshes(p);
+    }
+  },
+  [COMMANDER_UAV_STATES.UAV_ACTIVE_ORBIT]: {
+    on: {
+      [COMMANDER_UAV_EVENTS.CALL_UAV]: COMMANDER_UAV_STATES.UAV_ACTIVE_ORBIT,
+      [COMMANDER_UAV_EVENTS.SCAN_EXPIRED]: COMMANDER_UAV_STATES.UAV_COOLDOWN,
+      [COMMANDER_UAV_EVENTS.RESET]: COMMANDER_UAV_STATES.UAV_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.uavState = COMMANDER_UAV_STATES.UAV_ACTIVE_ORBIT;
+      p.uavActive = true;
+    }
+  },
+  [COMMANDER_UAV_STATES.UAV_COOLDOWN]: {
+    on: {
+      [COMMANDER_UAV_EVENTS.COOLDOWN_DONE]: COMMANDER_UAV_STATES.UAV_READY,
+      [COMMANDER_UAV_EVENTS.RESET]: COMMANDER_UAV_STATES.UAV_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.uavState = COMMANDER_UAV_STATES.UAV_COOLDOWN;
+      p.uavActive = false;
+      p.uavTimer = 0;
+      cleanupUavMeshes(p);
+    }
+  }
+});
+
 export function createCommanderUavFSM(player) {
   const fsm = new FiniteStateMachine({
     id: 'commanderUav',
     context: player,
     initial: COMMANDER_UAV_STATES.UAV_READY,
     emitEvents: false,
-    states: {
-      [COMMANDER_UAV_STATES.UAV_READY]: {
-        on: {
-          [COMMANDER_UAV_EVENTS.CALL_UAV]: COMMANDER_UAV_STATES.UAV_ACTIVE_ORBIT,
-          [COMMANDER_UAV_EVENTS.RESET]: COMMANDER_UAV_STATES.UAV_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.uavState = COMMANDER_UAV_STATES.UAV_READY;
-          p.uavActive = false;
-          p.uavTimer = 0;
-          cleanupUavMeshes(p);
-        }
-      },
-      [COMMANDER_UAV_STATES.UAV_ACTIVE_ORBIT]: {
-        on: {
-          [COMMANDER_UAV_EVENTS.CALL_UAV]: COMMANDER_UAV_STATES.UAV_ACTIVE_ORBIT,
-          [COMMANDER_UAV_EVENTS.SCAN_EXPIRED]: COMMANDER_UAV_STATES.UAV_COOLDOWN,
-          [COMMANDER_UAV_EVENTS.RESET]: COMMANDER_UAV_STATES.UAV_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.uavState = COMMANDER_UAV_STATES.UAV_ACTIVE_ORBIT;
-          p.uavActive = true;
-        }
-      },
-      [COMMANDER_UAV_STATES.UAV_COOLDOWN]: {
-        on: {
-          [COMMANDER_UAV_EVENTS.COOLDOWN_DONE]: COMMANDER_UAV_STATES.UAV_READY,
-          [COMMANDER_UAV_EVENTS.RESET]: COMMANDER_UAV_STATES.UAV_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.uavState = COMMANDER_UAV_STATES.UAV_COOLDOWN;
-          p.uavActive = false;
-          p.uavTimer = 0;
-          cleanupUavMeshes(p);
-        }
-      }
-    }
+    states: COMMANDER_UAV_GRAPH
   });
   if (player) {
     player.uavFSM = fsm;
@@ -1937,66 +1997,68 @@ function cleanupAirstrikeTargetMarkers(p) {
   p.airstrikeTarget = null;
 }
 
+const COMMANDER_AIRSTRIKE_GRAPH = compileStateGraph({
+  [COMMANDER_AIRSTRIKE_STATES.STRIKE_READY]: {
+    on: {
+      [COMMANDER_AIRSTRIKE_EVENTS.DESIGNATE_TARGET]:
+        COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING,
+      [COMMANDER_AIRSTRIKE_EVENTS.FORCE_REDESIGNATE]:
+        COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING,
+      [COMMANDER_AIRSTRIKE_EVENTS.RESET]: COMMANDER_AIRSTRIKE_STATES.STRIKE_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.airstrikeState = COMMANDER_AIRSTRIKE_STATES.STRIKE_READY;
+      cleanupAirstrikeTargetMarkers(p);
+    }
+  },
+  [COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING]: {
+    on: {
+      [COMMANDER_AIRSTRIKE_EVENTS.RELEASE_BARRAGE]: COMMANDER_AIRSTRIKE_STATES.BARRAGE_DROPPING,
+      [COMMANDER_AIRSTRIKE_EVENTS.FORCE_REDESIGNATE]:
+        COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING,
+      [COMMANDER_AIRSTRIKE_EVENTS.RESET]: COMMANDER_AIRSTRIKE_STATES.STRIKE_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.airstrikeState = COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING;
+    }
+  },
+  [COMMANDER_AIRSTRIKE_STATES.BARRAGE_DROPPING]: {
+    on: {
+      [COMMANDER_AIRSTRIKE_EVENTS.BARRAGE_COMPLETE]: COMMANDER_AIRSTRIKE_STATES.STRIKE_COOLDOWN,
+      [COMMANDER_AIRSTRIKE_EVENTS.FORCE_REDESIGNATE]:
+        COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING,
+      [COMMANDER_AIRSTRIKE_EVENTS.RESET]: COMMANDER_AIRSTRIKE_STATES.STRIKE_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.airstrikeState = COMMANDER_AIRSTRIKE_STATES.BARRAGE_DROPPING;
+      cleanupAirstrikeTargetMarkers(p);
+    }
+  },
+  [COMMANDER_AIRSTRIKE_STATES.STRIKE_COOLDOWN]: {
+    on: {
+      [COMMANDER_AIRSTRIKE_EVENTS.COOLDOWN_DONE]: COMMANDER_AIRSTRIKE_STATES.STRIKE_READY,
+      [COMMANDER_AIRSTRIKE_EVENTS.FORCE_REDESIGNATE]:
+        COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING,
+      [COMMANDER_AIRSTRIKE_EVENTS.RESET]: COMMANDER_AIRSTRIKE_STATES.STRIKE_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.airstrikeState = COMMANDER_AIRSTRIKE_STATES.STRIKE_COOLDOWN;
+      cleanupAirstrikeTargetMarkers(p);
+    }
+  }
+});
+
 export function createCommanderAirstrikeFSM(player) {
   const fsm = new FiniteStateMachine({
     id: 'commanderAirstrike',
     context: player,
     initial: COMMANDER_AIRSTRIKE_STATES.STRIKE_READY,
     emitEvents: false,
-    states: {
-      [COMMANDER_AIRSTRIKE_STATES.STRIKE_READY]: {
-        on: {
-          [COMMANDER_AIRSTRIKE_EVENTS.DESIGNATE_TARGET]:
-            COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING,
-          [COMMANDER_AIRSTRIKE_EVENTS.FORCE_REDESIGNATE]:
-            COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING,
-          [COMMANDER_AIRSTRIKE_EVENTS.RESET]: COMMANDER_AIRSTRIKE_STATES.STRIKE_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.airstrikeState = COMMANDER_AIRSTRIKE_STATES.STRIKE_READY;
-          cleanupAirstrikeTargetMarkers(p);
-        }
-      },
-      [COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING]: {
-        on: {
-          [COMMANDER_AIRSTRIKE_EVENTS.RELEASE_BARRAGE]: COMMANDER_AIRSTRIKE_STATES.BARRAGE_DROPPING,
-          [COMMANDER_AIRSTRIKE_EVENTS.FORCE_REDESIGNATE]:
-            COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING,
-          [COMMANDER_AIRSTRIKE_EVENTS.RESET]: COMMANDER_AIRSTRIKE_STATES.STRIKE_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.airstrikeState = COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING;
-        }
-      },
-      [COMMANDER_AIRSTRIKE_STATES.BARRAGE_DROPPING]: {
-        on: {
-          [COMMANDER_AIRSTRIKE_EVENTS.BARRAGE_COMPLETE]: COMMANDER_AIRSTRIKE_STATES.STRIKE_COOLDOWN,
-          [COMMANDER_AIRSTRIKE_EVENTS.FORCE_REDESIGNATE]:
-            COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING,
-          [COMMANDER_AIRSTRIKE_EVENTS.RESET]: COMMANDER_AIRSTRIKE_STATES.STRIKE_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.airstrikeState = COMMANDER_AIRSTRIKE_STATES.BARRAGE_DROPPING;
-          cleanupAirstrikeTargetMarkers(p);
-        }
-      },
-      [COMMANDER_AIRSTRIKE_STATES.STRIKE_COOLDOWN]: {
-        on: {
-          [COMMANDER_AIRSTRIKE_EVENTS.COOLDOWN_DONE]: COMMANDER_AIRSTRIKE_STATES.STRIKE_READY,
-          [COMMANDER_AIRSTRIKE_EVENTS.FORCE_REDESIGNATE]:
-            COMMANDER_AIRSTRIKE_STATES.TARGET_DESIGNATED_WARNING,
-          [COMMANDER_AIRSTRIKE_EVENTS.RESET]: COMMANDER_AIRSTRIKE_STATES.STRIKE_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.airstrikeState = COMMANDER_AIRSTRIKE_STATES.STRIKE_COOLDOWN;
-          cleanupAirstrikeTargetMarkers(p);
-        }
-      }
-    }
+    states: COMMANDER_AIRSTRIKE_GRAPH
   });
   if (player) {
     player.airstrikeFSM = fsm;
@@ -2050,51 +2112,78 @@ export const VEHICLE_THERMAL_EVENTS = {
   RESET: 'RESET'
 };
 
+const VEHICLE_CM_GRAPH = compileStateGraph({
+  [VEHICLE_CM_STATES.CM_READY]: {
+    on: {
+      [VEHICLE_CM_EVENTS.ACTIVATE_CM]: VEHICLE_CM_STATES.CM_ACTIVE,
+      [VEHICLE_CM_EVENTS.RESET]: VEHICLE_CM_STATES.CM_READY
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.cmState = VEHICLE_CM_STATES.CM_READY;
+      v.flareActiveTimer = 0;
+      v.flareCooldown = 0;
+    }
+  },
+  [VEHICLE_CM_STATES.CM_ACTIVE]: {
+    on: {
+      [VEHICLE_CM_EVENTS.ACTIVE_EXPIRED]: VEHICLE_CM_STATES.CM_RECHARGING,
+      [VEHICLE_CM_EVENTS.COOLDOWN_DONE]: VEHICLE_CM_STATES.CM_READY,
+      [VEHICLE_CM_EVENTS.RESET]: VEHICLE_CM_STATES.CM_READY
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.cmState = VEHICLE_CM_STATES.CM_ACTIVE;
+      if ((v.flareActiveTimer || 0) > 0 && (v.flareCooldown || 0) < v.flareActiveTimer) {
+        v.flareCooldown = v.flareActiveTimer;
+      }
+    }
+  },
+  [VEHICLE_CM_STATES.CM_RECHARGING]: {
+    on: {
+      [VEHICLE_CM_EVENTS.COOLDOWN_DONE]: VEHICLE_CM_STATES.CM_READY,
+      [VEHICLE_CM_EVENTS.RESET]: VEHICLE_CM_STATES.CM_READY
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.cmState = VEHICLE_CM_STATES.CM_RECHARGING;
+      v.flareActiveTimer = 0;
+    }
+  }
+});
+
+const VEHICLE_THERMAL_GRAPH = compileStateGraph({
+  [VEHICLE_THERMAL_STATES.THERMAL_NORMAL]: {
+    on: {
+      [VEHICLE_THERMAL_EVENTS.OVERHEAT_MAX]: VEHICLE_THERMAL_STATES.THERMAL_OVERHEATED_LOCKOUT,
+      [VEHICLE_THERMAL_EVENTS.RESET]: VEHICLE_THERMAL_STATES.THERMAL_NORMAL
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.thermalState = VEHICLE_THERMAL_STATES.THERMAL_NORMAL;
+      v.coaxOverheated = false;
+    }
+  },
+  [VEHICLE_THERMAL_STATES.THERMAL_OVERHEATED_LOCKOUT]: {
+    on: {
+      [VEHICLE_THERMAL_EVENTS.COOLED_DOWN]: VEHICLE_THERMAL_STATES.THERMAL_NORMAL,
+      [VEHICLE_THERMAL_EVENTS.RESET]: VEHICLE_THERMAL_STATES.THERMAL_NORMAL
+    },
+    onEnter(v) {
+      if (!v) return;
+      v.thermalState = VEHICLE_THERMAL_STATES.THERMAL_OVERHEATED_LOCKOUT;
+      v.coaxOverheated = true;
+    }
+  }
+});
+
 export function createVehicleSubsystemsFSM(vehicle) {
   const cmFsm = new FiniteStateMachine({
     id: `vehicleCM:${vehicle?.id || 'veh'}`,
     context: vehicle,
     initial: VEHICLE_CM_STATES.CM_READY,
     emitEvents: false,
-    states: {
-      [VEHICLE_CM_STATES.CM_READY]: {
-        on: {
-          [VEHICLE_CM_EVENTS.ACTIVATE_CM]: VEHICLE_CM_STATES.CM_ACTIVE,
-          [VEHICLE_CM_EVENTS.RESET]: VEHICLE_CM_STATES.CM_READY
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.cmState = VEHICLE_CM_STATES.CM_READY;
-          v.flareActiveTimer = 0;
-          v.flareCooldown = 0;
-        }
-      },
-      [VEHICLE_CM_STATES.CM_ACTIVE]: {
-        on: {
-          [VEHICLE_CM_EVENTS.ACTIVE_EXPIRED]: VEHICLE_CM_STATES.CM_RECHARGING,
-          [VEHICLE_CM_EVENTS.COOLDOWN_DONE]: VEHICLE_CM_STATES.CM_READY,
-          [VEHICLE_CM_EVENTS.RESET]: VEHICLE_CM_STATES.CM_READY
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.cmState = VEHICLE_CM_STATES.CM_ACTIVE;
-          if ((v.flareActiveTimer || 0) > 0 && (v.flareCooldown || 0) < v.flareActiveTimer) {
-            v.flareCooldown = v.flareActiveTimer;
-          }
-        }
-      },
-      [VEHICLE_CM_STATES.CM_RECHARGING]: {
-        on: {
-          [VEHICLE_CM_EVENTS.COOLDOWN_DONE]: VEHICLE_CM_STATES.CM_READY,
-          [VEHICLE_CM_EVENTS.RESET]: VEHICLE_CM_STATES.CM_READY
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.cmState = VEHICLE_CM_STATES.CM_RECHARGING;
-          v.flareActiveTimer = 0;
-        }
-      }
-    }
+    states: VEHICLE_CM_GRAPH
   });
 
   const thermalFsm = new FiniteStateMachine({
@@ -2102,30 +2191,7 @@ export function createVehicleSubsystemsFSM(vehicle) {
     context: vehicle,
     initial: VEHICLE_THERMAL_STATES.THERMAL_NORMAL,
     emitEvents: false,
-    states: {
-      [VEHICLE_THERMAL_STATES.THERMAL_NORMAL]: {
-        on: {
-          [VEHICLE_THERMAL_EVENTS.OVERHEAT_MAX]: VEHICLE_THERMAL_STATES.THERMAL_OVERHEATED_LOCKOUT,
-          [VEHICLE_THERMAL_EVENTS.RESET]: VEHICLE_THERMAL_STATES.THERMAL_NORMAL
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.thermalState = VEHICLE_THERMAL_STATES.THERMAL_NORMAL;
-          v.coaxOverheated = false;
-        }
-      },
-      [VEHICLE_THERMAL_STATES.THERMAL_OVERHEATED_LOCKOUT]: {
-        on: {
-          [VEHICLE_THERMAL_EVENTS.COOLED_DOWN]: VEHICLE_THERMAL_STATES.THERMAL_NORMAL,
-          [VEHICLE_THERMAL_EVENTS.RESET]: VEHICLE_THERMAL_STATES.THERMAL_NORMAL
-        },
-        onEnter(v) {
-          if (!v) return;
-          v.thermalState = VEHICLE_THERMAL_STATES.THERMAL_OVERHEATED_LOCKOUT;
-          v.coaxOverheated = true;
-        }
-      }
-    }
+    states: VEHICLE_THERMAL_GRAPH
   });
 
   if (vehicle) {
@@ -2143,28 +2209,42 @@ export function syncVehicleSubsystemsFSM(vehicle) {
     createVehicleSubsystemsFSM(vehicle);
   }
   const { cmFSM, thermalFSM } = vehicle;
+  const cmSt = cmFSM.state;
 
   // Enforce countermeasure invariant: flareActiveTimer > 0 requires flareCooldown >= flareActiveTimer
   if ((vehicle.flareActiveTimer || 0) > 0) {
     if ((vehicle.flareCooldown || 0) < vehicle.flareActiveTimer) {
       vehicle.flareCooldown = vehicle.flareActiveTimer;
     }
-    if (cmFSM.is(VEHICLE_CM_STATES.CM_READY)) {
+    if (cmSt === VEHICLE_CM_STATES.CM_RECHARGING) {
+      cmFSM.send(VEHICLE_CM_EVENTS.COOLDOWN_DONE);
+      cmFSM.send(VEHICLE_CM_EVENTS.ACTIVATE_CM);
+    } else if (cmSt === VEHICLE_CM_STATES.CM_READY) {
       cmFSM.send(VEHICLE_CM_EVENTS.ACTIVATE_CM);
     }
   } else if ((vehicle.flareCooldown || 0) > 0) {
-    if (cmFSM.is(VEHICLE_CM_STATES.CM_ACTIVE)) {
+    if (cmSt === VEHICLE_CM_STATES.CM_ACTIVE) {
       cmFSM.send(VEHICLE_CM_EVENTS.ACTIVE_EXPIRED);
     }
-  } else if (!cmFSM.is(VEHICLE_CM_STATES.CM_READY)) {
+  } else if (cmSt !== VEHICLE_CM_STATES.CM_READY) {
     cmFSM.send(VEHICLE_CM_EVENTS.COOLDOWN_DONE);
   }
 
   // Enforce coaxial thermal invariant: coaxHeat <= 0.15 clears coaxOverheated; coaxHeat >= 1.0 trips lockout
+  const thSt = thermalFSM.state;
   if ((vehicle.coaxHeat || 0) >= 1.0) {
-    thermalFSM.send(VEHICLE_THERMAL_EVENTS.OVERHEAT_MAX);
-  } else if ((vehicle.coaxHeat || 0) <= 0.15 && vehicle.coaxOverheated) {
-    thermalFSM.send(VEHICLE_THERMAL_EVENTS.COOLED_DOWN);
+    if (thSt === VEHICLE_THERMAL_STATES.THERMAL_NORMAL) {
+      thermalFSM.send(VEHICLE_THERMAL_EVENTS.OVERHEAT_MAX);
+    }
+  } else if (
+    (vehicle.coaxHeat || 0) <= 0.15 &&
+    (vehicle.coaxOverheated || thSt === VEHICLE_THERMAL_STATES.THERMAL_OVERHEATED_LOCKOUT)
+  ) {
+    if (thSt === VEHICLE_THERMAL_STATES.THERMAL_OVERHEATED_LOCKOUT) {
+      thermalFSM.send(VEHICLE_THERMAL_EVENTS.COOLED_DOWN);
+    } else {
+      vehicle.coaxOverheated = false;
+    }
   }
 
   vehicle.cmState = cmFSM.state;
@@ -2206,53 +2286,55 @@ export const TARGET_LOCK_EVENTS = {
   LOST_TARGET: 'LOST_TARGET'
 };
 
+const TARGET_LOCK_GRAPH = compileStateGraph({
+  [TARGET_LOCK_STATES.IDLE_NO_LOCK]: {
+    on: {
+      [TARGET_LOCK_EVENTS.ACQUIRE_TARGET]: TARGET_LOCK_STATES.LOCKING_ACQUIRING
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.targetLockState = TARGET_LOCK_STATES.IDLE_NO_LOCK;
+      p.aircraftLockTarget = null;
+      p.aircraftLockProgress = 0;
+    }
+  },
+  [TARGET_LOCK_STATES.LOCKING_ACQUIRING]: {
+    on: {
+      [TARGET_LOCK_EVENTS.LOCK_COMPLETE]: TARGET_LOCK_STATES.LOCKED_SOLID_TONE,
+      [TARGET_LOCK_EVENTS.SWITCH_TARGET]: TARGET_LOCK_STATES.LOCKING_ACQUIRING,
+      [TARGET_LOCK_EVENTS.LOST_TARGET]: TARGET_LOCK_STATES.IDLE_NO_LOCK
+    },
+    onEnter(p, fromState, payload) {
+      if (!p) return;
+      p.targetLockState = TARGET_LOCK_STATES.LOCKING_ACQUIRING;
+      if (payload?.target) {
+        p.aircraftLockTarget = payload.target;
+      }
+      if (typeof payload?.initialProgress === 'number') {
+        p.aircraftLockProgress = payload.initialProgress;
+      }
+    }
+  },
+  [TARGET_LOCK_STATES.LOCKED_SOLID_TONE]: {
+    on: {
+      [TARGET_LOCK_EVENTS.SWITCH_TARGET]: TARGET_LOCK_STATES.LOCKING_ACQUIRING,
+      [TARGET_LOCK_EVENTS.LOST_TARGET]: TARGET_LOCK_STATES.IDLE_NO_LOCK
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.targetLockState = TARGET_LOCK_STATES.LOCKED_SOLID_TONE;
+      p.aircraftLockProgress = 1.0;
+    }
+  }
+});
+
 export function createTargetLockScannerFSM(player) {
   const fsm = new FiniteStateMachine({
     id: 'targetLockScanner',
     context: player,
     initial: TARGET_LOCK_STATES.IDLE_NO_LOCK,
     emitEvents: false,
-    states: {
-      [TARGET_LOCK_STATES.IDLE_NO_LOCK]: {
-        on: {
-          [TARGET_LOCK_EVENTS.ACQUIRE_TARGET]: TARGET_LOCK_STATES.LOCKING_ACQUIRING
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.targetLockState = TARGET_LOCK_STATES.IDLE_NO_LOCK;
-          p.aircraftLockTarget = null;
-          p.aircraftLockProgress = 0;
-        }
-      },
-      [TARGET_LOCK_STATES.LOCKING_ACQUIRING]: {
-        on: {
-          [TARGET_LOCK_EVENTS.LOCK_COMPLETE]: TARGET_LOCK_STATES.LOCKED_SOLID_TONE,
-          [TARGET_LOCK_EVENTS.SWITCH_TARGET]: TARGET_LOCK_STATES.LOCKING_ACQUIRING,
-          [TARGET_LOCK_EVENTS.LOST_TARGET]: TARGET_LOCK_STATES.IDLE_NO_LOCK
-        },
-        onEnter(p, fromState, payload) {
-          if (!p) return;
-          p.targetLockState = TARGET_LOCK_STATES.LOCKING_ACQUIRING;
-          if (payload?.target) {
-            p.aircraftLockTarget = payload.target;
-          }
-          if (typeof payload?.initialProgress === 'number') {
-            p.aircraftLockProgress = payload.initialProgress;
-          }
-        }
-      },
-      [TARGET_LOCK_STATES.LOCKED_SOLID_TONE]: {
-        on: {
-          [TARGET_LOCK_EVENTS.SWITCH_TARGET]: TARGET_LOCK_STATES.LOCKING_ACQUIRING,
-          [TARGET_LOCK_EVENTS.LOST_TARGET]: TARGET_LOCK_STATES.IDLE_NO_LOCK
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.targetLockState = TARGET_LOCK_STATES.LOCKED_SOLID_TONE;
-          p.aircraftLockProgress = 1.0;
-        }
-      }
-    }
+    states: TARGET_LOCK_GRAPH
   });
   if (player) {
     player.targetLockFSM = fsm;
@@ -2267,6 +2349,7 @@ export function updateTargetLockScanner(player, candidateTarget, dt, lockRate = 
     createTargetLockScannerFSM(player);
   }
   const fsm = player.targetLockFSM;
+  const st = fsm.state;
 
   const isValidTarget = Boolean(
     candidateTarget &&
@@ -2276,7 +2359,7 @@ export function updateTargetLockScanner(player, candidateTarget, dt, lockRate = 
   );
 
   if (!isValidTarget) {
-    if (!fsm.is(TARGET_LOCK_STATES.IDLE_NO_LOCK)) {
+    if (st !== TARGET_LOCK_STATES.IDLE_NO_LOCK) {
       fsm.send(TARGET_LOCK_EVENTS.LOST_TARGET);
     } else {
       player.aircraftLockTarget = null;
@@ -2285,7 +2368,7 @@ export function updateTargetLockScanner(player, candidateTarget, dt, lockRate = 
     return fsm.state;
   }
 
-  if (fsm.is(TARGET_LOCK_STATES.IDLE_NO_LOCK)) {
+  if (st === TARGET_LOCK_STATES.IDLE_NO_LOCK) {
     fsm.send(TARGET_LOCK_EVENTS.ACQUIRE_TARGET, {
       target: candidateTarget,
       initialProgress: 0.25
@@ -2300,7 +2383,7 @@ export function updateTargetLockScanner(player, candidateTarget, dt, lockRate = 
     player.aircraftLockProgress = Math.min(1.0, (player.aircraftLockProgress || 0) + dt * lockRate);
     if (
       player.aircraftLockProgress >= 1.0 &&
-      fsm.is(TARGET_LOCK_STATES.LOCKING_ACQUIRING)
+      st === TARGET_LOCK_STATES.LOCKING_ACQUIRING
     ) {
       fsm.send(TARGET_LOCK_EVENTS.LOCK_COMPLETE);
     }
@@ -2354,67 +2437,69 @@ function cancelRouletteRaf(ui) {
   }
 }
 
+const ARMORY_CASE_GRAPH = compileStateGraph({
+  [ARMORY_CASE_STATES.CASE_IDLE]: {
+    on: {
+      [ARMORY_CASE_EVENTS.START_SPIN]: ARMORY_CASE_STATES.CASE_ROLLING_SPIN
+    },
+    onEnter(u) {
+      if (!u) return;
+      cancelRouletteRaf(u);
+      u.caseRouletteState = ARMORY_CASE_STATES.CASE_IDLE;
+      u._isRouletteSpinning = false;
+      u._playRouletteSpinNextRender = false;
+      u._rouletteSpinStart = null;
+    }
+  },
+  [ARMORY_CASE_STATES.CASE_ROLLING_SPIN]: {
+    on: {
+      [ARMORY_CASE_EVENTS.COMPLETE_SPIN]: ARMORY_CASE_STATES.CASE_REWARD_REVEALED,
+      [ARMORY_CASE_EVENTS.ABORT_SPIN]: ARMORY_CASE_STATES.CASE_IDLE
+    },
+    onEnter(u, fromState, payload) {
+      if (!u) return;
+      cancelRouletteRaf(u);
+      u.caseRouletteState = ARMORY_CASE_STATES.CASE_ROLLING_SPIN;
+      u._isRouletteSpinning = true;
+      u._playRouletteSpinNextRender = payload?.deferRender !== false;
+      u._rouletteSpinStart =
+        typeof payload?.spinStart === 'number'
+          ? payload.spinStart
+          : typeof performance !== 'undefined'
+          ? performance.now()
+          : Date.now();
+      u._lastCaseReward = null;
+    }
+  },
+  [ARMORY_CASE_STATES.CASE_REWARD_REVEALED]: {
+    on: {
+      [ARMORY_CASE_EVENTS.START_SPIN]: ARMORY_CASE_STATES.CASE_ROLLING_SPIN,
+      [ARMORY_CASE_EVENTS.RESET_CASE]: ARMORY_CASE_STATES.CASE_IDLE,
+      [ARMORY_CASE_EVENTS.ABORT_SPIN]: ARMORY_CASE_STATES.CASE_IDLE
+    },
+    onEnter(u, fromState, payload) {
+      if (!u) return;
+      cancelRouletteRaf(u);
+      u.caseRouletteState = ARMORY_CASE_STATES.CASE_REWARD_REVEALED;
+      u._isRouletteSpinning = false;
+      u._playRouletteSpinNextRender = false;
+      u._rouletteSpinStart = null;
+      if (payload?.reward !== undefined) {
+        u._lastCaseReward = payload.reward;
+      } else if (u.player?.lastCaseResult?.reward) {
+        u._lastCaseReward = u.player.lastCaseResult.reward;
+      }
+    }
+  }
+});
+
 export function createArmoryCaseRouletteFSM(ui) {
   const fsm = new FiniteStateMachine({
     id: 'armoryCaseRoulette',
     context: ui,
     initial: ARMORY_CASE_STATES.CASE_IDLE,
     emitEvents: false,
-    states: {
-      [ARMORY_CASE_STATES.CASE_IDLE]: {
-        on: {
-          [ARMORY_CASE_EVENTS.START_SPIN]: ARMORY_CASE_STATES.CASE_ROLLING_SPIN
-        },
-        onEnter(u) {
-          if (!u) return;
-          cancelRouletteRaf(u);
-          u.caseRouletteState = ARMORY_CASE_STATES.CASE_IDLE;
-          u._isRouletteSpinning = false;
-          u._playRouletteSpinNextRender = false;
-          u._rouletteSpinStart = null;
-        }
-      },
-      [ARMORY_CASE_STATES.CASE_ROLLING_SPIN]: {
-        on: {
-          [ARMORY_CASE_EVENTS.COMPLETE_SPIN]: ARMORY_CASE_STATES.CASE_REWARD_REVEALED,
-          [ARMORY_CASE_EVENTS.ABORT_SPIN]: ARMORY_CASE_STATES.CASE_IDLE
-        },
-        onEnter(u, fromState, payload) {
-          if (!u) return;
-          cancelRouletteRaf(u);
-          u.caseRouletteState = ARMORY_CASE_STATES.CASE_ROLLING_SPIN;
-          u._isRouletteSpinning = true;
-          u._playRouletteSpinNextRender = payload?.deferRender !== false;
-          u._rouletteSpinStart =
-            typeof payload?.spinStart === 'number'
-              ? payload.spinStart
-              : typeof performance !== 'undefined'
-              ? performance.now()
-              : Date.now();
-          u._lastCaseReward = null;
-        }
-      },
-      [ARMORY_CASE_STATES.CASE_REWARD_REVEALED]: {
-        on: {
-          [ARMORY_CASE_EVENTS.START_SPIN]: ARMORY_CASE_STATES.CASE_ROLLING_SPIN,
-          [ARMORY_CASE_EVENTS.RESET_CASE]: ARMORY_CASE_STATES.CASE_IDLE,
-          [ARMORY_CASE_EVENTS.ABORT_SPIN]: ARMORY_CASE_STATES.CASE_IDLE
-        },
-        onEnter(u, fromState, payload) {
-          if (!u) return;
-          cancelRouletteRaf(u);
-          u.caseRouletteState = ARMORY_CASE_STATES.CASE_REWARD_REVEALED;
-          u._isRouletteSpinning = false;
-          u._playRouletteSpinNextRender = false;
-          u._rouletteSpinStart = null;
-          if (payload?.reward !== undefined) {
-            u._lastCaseReward = payload.reward;
-          } else if (u.player?.lastCaseResult?.reward) {
-            u._lastCaseReward = u.player.lastCaseResult.reward;
-          }
-        }
-      }
-    }
+    states: ARMORY_CASE_GRAPH
   });
   if (ui) {
     ui.caseRouletteFSM = fsm;
@@ -2467,47 +2552,86 @@ function cleanupDeployableField(player, fieldName) {
   player[fieldName] = null;
 }
 
+const RALLY_DEPLOYABLE_GRAPH = compileStateGraph({
+  [DEPLOYABLE_STATES.DEPLOYABLE_READY]: {
+    on: {
+      [DEPLOYABLE_EVENTS.PLACE]: DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE,
+      [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.rallyDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_READY;
+    }
+  },
+  [DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE]: {
+    on: {
+      [DEPLOYABLE_EVENTS.PLACE]: DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE,
+      [DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY]: DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN,
+      [DEPLOYABLE_EVENTS.COOLDOWN_DONE]: DEPLOYABLE_STATES.DEPLOYABLE_READY,
+      [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.rallyDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE;
+    }
+  },
+  [DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN]: {
+    on: {
+      [DEPLOYABLE_EVENTS.COOLDOWN_DONE]: DEPLOYABLE_STATES.DEPLOYABLE_READY,
+      [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      cleanupDeployableField(p, 'rallyPoint');
+      p.rallyDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN;
+    }
+  }
+});
+
+const BEACON_DEPLOYABLE_GRAPH = compileStateGraph({
+  [DEPLOYABLE_STATES.DEPLOYABLE_READY]: {
+    on: {
+      [DEPLOYABLE_EVENTS.PLACE]: DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE,
+      [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.beaconDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_READY;
+    }
+  },
+  [DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE]: {
+    on: {
+      [DEPLOYABLE_EVENTS.PLACE]: DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE,
+      [DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY]: DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN,
+      [DEPLOYABLE_EVENTS.DEPLETE_SPAWNS]: DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN,
+      [DEPLOYABLE_EVENTS.COOLDOWN_DONE]: DEPLOYABLE_STATES.DEPLOYABLE_READY,
+      [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      p.beaconDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE;
+    }
+  },
+  [DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN]: {
+    on: {
+      [DEPLOYABLE_EVENTS.COOLDOWN_DONE]: DEPLOYABLE_STATES.DEPLOYABLE_READY,
+      [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
+    },
+    onEnter(p) {
+      if (!p) return;
+      cleanupDeployableField(p, 'insertionBeacon');
+      p.beaconDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN;
+    }
+  }
+});
+
 export function createSquadDeployablesFSM(player) {
   const rallyFsm = new FiniteStateMachine({
     id: 'rallyDeployable',
     context: player,
     initial: DEPLOYABLE_STATES.DEPLOYABLE_READY,
     emitEvents: false,
-    states: {
-      [DEPLOYABLE_STATES.DEPLOYABLE_READY]: {
-        on: {
-          [DEPLOYABLE_EVENTS.PLACE]: DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE,
-          [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.rallyDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_READY;
-        }
-      },
-      [DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE]: {
-        on: {
-          [DEPLOYABLE_EVENTS.PLACE]: DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE,
-          [DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY]: DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN,
-          [DEPLOYABLE_EVENTS.COOLDOWN_DONE]: DEPLOYABLE_STATES.DEPLOYABLE_READY,
-          [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.rallyDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE;
-        }
-      },
-      [DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN]: {
-        on: {
-          [DEPLOYABLE_EVENTS.COOLDOWN_DONE]: DEPLOYABLE_STATES.DEPLOYABLE_READY,
-          [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          cleanupDeployableField(p, 'rallyPoint');
-          p.rallyDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN;
-        }
-      }
-    }
+    states: RALLY_DEPLOYABLE_GRAPH
   });
 
   const beaconFsm = new FiniteStateMachine({
@@ -2515,42 +2639,7 @@ export function createSquadDeployablesFSM(player) {
     context: player,
     initial: DEPLOYABLE_STATES.DEPLOYABLE_READY,
     emitEvents: false,
-    states: {
-      [DEPLOYABLE_STATES.DEPLOYABLE_READY]: {
-        on: {
-          [DEPLOYABLE_EVENTS.PLACE]: DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE,
-          [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.beaconDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_READY;
-        }
-      },
-      [DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE]: {
-        on: {
-          [DEPLOYABLE_EVENTS.PLACE]: DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE,
-          [DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY]: DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN,
-          [DEPLOYABLE_EVENTS.DEPLETE_SPAWNS]: DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN,
-          [DEPLOYABLE_EVENTS.COOLDOWN_DONE]: DEPLOYABLE_STATES.DEPLOYABLE_READY,
-          [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          p.beaconDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE;
-        }
-      },
-      [DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN]: {
-        on: {
-          [DEPLOYABLE_EVENTS.COOLDOWN_DONE]: DEPLOYABLE_STATES.DEPLOYABLE_READY,
-          [DEPLOYABLE_EVENTS.RESET]: DEPLOYABLE_STATES.DEPLOYABLE_READY
-        },
-        onEnter(p) {
-          if (!p) return;
-          cleanupDeployableField(p, 'insertionBeacon');
-          p.beaconDeployableState = DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN;
-        }
-      }
-    }
+    states: BEACON_DEPLOYABLE_GRAPH
   });
 
   if (player) {
@@ -2573,41 +2662,65 @@ export function syncSquadDeployablesFSM(player) {
   // Sync Rally Point FSM & enforce invariants
   if (player.rallyPoint) {
     if ((player.rallyPoint.timer || 0) <= 0) {
+      if (rallyFsm.state !== DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE) {
+        if (rallyFsm.state === DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN) {
+          rallyFsm.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
+        }
+        rallyFsm.send(DEPLOYABLE_EVENTS.PLACE);
+      }
       rallyFsm.send(DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY);
       if ((player.rallyCooldown || 0) <= 0) {
         rallyFsm.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
       }
-    } else if (!rallyFsm.is(DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE)) {
+    } else if (rallyFsm.state !== DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE) {
+      if (rallyFsm.state === DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN) {
+        rallyFsm.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
+      }
       rallyFsm.send(DEPLOYABLE_EVENTS.PLACE);
     }
   } else if ((player.rallyCooldown || 0) > 0) {
-    if (rallyFsm.is(DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE)) {
+    if (rallyFsm.state === DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE) {
       rallyFsm.send(DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY);
     }
-  } else if (!rallyFsm.is(DEPLOYABLE_STATES.DEPLOYABLE_READY)) {
+  } else if (rallyFsm.state !== DEPLOYABLE_STATES.DEPLOYABLE_READY) {
     rallyFsm.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
   }
 
   // Sync Insertion Beacon FSM & enforce invariants
   if (player.insertionBeacon) {
     if ((player.insertionBeacon.spawnsLeft || 0) <= 0) {
+      if (beaconFsm.state !== DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE) {
+        if (beaconFsm.state === DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN) {
+          beaconFsm.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
+        }
+        beaconFsm.send(DEPLOYABLE_EVENTS.PLACE);
+      }
       beaconFsm.send(DEPLOYABLE_EVENTS.DEPLETE_SPAWNS);
       if ((player.beaconCooldown || 0) <= 0) {
         beaconFsm.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
       }
     } else if ((player.insertionBeacon.timer || 0) <= 0) {
+      if (beaconFsm.state !== DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE) {
+        if (beaconFsm.state === DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN) {
+          beaconFsm.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
+        }
+        beaconFsm.send(DEPLOYABLE_EVENTS.PLACE);
+      }
       beaconFsm.send(DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY);
       if ((player.beaconCooldown || 0) <= 0) {
         beaconFsm.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
       }
-    } else if (!beaconFsm.is(DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE)) {
+    } else if (beaconFsm.state !== DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE) {
+      if (beaconFsm.state === DEPLOYABLE_STATES.DEPLOYABLE_COOLDOWN) {
+        beaconFsm.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
+      }
       beaconFsm.send(DEPLOYABLE_EVENTS.PLACE);
     }
   } else if ((player.beaconCooldown || 0) > 0) {
-    if (beaconFsm.is(DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE)) {
+    if (beaconFsm.state === DEPLOYABLE_STATES.DEPLOYABLE_ACTIVE) {
       beaconFsm.send(DEPLOYABLE_EVENTS.EXPIRE_OR_DESTROY);
     }
-  } else if (!beaconFsm.is(DEPLOYABLE_STATES.DEPLOYABLE_READY)) {
+  } else if (beaconFsm.state !== DEPLOYABLE_STATES.DEPLOYABLE_READY) {
     beaconFsm.send(DEPLOYABLE_EVENTS.COOLDOWN_DONE);
   }
 
@@ -2653,56 +2766,58 @@ export const BASE_PROTECTION_EVENTS = {
   EVALUATE_CONTESTED_LOCKED: 'EVALUATE_CONTESTED_LOCKED'
 };
 
+const BASE_PROTECTION_GRAPH = compileStateGraph({
+  [BASE_PROTECTION_STATES.BASE_SAFE]: {
+    on: {
+      [BASE_PROTECTION_EVENTS.EVALUATE_SAFE]: BASE_PROTECTION_STATES.BASE_SAFE,
+      [BASE_PROTECTION_EVENTS.EVALUATE_INTRUDER_DEFENDED]:
+        BASE_PROTECTION_STATES.BASE_INTRUDER_DEFENDED,
+      [BASE_PROTECTION_EVENTS.EVALUATE_CONTESTED_LOCKED]:
+        BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED
+    },
+    onEnter(entry) {
+      if (!entry) return;
+      entry.protectionState = BASE_PROTECTION_STATES.BASE_SAFE;
+      entry.contested = false;
+    }
+  },
+  [BASE_PROTECTION_STATES.BASE_INTRUDER_DEFENDED]: {
+    on: {
+      [BASE_PROTECTION_EVENTS.EVALUATE_SAFE]: BASE_PROTECTION_STATES.BASE_SAFE,
+      [BASE_PROTECTION_EVENTS.EVALUATE_INTRUDER_DEFENDED]:
+        BASE_PROTECTION_STATES.BASE_INTRUDER_DEFENDED,
+      [BASE_PROTECTION_EVENTS.EVALUATE_CONTESTED_LOCKED]:
+        BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED
+    },
+    onEnter(entry) {
+      if (!entry) return;
+      entry.protectionState = BASE_PROTECTION_STATES.BASE_INTRUDER_DEFENDED;
+      entry.contested = false;
+    }
+  },
+  [BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED]: {
+    on: {
+      [BASE_PROTECTION_EVENTS.EVALUATE_SAFE]: BASE_PROTECTION_STATES.BASE_SAFE,
+      [BASE_PROTECTION_EVENTS.EVALUATE_INTRUDER_DEFENDED]:
+        BASE_PROTECTION_STATES.BASE_INTRUDER_DEFENDED,
+      [BASE_PROTECTION_EVENTS.EVALUATE_CONTESTED_LOCKED]:
+        BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED
+    },
+    onEnter(entry) {
+      if (!entry) return;
+      entry.protectionState = BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED;
+      entry.contested = true;
+    }
+  }
+});
+
 export function createBaseProtectionFSM(baseEntry, team = 'US') {
   const fsm = new FiniteStateMachine({
     id: `baseProtection:${team}`,
     context: baseEntry,
     initial: BASE_PROTECTION_STATES.BASE_SAFE,
     emitEvents: false,
-    states: {
-      [BASE_PROTECTION_STATES.BASE_SAFE]: {
-        on: {
-          [BASE_PROTECTION_EVENTS.EVALUATE_SAFE]: BASE_PROTECTION_STATES.BASE_SAFE,
-          [BASE_PROTECTION_EVENTS.EVALUATE_INTRUDER_DEFENDED]:
-            BASE_PROTECTION_STATES.BASE_INTRUDER_DEFENDED,
-          [BASE_PROTECTION_EVENTS.EVALUATE_CONTESTED_LOCKED]:
-            BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED
-        },
-        onEnter(entry) {
-          if (!entry) return;
-          entry.protectionState = BASE_PROTECTION_STATES.BASE_SAFE;
-          entry.contested = false;
-        }
-      },
-      [BASE_PROTECTION_STATES.BASE_INTRUDER_DEFENDED]: {
-        on: {
-          [BASE_PROTECTION_EVENTS.EVALUATE_SAFE]: BASE_PROTECTION_STATES.BASE_SAFE,
-          [BASE_PROTECTION_EVENTS.EVALUATE_INTRUDER_DEFENDED]:
-            BASE_PROTECTION_STATES.BASE_INTRUDER_DEFENDED,
-          [BASE_PROTECTION_EVENTS.EVALUATE_CONTESTED_LOCKED]:
-            BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED
-        },
-        onEnter(entry) {
-          if (!entry) return;
-          entry.protectionState = BASE_PROTECTION_STATES.BASE_INTRUDER_DEFENDED;
-          entry.contested = false;
-        }
-      },
-      [BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED]: {
-        on: {
-          [BASE_PROTECTION_EVENTS.EVALUATE_SAFE]: BASE_PROTECTION_STATES.BASE_SAFE,
-          [BASE_PROTECTION_EVENTS.EVALUATE_INTRUDER_DEFENDED]:
-            BASE_PROTECTION_STATES.BASE_INTRUDER_DEFENDED,
-          [BASE_PROTECTION_EVENTS.EVALUATE_CONTESTED_LOCKED]:
-            BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED
-        },
-        onEnter(entry) {
-          if (!entry) return;
-          entry.protectionState = BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED;
-          entry.contested = true;
-        }
-      }
-    }
+    states: BASE_PROTECTION_GRAPH
   });
   if (baseEntry) {
     baseEntry.fsm = fsm;
@@ -2722,16 +2837,21 @@ export function syncBaseProtectionFSM(baseEntry, team = 'US') {
   baseEntry.attackers = attackers;
   baseEntry.defenders = defenders;
 
+  const st = fsm.state;
   if (attackers === 0) {
-    fsm.send(BASE_PROTECTION_EVENTS.EVALUATE_SAFE);
+    if (st !== BASE_PROTECTION_STATES.BASE_SAFE) {
+      fsm.send(BASE_PROTECTION_EVENTS.EVALUATE_SAFE);
+    }
   } else if (defenders > 0) {
-    fsm.send(BASE_PROTECTION_EVENTS.EVALUATE_INTRUDER_DEFENDED);
-  } else {
+    if (st !== BASE_PROTECTION_STATES.BASE_INTRUDER_DEFENDED) {
+      fsm.send(BASE_PROTECTION_EVENTS.EVALUATE_INTRUDER_DEFENDED);
+    }
+  } else if (st !== BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED) {
     fsm.send(BASE_PROTECTION_EVENTS.EVALUATE_CONTESTED_LOCKED);
   }
 
   baseEntry.protectionState = fsm.state;
-  baseEntry.contested = fsm.is(BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED);
+  baseEntry.contested = fsm.state === BASE_PROTECTION_STATES.BASE_CONTESTED_LOCKED;
   return fsm.state;
 }
 
@@ -2787,31 +2907,39 @@ export class GameStateMachineRegistry {
         ui.victoryScreenEl.style.display !== 'none'
     );
 
-    if (g.matchEnded || onVictory) {
-      this.match.transition(MATCH_STATES.ROUND_VICTORY);
-    } else if (onDeploy) {
-      this.match.transition(MATCH_STATES.DEPLOY_LOBBY);
-    } else {
-      this.match.transition(MATCH_STATES.ACTIVE_COMBAT);
+    const desiredMatchState =
+      g.matchEnded || onVictory
+        ? MATCH_STATES.ROUND_VICTORY
+        : onDeploy
+        ? MATCH_STATES.DEPLOY_LOBBY
+        : MATCH_STATES.ACTIVE_COMBAT;
+    if (this.match.state !== desiredMatchState && this.match.can(desiredMatchState)) {
+      this.match.transition(desiredMatchState);
     }
 
     // 2. Sync UI Overlay & Input Focus FSM
+    let desiredModalState = UI_MODAL_STATES.HUD_LOCKED;
     if (onVictory) {
-      this.uiModal.transition(UI_MODAL_STATES.VICTORY_SCREEN);
+      desiredModalState = UI_MODAL_STATES.VICTORY_SCREEN;
     } else if (onDeploy) {
-      this.uiModal.transition(UI_MODAL_STATES.DEPLOY_SCREEN);
+      desiredModalState = UI_MODAL_STATES.DEPLOY_SCREEN;
     } else if (this._isDomModalOpen('gunsmith-modal')) {
-      this.uiModal.transition(UI_MODAL_STATES.MODAL_GUNSMITH_LOOT);
+      desiredModalState = UI_MODAL_STATES.MODAL_GUNSMITH_LOOT;
     } else if (this._isDomModalOpen('command-modal')) {
-      this.uiModal.transition(UI_MODAL_STATES.MODAL_COMMAND_MAP);
+      desiredModalState = UI_MODAL_STATES.MODAL_COMMAND_MAP;
     } else if (this._isDomModalOpen('multiplayer-modal')) {
-      this.uiModal.transition(UI_MODAL_STATES.MODAL_MULTIPLAYER);
+      desiredModalState = UI_MODAL_STATES.MODAL_MULTIPLAYER;
     } else if (this._isDomModalOpen('settings-modal')) {
-      this.uiModal.transition(UI_MODAL_STATES.MODAL_SETTINGS);
+      desiredModalState = UI_MODAL_STATES.MODAL_SETTINGS;
     } else if (p?.commoRoseActive) {
-      this.uiModal.transition(UI_MODAL_STATES.COMMO_ROSE);
-    } else {
-      this.uiModal.transition(UI_MODAL_STATES.HUD_LOCKED, { restorePointerLock: false });
+      desiredModalState = UI_MODAL_STATES.COMMO_ROSE;
+    }
+    if (this.uiModal.state !== desiredModalState) {
+      if (desiredModalState === UI_MODAL_STATES.HUD_LOCKED) {
+        this.uiModal.transition(UI_MODAL_STATES.HUD_LOCKED, NO_RESTORE_LOCK_PAYLOAD);
+      } else {
+        this.uiModal.transition(desiredModalState);
+      }
     }
 
     // 3. Sync Player Vitality, Stance, Weapon & Interact FSMs
@@ -2826,48 +2954,60 @@ export class GameStateMachineRegistry {
       }
 
       if (p.dead) {
-        if (!this.playerVitality.is(PLAYER_VITALITY_STATES.UNDEPLOYED)) {
-          this.playerVitality.transition(
-            onDeploy ? PLAYER_VITALITY_STATES.UNDEPLOYED : PLAYER_VITALITY_STATES.DEAD_AWAITING_RESPAWN
-          );
+        if (this.playerVitality.state !== PLAYER_VITALITY_STATES.UNDEPLOYED) {
+          const targetVit = onDeploy
+            ? PLAYER_VITALITY_STATES.UNDEPLOYED
+            : PLAYER_VITALITY_STATES.DEAD_AWAITING_RESPAWN;
+          if (this.playerVitality.state !== targetVit && this.playerVitality.can(targetVit)) {
+            this.playerVitality.transition(targetVit);
+          }
         }
       } else if (p.downed) {
-        this.playerVitality.transition(PLAYER_VITALITY_STATES.DOWNED_BLEEDING_OUT);
+        if (this.playerVitality.state !== PLAYER_VITALITY_STATES.DOWNED_BLEEDING_OUT) {
+          if (!this.playerVitality.can(PLAYER_VITALITY_STATES.DOWNED_BLEEDING_OUT)) {
+            this.playerVitality.transition(PLAYER_VITALITY_STATES.ALIVE);
+          }
+          this.playerVitality.transition(PLAYER_VITALITY_STATES.DOWNED_BLEEDING_OUT);
+        }
       } else if (p.activeVehicle) {
-        this.playerVitality.transition(PLAYER_VITALITY_STATES.IN_VEHICLE);
-      } else {
+        if (this.playerVitality.state !== PLAYER_VITALITY_STATES.IN_VEHICLE) {
+          if (!this.playerVitality.can(PLAYER_VITALITY_STATES.IN_VEHICLE)) {
+            this.playerVitality.transition(PLAYER_VITALITY_STATES.ALIVE);
+          }
+          this.playerVitality.transition(PLAYER_VITALITY_STATES.IN_VEHICLE);
+        }
+      } else if (this.playerVitality.state !== PLAYER_VITALITY_STATES.ALIVE) {
         this.playerVitality.transition(PLAYER_VITALITY_STATES.ALIVE);
       }
 
       // Stance FSM
       if (p.dead || p.downed) {
-        if (this.playerStance.is(PLAYER_STANCE_STATES.VEHICLE_SEATED)) {
-          this.playerStance.transition(PLAYER_STANCE_STATES.INCAPACITATED);
-        } else {
+        if (this.playerStance.state !== PLAYER_STANCE_STATES.INCAPACITATED) {
           this.playerStance.transition(PLAYER_STANCE_STATES.INCAPACITATED);
         }
       } else {
-        if (this.playerStance.is(PLAYER_STANCE_STATES.INCAPACITATED)) {
+        if (this.playerStance.state === PLAYER_STANCE_STATES.INCAPACITATED) {
           this.playerStance.transition(PLAYER_STANCE_STATES.STANDING);
         }
         if (p.activeVehicle) {
-          if (this.playerStance.is(PLAYER_STANCE_STATES.VEHICLE_SEATED) === false) {
+          if (this.playerStance.state !== PLAYER_STANCE_STATES.VEHICLE_SEATED) {
             this.playerStance.transition(PLAYER_STANCE_STATES.VEHICLE_SEATED);
           }
         } else {
-          if (this.playerStance.is(PLAYER_STANCE_STATES.VEHICLE_SEATED)) {
+          if (this.playerStance.state === PLAYER_STANCE_STATES.VEHICLE_SEATED) {
             this.playerStance.transition(
               p.isGrounded ? PLAYER_STANCE_STATES.STANDING : PLAYER_STANCE_STATES.AIRBORNE
             );
           }
+          let desiredStance = PLAYER_STANCE_STATES.STANDING;
           if (p.draggedBot || p.isDraggingAlly) {
-            this.playerStance.transition(PLAYER_STANCE_STATES.DRAGGING_ALLY);
+            desiredStance = PLAYER_STANCE_STATES.DRAGGING_ALLY;
           } else if (!p.isGrounded) {
-            this.playerStance.transition(PLAYER_STANCE_STATES.AIRBORNE);
+            desiredStance = PLAYER_STANCE_STATES.AIRBORNE;
           } else if (p.prone) {
-            this.playerStance.transition(PLAYER_STANCE_STATES.PRONE);
+            desiredStance = PLAYER_STANCE_STATES.PRONE;
           } else if (p.crouching) {
-            this.playerStance.transition(PLAYER_STANCE_STATES.CROUCHING);
+            desiredStance = PLAYER_STANCE_STATES.CROUCHING;
           } else if (
             p.keys?.['ShiftLeft'] &&
             p.keys?.['KeyW'] &&
@@ -2875,51 +3015,64 @@ export class GameStateMachineRegistry {
             !p.isFiring &&
             !p.isModalOpen?.()
           ) {
-            this.playerStance.transition(PLAYER_STANCE_STATES.SPRINTING);
-          } else {
-            this.playerStance.transition(PLAYER_STANCE_STATES.STANDING);
+            desiredStance = PLAYER_STANCE_STATES.SPRINTING;
+          }
+          if (this.playerStance.state !== desiredStance) {
+            this.playerStance.transition(desiredStance);
           }
         }
       }
 
       // Weapon & Action FSM
       if (p.dead || p.downed) {
-        this.playerWeapon.transition(PLAYER_WEAPON_STATES.DISABLED);
+        if (this.playerWeapon.state !== PLAYER_WEAPON_STATES.DISABLED) {
+          this.playerWeapon.transition(PLAYER_WEAPON_STATES.DISABLED);
+        }
       } else {
-        if (this.playerWeapon.is(PLAYER_WEAPON_STATES.DISABLED)) {
+        if (this.playerWeapon.state === PLAYER_WEAPON_STATES.DISABLED) {
           this.playerWeapon.transition(PLAYER_WEAPON_STATES.READY);
         }
+        let desiredWeapon = PLAYER_WEAPON_STATES.READY;
         if ((p.reviveProgress || 0) > 0) {
-          this.playerWeapon.transition(PLAYER_WEAPON_STATES.REVIVING_ALLY);
+          desiredWeapon = PLAYER_WEAPON_STATES.REVIVING_ALLY;
         } else if ((p.bandageProgress || 0) > 0) {
-          this.playerWeapon.transition(PLAYER_WEAPON_STATES.BANDAGING_SELF);
+          desiredWeapon = PLAYER_WEAPON_STATES.BANDAGING_SELF;
         } else if (p.reloading) {
-          this.playerWeapon.transition(
-            p.fastReload ? PLAYER_WEAPON_STATES.SPEED_RELOAD : PLAYER_WEAPON_STATES.TACTICAL_RELOAD
-          );
+          desiredWeapon = p.fastReload
+            ? PLAYER_WEAPON_STATES.SPEED_RELOAD
+            : PLAYER_WEAPON_STATES.TACTICAL_RELOAD;
         } else if (p.slowReloading) {
-          this.playerWeapon.transition(PLAYER_WEAPON_STATES.SLOW_MAG_PACK);
+          desiredWeapon = PLAYER_WEAPON_STATES.SLOW_MAG_PACK;
         } else if (p.keys?.['KeyF'] && (p.keyFHoldTime || 0) > 0 && p._pendingEnemyLootPack) {
-          this.playerWeapon.transition(PLAYER_WEAPON_STATES.LOOTING_HOLD);
+          desiredWeapon = PLAYER_WEAPON_STATES.LOOTING_HOLD;
         } else if (p.isFiring) {
-          this.playerWeapon.transition(PLAYER_WEAPON_STATES.FIRING);
-        } else {
-          this.playerWeapon.transition(PLAYER_WEAPON_STATES.READY);
+          desiredWeapon = PLAYER_WEAPON_STATES.FIRING;
+        }
+        if (this.playerWeapon.state !== desiredWeapon) {
+          if (!this.playerWeapon.can(desiredWeapon) && this.playerWeapon.can(PLAYER_WEAPON_STATES.READY)) {
+            this.playerWeapon.transition(PLAYER_WEAPON_STATES.READY);
+          }
+          this.playerWeapon.transition(desiredWeapon);
         }
       }
 
       // Interact [F] FSM
+      let desiredInteract = PLAYER_INTERACT_STATES.IDLE;
       if (
-        this.uiModal.is(UI_MODAL_STATES.MODAL_GUNSMITH_LOOT) &&
+        this.uiModal.state === UI_MODAL_STATES.MODAL_GUNSMITH_LOOT &&
         ui?._gunsmithActiveTab === 'backpack'
       ) {
-        this.playerInteract.transition(PLAYER_INTERACT_STATES.MANUAL_LOOT_MODAL_OPEN);
+        desiredInteract = PLAYER_INTERACT_STATES.MANUAL_LOOT_MODAL_OPEN;
       } else if ((p.reviveProgress || 0) > 0) {
-        this.playerInteract.transition(PLAYER_INTERACT_STATES.HOLDING_REVIVE);
+        desiredInteract = PLAYER_INTERACT_STATES.HOLDING_REVIVE;
       } else if (p.keys?.['KeyF'] && p._pendingEnemyLootPack) {
-        this.playerInteract.transition(PLAYER_INTERACT_STATES.HOLDING_ENEMY_LOOT);
-      } else {
-        this.playerInteract.transition(PLAYER_INTERACT_STATES.IDLE);
+        desiredInteract = PLAYER_INTERACT_STATES.HOLDING_ENEMY_LOOT;
+      }
+      if (this.playerInteract.state !== desiredInteract) {
+        if (!this.playerInteract.can(desiredInteract) && this.playerInteract.can(PLAYER_INTERACT_STATES.IDLE)) {
+          this.playerInteract.transition(PLAYER_INTERACT_STATES.IDLE);
+        }
+        this.playerInteract.transition(desiredInteract);
       }
     }
 

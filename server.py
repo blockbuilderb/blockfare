@@ -135,10 +135,37 @@ class BattleBitRequestHandler(SimpleHTTPRequestHandler):
         if "/api/telemetry" not in self.path and "/api/mp/" not in self.path:
             log_http_access(f"{self.client_address[0]}:{self.client_address[1]} - {format_str % args}")
 
+    STATIC_CACHE_EXTS = (
+        ".js",
+        ".mjs",
+        ".css",
+        ".ogg",
+        ".mp3",
+        ".wav",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".svg",
+        ".webp",
+        ".ico",
+        ".woff",
+        ".woff2",
+        ".ttf",
+    )
+
     def end_headers(self):
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
+        raw_path = (getattr(self, "path", "") or "").split("?", 1)[0].lower()
+        if (
+            not raw_path.startswith("/api/")
+            and raw_path != "/"
+            and not raw_path.endswith(".html")
+            and raw_path.endswith(self.STATIC_CACHE_EXTS)
+        ):
+            self.send_header("Cache-Control", "public, max-age=3600")
+        else:
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
         super().end_headers()
 
     def guess_type(self, path):
