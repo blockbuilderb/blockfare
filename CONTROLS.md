@@ -1,111 +1,99 @@
-# BattleBit Clone — Complete Controls Reference (`CONTROLS.md`)
+# ⌨️ BLOCKFARE — Complete Controls & Keybind Reference
 
-Complete keyboard and mouse keybind reference organized by tactical category. You can also view the in-game quick reference overlay at any time by pressing **`[F1]`**.
+Play live in your browser: **[https://blockbuilderb.github.io/blockfare/](https://blockbuilderb.github.io/blockfare/)**
 
 ---
 
-## 1. Movement & Stance
+## 1. Infantry Movement & Stance
 
 | Key / Input | Action | Notes |
 | :--- | :--- | :--- |
-| **`W` / `A` / `S` / `D`** | Move Forward / Strafe Left / Back / Right | Speed adjusts dynamically by stance (`Stand 7.0 m/s`, `Crouch 4.3 m/s`, `Prone 2.4 m/s`) |
-| **`Left Shift` (Hold + `W`)** | Tactical Sprint | Sprints at `9.8 m/s`; automatically stands up from Crouch or Prone |
-| **`Space`** | Jump / Tactical Vault / Stand Up | Vaults over low walls & windows (`1–1.5` blocks high); stands up if Crouched/Prone |
-| **`Space` (Hold when Downed)** | Give Up & Respawn | Bleeds out immediately (`-1 Ticket`) to return to the Deploy Screen |
-| **`C`** or **`Left Ctrl`** | Toggle Crouch | Lowers eye height to `1.05m` and reduces weapon recoil by **22%** |
-| **`Z`** | Toggle Prone | Lowers eye height to `0.48m` and reduces weapon recoil by **45%** |
-| **`Q` (Hold)** | Lean Left | Peers around left cover corners (`0.52m` offset) |
-| **`Right Click (ADS)` + `E` (Hold)** | Lean Right | Peers around right cover corners while aiming down sights (prevents conflict with `[E]` interact) |
+| **`W` / `A` / `S` / `D`** | Move Forward / Strafe Left / Back / Right | Progressive stride acceleration; speed scales by class armor & stance |
+| **`Left Shift` (Hold + `W`)** | Tactical Sprint | Full-speed sprint; automatically stands up from Crouch or Prone |
+| **`Space`** | Jump / Vault / Stand Up | Vaults low cover (`1–1.5` blocks); **Hold `Space` when Downed** to Give Up (`-1 Ticket`) |
+| **`C`** or **`Left Ctrl`** | Toggle Crouch | Lowers profile (`1.05m`) and reduces firearm recoil by **22%** |
+| **`Z`** | Toggle Prone | Lowers profile (`0.48m`) and reduces firearm recoil by **45%** |
+| **`Q` (Hold)** | Lean Left | Peers around left cover corners |
+| **`RMB (ADS)` + `E` (Hold)** | Lean Right | Peers around right corners while aiming down sights |
+| **`Space` (In Mid-Air After Ejecting)** | Deploy / Cut Parachute | Steerable parachute canopy after ejecting from an aircraft |
 
 ---
 
-## 2. Combat, Weapons & Optics
+## 2. Modern Era Combat, Weapons & Tarkov Magazine System
 
 | Key / Input | Action | Notes |
 | :--- | :--- | :--- |
-| **`Left Click (LMB)`** | Fire Weapon / Use Equipped Gadget | Fires primary/sidearm/RPG, throws C4 (`[3]`), heals with Medkit (`[3]`), Drops Ammo Crate (`[3]`), or builds HESCO block with Hammer (`[4]`) |
-| **`Right Click (RMB)`** | Aim Down Sights (ADS) / Secondary Gadget Action | Enters precision optic view; **Detonates planted C4** when C4 is equipped; **Breaches/destroys voxel wall** when Build Hammer (`[4]`) is equipped |
-| **`1`** | Equip Primary Weapon | `M4A1` (Engineer), `AK-15` (Assault), `KRISS Vector` (Medic), `M249 SAW` (Support), `SV-98M` (Recon) |
-| **`2`** | Equip Sidearm | `MP-443 Grach` 9mm semi-automatic pistol |
-| **`3`** | Equip Primary Class Gadget | `RPG-7V2 HEAT` (Engineer), `C4 Breach Charge` (Assault/Recon), `Combat Medkit` (Medic), `Ammo Supply Crate` (Support) |
-| **`4`** | Equip Tactical Sledge / Build Hammer | `LMB`: Build HESCO fortification block • `RMB` or `[T]`: Breach/destroy enemy walls |
-| **`R` (Single Tap)** | Tactical Magazine Reload | Swaps to fullest reserve magazine and **retains partial magazine** in rotation |
-| **`R` (Double Tap)** | Speed Drop Reload | **38% faster emergency reload**, but discards any remaining rounds in the dropped magazine |
-| **`P` (Hold)** | Consolidate / Pack Partial Magazines | Repacks partially spent magazines into full magazines (`1.3s`) |
-| **`G`** | Throw Frag Grenade | Throws ballistic fragmentation grenade (`2` per spawn, resupplied at Ammo Crates) |
-| **`H` (Hold)** | Bandage Bleeding / Self-Heal | Stops active bleeding (`-3 HP / 1.2s`) and restores HP (`+70 HP` in `1.25s` for Medic; `+50 HP` in `1.9s` for other classes) |
-| **`V`** or **`Mouse Wheel` (in ADS)** | Toggle 45° Canted Red-Dot Sight | Switches between primary magnified optic (`8× Scope`, `3.4× ACOG`, `Holo`, `Kobra`) and 45° Canted Red-Dot for close-quarters combat |
-| **`X`** | Cycle Scope Zeroing Distance | Cycles ballistic elevation zeroing through **`100m` → `200m` → `300m` → `400m`** |
-| **`N`** | Toggle Night Vision Goggles (NVG) | Activates green phosphor night-vision overlay and ambient light amplification |
+| **`Left Click (LMB)`** | Fire Weapon / Use Gadget | Fires primary, sidearm, RPG-7, Stinger SAM, C4 throw, Medkit, or Build Hammer |
+| **`Right Click (RMB)`** | Aim Down Sights (ADS) / Detonate C4 | Enters optic/iron sight view; detonates planted C4 when C4 is equipped |
+| **`1` / `2` / `3` / `4`** | Switch Loadout Slot | `[1]` Primary • `[2]` Sidearm • `[3]` Class Launcher/Gadget • `[4]` Sledge/Build Hammer |
+| **`R` (Single Tap)** | Tactical Magazine Reload | Swaps to fullest Chest Rig magazine and retains your partial magazine |
+| **`R` (Double Tap)** | Emergency Speed Drop Reload | **38% faster reload**, dropping the current magazine |
+| **`P`** or **`Hold R`** | Tarkov Slow Bullet-Packing Reload | Presses loose backpack cartridges one-by-one into partial Chest Rig magazines |
+| **`G`** | Throw Frag Grenade | Ballistic fragmentation grenade (Modern Era on foot) |
+| **`H` (Hold)** | Bandage Bleeding / Self-Heal | Stops active bleed and restores HP (`2×` faster for Medic) |
+| **`V`** or **`Mouse Wheel` (in ADS)** | Toggle 45° Canted Red-Dot Sight | Switches between magnified scope (`8×` / `3.4× ACOG`) and 45° Canted Red-Dot |
+| **`X`** | Cycle Scope Zeroing | Cycles ballistic elevation (`100m` → `200m` → `300m` → `400m`) |
+| **`N`** | Toggle Night Vision Goggles (NVG) | Phosphor green night-vision amplification |
 
 ---
 
-## 3. Tactical Interaction (`[F]` vs. `[E]` Split)
-
-To prevent accidental vehicle entries or dropped drags during firefights, **`[F]`** and **`[E]`** have dedicated, non-overlapping responsibilities:
-
-| Key / Input | Action | Priority & Behavior |
-| :--- | :--- | :--- |
-| **`F` (Hold on Downed Ally)** | **Revive Downed Soldier** | Wraps bandage to revive fallen teammate (`1.15s` Medic / `1.75s` Other). Saves `1` team ticket and awards `+200 XP` (`+250 XP` if dragged to cover first!) |
-| **`F` (Press on Injured Ally)** | **Field Heal Standing Teammate** | Restores `+75 HP` (Medic) or `+50 HP` (Other) to an injured friendly soldier within `4.5m` (`+50 XP`) |
-| **`F` (Press near Ammo Crate)** | **Resupply Ammo, Rockets & Armor** | Refills all magazines, frag grenades, bandages, RPG/C4 ordnance, and restores `+25 Armor` from a friendly Support Ammo Crate (`6m` radius) |
-| **`F` (Press in Field / Objective)** | **Build Chest Wall & Objective Point Defenses** | Erects your selected defensive fortification (`[B]`) directly in front of you; if inside/near a captured friendly Objective (`A`–`E`), also constructs perimeter **Point Defense** breastworks around the flag! |
-| **`B`** | **Cycle Fortification Blueprint** | Cycles `[F]` build blueprint: **`CHEST WALL`** → **`FIRING PORT`** → **`SANDBAG BUNKER`** → **`HESCO BASTION`** |
-| **`T`** | **Quick Hammer Breach** | Swings sledgehammer to break voxel obstacles in front of you |
-| **`E` (Press near Downed Ally)** | **Grab / Release Dragging Downed Soldier** | Toggles dragging a downed teammate (`4.6 m/s`) so you can pull them behind voxel cover before holding **`[F]`** to revive |
-| **`E` (Press near Vehicle)** | **Enter / Exit Armored Vehicle** | Boards or exits friendly Main Battle Tanks, IFVs/APCs, or Armored Cars within `6.5m` (friendly AI drivers automatically hand over controls) |
-
----
-
-## 4. Squad Leader & Force Commander Orders
+## 3. Medieval & Jurassic Era Melee, Shields, Archery & Siege
 
 | Key / Input | Action | Notes |
 | :--- | :--- | :--- |
-| **`K`** or **`CapsLock`** | **Open Tactical Command Map Modal** | Interactive 2D operational map to assign orders to all 5 squads (`ALPHA`–`ECHO`) or call precision map airstrikes |
-| **`Y` (Hold + Mouse / `1`–`8`)** | **Open Radial Commo Rose / Command Wheel** | Move mouse or press `1`–`8` / `-` / `+` to issue quick squad orders, request Medic/Ammo, or adjust formation spacing |
-| **`Middle Click (MMB)`** | **3D Tactical Ping / Spot Enemy** | Places a 3D squad waypoint marker at crosshair, or **Spots hostile infantry/armor** for `7.5s` (`+25 XP`) |
-| **`Numpad -`** or **`-`** | **Formation Spacing: `STAY CLOSE`** | Tightens squad to `2m–6m` CQB stack and brings friendly armor into close support (`32m–42m` standoff) |
-| **`Numpad +`** or **`=`** | **Formation Spacing: `FAN OUT`** | Disperses squad to `12m–25m` anti-artillery spacing and pushes armor to long-range overwatch (`95m–105m` standoff) |
-| **`Alt + 0`** or **`Numpad 0`** | **Toggle Command Scope (`ALL` vs. `SQUAD`)** | Switches order authority between **All 5 Squads (40 AI Soldiers)** and **Your Squad Only (8 AI Soldiers)** |
-| **`Alt + 1..5`** or **`Numpad 1..5`** | **Order: Attack / Defend Objective `A`–`E`** | Directs active command scope to seize or hold Objective `A`, `B`, `C`, `D`, or `E` |
-| **`Alt + F`** or **`Numpad 6`** | **Order: Follow Me** | Orders AI soldiers in scope to rally on your position and advance with you |
-| **`Alt + H` / `Alt + D`** or **`Numpad 7`** | **Order: Hold Position** | Orders AI soldiers in scope to dig in and defend their current coordinates |
-| **`Alt + A`** or **`Numpad 8`** | **Order: Autonomous AI (`AUTO`)** | Returns AI squads to autonomous frontline objective evaluation |
-| **`U`** | **Deploy MQ-9 Reaper UAV Recon Datalink** | Launches an overhead UAV (`25s` duration, `20s` cooldown) that paints all enemy soldiers & vehicles in 3D + minimap |
-| **`J`** | **Call Commander Airstrike at Crosshair** | Calls the selected heavy fire support barrage onto your aimed target coordinates (`25s` cooldown) |
-| **`Shift + J`** | **Cycle Airstrike Barrage Pattern** | Cycles between: **1. F-15E Carpet Bombing** (linear corridor), **2. GBU-31 Bunker Buster** (tight anti-armor/building demolition), **3. 155mm Howitzer Artillery** (wide area suppression) |
-| **`5`** | **Deploy Squad Leader Rally Point** | Places a mobile squad spawn radio (`120s` duration, `90s` cooldown; requires no enemies within `20m`) |
-| **`6`** | **Deploy Recon Insertion Beacon** | *Recon class only*: Places a covert high-priority spawn beacon (`2` spawns or `180s` duration) |
+| **`Mouse Move` + `LMB`** | Directional Melee Attack | **Zweihänder / Sword / Polearm**: Mouse Up = Overhead Chop, Mouse Left/Right = Wide Horizontal Cleave, Forward/Neutral = Lunge Thrust |
+| **`Right Click (RMB)` (Hold)** | Raise Shield / Crossguard Parry / Spear Brace | **1H Shield**: Blocks `70%` frontal arrows/melee • **2H Pavise Shield (`[2]`)**: Blocks `92%` • **2H Zweihänder**: Steel crossguard parry + riposte window • **Long Spear**: Anti-cavalry ground brace |
+| **`LMB` (Bow / Crossbow)** | Loose Bodkin Arrow / Arbalest Bolt | Ballistic drop pins on center archery reticle; toggle Fire Arrows where unlocked |
+| **`G` (Near Siege Trebuchet)** | Summon Siege Crew / Winch Trebuchet | Calls nearby friendly soldiers to crew, winch, and hurl flaming boulders at the enemy |
 
 ---
 
-## 5. Armored Vehicle Controls
-
-Active while driving/gunning an **M1A2 Abrams**, **T-90M Proryv**, **LAV-25**, **BTR-82A**, **M1151 Humvee**, or **GAZ Tigr**:
+## 4. Aircraft Flight & Avionics Controls (*Combat Pilot Class*)
 
 | Key / Input | Action | Notes |
 | :--- | :--- | :--- |
-| **`W` / `S`** | Drive Forward / Reverse | Tank: `17.5 m/s` • IFV/APC: `23.0 m/s` • Humvee/Tigr: `30.0 m/s` |
-| **`A` / `D`** | Steer / Pivot Hull Left / Right | Rotates vehicle hull yaw |
-| **`Mouse Movement`** | Aim Turret & Main Gun | Independently rotates 360° turret yaw and barrel elevation |
-| **`Left Click (LMB)`** | Fire Main Turret Weapon | Fires `120mm/125mm` Tank Shell, `30mm HE` Autocannon burst, or `.50 Cal` HMG |
-| **`Space` (Hold in Tank)** | Fire 7.62mm Coaxial Machine Gun | Fires high-RPM anti-infantry coaxial MG (`620 RPM`); also fires automatically while holding `LMB` when the main cannon is reloading |
-| **`Right Click (RMB)` (Hold)** | Turret Thermal / Zoom Optics (`ADS`) | Zooms turret fire-control optics (`FOV 42°`) |
-| **`C`** | Toggle 1st-Person / 3rd-Person Vehicle Camera | Switches between external chase camera and commander cupola / turret sight view |
-| **`E`** | Exit Vehicle | Dismounts beside the vehicle hull |
+| **`Mouse Movement`** | Pitch & Bank-to-Turn Flight Control | Smoothly banks wings into coordinated 3D turns and aims nose/CCIP pipper |
+| **`W` (Hold)** | Throttle Up / Afterburner (`AB`) | Spools turbofan thrust up to max afterburner speed |
+| **`S` (Hold)** | Airbrake / Throttle Down | Decelerates for gun runs, loitering, or runway landing approach |
+| **`A` / `D`** | Roll / Rudder Trim | Manual wing bank & runway steering |
+| **`1` / `2` / `3`** | Select Ordnance Pylon | `[1]` Rotary Cannon / 80× Carpet Bay • `[2]` AIM-9X A2A Missile / Hydra Rockets / 40mm Bofors • `[3]` JDAM Bombs / GBU-57 MOP / 105mm Howitzer |
+| **`LMB`** | Fire Selected Weapon Bay | Fires rotary cannon or selected pylon |
+| **`Space`** | Quick-Launch Heavy Ordnance / Locked Missile | Launches locked AIM-9X A2A missile, rocket salvo, JDAM bomb, or 105mm shell |
+| **`X`** | Release Countermeasures (`ECM / Flares / RAM Cloak`) | Launches 3D glowing angel-wing magnesium IR flare arcs (or B-2A Spirit active stealth cloak) to spoof missiles |
+| **`G`** | Toggle Collision Avoidance (`AUTO ON` vs. `OFF`) | **`AUTO ON`** (default): auto-pulls up over terrain/buildings • **`OFF`**: realistic crashes into buildings, mountains & ground |
+| **`Fly < 28m AGL`** | Low-Altitude Radar Ground-Clutter Stealth | Hides your plane from enemy radar TD boxes and breaks incoming missile locks |
+| **`C`** | Toggle Cockpit / 3rd-Person Chase Camera | Switches between HUD nose camera (or AC-130 thermal gun camera) and 3rd-person jet chase view |
+| **`E`** | Land Exit / Emergency Parachute Eject | Exits on runway, or ejects upward with a steerable parachute in flight |
 
 ---
 
-## 6. UI, Armory, Multiplayer & Debug Overlays
+## 5. Tanks, APCs, SPAAG AA, Motorcycles & Mounts
 
 | Key / Input | Action | Notes |
 | :--- | :--- | :--- |
-| **`I`** | **Open Gunsmith & Tactical Armory** | Spend Combat Cash (`$`) to unlock and equip muzzles, silencers, extended magazines, grips, optics, and ammo types |
-| **`M`** | **Redeploy / Return to Deploy Screen** | Leaves current life/vehicle and opens the Deploy Screen to switch class, squad, spawn flag, or atmosphere |
-| **`Tab` (Hold)** | **Live Battle Scoreboard** | Displays US vs. RU ticket breakdown, all 10 tactical squads (`ALPHA`–`ECHO`), and all 80 soldiers' Kills, Deaths, Revives, Armor Destroyed, Captures, and Score |
-| **`O`** | **Open Multiplayer & Co-Op Lobby Modal** | Switch between `SINGLEPLAYER` and `MULTIPLAYER`, set room code/callsign, adjust AI bot population, or open a synced Co-Op test window |
-| **`L`** | **Cycle Time-of-Day Atmosphere** | Cycles live between **`DAY`** → **`SUNSET`** → **`NIGHT`** lighting and skybox presets |
-| **`F1`** | **Toggle In-Game Controls Reference Overlay** | Shows/hides the quick keybind cheat sheet modal |
-| **`F2`** | **Toggle Real-Time FPS & Frame-Time Pill** | Shows/hides top-right `FPS`, `frame ms`, and `10% Low FPS` performance monitor |
-| **`F3`** | **Toggle Live Battle Telemetry Inspector** | Opens the real-time telemetry overlay displaying active AI state counts, vehicle hull HP, and recent JSONL combat events |
-| **`Enter` / `Space` (On Deploy or Victory Screen)** | **Quick Deploy / Play Next Round** | Immediately deploys your soldier into battle or starts the next match |
+| **`E`** | Enter / Mount / Exit Vehicle | Boards friendly Tanks, IFVs, Jeeps, FOB Motorcycles/ATVs, Warhorses, or Dino Mounts |
+| **`W` / `S` / `A` / `D`** | Drive / Gallop & Steer | Progressive engine spool & 1-block obstacle crushing/climbing |
+| **`LMB`** | Fire Main Cannon / Autocannon / Mounted Bow / Jaws | `120/125mm APFSDS` (MBT), `30mm HE` (IFV), `1,050 RPM Proximity Flak` (AA), `9mm SMG` (Bike) |
+| **`Space`** | Secondary Weapon / Boost / Jump | **Tank/IFV**: `7.62mm Coax MG` • **SPAAG AA**: Launch locked SAM • **Bike/ATV**: Wheelie / Nitro Boost • **Warhorse**: Rear/Jump • **T-Rex/Raptor**: Apex Roar / Pounce Leap |
+| **`X` (Tank / IFV)** | Active Protection System (`APS`) / Thermal Smoke | Intercepts incoming anti-tank rockets (*Armor Crewman*) |
+| **`C`** | Toggle 1st-Person Optics / 3rd-Person Chase Cam | Switches between turret FCS reticle and 3rd-person vehicle view |
+
+---
+
+## 6. Tactical Interaction (`[F]` vs. `[E]`) & Commander Orders
+
+| Key / Input | Action | Notes |
+| :--- | :--- | :--- |
+| **`F` (Hold on Downed Ally)** | Revive Fallen Teammate | Restores ally and saves `1` team ticket (`2×` faster for Medic) |
+| **`E` (Press near Downed Ally)** | Grab / Drag Downed Teammate | Pulls wounded ally behind cover before holding `[F]` to revive |
+| **`F` (Near Loot / Ammo / Key)** | Loot Backpack / Resupply / Collect Armory Key | Opens/collects battlefield supplies and golden CS2 case keys |
+| **`B` / `8`** | Build Fortification / Paid Squad Emplacement | Builds Sandbag/HESCO cover, HMG nests, Mortar pits, AA pits, or Bunkers |
+| **`K`** or **`CapsLock`** | Open Interactive Tactical Command Map | Click objectives to command all 5 squads or call map airstrikes |
+| **`Y` (Hold)** | Radial Command Wheel (Commo Rose) | Issue quick tactical orders & spacing commands |
+| **`Alt + C` / `Alt + H` / `Alt + R` / `Alt + F`** | Charge / Defend (Shield Wall) / Retreat / Follow | Direct tactical orders to active scope (`ALL 5 SQUADS` or `MY SQUAD`) |
+| **`Alt + G`** | Toggle Garrison Doctrine (`ON` / `OFF`) | Keeps 1 squad defending each captured Forward Base vs. all-out frontline push |
+| **`Alt + A`** | Toggle Autonomous AI (`ON` / `OFF`) | Switches AI Squad Leaders between autonomous objective play and manual hold |
+| **`Alt + 1..5`** | Attack / Defend Objective `A`–`E` | Directs squads to a specific capture flag |
+| **`Numpad -` / `Numpad +`** | Formation Spacing (`STAY CLOSE` / `FAN OUT`) | Tight CQB cluster vs. wide anti-artillery dispersion |
+| **`U` / `J` / `Shift + J` / `9`** | UAV (`[U]`), Airstrike (`[J]`), Pattern (`[Shift+J]`), Air Sortie (`[9]`) | Modern Era Force Commander support abilities |
+| **`I` / `L` / `O` / `Tab` / `F2` / `F3`** | Backpack (`[I]`), Armory & Cases (`[L]`), Co-Op Lobby (`[O]`), Scoreboard (`[Tab]`), FPS (`[F2]`), Telemetry (`[F3]`) | Core HUD modals & diagnostics |
