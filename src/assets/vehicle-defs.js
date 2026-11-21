@@ -4,7 +4,7 @@
 // Positions stored as arrays [x, y, z] — y is computed at runtime via getGroundHeightAt.
 // =========================================================================
 
-import { VEHICLE_STATS } from '../config.js?v=91';
+import { VEHICLE_STATS } from '../config.js?v=92';
 
 export const VEHICLE_DEFS = [
   // ===================== US FLEET (Parked Right Next to US Main Base Spawn at x = -922..-914, z = -12..+12) =====================

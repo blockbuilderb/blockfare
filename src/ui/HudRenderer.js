@@ -1,4 +1,4 @@
-import { UI, getEraRoles } from '../config.js?v=91';
+import { UI, getEraRoles } from '../config.js?v=92';
 
 export const HudRenderer = {
   _setText(el, str) {

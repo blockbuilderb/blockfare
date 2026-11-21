@@ -6,15 +6,16 @@
 //  3. jurassic_island  — JURASSIC ERA (Prehistoric Jungle Island — Humans vs Dinosaurs)
 // ============================================================================
 
-import { TERRAIN } from '../config.js?v=91';
-import { FRUGIS_RIVER_MAP } from './frugis-river.js?v=91';
+import { TERRAIN } from '../config.js?v=92';
+import { FRUGIS_RIVER_MAP } from './frugis-river.js?v=92';
 
 export const MEDIEVAL_CITADEL_MAP = {
   id: 'medieval_citadel',
   era: 'medieval',
-  eraLabel: 'MEDIEVAL ERA (12TH CENTURY)',
-  name: 'IRONKEEP CITADEL & CASTLE VALLEY',
-  subtitle: 'SIEGE WARFARE • STONE CASTLES, TREBUCHETS & CAVALRY • NO MODERN AIRCRAFT',
+  isBeta: true,
+  eraLabel: 'MEDIEVAL ERA (12TH CENTURY • BETA)',
+  name: 'IRONKEEP CITADEL & CASTLE VALLEY (BETA)',
+  subtitle: 'BETA PREVIEW • STONE CASTLES, TREBUCHETS & CAVALRY • NO MODERN AIRCRAFT',
   dimensions: {
     width: 4800,
     depth: 3200,
@@ -148,9 +149,10 @@ export const MEDIEVAL_CITADEL_MAP = {
 export const JURASSIC_ISLAND_MAP = {
   id: 'jurassic_island',
   era: 'jurassic',
-  eraLabel: 'JURASSIC ERA (65 MILLION BC)',
-  name: 'ISLA CARNIVORA — HUMANS VS DINOSAURS',
-  subtitle: 'EXPEDITION HUMANS (US) VS PREHISTORIC DINOSAUR PACK (RU) • VOLCANIC JUNGLE',
+  isBeta: true,
+  eraLabel: 'JURASSIC ERA (65 MILLION BC • BETA)',
+  name: 'ISLA CARNIVORA — HUMANS VS DINOSAURS (BETA)',
+  subtitle: 'BETA PREVIEW • EXPEDITION HUMANS (US) VS PREHISTORIC DINOSAUR PACK (RU)',
   dimensions: {
     width: 4800,
     depth: 3200,

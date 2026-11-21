@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=91';
-import { sound } from '../audio.js?v=91';
-import { PLAYER, DISTANCES, CLASS_TRAITS, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=91';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=91';
-import { events, makeEventBridge } from '../events.js?v=91';
-import { GunsmithMethods } from './GunsmithState.js?v=91';
-import { FortificationMethods } from './FortificationBuilder.js?v=91';
-import { CommanderMethods } from './CommanderAbilities.js?v=91';
-import { VehicleControlMethods } from './VehicleControl.js?v=91';
-import { CombatMethods } from './PlayerCombat.js?v=91';
+import { VOXEL_SIZE } from '../world.js?v=92';
+import { sound } from '../audio.js?v=92';
+import { PLAYER, DISTANCES, CLASS_TRAITS, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=92';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=92';
+import { events, makeEventBridge } from '../events.js?v=92';
+import { GunsmithMethods } from './GunsmithState.js?v=92';
+import { FortificationMethods } from './FortificationBuilder.js?v=92';
+import { CommanderMethods } from './CommanderAbilities.js?v=92';
+import { VehicleControlMethods } from './VehicleControl.js?v=92';
+import { CombatMethods } from './PlayerCombat.js?v=92';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -16,7 +16,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=91';
+} from '../core/StateMachines.js?v=92';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {

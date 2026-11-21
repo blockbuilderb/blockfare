@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { events } from '../events.js?v=91';
+import { events } from '../events.js?v=92';
 
 function markShared(asset) {
   if (asset) {

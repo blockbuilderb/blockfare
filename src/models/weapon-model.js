@@ -18,7 +18,7 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=91';
+import { TEXTURES } from '../assets/textures.js?v=92';
 
 export function createWeaponViewModel(def, team = 'US', custom = {}) {
   const group = new THREE.Group();

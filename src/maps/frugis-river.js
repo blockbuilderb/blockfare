@@ -4,7 +4,7 @@
 // bridges, multi-story buildings, fortifications, ammo crates, and tree cover.
 // ============================================================================
 
-import { TERRAIN } from '../config.js?v=91';
+import { TERRAIN } from '../config.js?v=92';
 
 export const FRUGIS_RIVER_MAP = {
   id: 'frugis_river',

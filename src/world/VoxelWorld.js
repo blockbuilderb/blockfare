@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=91';
-import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=91';
-import { getMapDefinition } from '../maps/index.js?v=91';
-import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=91';
-import { events, makeEventBridge } from '../events.js?v=91';
-import { TerrainGenerator } from './TerrainGenerator.js?v=91';
-import { BuildingFactory } from './BuildingFactory.js?v=91';
-import { ConquestSystem } from './ConquestSystem.js?v=91';
-import { ProjectileManager } from './ProjectileManager.js?v=91';
-import { WeatherSystem } from './WeatherSystem.js?v=91';
+import { TEXTURES } from '../assets/textures.js?v=92';
+import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=92';
+import { getMapDefinition } from '../maps/index.js?v=92';
+import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=92';
+import { events, makeEventBridge } from '../events.js?v=92';
+import { TerrainGenerator } from './TerrainGenerator.js?v=92';
+import { BuildingFactory } from './BuildingFactory.js?v=92';
+import { ConquestSystem } from './ConquestSystem.js?v=92';
+import { ProjectileManager } from './ProjectileManager.js?v=92';
+import { WeatherSystem } from './WeatherSystem.js?v=92';
 
 export { VOXEL_SIZE, MAT_DEFS };
 

@@ -1,12 +1,12 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=91';
-import { sound } from './audio.js?v=91';
-import { NETWORK } from './config.js?v=91';
-import { events, makeEventBridge } from './events.js?v=91';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=92';
+import { sound } from './audio.js?v=92';
+import { NETWORK } from './config.js?v=92';
+import { events, makeEventBridge } from './events.js?v=92';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=91';
+} from './core/StateMachines.js?v=92';
 
 export class NetworkManager {
   constructor(scene, world, player, botManager) {

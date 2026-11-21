@@ -1,11 +1,11 @@
-import { SQUAD_DEFS } from '../bots.js?v=91';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=91';
-import { events } from '../events.js?v=91';
+import { SQUAD_DEFS } from '../bots.js?v=92';
+import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=92';
+import { events } from '../events.js?v=92';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=91';
+} from '../core/StateMachines.js?v=92';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -1043,6 +1043,7 @@ export const DeployScreen = {
     // 2. Update Deploy Screen Header Title & Faction Labels
     const eraTagEl = document.getElementById('deploy-era-tag');
     const mapTitleEl = document.getElementById('deploy-map-title');
+    const betaPillEl = document.getElementById('deploy-beta-pill');
     const usTeamBtn = document.getElementById('us-team-btn') || document.querySelector('.team-btn[data-subfaction="US"]');
     const ruTeamBtn = document.getElementById('ru-team-btn') || document.querySelector('.team-btn[data-subfaction="RU"]');
     const dinoTeamBtn = document.getElementById('dino-team-btn');
@@ -1052,8 +1053,12 @@ export const DeployScreen = {
     if (era === 'medieval') {
       if (eraTagEl) eraTagEl.textContent = '🏰 MEDIEVAL BLOCKFARE';
       if (mapTitleEl) mapTitleEl.textContent = 'IRONKEEP CITADEL';
+      if (betaPillEl) {
+        betaPillEl.classList.remove('hidden');
+        betaPillEl.style.display = 'inline-flex';
+      }
       if (typeof document !== 'undefined') {
-        document.title = 'MEDIEVAL BLOCKFARE — Ironkeep Citadel';
+        document.title = 'MEDIEVAL BLOCKFARE — Ironkeep Citadel (Beta)';
       }
       if (usTeamBtn) {
         usTeamBtn.dataset.team = 'US';
@@ -1074,8 +1079,12 @@ export const DeployScreen = {
     } else if (era === 'jurassic') {
       if (eraTagEl) eraTagEl.textContent = '🦖 JURASSIC BLOCKFARE';
       if (mapTitleEl) mapTitleEl.textContent = 'ISLA CARNIVORA';
+      if (betaPillEl) {
+        betaPillEl.classList.remove('hidden');
+        betaPillEl.style.display = 'inline-flex';
+      }
       if (typeof document !== 'undefined') {
-        document.title = 'JURASSIC BLOCKFARE — Isla Carnivora';
+        document.title = 'JURASSIC BLOCKFARE — Isla Carnivora (Beta)';
       }
       if (usTeamBtn) {
         usTeamBtn.dataset.team = 'US';
@@ -1104,6 +1113,10 @@ export const DeployScreen = {
     } else {
       if (eraTagEl) eraTagEl.textContent = '✈️ MODERN BLOCKFARE';
       if (mapTitleEl) mapTitleEl.textContent = 'FRUGIS RIVER VALLEY';
+      if (betaPillEl) {
+        betaPillEl.classList.add('hidden');
+        betaPillEl.style.display = 'none';
+      }
       if (typeof document !== 'undefined') {
         document.title = 'MODERN BLOCKFARE — Frugis River Valley';
       }

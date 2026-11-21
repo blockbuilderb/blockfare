@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=91';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=91';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=91';
-import { events } from '../events.js?v=91';
+import { sound } from '../audio.js?v=92';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=92';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=92';
+import { events } from '../events.js?v=92';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +11,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=91';
+} from '../core/StateMachines.js?v=92';
 
 function markShared(asset) {
   if (asset) {

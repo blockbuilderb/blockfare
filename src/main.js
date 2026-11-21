@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=91';
-import { VehicleManager } from './vehicles.js?v=91';
-import { BotManager } from './bots.js?v=91';
-import { PlayerController } from './player.js?v=91';
-import { NetworkManager } from './network.js?v=91';
-import { UIManager } from './ui.js?v=91';
-import { TelemetryLogger } from './telemetry.js?v=91';
-import { sound } from './audio.js?v=91';
-import { CAMERA, LIGHTING, MATCH, WEATHER, SKY_FOG_COLOR } from './config.js?v=91';
-import { events, makeEventBridge } from './events.js?v=91';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=91';
+import { VoxelWorld } from './world.js?v=92';
+import { VehicleManager } from './vehicles.js?v=92';
+import { BotManager } from './bots.js?v=92';
+import { PlayerController } from './player.js?v=92';
+import { NetworkManager } from './network.js?v=92';
+import { UIManager } from './ui.js?v=92';
+import { TelemetryLogger } from './telemetry.js?v=92';
+import { sound } from './audio.js?v=92';
+import { CAMERA, LIGHTING, MATCH, WEATHER, SKY_FOG_COLOR } from './config.js?v=92';
+import { events, makeEventBridge } from './events.js?v=92';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=92';
 
 class BattleBitGame {
   constructor() {
@@ -248,9 +248,9 @@ class BattleBitGame {
       this.ui.addXpNotification?.(
         0,
         this.activeEra === 'medieval'
-          ? '🏰 ERA SWITCHED: MEDIEVAL CASTLE SIEGE (CASTLES, TREBUCHETS, SWORDSMAN & MOUNTED KNIGHT)'
+          ? '🏰 ERA SWITCHED: MEDIEVAL CASTLE SIEGE [BETA] (IRONKEEP CITADEL)'
           : this.activeEra === 'jurassic'
-          ? '🦖 ERA SWITCHED: JURASSIC ISLAND (HUMANS VS DINOSAURS — T-REX & VELOCIRAPTOR PACK)'
+          ? '🦖 ERA SWITCHED: JURASSIC ISLAND [BETA] (ISLA CARNIVORA — HUMANS VS DINOSAURS)'
           : '✈️ ERA SWITCHED: MODERN COMBINED ARMS (FRUGIS RIVER VALLEY)'
       );
     }
