@@ -1,4 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=105';
+import { UI, getEraRoles } from '../config.js?v=110';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=110';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -46,29 +47,42 @@ export const HudRenderer = {
   },
 
   updateFpsMetrics(rawDt) {
-    const clampedDt = Math.max(0.001, Math.min(0.25, rawDt || 0.0167));
-    const instFps = 1.0 / clampedDt;
-    const instMs = clampedDt * 1000;
-    this.fpsSmoothed = this.fpsSmoothed * 0.9 + instFps * 0.1;
-    this.frameMsSmoothed = this.frameMsSmoothed * 0.9 + instMs * 0.1;
-    this.frameHistory.push(instFps);
-    if (this.frameHistory.length > 60) {
+    // Uncapped Benchmark FPS Measurement (no 1,000 FPS / 1.0ms artificial clamp!):
+    // Counts exact rendered frames across a 0.20s wall-clock window for rock-steady readings from 15 FPS up to 5,000+ FPS.
+    const safeDt = Math.max(0.00002, Math.min(0.25, rawDt || 0.0167));
+    this._fpsWinFrames = (this._fpsWinFrames || 0) + 1;
+    this._fpsWinTime = (this._fpsWinTime || 0) + safeDt;
+
+    if (this._fpsWinTime < 0.2) return;
+
+    const windowFps = this._fpsWinFrames / this._fpsWinTime;
+    const windowMs = (this._fpsWinTime / this._fpsWinFrames) * 1000;
+    this._fpsWinFrames = 0;
+    this._fpsWinTime = 0;
+
+    this.fpsSmoothed = this.fpsSmoothed * 0.55 + windowFps * 0.45;
+    this.frameMsSmoothed = this.frameMsSmoothed * 0.55 + windowMs * 0.45;
+    this.frameHistory.push(windowFps);
+    if (this.frameHistory.length > 30) {
       this.frameHistory.shift();
     }
 
     if (!this.showFps || !this.fpsPillEl) return;
-    this.fpsUiTimer -= clampedDt;
-    if (this.fpsUiTimer > 0) return;
-    this.fpsUiTimer = 0.15;
 
     const avgFps = Math.round(this.fpsSmoothed);
-    const msStr = `${this.frameMsSmoothed.toFixed(1)} ms`;
+    const msStr =
+      this.frameMsSmoothed < 10
+        ? `${this.frameMsSmoothed.toFixed(2)} ms`
+        : `${this.frameMsSmoothed.toFixed(1)} ms`;
     const sorted = [...this.frameHistory].sort((a, b) => a - b);
     const lowFps = Math.round(sorted[Math.max(0, Math.floor(sorted.length * 0.1))] || avgFps);
+    const isUncapped = typeof window !== 'undefined' && window.game ? window.game.uncappedFps !== false : true;
 
     if (this.fpsValEl) this.fpsValEl.textContent = String(avgFps);
     if (this.fpsMsValEl) this.fpsMsValEl.textContent = msStr;
-    if (this.fpsLowValEl) this.fpsLowValEl.textContent = `LOW: ${lowFps}`;
+    if (this.fpsLowValEl) {
+      this.fpsLowValEl.textContent = `LOW: ${lowFps} • ${isUncapped ? 'MAX' : 'VSYNC'}`;
+    }
 
     this.fpsPillEl.classList.toggle('fps-warn', avgFps >= 30 && avgFps < 50);
     this.fpsPillEl.classList.toggle('fps-low', avgFps < 30);
@@ -109,6 +123,8 @@ export const HudRenderer = {
       box-shadow: 0 20px 55px rgba(0,0,0,0.9);
     `;
 
+    const isMac = isMacPlatform();
+    const modShort = getShortOrderModifierLabel(isMac);
     const sections = {
       ac130: `
         <div style="background:rgba(46,204,113,0.1);border:1px solid rgba(46,204,113,0.45);border-radius:6px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;">
@@ -120,7 +136,7 @@ export const HudRenderer = {
           <div><b style="color:#f1c40f;">[A / D] (1968 Manual)</b> — Steepen / Shallow Left Pylon Bank</div>
           <div><b style="color:#f1c40f;">[WASD] (Coupled AP)</b> — Slide GPS Orbit Circle Across Map</div>
           <div><b style="color:#7bed9f;">[F] Key</b> — Snap GPS Orbit Anchor onto FOB / Crosshair</div>
-          <div><b style="color:#7bed9f;">[↑ / ↓] Arrows</b> — Adjust Loiter Altitude (125m – 310m AGL)</div>
+          <div><b style="color:#7bed9f;">[↑ / ↓] or [- / +]</b> — Adjust Loiter Altitude (125m – 310m AGL)</div>
           <div><b>[1] / LMB</b> — 20mm/25mm Gatling Cannon</div>
           <div><b>[2] / LMB</b> — 40mm L/60 Bofors HE Autocannon</div>
           <div><b>[3] or [Space]</b> — 105mm M102 Heavy Howitzer</div>
@@ -182,7 +198,9 @@ export const HudRenderer = {
           <div><b>[7] / [8] / [B]</b> — Class Deployable / Engineer Bunker Blueprint</div>
           <div><b>[N] Key</b> — Night Vision / GPNVG-18 Thermal</div>
           <div><b>[K] / Hold [Y]</b> — Full Tactical Map / Squad Command Wheel</div>
-          <div><b>[Tab] / [F1]</b> — Scoreboard &amp; Stats / Close Manual</div>
+          <div><b style="color:#00d2d3;">${isMac ? '[⌥ / ⌃ + G, C, H, R, F, 1-5]' : `[${modShort}+G, C, H, R, F, 1-5] (Mac: [⌥ / ⌃ + G, C, H, R, F, 1-5])`}</b> — Garrison &amp; Squad Orders</div>
+          <div><b style="color:#a29bfe;">[Shift+1..7] / [F5–F11]</b> — Field Role Swap (<b>[Shift+7]</b> Pilot on Mac)</div>
+          <div><b>[Tab] / [? / F1]</b> — Scoreboard &amp; Stats / Close Manual</div>
         </div>
       `
     };
@@ -196,8 +214,8 @@ export const HudRenderer = {
       ];
       el.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;">
-          <div style="font-size:18px;font-weight:900;color:#00d2d3;letter-spacing:1.5px;">📖 FIELD &amp; FLIGHT OPERATIONS MANUAL [F1]</div>
-          <button type="button" id="manual-close-btn" style="background:#e74c3c;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:900;cursor:pointer;">✕ CLOSE [F1]</button>
+          <div style="font-size:18px;font-weight:900;color:#00d2d3;letter-spacing:1.5px;">📖 FIELD &amp; FLIGHT OPERATIONS MANUAL [? / F1]</div>
+          <button type="button" id="manual-close-btn" style="background:#e74c3c;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:900;cursor:pointer;">✕ CLOSE [? / F1]</button>
         </div>
         <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">
           ${tabsMeta
@@ -213,7 +231,7 @@ export const HudRenderer = {
             .join('')}
         </div>
         <div>${sections[tabKey] || sections.infantry}</div>
-        <div style="margin-top:12px;color:#95a5a6;font-size:11px;text-align:center;">Press <b>[F1]</b> anytime in battle or cockpit to open/close this manual</div>
+        <div style="margin-top:12px;color:#95a5a6;font-size:11px;text-align:center;">Press <b>[? / F1]</b> anytime to open/close manual • Mac Orders: <b>[⌥ / ⌃ + G, C, H, R, F, 1-5]</b> • Role Swap: <b>[Shift+1..7]</b></div>
       `;
       el.querySelectorAll('.manual-tab-btn').forEach((btn) => {
         btn.addEventListener('click', (ev) => {
@@ -447,6 +465,28 @@ export const HudRenderer = {
     this.lastTicketsRU = ticketsRU;
     this.lastMatchTime = matchTimeRemaining;
 
+    const onDeployOrVictory = Boolean(
+      (this.deployScreenEl && !this.deployScreenEl.classList.contains('hidden')) ||
+        (this.victoryScreenEl && !this.victoryScreenEl.classList.contains('hidden'))
+    );
+
+    if (this.player.dead || onDeployOrVictory) {
+      if (document.body) {
+        document.body.classList.toggle('nvg-green-mode', false);
+        document.body.classList.toggle('flir-whot-mode', false);
+        document.body.classList.toggle('flir-bhot-mode', false);
+        document.body.classList.toggle('flir-scope-mode', false);
+      }
+      if (this.nvgOverlayEl && !this.nvgOverlayEl.classList.contains('hidden')) {
+        this.nvgOverlayEl.classList.add('hidden');
+        this.nvgOverlayEl.classList.remove('sensor-whot', 'sensor-bhot');
+      }
+      const flirDeadCanvas = this.el('flir-fullscreen-canvas');
+      if (flirDeadCanvas && !flirDeadCanvas.classList.contains('hidden')) {
+        flirDeadCanvas.classList.add('hidden');
+      }
+    }
+
     if (this.player.dead) {
       // Respawn timer countdown
       if (this.player.respawnTimer > 0) {
@@ -515,9 +555,16 @@ export const HudRenderer = {
     }
     const flirFsCanvas = this.el('flir-fullscreen-canvas');
     if (flirFsCanvas) {
-      flirFsCanvas.classList.toggle('hidden', !isFlirMode);
+      if (flirFsCanvas.classList.contains('hidden') === isFlirMode) {
+        flirFsCanvas.classList.toggle('hidden', !isFlirMode);
+      }
       if (isFlirMode) {
-        this.renderFullScreenFlirThermal(activeSensorMode);
+        this._flirCanvasAccum = (this._flirCanvasAccum || 0) + dt;
+        if (this._flirCanvasAccum >= 0.022 || this._lastFlirCanvasMode !== activeSensorMode) {
+          this._flirCanvasAccum = 0;
+          this._lastFlirCanvasMode = activeSensorMode;
+          this.renderFullScreenFlirThermal(activeSensorMode);
+        }
       }
     }
 
@@ -791,12 +838,32 @@ export const HudRenderer = {
       this.captureStatusEl.classList.add('hidden');
     }
 
-    // Compass Heading
-    let deg = Math.round(((-this.player.yaw * 180) / Math.PI) % 360);
-    if (deg < 0) deg += 360;
-    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-    const dirStr = dirs[Math.round(deg / 45) % 8];
-    this._setText(this.compassHeadingEl, `${String(deg).padStart(3, '0')}° ${dirStr}`);
+    // Compass Heading (Hidden while piloting aircraft since #aircraft-cockpit-hud displays live HDG + G-load)
+    const compassBarEl = this.el('compass-bar');
+    const inAircraftCompass = Boolean(
+      this.player.activeVehicle &&
+        this.player.activeVehicle.isAircraft &&
+        !this.player.activeVehicle.isSecretOmegaFlyer
+    );
+    if (compassBarEl) {
+      if (compassBarEl.classList.contains('hidden') !== inAircraftCompass) {
+        compassBarEl.classList.toggle('hidden', inAircraftCompass);
+      }
+      if (this.ticketEventFeedEl) {
+        const feedMargin = inAircraftCompass ? '8px' : '52px';
+        if (this.ticketEventFeedEl._lastMarginTop !== feedMargin) {
+          this.ticketEventFeedEl._lastMarginTop = feedMargin;
+          this.ticketEventFeedEl.style.marginTop = feedMargin;
+        }
+      }
+    }
+    if (!inAircraftCompass) {
+      let deg = Math.round(((-this.player.yaw * 180) / Math.PI) % 360);
+      if (deg < 0) deg += 360;
+      const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+      const dirStr = dirs[Math.round(deg / 45) % 8];
+      this._setText(this.compassHeadingEl, `${String(deg).padStart(3, '0')}° ${dirStr}`);
+    }
 
     // Dynamic Weather Status (Battlefield 2042 inspired)
     const weatherStatus = this.world.getWeatherStatus ? this.world.getWeatherStatus() : null;
@@ -834,7 +901,6 @@ export const HudRenderer = {
     const activeVeh = this.player.activeVehicle;
     const ammoPanelEl = this.el('ammo-panel');
     const airCockpitHudEl = this.el('aircraft-cockpit-hud');
-    const airCenterHudEl = this.el('air-center-hud');
     const cockpitFrameEl = this.el('vehicle-cockpit-frame');
     const camModePillEl = this.el('veh-cam-mode-pill');
     if (camModePillEl && !this._vehCamPillBound) {
@@ -1002,21 +1068,18 @@ export const HudRenderer = {
           }
         }
       }
-      if (airCenterHudEl) {
-        airCenterHudEl.classList.toggle('hidden', !activeVeh.isAircraft);
-      }
       if (camModePillEl) {
         const camShort =
           vCamMode === 'COCKPIT_1P'
             ? activeVeh.aircraftRole === 'gunship' && !activeVeh.gunshipManualFlight
-              ? 'PORT BAY 1P'
-              : '1P COCKPIT'
+              ? 'BAY 1P'
+              : '1P CKP'
             : vCamMode === 'OPTIC_NOSE'
             ? activeVeh.aircraftRole === 'gunship'
-              ? 'FCO SENSOR POD'
-              : 'NOSE / OPTIC'
-            : '3P CHASE';
-        this._setText(camModePillEl, `🎥 CAM [C]: ${camShort}`);
+              ? 'FCO POD'
+              : 'OPTIC'
+            : '3P CAM';
+        this._setText(camModePillEl, `🎥 ${camShort} [C]`);
       }
       const sensorPillEl = this.el('veh-sensor-mode-pill');
       if (sensorPillEl) {
@@ -1030,13 +1093,30 @@ export const HudRenderer = {
         const sMode = this.player.nvgActive ? this.player.sensorMode || 'NVG' : 'OFF';
         const sLabel =
           sMode === 'WHOT'
-            ? '🌡️ [N]: WHOT IR'
+            ? '🌡️ WHOT [N]'
             : sMode === 'BHOT'
-            ? '🌡️ [N]: BHOT IR'
+            ? '🌡️ BHOT [N]'
             : sMode === 'NVG'
-            ? '🥽 [N]: NVG GREEN'
-            : '☀️ [N]: DAY TV';
+            ? '🥽 NVG [N]'
+            : '☀️ TV [N]';
         this._setText(sensorPillEl, sLabel);
+      }
+      const avoidPillEl = this.el('veh-avoid-mode-pill');
+      if (avoidPillEl) {
+        if (!this._vehAvoidPillBound) {
+          this._vehAvoidPillBound = true;
+          avoidPillEl.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            if (typeof this.player?.toggleAircraftCollisionAvoidance === 'function') {
+              this.player.toggleAircraftCollisionAvoidance();
+            } else {
+              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyG' }));
+            }
+          });
+        }
+        const avoidAuto = this.player ? this.player.aircraftCollisionAvoidance !== false : true;
+        avoidPillEl.classList.toggle('avoid-off', !avoidAuto);
+        this._setText(avoidPillEl, avoidAuto ? '🛡️ AUTO [G]' : '💥 CRASH [G]');
       }
 
       const isHorseMount = activeVeh.type === 'warhorse';
@@ -1107,7 +1187,6 @@ export const HudRenderer = {
       this._lastVehOverlayTheme = null;
       this.vehicleOverlayEl.className = 'hidden';
       if (cockpitFrameEl) cockpitFrameEl.classList.add('hidden');
-      if (airCenterHudEl) airCenterHudEl.classList.add('hidden');
       const ac130FcoOff = this.el('ac130-fco-overlay');
       if (ac130FcoOff) ac130FcoOff.classList.add('hidden');
       const gunTagsEl = this.ammoPanelEl ? this.ammoPanelEl.querySelector('.tactical-gun-tags') : null;
@@ -1389,7 +1468,26 @@ export const HudRenderer = {
     this.updateTelemetryPanel();
 
     // Vehicle Hull Armor Integrity Row + Crew Health, Armor, Bleeding, Grenades & Stance
-    if (activeVeh && !activeVeh.isSecretOmegaFlyer && this.vehicleVitalsRowEl) {
+    const inAircraftVitals = Boolean(
+      activeVeh && activeVeh.isAircraft && !activeVeh.isSecretOmegaFlyer
+    );
+    const backpackBadgeEl = this.el('backpack-hud-badge');
+    if (this._lastInAircraftVitals !== inAircraftVitals) {
+      this._lastInAircraftVitals = inAircraftVitals;
+      if (this.armorBadgeEl) this.armorBadgeEl.classList.toggle('hidden', inAircraftVitals);
+      if (this.bandageBadgeEl) this.bandageBadgeEl.classList.toggle('hidden', inAircraftVitals);
+      if (this.grenadeBadgeEl) this.grenadeBadgeEl.classList.toggle('hidden', inAircraftVitals);
+      if (backpackBadgeEl) backpackBadgeEl.classList.toggle('hidden', inAircraftVitals);
+      const hudBuildBtn = this.el('hud-build-bunker-btn');
+      const hudBikeBtn = this.el('hud-request-bike-btn');
+      if (hudBuildBtn) hudBuildBtn.style.display = inAircraftVitals ? 'none' : '';
+      if (hudBikeBtn) {
+        const isModern = (this.world?.era || 'modern') === 'modern';
+        hudBikeBtn.style.display = isModern && !inAircraftVitals ? '' : 'none';
+      }
+    }
+
+    if (activeVeh && !activeVeh.isAircraft && !activeVeh.isSecretOmegaFlyer && this.vehicleVitalsRowEl) {
       this.vehicleVitalsRowEl.classList.remove('hidden');
       const hullPct = Math.max(0, Math.min(100, (activeVeh.hp / activeVeh.maxHp) * 100));
       if (this.vehHullTagEl) {
@@ -1475,8 +1573,10 @@ export const HudRenderer = {
       if (this.vehicleVitalsRowEl && !this.vehicleVitalsRowEl.classList.contains('hidden')) {
         this.vehicleVitalsRowEl.classList.add('hidden');
       }
-      this._setText(this.crewHpLabelEl, 'HP');
-      this._setText(this.armorBadgeEl, `ARMOR: ${Math.ceil(this.player.armor)}/${this.player.maxArmor || 50}`);
+      this._setText(this.crewHpLabelEl, inAircraftVitals ? 'PILOT' : 'HP');
+      if (!inAircraftVitals) {
+        this._setText(this.armorBadgeEl, `ARMOR: ${Math.ceil(this.player.armor)}/${this.player.maxArmor || 50}`);
+      }
     }
 
     this._setText(this.hpValEl, Math.ceil(this.player.hp));
@@ -1539,30 +1639,31 @@ export const HudRenderer = {
       ? 'CROUCHED [C]'
       : 'STANDING';
     this._setText(this.stanceBadgeEl, stanceStr);
-    const maxPlayerDressings =
-      this.player.maxBandages || (this.player.role === 'medic' ? 9 : 2);
-    if (this.player.role === 'medic') {
-      const bagPct = Math.round(
-        ((this.player.medicBagSupply ?? 600) / (this.player.maxMedicBagSupply || 600)) * 100
-      );
-      this._setText(this.bandageBadgeEl, `DRESSINGS: ${this.player.bandages}/${maxPlayerDressings} • BAG: ${bagPct}%`);
-    } else {
-      this._setText(this.bandageBadgeEl, `DRESSINGS: ${this.player.bandages}/${maxPlayerDressings}`);
-    }
-    this._setText(this.grenadeBadgeEl, `FRAGS [G]: ${this.player.grenades}`);
-    const backpackBadgeEl = this.el('backpack-hud-badge');
-    if (backpackBadgeEl) {
-      const curWep = this.player.currentWeapon ? this.player.currentWeapon() : null;
-      const looseRds = curWep && typeof curWep.looseAmmo === 'number' ? curWep.looseAmmo : 0;
-      const lootCount = Array.isArray(this.player.backpackItems)
-        ? this.player.backpackItems.length
-        : 0;
-      this._setText(
-        backpackBadgeEl,
-        lootCount > 0
-          ? `🎒 PACK [I]: +${looseRds}R • ${lootCount} LOOT`
-          : `🎒 PACK [I]: +${looseRds} RDS`
-      );
+    if (!inAircraftVitals) {
+      const maxPlayerDressings =
+        this.player.maxBandages || (this.player.role === 'medic' ? 9 : 2);
+      if (this.player.role === 'medic') {
+        const bagPct = Math.round(
+          ((this.player.medicBagSupply ?? 600) / (this.player.maxMedicBagSupply || 600)) * 100
+        );
+        this._setText(this.bandageBadgeEl, `DRESSINGS: ${this.player.bandages}/${maxPlayerDressings} • BAG: ${bagPct}%`);
+      } else {
+        this._setText(this.bandageBadgeEl, `DRESSINGS: ${this.player.bandages}/${maxPlayerDressings}`);
+      }
+      this._setText(this.grenadeBadgeEl, `FRAGS [G]: ${this.player.grenades}`);
+      if (backpackBadgeEl) {
+        const curWep = this.player.currentWeapon ? this.player.currentWeapon() : null;
+        const looseRds = curWep && typeof curWep.looseAmmo === 'number' ? curWep.looseAmmo : 0;
+        const lootCount = Array.isArray(this.player.backpackItems)
+          ? this.player.backpackItems.length
+          : 0;
+        this._setText(
+          backpackBadgeEl,
+          lootCount > 0
+            ? `🎒 PACK [I]: +${looseRds}R • ${lootCount} LOOT`
+            : `🎒 PACK [I]: +${looseRds} RDS`
+        );
+      }
     }
 
     if ((this.player.reloading || this.player.slowReloading) && !this.interactPromptEl.classList.contains('hidden')) {
@@ -1920,7 +2021,8 @@ export const HudRenderer = {
           1 + remoteCount
         } PLAYERS • ${this.botManager.bots.length} BOTS`;
       } else {
-        this.netLabelEl.textContent = `🎮 SINGLEPLAYER (OFFLINE) • ${this.botManager.bots.length} AI BOTS`;
+        const aiCnt = this.botManager.bots.length;
+        this.netLabelEl.textContent = `🎮 SINGLEPLAYER • ${1 + aiCnt} PLAYERS (1 YOU + ${aiCnt} AI)`;
       }
       this.updateCommandOrderHud();
       this.updateSquadRoster();
@@ -1980,6 +2082,15 @@ export const HudRenderer = {
    */
   updateAircraftCockpitHud(v, dt = 0.016) {
     if (!v || !v.isAircraft) return;
+    // Throttle SVG transform & MFD 2D canvas redraws to ~30 Hz so uncapped 200+ FPS never thrashes browser SVG layout!
+    this._airCockpitHudAccum = (this._airCockpitHudAccum || 0) + dt;
+    if (this._airCockpitHudAccum < 0.032 && this._lastAirCockpitVeh === v) {
+      return;
+    }
+    const hudDt = Math.min(0.1, this._airCockpitHudAccum || dt);
+    this._airCockpitHudAccum = 0;
+    this._lastAirCockpitVeh = v;
+    dt = hudDt;
 
     // Bind interactive pylon click handlers once
     if (!this._airCockpitPylonsBound) {
@@ -2320,40 +2431,8 @@ export const HudRenderer = {
     if (altValEl) altValEl.textContent = `${altAgl}M`;
     const vsiValEl = this.el('air-vsi-val');
     if (vsiValEl) {
-      vsiValEl.textContent = vsiStr;
-      vsiValEl.style.color = vsiMs > 2 ? '#7bed9f' : vsiMs < -8 ? '#ff7675' : '#bdc3c7';
-    }
-
-    // Update Center Eye-Level Digital Speed & Radar Altimeter (AGL + VSI) HUD Tapes!
-    const cSpdEl = this.el('air-center-spd');
-    const cMachEl = this.el('air-center-mach');
-    const cAltEl = this.el('air-center-alt');
-    const cVsiEl = this.el('air-center-vsi');
-    if (cSpdEl) {
-      this._setText(cSpdEl, `${kmh}`);
-      cSpdEl.style.color = v.isStalling ? '#ff4757' : wHeld && !isGunship ? '#00d2d3' : '#7bed9f';
-    }
-    if (cMachEl) {
-      this._setText(
-        cMachEl,
-        v.isStalling ? '⚠️ STALL' : isGunship && !v.gunshipManualFlight ? 'ORBIT SPD' : `KM/H • M${mach}`
-      );
-    }
-    if (cAltEl) {
-      this._setText(cAltEl, `${altAgl}M`);
-      cAltEl.style.color = altAgl < 28 ? '#00ffcc' : altAgl > 680 && altAgl < 1250 ? '#dfe6e9' : '#74b9ff';
-    }
-    if (cVsiEl) {
-      this._setText(
-        cVsiEl,
-        altAgl < 28
-          ? '🦇 RADAR MASK'
-          : isGunship && !v.gunshipManualFlight
-          ? `🔄 R:${Math.round(v.orbitRadius || 220)}M • RNG:${Math.round(v.slantRangeM || 300)}M`
-          : isGunship && v.gunshipManualFlight
-          ? `🎯 SET ${Math.round(v.targetGunshipAlt || 200)}M [WHEEL/↑↓]`
-          : `VSI ${vsiStr}`
-      );
+      vsiValEl.textContent = altAgl < 28 ? '🦇 MASK' : vsiStr;
+      vsiValEl.style.color = altAgl < 28 ? '#00ffcc' : vsiMs > 2 ? '#7bed9f' : vsiMs < -8 ? '#ff7675' : '#bdc3c7';
     }
 
     // 5. Visual Weapon Bay Pylon & Countermeasure Strip ([1], [2], [3], [X])
@@ -3079,98 +3158,67 @@ export const HudRenderer = {
       }
     }
 
-    // Live per-frame top & bottom telemetry tags on the center sight
-    const kmh = Math.round(Math.abs(v.forwardSpeed || 0) * 3.6);
-    const maxKmh = Math.round((v.speed || 0) * 3.6);
+    // Center Reticle Tags: Keep center crosshair clean (no duplicated name/speed/altitude/keybind walls!).
+    // Show ONLY active transient tactical alerts (missile lock, stall, mayday, flares/cloak, cannon reload, mortar arc).
     if (topTagEl && botTagEl) {
+      let topTxt = '';
+      let botTxt = '';
+
       if (v.isAircraft) {
-        const gY = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
-        const alt = Math.max(0, Math.round(v.pos.y - gY));
-        const avoidAuto = this.player ? this.player.aircraftCollisionAvoidance !== false : true;
-        const avoidTag = avoidAuto ? '🛡️ AVOID: AUTO [G]' : '💥 AVOID: OFF (CRASH) [G]';
+        const lockTgt = this.player?.aircraftLockTarget;
+        const lockPct = Math.round((this.player?.aircraftLockProgress || 0) * 100);
         if (v.aircraftRole === 'gunship') {
-          const wpnStrip =
-            activeSlot === 2
-              ? '[3: 105MM]  2:40MM  1:25MM'
-              : activeSlot === 1
-              ? '3:105MM  [2: 40MM]  1:25MM'
-              : '3:105MM  2:40MM  [1: 25MM]';
           const curFov = Math.round(this.player?.camera?.fov || 60);
-          const mag = (75 / Math.max(12, curFov)).toFixed(1);
-          const sensTag = this.player?.nvgActive ? `${this.player.sensorMode} IR` : 'TV';
-          const slant = Math.round(v.slantRangeM || Math.hypot(alt, v.orbitRadius || 240));
-          topTagEl.textContent = v.gunshipManualFlight
-            ? `🛸 ${v.name.split(' (')[0]} • ✈️ TRANSIT [R] • IAS ${kmh} KM/H • ALT ${alt}M AGL`
-            : `${wpnStrip}  •  ${sensTag} [N]  •  FOV ${curFov}° (${mag}X)  •  AGL ${alt}M  •  SLANT ${slant}M`;
-          botTagEl.textContent = v.gunshipManualFlight
-            ? '[W/S] THROTTLE • [Q / Z] OR [↑ / ↓] HEIGHT & RING • [SCROLL] ZOOM • PRESS [R] TO CIRCLE'
-            : 'FF: BLINKING IR STROBE = FRIENDLY! • [SCROLL] OPTIC ZOOM • [1/2/3] GUNS • [Q/Z] OR [↑/↓] ALT 180-1800M • [WASD] MOVE RING';
-        } else {
-          topTagEl.textContent = `✈️ ${v.name.split(' (')[0]} • IAS ${kmh} KM/H • ALT ${alt}M AGL • ${avoidTag}`;
-          botTagEl.textContent = v.isStalling
-            ? '⚠️ STALL WARNING — HOLD [W] & LOWER NOSE'
-            : (v.flareActiveTimer || 0) > 0
-            ? `✨ COUNTERMEASURES ACTIVE (${v.flareActiveTimer.toFixed(1)}S) — ANGEL-WING FLARES & ECM SPOOFING MISSILES!`
-            : '[LMB] PRIMARY • [SPACE] ORDNANCE • [MOUSE/↑↓] 360° LOOP • [C] COCKPIT/3P CAM • [X] FLARES';
+          if (!v.gunshipManualFlight && curFov < 52) {
+            const gY = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
+            const alt = Math.max(0, Math.round(v.pos.y - gY));
+            const mag = (75 / Math.max(12, curFov)).toFixed(1);
+            const slant = Math.round(v.slantRangeM || Math.hypot(alt, v.orbitRadius || 240));
+            topTxt = `🔍 ${mag}X • SLANT ${slant}M`;
+          }
+        } else if (lockTgt) {
+          const tgtShort = (lockTgt.name || 'BANDIT').split(' ')[0];
+          topTxt =
+            lockPct >= 100
+              ? `🎯 LOCKED ${tgtShort} — [SPACE]`
+              : `📡 SEEKING ${tgtShort} (${lockPct}%)`;
         }
-      } else if (v.type === 'bike' || v.type === 'atv') {
-        const leanDeg = Math.round(((v.roll || 0) * 180) / Math.PI);
-        const gearStr = v.isElectric ? 'EV' : `G${v.currentGear || 'N'}`;
-        topTagEl.textContent = `🏍️ ${kmh} / ${maxKmh} KM/H • ${gearStr} • LEAN ${leanDeg >= 0 ? '+' : ''}${leanDeg}°`;
-        botTagEl.textContent = '[LMB] 9MM DRIVE-BY SMG • [SPACE] WHEELIE / NITRO BOOST';
-      } else if (v.type === 'humvee' || v.type === 'emplace_hmg') {
-        topTagEl.textContent = `🚙 .50 CAL M2HB RWS • ${kmh} / ${maxKmh} KM/H`;
-        botTagEl.textContent = '720 RPM .50 BMG AP-I (FLAT TRAJECTORY)';
+
+        if (v.isShotDown) {
+          botTxt = '🚨 MAYDAY — PRESS [E] TO EJECT!';
+        } else if (v.isStalling) {
+          botTxt = '⚠️ STALL WARNING — HOLD [W] & LOWER NOSE';
+        } else if ((v.flareActiveTimer || 0) > 0) {
+          botTxt =
+            v.aircraftRole === 'b2_spirit'
+              ? `🦇 RAM CLOAK ACTIVE (${v.flareActiveTimer.toFixed(1)}S)`
+              : `✨ FLARES & ECM ACTIVE (${v.flareActiveTimer.toFixed(1)}S)`;
+        }
       } else if (v.type === 'aa' || v.type === 'emplace_aa') {
         const lockTgt = this.player?.aircraftLockTarget;
         const lockPct = Math.round((this.player?.aircraftLockProgress || 0) * 100);
-        topTagEl.textContent = `📡 SPAAG 360° AIR-DEFENSE RADAR • ${kmh}/${maxKmh} KM/H`;
-        botTagEl.textContent = lockTgt
-          ? lockPct >= 100
-            ? `🔒 SAM LOCKED ON ${lockTgt.name.split(' ')[0]} — PRESS [SPACE]!`
-            : `📡 TRACKING ${lockTgt.name.split(' ')[0]} (${lockPct}%)`
-          : '[LMB] 1,050 RPM PROXIMITY FLAK • [SPACE] SAM LOCK';
-      } else if (v.type === 'apc') {
-        topTagEl.textContent = `🛡️ 8×8 IFV 30MM AUTOCANNON • ${kmh}/${maxKmh} KM/H`;
-        botTagEl.textContent = '[1] 30MM HE-FRAG (330 RPM) • [2/SPACE] 7.62MM COAX';
-      } else if (v.type === 'warhorse') {
-        // Keep the center archery sight completely free of tank-turret telemetry banners!
-        topTagEl.textContent = '';
-        botTagEl.textContent = '';
-      } else if (v.type === 'trebuchet') {
+        if (lockTgt) {
+          const tgtShort = (lockTgt.name || 'AIRCRAFT').split(' ')[0];
+          botTxt =
+            lockPct >= 100
+              ? `🔒 SAM LOCKED ON ${tgtShort} — PRESS [SPACE]!`
+              : `📡 TRACKING ${tgtShort} (${lockPct}%)`;
+        }
+      } else if (v.type === 'trebuchet' || v.type === 'emplace_mortar') {
         const rng = Math.round(this.player?.mortarRangeM || 200);
-        const crewCnt = v.setupCrewIds ? v.setupCrewIds.length : 0;
-        topTagEl.textContent = `🪨 SIEGE TREBUCHET • IMPACT ARC ${rng}M`;
-        botTagEl.textContent = `CREW ${crewCnt}/2 [T] • [W/S] ELEVATION • [LMB] LOOSE BOULDER`;
-      } else if (v.type === 'emplace_mortar') {
-        const rng = Math.round(this.player?.mortarRangeM || 200);
-        topTagEl.textContent = `🎯 81MM INDIRECT MORTAR • IMPACT ${rng}M`;
-        botTagEl.textContent = '[LMB] 81MM HE • [SPACE] 3-ROUND RAPID BARRAGE';
-      } else if (v.type === 'trex_mount' || v.type === 'raptor_mount') {
-        const isTrex = v.type === 'trex_mount';
-        topTagEl.textContent = `🦖 ${isTrex ? 'APEX T-REX' : 'VELOCIRAPTOR'} • ${kmh}/${maxKmh} KM/H`;
-        botTagEl.textContent = isTrex
-          ? '[LMB] CRUSHING JAWS & STOMP • [SPACE] APEX ROAR'
-          : '[LMB] SICKLE TALONS & VENOM • [SPACE] POUNCE LEAP';
-      } else {
-        const hullIntPct = Math.round(
-          v.hullIntegrityPct ?? (v.hp / Math.max(1, v.maxHp)) * 100
-        );
-        const eraTag = v.maxEraBlocks
-          ? ` • ERA ${v.eraBlocksIntact ?? v.maxEraBlocks}/${v.maxEraBlocks}`
-          : '';
-        const subWarn =
-          v.subsystems && v.subsystems.tracks === 'DAMAGED'
-            ? ' • ⚠️ TRACKS'
-            : v.subsystems && v.subsystems.engine === 'CRITICAL'
-            ? ' • 🔥 ENGINE CRIT'
-            : '';
-        topTagEl.textContent = `🛡️ MBT FCS • HULL ${hullIntPct}%${eraTag}${subWarn} • ${kmh}/${maxKmh} KM/H`;
-        botTagEl.textContent =
-          v.fireCooldown > 0.05
-            ? `⏳ RELOADING MAIN CANNON (${v.fireCooldown.toFixed(1)}S) • [SPACE] COAX MG`
-            : '[1] 120/125MM APFSDS-T [LMB] • [2/SPACE] 7.62MM COAX MG';
+        topTxt = `🎯 IMPACT ARC ${rng}M`;
+      } else if (v.type === 'tank' || v.type === 'apc') {
+        if (v.fireCooldown > 0.05 && v.weaponType === 'tank_cannon') {
+          botTxt = `⏳ RELOADING (${v.fireCooldown.toFixed(1)}S)`;
+        } else if (v.coaxOverheated) {
+          botTxt = '🔥 COAX OVERHEATED';
+        }
       }
+
+      this._setText(topTagEl, topTxt);
+      this._setText(botTagEl, botTxt);
+      topTagEl.classList.toggle('hidden', !topTxt);
+      botTagEl.classList.toggle('hidden', !botTxt);
     }
   },
 
@@ -4020,7 +4068,9 @@ export const HudRenderer = {
         if (this._domCache) this._domCache.set('kill-streak-badge', el);
       }
       const inAircraft = Boolean(this.player.activeVehicle && this.player.activeVehicle.isAircraft);
-      const bottomStr = inAircraft ? '252px' : '165px';
+      const mfdEl = inAircraft ? this.el('ac130-flir-mfd-card') : null;
+      const mfdOpen = Boolean(mfdEl && !mfdEl.classList.contains('hidden'));
+      const bottomStr = inAircraft ? (mfdOpen ? '374px' : '252px') : '165px';
       if (el._lastBottom !== bottomStr) {
         el._lastBottom = bottomStr;
         el.style.bottom = bottomStr;
@@ -4103,7 +4153,9 @@ export const HudRenderer = {
         if (this._domCache) this._domCache.set('war-crime-badge', el);
       }
       const inAircraft = Boolean(this.player.activeVehicle && this.player.activeVehicle.isAircraft);
-      const bottomStr = inAircraft ? '275px' : '188px';
+      const mfdEl = inAircraft ? this.el('ac130-flir-mfd-card') : null;
+      const mfdOpen = Boolean(mfdEl && !mfdEl.classList.contains('hidden'));
+      const bottomStr = inAircraft ? (mfdOpen ? '398px' : '275px') : '188px';
       if (el._lastBottom !== bottomStr) {
         el._lastBottom = bottomStr;
         el.style.bottom = bottomStr;
@@ -4122,7 +4174,7 @@ export const HudRenderer = {
       feed = document.createElement('div');
       feed.id = 'tactical-comms-feed';
       feed.style.cssText = `
-        position: fixed; bottom: 392px; left: 16px; width: 256px;
+        position: fixed; bottom: 512px; left: 14px; width: 256px;
         display: flex; flex-direction: column; gap: 3px;
         pointer-events: none; z-index: 150;
         font-family: 'Rajdhani', 'Segoe UI', sans-serif;
@@ -4277,7 +4329,8 @@ export const HudRenderer = {
     const era = this.world?.era || 'modern';
     const activeRole = (this.player.role || 'engineer').toLowerCase();
     const curWepName = this.player.slots?.[0]?.def?.shortName || 'RIFLE';
-    const sig = `${era}:${ this.player.team}:${activeRole}:${curWepName}`;
+    const isMac = isMacPlatform();
+    const sig = `${era}:${this.player.team}:${activeRole}:${curWepName}:${isMac ? 'mac' : 'pc'}`;
     if (el.dataset.sig !== sig) {
       el.dataset.sig = sig;
       const roles = getEraRoles(era, this.player.team);
@@ -4285,18 +4338,19 @@ export const HudRenderer = {
         `<button id="fkb-resupply-btn" style="background:#00b894;border:1.5px solid #55efc4;color:#fff;border-radius:4px;padding:4px 9px;cursor:pointer;font-family:'Rajdhani',sans-serif;font-weight:900;font-size:11.5px;white-space:nowrap;">📦 [F] RESUPPLY 100%</button>` +
         `<button id="fkb-loadout-modal-btn" style="background:rgba(241,196,15,0.22);border:1.5px solid #f1c40f;color:#f1c40f;border-radius:4px;padding:4px 10px;cursor:pointer;font-family:'Rajdhani',sans-serif;font-weight:900;font-size:11.5px;white-space:nowrap;">🎒 [L] ROLE, GUN (${curWepName}) &amp; GUNSMITH</button>` +
         roles
-          .map((r) => {
+          .map((r, idx) => {
             const isAct = r.id === activeRole;
             const bg = isAct ? 'rgba(46, 204, 113, 0.28)' : 'rgba(30, 42, 56, 0.85)';
             const border = isAct ? '#2ecc71' : 'rgba(255,255,255,0.2)';
             const col = isAct ? '#2ecc71' : '#ecf0f1';
+            const keyHint = isMac ? `Shift+${idx + 1}` : r.key;
             return `<button class="field-kit-role-btn" data-role="${r.id}" style="
               background:${bg}; border:1.5px solid ${border}; color:${col};
               border-radius:4px; padding:3px 8px; cursor:pointer;
               font-family:'Rajdhani',sans-serif; font-weight:800; font-size:12px;
               display:flex; flex-direction:column; align-items:center; line-height:1.1;
             ">
-              <span>[${r.key}] ${r.icon} ${r.label}</span>
+              <span>[${keyHint}] ${r.icon} ${r.label}</span>
               <span style="font-size:9px;color:#95a5a6;font-weight:700;">${r.sub}</span>
             </button>`;
           })

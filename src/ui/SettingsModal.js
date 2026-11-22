@@ -1,4 +1,4 @@
-import { sound } from '../audio.js?v=105';
+import { sound } from '../audio.js?v=110';
 
 export const SettingsModal = {
   bindSettingsEvents() {
@@ -355,24 +355,37 @@ export const SettingsModal = {
         </div>
       </div>
 
-      <!-- CATEGORY 7: FPS COUNTER OVERLAY [F2] -->
+      <!-- CATEGORY 7: FPS COUNTER & UNCAPPED BENCHMARK MODE [F2] -->
       <div style="background:rgba(16,26,36,0.88);border:1px solid rgba(0,206,201,0.35);border-left:4px solid #00cec9;border-radius:6px;padding:10px 14px;margin-bottom:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-          <div>
-            <span style="font-size:13px;font-weight:900;color:#81ecec;">7. FPS &amp; FRAME-TIME COUNTER [F2]</span>
-            <div style="font-size:10px;color:#bdc3c7;">Show or hide the real-time FPS &amp; 1% Low counter pill in the top-right corner.</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:220px;">
+            <span style="font-size:13px;font-weight:900;color:#81ecec;">7. FPS COUNTER &amp; UNCAPPED BENCHMARK MODE [F2]</span>
+            <div style="font-size:10px;color:#bdc3c7;"><b>UNCAPPED</b> (default) bypasses browser 60Hz/120Hz V-Sync via a zero-delay <code>MessageChannel</code> loop to benchmark raw CPU/GPU max FPS across different computers! Switch to <b>V-SYNC</b> anytime to save laptop battery.</div>
           </div>
-          <button
-            type="button"
-            id="settings-fps-toggle-btn"
-            style="background:${
-              this.showFps !== false ? 'rgba(46,204,113,0.25)' : 'rgba(255,255,255,0.08)'
-            };border:1px solid ${this.showFps !== false ? '#2ecc71' : 'rgba(255,255,255,0.28)'};color:${
-              this.showFps !== false ? '#7bed9f' : '#94a3b8'
-            };border-radius:4px;padding:6px 12px;font-size:11.5px;font-weight:900;cursor:pointer;white-space:nowrap;"
-          >
-            ${this.showFps !== false ? '⏱ FPS: ON' : '⏱ FPS: OFF'}
-          </button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button
+              type="button"
+              id="settings-uncapped-fps-btn"
+              style="background:${
+                window.game?.uncappedFps !== false ? 'rgba(0,210,211,0.26)' : 'rgba(255,255,255,0.08)'
+              };border:1px solid ${window.game?.uncappedFps !== false ? '#00d2d3' : 'rgba(255,255,255,0.28)'};color:${
+                window.game?.uncappedFps !== false ? '#81ecec' : '#cbd5e1'
+              };border-radius:4px;padding:6px 12px;font-size:11.5px;font-weight:900;cursor:pointer;white-space:nowrap;"
+            >
+              ${window.game?.uncappedFps !== false ? '🚀 CAP: UNCAPPED (MAX FPS)' : '🖥️ CAP: V-SYNC (MONITOR Hz)'}
+            </button>
+            <button
+              type="button"
+              id="settings-fps-toggle-btn"
+              style="background:${
+                this.showFps !== false ? 'rgba(46,204,113,0.25)' : 'rgba(255,255,255,0.08)'
+              };border:1px solid ${this.showFps !== false ? '#2ecc71' : 'rgba(255,255,255,0.28)'};color:${
+                this.showFps !== false ? '#7bed9f' : '#94a3b8'
+              };border-radius:4px;padding:6px 12px;font-size:11.5px;font-weight:900;cursor:pointer;white-space:nowrap;"
+            >
+              ${this.showFps !== false ? '⏱ FPS HUD: ON' : '⏱ FPS HUD: OFF'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -418,23 +431,25 @@ export const SettingsModal = {
         </div>
       </div>
 
-      <!-- CATEGORY 10: AI ARMY SCALE (100 - 400 TOTAL AI SOLDIERS) -->
+      <!-- CATEGORY 10: BATTLEFIELD PLAYER & AI ARMY SCALE (UP TO 500 PLAYERS: 1 YOU + 499 AI) -->
       <div style="background:rgba(16,26,36,0.88);border:1px solid rgba(241,196,15,0.45);border-left:4px solid #f1c40f;border-radius:6px;padding:10px 14px;margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
           <div>
-            <span style="font-size:13px;font-weight:900;color:#f1c40f;">10. AI ARMY SIZE PER SIDE (DEFAULT: 125 VS 125 = 250 TOTAL • UP TO 200 VS 200 = 400 TOTAL)</span>
-            <div style="font-size:10px;color:#bdc3c7;">Scale battlefield soldier density across the 7,600m theater in real time (equal US &amp; RU headcount).</div>
+            <span style="font-size:13px;font-weight:900;color:#f1c40f;">10. BATTLEFIELD SCALE (DEFAULT: 500 PLAYERS = 1 YOU + 499 AI • BALANCED 250 VS 250)</span>
+            <div style="font-size:10px;color:#bdc3c7;">Scale battlefield combatant density across the 7,600m theater in real time (reserves 1 slot on your faction so US &amp; RU stay evenly matched).</div>
           </div>
-          <div style="display:flex;gap:5px;">
-            ${[75, 125, 160, 200]
+          <div style="display:flex;gap:5px;flex-wrap:wrap;">
+            ${[75, 125, 175, 200, 250]
               .map((cnt) => {
-                const curCnt = this.botManager?.currentBotsPerTeam || 125;
+                const curCnt = this.botManager?.currentBotsPerTeam || 250;
                 const active = curCnt === cnt;
+                const totPlayers = cnt * 2;
+                const aiCount = totPlayers - 1;
                 return `<button type="button" class="settings-bot-count-btn" data-bots="${cnt}" style="background:${
                   active ? 'rgba(241,196,15,0.28)' : 'rgba(255,255,255,0.08)'
                 };border:1px solid ${active ? '#f1c40f' : 'rgba(255,255,255,0.24)'};color:${
                   active ? '#ffeaa7' : '#dfe6e9'
-                };border-radius:4px;padding:4px 9px;font-size:11px;font-weight:900;cursor:pointer;">${cnt * 2} AI (${cnt}v${cnt})</button>`;
+                };border-radius:4px;padding:4px 9px;font-size:11px;font-weight:900;cursor:pointer;">${totPlayers}P (1+${aiCount} AI)</button>`;
               })
               .join('')}
           </div>
@@ -581,6 +596,21 @@ export const SettingsModal = {
       });
     }
 
+    const uncappedFpsBtn = modal.querySelector('#settings-uncapped-fps-btn');
+    if (uncappedFpsBtn && window.game && typeof window.game.toggleUncappedFps === 'function') {
+      uncappedFpsBtn.addEventListener('click', () => {
+        const uncapped = window.game.toggleUncappedFps();
+        this.renderSettingsModalContent(modal);
+        sound.playRadioBeep(true);
+        this.addXpNotification?.(
+          0,
+          uncapped
+            ? '🚀 FPS LIMIT REMOVED: UNCAPPED BENCHMARK MODE ACTIVE!'
+            : '🖥️ V-SYNC ENABLED: LOCKED TO DISPLAY REFRESH RATE'
+        );
+      });
+    }
+
     const fpsToggleBtn = modal.querySelector('#settings-fps-toggle-btn');
     if (fpsToggleBtn && typeof this.toggleFpsCounter === 'function') {
       fpsToggleBtn.addEventListener('click', () => {
@@ -622,16 +652,25 @@ export const SettingsModal = {
 
     modal.querySelectorAll('.settings-bot-count-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const cnt = Number(btn.dataset.bots || 125);
+        const cnt = Number(btn.dataset.bots || 250);
         if (this.botManager && typeof this.botManager.setBotCountPerSide === 'function') {
-          this.botManager.setBotCountPerSide(cnt);
+          const isSp = !this.network || !this.network.isMultiplayer();
+          const playerTeam = isSp ? this.player?.team || 'US' : null;
+          this.botManager.setBotCountPerSide(cnt, { playerTeam });
+          window.game?.syncMatchTicketsForArmyScale?.(cnt);
+          const aiCnt = this.botManager.bots.length;
           const netLbl = this.el('net-label');
-          if (netLbl && (!this.network || !this.network.connected)) {
-            netLbl.textContent = `SINGLEPLAYER (OFFLINE) • ${cnt * 2} AI BOTS`;
+          if (netLbl && isSp) {
+            netLbl.textContent = `🎮 SINGLEPLAYER • ${1 + aiCnt} PLAYERS (1 YOU + ${aiCnt} AI)`;
           }
           this.renderSettingsModalContent(modal);
           sound.playRadioBeep(true);
-          this.addXpNotification?.(0, `🪖 AI ARMY SCALED TO ${cnt * 2} SOLDIERS (${cnt} US VS ${cnt} RU)!`);
+          this.addXpNotification?.(
+            0,
+            isSp
+              ? `🪖 BATTLEFIELD SCALED TO ${1 + aiCnt} PLAYERS (1 YOU + ${aiCnt} AI • ${cnt} US VS ${cnt} RU)!`
+              : `🪖 AI ARMY SCALED TO ${aiCnt} SOLDIERS (${cnt} US VS ${cnt} RU)!`
+          );
         }
       });
     });

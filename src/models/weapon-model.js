@@ -18,7 +18,55 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=105';
+import { TEXTURES } from '../assets/textures.js?v=110';
+
+// Cached shared geometries & materials for 1st-person Spec-Ops Operator Arms, Watch & Articulated Tactical Gloves
+const _fpArmGeos = {
+  upperSleeve: new THREE.CylinderGeometry(0.039, 0.045, 0.22, 10),
+  forearmSleeve: new THREE.CylinderGeometry(0.033, 0.04, 0.22, 10),
+  sleeveFold: new THREE.CylinderGeometry(0.042, 0.041, 0.038, 10),
+  elbowPad: new THREE.BoxGeometry(0.056, 0.026, 0.095),
+  wristSkin: new THREE.CylinderGeometry(0.027, 0.03, 0.046, 10),
+  gloveCuff: new THREE.CylinderGeometry(0.031, 0.032, 0.034, 10),
+  velcroTab: new THREE.BoxGeometry(0.038, 0.012, 0.024),
+  watchBand: new THREE.CylinderGeometry(0.0315, 0.0315, 0.022, 12),
+  watchCase: new THREE.BoxGeometry(0.034, 0.012, 0.038),
+  watchScreen: new THREE.BoxGeometry(0.026, 0.004, 0.028),
+  watchTick: new THREE.BoxGeometry(0.016, 0.0045, 0.005),
+  palmCore: new THREE.BoxGeometry(0.06, 0.034, 0.074),
+  suedePatch: new THREE.BoxGeometry(0.054, 0.008, 0.062),
+  knuckleGuard: new THREE.BoxGeometry(0.062, 0.012, 0.022),
+  knucklePod: new THREE.SphereGeometry(0.0075, 6, 6),
+  thumbProx: new THREE.CylinderGeometry(0.0095, 0.011, 0.036, 8),
+  thumbDist: new THREE.CylinderGeometry(0.008, 0.0095, 0.028, 8),
+  fingerProx: new THREE.CylinderGeometry(0.008, 0.009, 0.034, 7),
+  fingerDist: new THREE.CylinderGeometry(0.007, 0.008, 0.028, 7)
+};
+for (const g of Object.values(_fpArmGeos)) {
+  g.userData.shared = true;
+}
+
+const _fpWatchCaseMat = new THREE.MeshStandardMaterial({
+  color: 0x15191e,
+  roughness: 0.35,
+  metalness: 0.78
+});
+_fpWatchCaseMat.userData.shared = true;
+const _fpWatchScreenMat = new THREE.MeshBasicMaterial({ color: 0x0a2e24 });
+_fpWatchScreenMat.userData.shared = true;
+const _fpWatchGlowMat = new THREE.MeshBasicMaterial({ color: 0x2ed573 });
+_fpWatchGlowMat.userData.shared = true;
+const _fpCarbonKnuckleMat = new THREE.MeshStandardMaterial({
+  color: 0x111418,
+  roughness: 0.26,
+  metalness: 0.65
+});
+_fpCarbonKnuckleMat.userData.shared = true;
+const _fpTanSuedeMat = new THREE.MeshStandardMaterial({
+  color: 0x594a3a,
+  roughness: 0.88
+});
+_fpTanSuedeMat.userData.shared = true;
 
 export function createWeaponViewModel(def, team = 'US', custom = {}) {
   const group = new THREE.Group();
@@ -67,13 +115,129 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
 
   const buildArm = (isLeft) => {
     const armGroup = new THREE.Group();
-    const forearm = new THREE.Mesh(new THREE.BoxGeometry(0.064, 0.064, 0.28), sleeveMat);
-    forearm.position.set(0, 0, 0.14);
-    const wrist = new THREE.Mesh(new THREE.BoxGeometry(0.056, 0.056, 0.04), skinMat);
-    wrist.position.set(0, 0, -0.01);
-    const glove = new THREE.Mesh(new THREE.BoxGeometry(0.062, 0.066, 0.085), gloveMat);
-    glove.position.set(0, 0, -0.05);
-    armGroup.add(forearm, wrist, glove);
+    const sideSign = isLeft ? 1 : -1;
+
+    // 1. Extended Combat-Shirt Upper/Lower Forearm Sleeve + Rolled Cuff + Molded Elbow Pad
+    const upperSleeve = new THREE.Mesh(_fpArmGeos.upperSleeve, sleeveMat);
+    upperSleeve.rotation.x = Math.PI / 2;
+    upperSleeve.position.set(sideSign * 0.008, -0.012, 0.31);
+
+    const forearm = new THREE.Mesh(_fpArmGeos.forearmSleeve, sleeveMat);
+    forearm.rotation.x = Math.PI / 2;
+    forearm.position.set(0, -0.003, 0.135);
+
+    const sleeveFold = new THREE.Mesh(_fpArmGeos.sleeveFold, sleeveMat);
+    sleeveFold.rotation.x = Math.PI / 2;
+    sleeveFold.position.set(0, -0.002, 0.036);
+
+    const elbowPad = new THREE.Mesh(_fpArmGeos.elbowPad, _fpCarbonKnuckleMat);
+    elbowPad.position.set(sideSign * 0.006, -0.036, 0.25);
+
+    // 2. Exposed Wrist + Tactical Wrist Gear (Garmin/Tactical Watch on Left Arm, Paracord Cuff on Right Arm)
+    const wrist = new THREE.Mesh(_fpArmGeos.wristSkin, skinMat);
+    wrist.rotation.x = Math.PI / 2;
+    wrist.position.set(0, 0, 0.006);
+
+    const gloveCuff = new THREE.Mesh(_fpArmGeos.gloveCuff, gloveMat);
+    gloveCuff.rotation.x = Math.PI / 2;
+    gloveCuff.position.set(0, 0, -0.016);
+
+    const velcroTab = new THREE.Mesh(_fpArmGeos.velcroTab, _fpTanSuedeMat);
+    velcroTab.position.set(0, 0.028, -0.016);
+
+    armGroup.add(upperSleeve, forearm, sleeveFold, elbowPad, wrist, gloveCuff, velcroTab);
+
+    if (isLeft) {
+      // Inward-canted Operator Tactical Watch / GPS Foretrex (visible during hipfire,ADS, reload & inspect!)
+      const watchGroup = new THREE.Group();
+      watchGroup.name = 'tacticalWatchGroup';
+      watchGroup.position.set(0, 0, 0.008);
+      watchGroup.rotation.z = -0.78; // Angled inward toward the operator's eyes
+      const band = new THREE.Mesh(_fpArmGeos.watchBand, _fpWatchCaseMat);
+      band.rotation.x = Math.PI / 2;
+      const bezel = new THREE.Mesh(_fpArmGeos.watchCase, _fpWatchCaseMat);
+      bezel.position.set(0, 0.031, 0);
+      const screen = new THREE.Mesh(_fpArmGeos.watchScreen, _fpWatchScreenMat);
+      screen.position.set(0, 0.036, 0);
+      const readoutTop = new THREE.Mesh(_fpArmGeos.watchTick, _fpWatchGlowMat);
+      readoutTop.position.set(0, 0.0375, -0.005);
+      const readoutBot = new THREE.Mesh(_fpArmGeos.watchTick, _fpWatchGlowMat);
+      readoutBot.scale.set(0.68, 1, 0.8);
+      readoutBot.position.set(-0.003, 0.0375, 0.005);
+      watchGroup.add(band, bezel, screen, readoutTop, readoutBot);
+      armGroup.add(watchGroup);
+    } else {
+      const paracordBand = new THREE.Mesh(_fpArmGeos.watchBand, _fpTanSuedeMat);
+      paracordBand.rotation.x = Math.PI / 2;
+      paracordBand.position.set(0, 0, 0.008);
+      armGroup.add(paracordBand);
+    }
+
+    // 3. Sculpted Hard-Knuckle Tactical Glove Hand + Thumb + Curled Grip Fingers + Articulated Index Trigger Finger
+    const handGroup = new THREE.Group();
+    handGroup.name = isLeft ? 'leftHandGroup' : 'rightHandGroup';
+    handGroup.position.set(0, -0.002, -0.056);
+
+    const palm = new THREE.Mesh(_fpArmGeos.palmCore, gloveMat);
+    const suedePalm = new THREE.Mesh(_fpArmGeos.suedePatch, _fpTanSuedeMat);
+    suedePalm.position.set(-sideSign * 0.004, -0.015, 0);
+
+    const knuckleBar = new THREE.Mesh(_fpArmGeos.knuckleGuard, _fpCarbonKnuckleMat);
+    knuckleBar.position.set(0, 0.018, -0.024);
+    handGroup.add(palm, suedePalm, knuckleBar);
+    for (let k = 0; k < 4; k++) {
+      const pod = new THREE.Mesh(_fpArmGeos.knucklePod, _fpCarbonKnuckleMat);
+      pod.position.set((k - 1.5) * 0.014, 0.023, -0.026);
+      handGroup.add(pod);
+    }
+
+    // Opposable Thumb wrapping inward over the grip / handguard C-clamp
+    const thumbPivot = new THREE.Group();
+    thumbPivot.name = isLeft ? 'leftThumbGroup' : 'rightThumbGroup';
+    thumbPivot.position.set(sideSign * 0.028, 0.006, -0.012);
+    thumbPivot.rotation.set(isLeft ? 0.18 : 0.32, -sideSign * (isLeft ? 0.58 : 0.46), sideSign * 0.35);
+    const thumb1 = new THREE.Mesh(_fpArmGeos.thumbProx, gloveMat);
+    thumb1.rotation.x = Math.PI / 2;
+    thumb1.position.set(0, 0, -0.016);
+    const thumb2 = new THREE.Mesh(_fpArmGeos.thumbDist, _fpTanSuedeMat);
+    thumb2.rotation.x = Math.PI / 2 + 0.38;
+    thumb2.position.set(-sideSign * 0.005, -0.006, -0.04);
+    thumbPivot.add(thumb1, thumb2);
+    handGroup.add(thumbPivot);
+
+    // Index Finger (Extended Trigger Finger on Right Hand; C-Clamp / Forend Support Finger on Left Hand)
+    const indexPivot = new THREE.Group();
+    indexPivot.name = isLeft ? 'leftIndexGroup' : 'triggerFingerGroup';
+    indexPivot.position.set(sideSign * 0.02, 0.008, -0.036);
+    indexPivot.rotation.set(isLeft ? 0.62 : 0.24, -sideSign * (isLeft ? 0.12 : 0.22), 0);
+    indexPivot.userData.baseRotX = indexPivot.rotation.x;
+    indexPivot.userData.baseRotY = indexPivot.rotation.y;
+    const idx1 = new THREE.Mesh(_fpArmGeos.fingerProx, gloveMat);
+    idx1.rotation.x = Math.PI / 2;
+    idx1.position.set(0, 0, -0.016);
+    const idx2 = new THREE.Mesh(_fpArmGeos.fingerDist, _fpTanSuedeMat);
+    idx2.rotation.x = Math.PI / 2 + (isLeft ? 0.72 : 0.48);
+    idx2.position.set(-sideSign * 0.004, -0.01, -0.038);
+    indexPivot.add(idx1, idx2);
+    handGroup.add(indexPivot);
+
+    // Curled Middle, Ring & Little Fingers wrapping firmly around the grip / handguard
+    const gripFingers = new THREE.Group();
+    gripFingers.name = isLeft ? 'leftGripFingers' : 'rightGripFingers';
+    for (let f = 0; f < 3; f++) {
+      const fX = sideSign * (0.006 - f * 0.014);
+      const curl = 0.85 + f * 0.08;
+      const fProx = new THREE.Mesh(_fpArmGeos.fingerProx, gloveMat);
+      fProx.rotation.x = Math.PI / 2 + curl * 0.55;
+      fProx.position.set(fX, -0.002, -0.044);
+      const fDist = new THREE.Mesh(_fpArmGeos.fingerDist, _fpTanSuedeMat);
+      fDist.rotation.x = Math.PI / 2 + curl * 1.25;
+      fDist.position.set(fX, -0.022, -0.056);
+      gripFingers.add(fProx, fDist);
+    }
+    handGroup.add(gripFingers);
+    armGroup.add(handGroup);
+
     armGroup.name = isLeft ? 'leftArmGroup' : 'rightArmGroup';
     return armGroup;
   };
@@ -1201,6 +1365,9 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     );
     triggerBlade.position.set(0, isPistol ? -0.013 : -0.03, isPistol ? -0.222 : -0.186);
     triggerBlade.rotation.x = -0.35;
+    triggerBlade.name = 'triggerBladeMesh';
+    triggerBlade.userData.baseRotX = -0.35;
+    triggerBlade.userData.baseZ = triggerBlade.position.z;
     group.add(triggerBlade);
 
     // 2. Upper & Lower Receiver Geometry + Ejection Port + Fire Selector + Magwell (customized per firearm!)

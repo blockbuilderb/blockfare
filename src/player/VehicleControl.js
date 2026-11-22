@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=105';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=105';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=105';
-import { events } from '../events.js?v=105';
+import { sound } from '../audio.js?v=110';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=110';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=110';
+import { events } from '../events.js?v=110';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +11,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=105';
+} from '../core/StateMachines.js?v=110';
 
 function markShared(asset) {
   if (asset) {
@@ -64,10 +64,14 @@ const _b2CarpetBombGeo = markShared(new THREE.BoxGeometry(0.44, 0.44, 1.75));
 const _b2CarpetBombMat = markShared(
   new THREE.MeshStandardMaterial({ color: 0x2f3640, roughness: 0.45, metalness: 0.4 })
 );
-const _bofors40mmGeo = markShared(new THREE.BoxGeometry(0.28, 0.28, 0.95));
-const _bofors40mmMat = markShared(new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
-const _howitzer105mmGeo = markShared(new THREE.BoxGeometry(0.42, 0.42, 1.45));
-const _howitzer105mmMat = markShared(new THREE.MeshBasicMaterial({ color: 0xff5252 }));
+const _bofors40mmGeo = markShared(new THREE.BoxGeometry(0.32, 0.32, 1.1));
+const _bofors40mmMat = markShared(
+  new THREE.MeshBasicMaterial({ color: 0xfff7d6, toneMapped: false })
+);
+const _howitzer105mmGeo = markShared(new THREE.BoxGeometry(0.48, 0.48, 1.6));
+const _howitzer105mmMat = markShared(
+  new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false })
+);
 const _jdam500Geo = markShared(new THREE.BoxGeometry(0.42, 0.42, 1.65));
 const _jdam500Mat = markShared(new THREE.MeshStandardMaterial({ color: 0x3b4d3b, roughness: 0.6 }));
 const _wrightDynGeo = markShared(new THREE.BoxGeometry(0.46, 0.36, 0.56));
@@ -86,8 +90,8 @@ const _a2aMissileMat = markShared(new THREE.MeshBasicMaterial({ color: 0x00d2d3 
 const _colSmokeWhite = new THREE.Color(0xdfe6e9);
 const _colCyan = new THREE.Color(0x00d2d3);
 const _colTrebOrange = new THREE.Color(0xff7f11);
-const _colTankFlash = new THREE.Color(0xffaa00);
-const _colHowitzerFlash = new THREE.Color(0xff9f1a);
+const _colTankFlash = new THREE.Color(0xffeaa7);
+const _colHowitzerFlash = new THREE.Color(0xffffff);
 const _colFlareGold = new THREE.Color(0xffd32a);
 const _colFlareBlue = new THREE.Color(0x74b9ff);
 const _colFlarePale = new THREE.Color(0xffeaa7);
@@ -135,10 +139,8 @@ export const VehicleControlMethods = {
       }
       v.driver = null;
       this.activeVehicle = null;
-      if (this.sensorMode === 'WHOT' || this.sensorMode === 'BHOT') {
-        this.sensorMode = this.hasThermalGoggles ? 'WHOT' : 'OFF';
-        this.nvgActive = this.sensorMode !== 'OFF';
-      }
+      this.sensorMode = 'OFF';
+      this.nvgActive = false;
       this.targetLockFSM?.send(TARGET_LOCK_EVENTS.LOST_TARGET);
       this.aircraftLockTarget = null;
       this.aircraftLockProgress = 0;
@@ -147,7 +149,7 @@ export const VehicleControlMethods = {
       }
       if (this.ccipMarkerMesh) this.ccipMarkerMesh.visible = false;
       if (this._gunshipOrbitVisGroup) this._gunshipOrbitVisGroup.visible = false;
-      this.viewModelGroup.visible = true;
+      if (this.viewModelGroup) this.viewModelGroup.visible = true;
       events.emit('player:exited-vehicle', { vehicle: v, reason: isAirbornePlane ? 'ejected' : 'manual' });
 
       if (isAirbornePlane) {
@@ -792,28 +794,40 @@ export const VehicleControlMethods = {
     bullMat.color.setHex(colHex);
     beaconMat.color.setHex(colHex);
 
-    bullMesh.position.set(cx, centerGroundY, cz);
-    bullMesh.scale.set(bullScale, 1, bullScale);
-    crossX.position.set(cx, centerGroundY + 0.1, cz);
-    crossX.scale.set(bullScale, 1, bullScale);
-    crossZ.position.set(cx, centerGroundY + 0.1, cz);
-    crossZ.scale.set(bullScale, 1, bullScale);
-    beaconMesh.position.set(cx, centerGroundY + 21 * bullScale, cz);
-    beaconMesh.scale.set(bullScale, bullScale, bullScale);
+    // Only rebuild & re-upload the 65-vertex 3D ground ring VBO when center/radius actually moves > 0.65m!
+    const movedRing =
+      grp.userData._lastCx === undefined ||
+      Math.abs(cx - grp.userData._lastCx) > 0.65 ||
+      Math.abs(cz - grp.userData._lastCz) > 0.65 ||
+      Math.abs(radius - grp.userData._lastRadius) > 0.65;
 
-    const posArr = ringLine.geometry.attributes.position.array;
-    const segs = 64;
-    for (let i = 0; i <= segs; i++) {
-      const ang = (i / segs) * Math.PI * 2;
-      const rx = cx + Math.cos(ang) * radius;
-      const rz = cz + Math.sin(ang) * radius;
-      const ry = (this.world ? this.world.getGroundHeightAt(rx, rz) : 1.25) + 3.2;
-      const idx = i * 3;
-      posArr[idx] = rx;
-      posArr[idx + 1] = ry;
-      posArr[idx + 2] = rz;
+    if (movedRing) {
+      grp.userData._lastCx = cx;
+      grp.userData._lastCz = cz;
+      grp.userData._lastRadius = radius;
+      bullMesh.position.set(cx, centerGroundY, cz);
+      bullMesh.scale.set(bullScale, 1, bullScale);
+      crossX.position.set(cx, centerGroundY + 0.1, cz);
+      crossX.scale.set(bullScale, 1, bullScale);
+      crossZ.position.set(cx, centerGroundY + 0.1, cz);
+      crossZ.scale.set(bullScale, 1, bullScale);
+      beaconMesh.position.set(cx, centerGroundY + 21 * bullScale, cz);
+      beaconMesh.scale.set(bullScale, bullScale, bullScale);
+
+      const posArr = ringLine.geometry.attributes.position.array;
+      const segs = 64;
+      for (let i = 0; i <= segs; i++) {
+        const ang = (i / segs) * Math.PI * 2;
+        const rx = cx + Math.cos(ang) * radius;
+        const rz = cz + Math.sin(ang) * radius;
+        const ry = (this.world ? this.world.getGroundHeightAt(rx, rz) : 1.25) + 3.2;
+        const idx = i * 3;
+        posArr[idx] = rx;
+        posArr[idx + 1] = ry;
+        posArr[idx + 2] = rz;
+      }
+      ringLine.geometry.attributes.position.needsUpdate = true;
     }
-    ringLine.geometry.attributes.position.needsUpdate = true;
 
     // Show golden Entry Guide Line when in Transit Mode (or >25m off the orbit perimeter)
     const dx = v.pos.x - cx;
@@ -2937,7 +2951,7 @@ export const VehicleControlMethods = {
     }
     try {
       localStorage.setItem(
-        'bb_aircraft_collision_avoidance_v1',
+        'bb_aircraft_collision_avoidance_v2',
         this.aircraftCollisionAvoidance ? '1' : '0'
       );
     } catch (_) {}
@@ -3322,7 +3336,15 @@ export const VehicleControlMethods = {
           bGrp.rotation.z = THREE.MathUtils.clamp((this.pitch - idealDepress) * 0.5, -0.32, 0.32);
         }
 
-        const targetAltY = groundH + v.targetGunshipAlt;
+        let gunshipSafeFloorY = groundH + v.targetGunshipAlt;
+        if (this.aircraftCollisionAvoidance !== false) {
+          const gLookX = v.pos.x - Math.sin(v.yaw || 0) * 38;
+          const gLookZ = v.pos.z - Math.cos(v.yaw || 0) * 38;
+          const curObsY = this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z, v.pos.y);
+          const fwdObsY = this.getAircraftObstacleHeightAt(gLookX, gLookZ, v.pos.y);
+          gunshipSafeFloorY = Math.max(gunshipSafeFloorY, curObsY + 24, fwdObsY + 24);
+        }
+        const targetAltY = gunshipSafeFloorY;
         const altErr = targetAltY - v.pos.y;
         const targetGunshipPitch = THREE.MathUtils.clamp(altErr * 0.016, -0.28, 0.28);
         v.pitch = THREE.MathUtils.lerp(v.pitch || 0, targetGunshipPitch, Math.min(1, dt * 3.4));
@@ -3429,14 +3451,13 @@ export const VehicleControlMethods = {
         } else if (
           collisionAvoidAuto &&
           !onRunway &&
-          effectiveClearance < (isWright ? 14 : 28) &&
-          Math.sin(desiredPitch) < 0.22 &&
-          throttleInput >= 0
+          effectiveClearance < (isWright ? 16 : 34) &&
+          Math.sin(desiredPitch) < 0.24
         ) {
-          const pullSpan = isWright ? 14 : 28;
+          const pullSpan = isWright ? 16 : 34;
           const pullFrac = THREE.MathUtils.clamp((pullSpan - effectiveClearance) / pullSpan, 0, 1);
-          desiredPitch = THREE.MathUtils.lerp(desiredPitch, 0.26, pullFrac);
-          this.pitch = THREE.MathUtils.lerp(this.pitch, 0.14, pullFrac * dt * 4.5);
+          desiredPitch = THREE.MathUtils.lerp(desiredPitch, 0.28, pullFrac);
+          this.pitch = THREE.MathUtils.lerp(this.pitch, 0.16, pullFrac * dt * 4.8);
         }
 
         let pitchDelta = desiredPitch - (v.pitch || 0);
@@ -3574,30 +3595,54 @@ export const VehicleControlMethods = {
           }
         }
       } else {
-        // COLLISION AVOIDANCE: AUTO ON (Default — Easier Flight Control)
-        // Automatically cushions altitude over buildings, mountains & ground (unless in a deep unrecovered stall crash)
-        if (v.isStalling && nextY <= newGroundH + 1.8 && stallSinkY < -12.0) {
-          v.pos.y = newGroundH + 0.5;
-          v.shotDownAttacker = {
-            attackerName: 'AERODYNAMIC STALL CRASH',
-            attackerTeam: v.team === 'US' ? 'RU' : 'US',
-            weaponName: 'AERODYNAMIC STALL GROUND IMPACT'
-          };
-          this.vehicleManager?.finalizeShotDownCrash?.(v);
-          return;
+        // COLLISION AVOIDANCE: AUTO ON (Default — Full Auto-GCAS Terrain, Building, Stall & Airspace Cushion)
+        if (v.isStalling && v.hasLeftRunwayOnce && nextY <= newGroundH + 26.0) {
+          // Auto-GCAS emergency throttle & angle-of-attack recovery prevents fatal stall crashes when protection is ON
+          v.isStalling = false;
+          v.stallSinkVel = 0;
+          v.forwardSpeed = Math.max(v.forwardSpeed || 0, (stallSpd || 28) * 1.12);
+          v.pitch = Math.max(v.pitch || 0, 0.12);
+          v.flightFSM?.send(AIRCRAFT_FLIGHT_EVENTS.RECOVER_STALL);
         }
-        if (!insideSecretCaveNow && v.hasLeftRunwayOnce && !v.isStalling) {
+        if (!insideSecretCaveNow && v.hasLeftRunwayOnce) {
           const obsTopY = this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z, nextY);
-          if (obsTopY > newGroundH + 1.0 && nextY < obsTopY + 3.2) {
-            // Auto Collision Avoidance smoothly lifts the plane over the building/tower roof!
+          const minAirborneFloor =
+            onRunway && (v.forwardSpeed || 0) < 40
+              ? newGroundH
+              : newGroundH + (isWright ? 6.0 : 12.0);
+          const requiredSafeY = Math.max(
+            minAirborneFloor,
+            obsTopY > newGroundH + 1.0 ? obsTopY + 5.0 : minAirborneFloor
+          );
+          if (nextY < requiredSafeY) {
             v.pos.y = THREE.MathUtils.clamp(
-              THREE.MathUtils.lerp(v.pos.y, obsTopY + 4.0, Math.min(1, dt * 8.0)),
+              THREE.MathUtils.lerp(Math.max(v.pos.y, newGroundH), requiredSafeY + 1.5, Math.min(1, dt * 8.5)),
               newGroundH,
               maxAirspaceAlt
             );
-            v.pitch = Math.max(v.pitch, 0.14);
+            v.pitch = Math.max(v.pitch || 0, 0.14);
           } else {
             v.pos.y = THREE.MathUtils.clamp(nextY, newGroundH, maxAirspaceAlt);
+          }
+          // Mid-air Traffic Collision Avoidance (TCAS): gently separate from nearby airborne aircraft within 24m
+          if (this.vehicleManager?.vehicles) {
+            const allVehs = this.vehicleManager.vehicles;
+            for (let oi = 0; oi < allVehs.length; oi++) {
+              const ov = allVehs[oi];
+              if (!ov || ov === v || ov.dead || !ov.isAircraft) continue;
+              const dxA = v.pos.x - ov.pos.x;
+              const dyA = v.pos.y - ov.pos.y;
+              const dzA = v.pos.z - ov.pos.z;
+              const distSqA = dxA * dxA + dyA * dyA + dzA * dzA;
+              if (distSqA < 24 * 24 && ov.pos.y > newGroundH + 8.0) {
+                const liftDir = dyA >= -2.0 ? 1 : -1;
+                v.pos.y = THREE.MathUtils.clamp(
+                  v.pos.y + liftDir * 18.0 * dt,
+                  requiredSafeY,
+                  maxAirspaceAlt
+                );
+              }
+            }
           }
         } else {
           v.pos.y = THREE.MathUtils.clamp(nextY, newGroundH, maxAirspaceAlt);

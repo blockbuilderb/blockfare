@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=105';
+import { sound } from '../audio.js?v=110';
 import {
   PLAYER,
   COMBAT,
@@ -8,9 +8,9 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=105';
-import { events } from '../events.js?v=105';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=105';
+} from '../config.js?v=110';
+import { events } from '../events.js?v=110';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=110';
 
 function markShared(asset) {
   if (asset) {
@@ -956,9 +956,12 @@ export const CombatMethods = {
     }
     const cur = this.currentWeapon();
     if (cur && cur.mesh) {
-      cur.mesh.position.set(0.22, -0.2, -0.31);
+      cur.mesh.position.set(0.22, -0.34, -0.26);
       this.viewModelGroup.add(cur.mesh);
     }
+    this.weaponDrawDuration = cur?.def?.slot === 'secondary' ? 0.19 : 0.26;
+    this.weaponDrawTimer = this.weaponDrawDuration;
+    this.sprintAnimBlend = 0;
     if (cur && cur.def && cur.def.type === 'melee_sword') {
       // Start in the scabbard (swordSlungBlend = 1.0) and smoothly draw/unsheathe into hand!
       this.swordSlung = false;
@@ -1199,9 +1202,11 @@ export const CombatMethods = {
     }
 
     const cohesionReloadMult = this.inSquadCohesion ? 0.82 : 1.0;
+    this.reloadWasEmpty = (cur.clip || 0) <= 0;
     this.reloading = true;
     this.fastReload = false;
     this.slowReloading = false;
+    this.weaponDrawTimer = 0;
     this.reloadTotalTime = cur.def.reloadTime * cohesionReloadMult;
     this.reloadTimer = this.reloadTotalTime;
     this.isAds = false;
@@ -1420,6 +1425,15 @@ export const CombatMethods = {
     this.recoilKickZ = PLAYER.RECOIL_KICK_Z * recoilScale;
     this.recoilOffsetPitch += (def.recoilPitch || 0.014) * recoilScale;
     this.yaw += (Math.random() - 0.5) * (def.recoilYaw || 0.006) * recoilScale;
+    this.recoilVisualPitch = Math.min(0.11, (this.recoilVisualPitch || 0) + (def.recoilPitch || 0.016) * 1.65 * recoilScale);
+    this.recoilVisualRoll = THREE.MathUtils.clamp(
+      (this.recoilVisualRoll || 0) + (Math.random() - 0.42) * 0.048 * recoilScale,
+      -0.12,
+      0.12
+    );
+    this.boltCycleTimer = 0.09;
+    this.triggerPullTimer = 0.085;
+    this.weaponDrawTimer = 0;
 
     if (cur.clip === 0 && (cur.reserve > 0 || (cur.looseAmmo || 0) > 0)) {
       this.startReload();
@@ -3324,6 +3338,12 @@ export const CombatMethods = {
   finalizeDeath() {
     this.downed = false;
     this.dead = true;
+    if (typeof this.resetVisionSensors === 'function') {
+      this.resetVisionSensors();
+    } else {
+      this.sensorMode = 'OFF';
+      this.nvgActive = false;
+    }
     this.deaths++;
     this.killStreak = 0;
     this.multiKillCount = 0;

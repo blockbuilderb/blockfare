@@ -3,7 +3,7 @@
 // All 5 Forward Operating Bases (A-E) start NEUTRAL (0%) for fair Conquest starts.
 // ============================================================================
 
-import { TERRAIN } from '../config.js?v=105';
+import { TERRAIN } from '../config.js?v=110';
 
 export const FRUGIS_RIVER_MAP = {
   "id": "frugis_river",

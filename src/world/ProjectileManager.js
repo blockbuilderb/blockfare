@@ -1,13 +1,15 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=105';
-import { TERRAIN } from '../config.js?v=105';
-import { events } from '../events.js?v=105';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=105';
+import { sound } from '../audio.js?v=110';
+import { TERRAIN } from '../config.js?v=110';
+import { events } from '../events.js?v=110';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=110';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;
 const FX_POOL_CAPACITY = 384;
-const SHOCKWAVE_POOL_CAPACITY = 24;
+const GLOW_POOL_CAPACITY = 384;
+const SHOCKWAVE_POOL_CAPACITY = 32;
+const BLAST_LIGHT_CAPACITY = 4;
 
 function markShared(asset) {
   if (asset) {
@@ -42,26 +44,35 @@ function disposeNonSharedMeshResources(root) {
 }
 
 // Pre-allocated reusable THREE.Color & BufferGeometry instances (userData.shared = true)
-const _debrisDarkColor = new THREE.Color(0x2d3436);
-const _debrisOrangeColor = new THREE.Color(0xe67e22);
-const _airstrikeTrailColor = new THREE.Color(0xff7675);
-const _rocketTrailColor = new THREE.Color(0x95a5a6);
-const _sparkFlashColor = new THREE.Color(0xffeaa7);
-const _coreFlashColor = new THREE.Color(0xfff3b0);
-const _fireballColor = new THREE.Color(0xff6b00);
-const _smokeDarkColor = new THREE.Color(0x2f3640);
-const _smokeMidColor = new THREE.Color(0x4b4b4b);
-const _fallbackChipColor = new THREE.Color(0x95a5a6);
+const _debrisWarmEarthColor = new THREE.Color(0xa89f94);
+const _debrisEmberColor = new THREE.Color(0xffbe44);
+const _debrisFlirHotColor = new THREE.Color(0xffffff);
+const _airstrikeTrailColor = new THREE.Color(0xfff2b8);
+const _rocketTrailColor = new THREE.Color(0xd5dde5);
+const _sparkFlashColor = new THREE.Color(0xffffff);
+const _corePureWhiteColor = new THREE.Color(0xffffff);
+const _coreFlashColor = new THREE.Color(0xfff7cc);
+const _fireballBrightColor = new THREE.Color(0xffdd59);
+const _fireballColor = new THREE.Color(0xff8c1a);
+const _smokeDustLightColor = new THREE.Color(0x9a9288);
+const _smokeDustMidColor = new THREE.Color(0x78736d);
+const _smokeFlirHotVaporColor = new THREE.Color(0xdce4ee);
+const _smokeFlirWarmVaporColor = new THREE.Color(0xaeb8c4);
+const _fallbackChipColor = new THREE.Color(0xcbd5e1);
 const _poolColor = new THREE.Color();
 
 const _sharedUnitBoxGeo = markShared(new THREE.BoxGeometry(1, 1, 1));
-const _sharedRingGeo = markShared(new THREE.RingGeometry(0.3, 0.5, 24));
+const _sharedRingGeo = markShared(new THREE.RingGeometry(0.32, 0.5, 28));
 _sharedRingGeo.rotateX(-Math.PI / 2);
+const _sharedDiscGeo = markShared(new THREE.CircleGeometry(0.5, 24));
+_sharedDiscGeo.rotateX(-Math.PI / 2);
 
 const _debrisPoolMat = markShared(
   new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    roughness: 0.86,
+    roughness: 0.72,
+    emissive: 0x3a2610,
+    emissiveIntensity: 0.35,
     flatShading: true
   })
 );
@@ -69,8 +80,18 @@ const _fxPoolMat = markShared(
   new THREE.MeshBasicMaterial({
     color: 0xffffff,
     transparent: true,
-    opacity: 0.88,
+    opacity: 0.52,
     depthWrite: false
+  })
+);
+const _glowPoolMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+    opacity: 0.96,
+    depthWrite: false,
+    toneMapped: false
   })
 );
 
@@ -124,7 +145,7 @@ function extractRGB(col, fallbackR = 0.6, fallbackG = 0.6, fallbackB = 0.6) {
 
 export const ProjectileManager = {
   _ensureParticlePools() {
-    if (this._debrisPool && this._fxPool) return;
+    if (this._debrisPool && this._fxPool && this._glowPool) return;
     if (!this.scene) return;
 
     const dCap = DEBRIS_POOL_CAPACITY;
@@ -174,6 +195,7 @@ export const ProjectileManager = {
     fMesh.matrixAutoUpdate = false;
     fMesh.castShadow = false;
     fMesh.receiveShadow = false;
+    fMesh.renderOrder = 1;
     fMesh.count = 0;
     this.scene.add(fMesh);
 
@@ -202,6 +224,52 @@ export const ProjectileManager = {
       maxLife: new Float32Array(fCap)
     };
 
+    const gCap = GLOW_POOL_CAPACITY;
+    const gMesh = new THREE.InstancedMesh(_sharedUnitBoxGeo, _glowPoolMat, gCap);
+    gMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    gMesh.setColorAt(0, _poolColor);
+    if (gMesh.instanceColor) gMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    gMesh.frustumCulled = false;
+    gMesh.matrixAutoUpdate = false;
+    gMesh.castShadow = false;
+    gMesh.receiveShadow = false;
+    gMesh.renderOrder = 3;
+    gMesh.count = 0;
+    this.scene.add(gMesh);
+
+    this._glowPool = {
+      mesh: gMesh,
+      count: 0,
+      capacity: gCap,
+      px: new Float32Array(gCap),
+      py: new Float32Array(gCap),
+      pz: new Float32Array(gCap),
+      vx: new Float32Array(gCap),
+      vy: new Float32Array(gCap),
+      vz: new Float32Array(gCap),
+      rx: new Float32Array(gCap),
+      ry: new Float32Array(gCap),
+      rz: new Float32Array(gCap),
+      rvx: new Float32Array(gCap),
+      rvy: new Float32Array(gCap),
+      rvz: new Float32Array(gCap),
+      scale: new Float32Array(gCap),
+      growRate: new Float32Array(gCap),
+      cr: new Float32Array(gCap),
+      cg: new Float32Array(gCap),
+      cb: new Float32Array(gCap),
+      life: new Float32Array(gCap),
+      maxLife: new Float32Array(gCap)
+    };
+
+    this._blastLights = [];
+    for (let li = 0; li < BLAST_LIGHT_CAPACITY; li++) {
+      const pt = new THREE.PointLight(0xffd88a, 0, 36, 1.5);
+      pt.visible = false;
+      this.scene.add(pt);
+      this._blastLights.push({ light: pt, life: 0, maxLife: 0.35, peakIntensity: 6 });
+    }
+
     this._shockwaveFree = [];
     this._shockwaveActive = [];
   },
@@ -216,6 +284,19 @@ export const ProjectileManager = {
       if (this.scene) this.scene.remove(this._fxPool.mesh);
       this._fxPool.mesh.dispose?.();
       this._fxPool = null;
+    }
+    if (this._glowPool && this._glowPool.mesh) {
+      if (this.scene) this.scene.remove(this._glowPool.mesh);
+      this._glowPool.mesh.dispose?.();
+      this._glowPool = null;
+    }
+    if (this._blastLights) {
+      for (let i = 0; i < this._blastLights.length; i++) {
+        const bl = this._blastLights[i];
+        if (bl.light && this.scene) this.scene.remove(bl.light);
+        bl.light?.dispose?.();
+      }
+      this._blastLights = null;
     }
     if (this._shockwaveActive) {
       for (let i = 0; i < this._shockwaveActive.length; i++) {
@@ -293,29 +374,92 @@ export const ProjectileManager = {
     pool.maxLife[id] = life;
   },
 
-  _spawnShockwaveRing(x, y, z, initScale, shockSpeed, maxLife) {
+  _spawnGlowSlot(px, py, pz, vx, vy, vz, rvx, rvy, rvz, initScale, growRate, color, life) {
+    this._ensureParticlePools();
+    const pool = this._glowPool;
+    if (!pool || pool.count >= pool.capacity) return;
+    const id = pool.count++;
+    const c = extractRGB(color, 1, 0.95, 0.78);
+    pool.px[id] = px;
+    pool.py[id] = py;
+    pool.pz[id] = pz;
+    pool.vx[id] = vx;
+    pool.vy[id] = vy;
+    pool.vz[id] = vz;
+    pool.rx[id] = Math.random() * 3.14;
+    pool.ry[id] = Math.random() * 3.14;
+    pool.rz[id] = Math.random() * 3.14;
+    pool.rvx[id] = rvx;
+    pool.rvy[id] = rvy;
+    pool.rvz[id] = rvz;
+    pool.scale[id] = initScale;
+    pool.growRate[id] = growRate;
+    pool.cr[id] = c.r;
+    pool.cg[id] = c.g;
+    pool.cb[id] = c.b;
+    pool.life[id] = life;
+    pool.maxLife[id] = life;
+  },
+
+  _spawnBlastLight(x, y, z, radius, isFlir) {
+    if (!this._blastLights || this._blastLights.length === 0) return;
+    let slot = null;
+    for (let i = 0; i < this._blastLights.length; i++) {
+      if (this._blastLights[i].life <= 0) {
+        slot = this._blastLights[i];
+        break;
+      }
+    }
+    if (!slot) {
+      slot = this._blastLights[0];
+      for (let i = 1; i < this._blastLights.length; i++) {
+        if (this._blastLights[i].life < slot.life) slot = this._blastLights[i];
+      }
+    }
+    const isHeavy = radius >= 10;
+    slot.maxLife = isHeavy ? 0.52 : radius >= 6 ? 0.38 : 0.26;
+    slot.life = slot.maxLife;
+    slot.peakIntensity = isHeavy ? 11.0 : radius >= 6 ? 7.2 : 4.5;
+    slot.light.color.setHex(isFlir ? 0xffffff : 0xffe099);
+    slot.light.distance = Math.max(24, radius * 4.5);
+    slot.light.intensity = slot.peakIntensity;
+    slot.light.position.set(x, y + 1.8, z);
+    slot.light.visible = true;
+  },
+
+  _spawnShockwaveRing(x, y, z, initScale, shockSpeed, maxLife, isFilledDisc = false, colorHex = 0xffeaa7) {
     this._ensureParticlePools();
     if (!this.scene || !this._shockwaveActive) return;
     if (this._shockwaveActive.length >= SHOCKWAVE_POOL_CAPACITY) return;
 
-    let entry = this._shockwaveFree.pop();
+    let entry = null;
+    for (let i = this._shockwaveFree.length - 1; i >= 0; i--) {
+      if (Boolean(this._shockwaveFree[i].isFilledDisc) === Boolean(isFilledDisc)) {
+        entry = this._shockwaveFree.splice(i, 1)[0];
+        break;
+      }
+    }
     if (!entry) {
       const ringMat = new THREE.MeshBasicMaterial({
-        color: 0xffb142,
+        color: colorHex,
+        blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.88,
-        depthWrite: false
+        opacity: 0.92,
+        depthWrite: false,
+        toneMapped: false
       });
-      const ringMesh = new THREE.Mesh(_sharedRingGeo, ringMat);
-      entry = { mesh: ringMesh, life: 0, maxLife: 0.42, shockSpeed: 16 };
+      const ringMesh = new THREE.Mesh(isFilledDisc ? _sharedDiscGeo : _sharedRingGeo, ringMat);
+      ringMesh.renderOrder = 4;
+      entry = { mesh: ringMesh, life: 0, maxLife: 0.42, shockSpeed: 16, isFilledDisc: Boolean(isFilledDisc) };
     }
     entry.life = maxLife;
     entry.maxLife = maxLife;
     entry.shockSpeed = shockSpeed;
     entry.mesh.position.set(x, y, z);
     entry.mesh.scale.setScalar(initScale);
-    entry.mesh.material.opacity = 0.88;
+    entry.mesh.material.color.setHex(colorHex);
+    entry.mesh.material.opacity = isFilledDisc ? 0.85 : 0.94;
     entry.mesh.visible = true;
     if (entry.mesh.parent !== this.scene) {
       this.scene.add(entry.mesh);
@@ -495,6 +639,7 @@ export const ProjectileManager = {
   spawnFallingBlock(origin, color) {
     this._ensureParticlePools();
     if (!this._debrisPool || this._debrisPool.count > DEBRIS_POOL_CAPACITY - 32) return;
+    const isFlir = Boolean(typeof window !== 'undefined' && window.game?._flirSceneActive);
     const s = VOXEL_SIZE * 0.88;
     this.spawnCustomDebris(
       origin.x,
@@ -509,7 +654,7 @@ export const ProjectileManager = {
       s,
       s,
       s,
-      color,
+      isFlir ? _smokeFlirHotVaporColor : color,
       1.4 + Math.random() * 0.5
     );
   },
@@ -655,10 +800,11 @@ export const ProjectileManager = {
     const sy = hitPoint.y + ny * 0.04;
     const sz = hitPoint.z + nz * 0.04;
 
-    // 1. Stationary pinpoint spark at exact hit coordinate
-    this._spawnFxSlot(sx, sy, sz, 0, 0, 0, 8, 8, 8, 0.14, 7.0, _sparkFlashColor, 0.11);
+    // 1. Stationary additive white-hot spark flash at exact hit coordinate
+    this._spawnGlowSlot(sx, sy, sz, 0, 0, 0, 9, 9, 9, 0.28, 8.5, _sparkFlashColor, 0.14);
 
     // 2. Tiny surface chip bouncing out from exact hit point
+    const isFlirChip = Boolean(typeof window !== 'undefined' && window.game?._flirSceneActive);
     this.spawnCustomDebris(
       sx,
       sy,
@@ -672,80 +818,148 @@ export const ProjectileManager = {
       0.12,
       0.12,
       0.12,
-      color || _fallbackChipColor,
+      isFlirChip ? _debrisFlirHotColor : color || _fallbackChipColor,
       0.55
     );
   },
 
   spawnExplosionVisual(pos, radius) {
-    // 1. White-hot inner detonation core
-    this._spawnFxSlot(
-      pos.x,
-      pos.y,
-      pos.z,
-      0,
-      1.0,
-      0,
-      5,
-      5,
-      5,
-      radius * 0.55,
-      7.0,
-      _coreFlashColor,
-      0.18
-    );
-
-    // 2. Expanding fiery orange-red fireball
-    this._spawnFxSlot(
-      pos.x,
-      pos.y,
-      pos.z,
-      0,
-      2.2,
-      0,
-      3,
-      3,
-      3,
-      radius * 0.95,
-      7.0,
-      _fireballColor,
-      0.34
-    );
-
-    // 3. Expanding horizontal ground shockwave ring (pooled mesh, 0 allocations)
+    this._ensureParticlePools();
+    const isFlir = Boolean(typeof window !== 'undefined' && window.game?._flirSceneActive);
+    const isHeavy = radius >= 10;
+    const isMed = radius >= 6;
     const groundY = this.getGroundHeightAt(pos.x, pos.z);
-    this._spawnShockwaveRing(
+    const baseY = Math.max(pos.y, groundY + 0.25);
+
+    // 1. Blinding white-hot plasma core + rising incandescent flash dome (Additive _glowPool -> never occluded by smoke!)
+    this._spawnGlowSlot(
       pos.x,
-      Math.max(pos.y, groundY) + 0.25,
+      baseY + 0.35,
       pos.z,
-      Math.max(1.5, radius * 0.85),
-      Math.max(12, radius * 2.6),
-      0.42
+      0,
+      1.6,
+      0,
+      6,
+      6,
+      6,
+      radius * 0.85,
+      radius * 1.65,
+      _corePureWhiteColor,
+      isHeavy ? 0.46 : isMed ? 0.34 : 0.24
+    );
+    this._spawnGlowSlot(
+      pos.x,
+      baseY + 0.75,
+      pos.z,
+      0,
+      3.2,
+      0,
+      4,
+      5,
+      4,
+      radius * 0.72,
+      radius * 1.25,
+      isFlir ? _corePureWhiteColor : _coreFlashColor,
+      isHeavy ? 0.62 : isMed ? 0.45 : 0.32
     );
 
-    // 4. Rising dark mushroom smoke plume blocks
-    const smokeCount = radius >= 8 ? 5 : 2;
-    for (let s = 0; s < smokeCount; s++) {
-      this._spawnFxSlot(
-        pos.x + (Math.random() - 0.5) * radius * 0.5,
-        pos.y + 0.6 + s * 0.4,
-        pos.z + (Math.random() - 0.5) * radius * 0.5,
-        (Math.random() - 0.5) * 3.5,
-        4.5 + Math.random() * 4.5,
-        (Math.random() - 0.5) * 3.5,
-        1.2,
-        1.5,
-        1.0,
-        radius * 0.48,
-        1.65,
-        s % 2 === 0 ? _smokeDarkColor : _smokeMidColor,
-        1.35 + Math.random() * 0.5
+    // 2. Multi-lobed searing fireball bloom (pure white/ivory in FLIR so WHOT contrast filter blooms 100% white!)
+    const lobeCount = isHeavy ? 4 : isMed ? 3 : 2;
+    for (let f = 0; f < lobeCount; f++) {
+      const ang = (f / lobeCount) * Math.PI * 2 + Math.random() * 0.6;
+      const offR = f === 0 ? 0 : radius * 0.22;
+      this._spawnGlowSlot(
+        pos.x + Math.cos(ang) * offR,
+        baseY + 0.6 + f * 0.45,
+        pos.z + Math.sin(ang) * offR,
+        Math.cos(ang) * 2.4,
+        2.8 + f * 1.35,
+        Math.sin(ang) * 2.4,
+        3.2,
+        3.6,
+        2.8,
+        radius * (f === 0 ? 1.05 : 0.68),
+        radius * 0.92,
+        isFlir ? _corePureWhiteColor : f % 2 === 0 ? _fireballBrightColor : _fireballColor,
+        (isHeavy ? 0.68 : 0.46) + Math.random() * 0.14
       );
     }
 
-    const chunkMult = radius >= 8 ? 2 : 1;
-    this.spawnDebris(pos, _debrisDarkColor, 7 * chunkMult);
-    this.spawnDebris(pos, _debrisOrangeColor, 5 * chunkMult);
+    // 3. Radial white-hot shrapnel / incandescent spark burst (CoD AC-130 FLIR signature!)
+    const sparkCount = isHeavy ? 14 : isMed ? 9 : 5;
+    for (let sp = 0; sp < sparkCount; sp++) {
+      const a = Math.random() * Math.PI * 2;
+      const spd = (isHeavy ? 15 : 10) + Math.random() * (isHeavy ? 18 : 11);
+      const vy = (isHeavy ? 7 : 4.5) + Math.random() * (isHeavy ? 14 : 8);
+      this._spawnGlowSlot(
+        pos.x + Math.cos(a) * 0.5,
+        baseY + 0.5,
+        pos.z + Math.sin(a) * 0.5,
+        Math.cos(a) * spd,
+        vy,
+        Math.sin(a) * spd,
+        10,
+        10,
+        10,
+        isHeavy ? 0.52 : 0.34,
+        -0.35,
+        isFlir || sp % 2 === 0 ? _corePureWhiteColor : _fireballBrightColor,
+        (isHeavy ? 0.58 : 0.4) + Math.random() * 0.22
+      );
+    }
+
+    // 4. Additive ground flash disc + supersonic shockwave ring + dynamic blast PointLight
+    this._spawnShockwaveRing(
+      pos.x,
+      groundY + 0.2,
+      pos.z,
+      Math.max(2.0, radius * 1.15),
+      Math.max(10, radius * 1.9),
+      isHeavy ? 0.68 : 0.44,
+      true,
+      isFlir ? 0xffffff : 0xfff3c4
+    );
+    this._spawnShockwaveRing(
+      pos.x,
+      groundY + 0.28,
+      pos.z,
+      Math.max(1.8, radius * 0.9),
+      Math.max(16, radius * 3.1),
+      isHeavy ? 0.62 : 0.44,
+      false,
+      isFlir ? 0xffffff : 0xffdf85
+    );
+    this._spawnBlastLight(pos.x, baseY, pos.z, radius, isFlir);
+
+    // 5. Rising blast dust / superheated vapor plume (soft warm dust in Day TV; hot white-grey vapor in FLIR, never pitch black!)
+    const smokeCount = isHeavy ? 4 : 2;
+    for (let s = 0; s < smokeCount; s++) {
+      this._spawnFxSlot(
+        pos.x + (Math.random() - 0.5) * radius * 0.45,
+        baseY + 1.4 + s * 0.65,
+        pos.z + (Math.random() - 0.5) * radius * 0.45,
+        (Math.random() - 0.5) * 3.8,
+        5.5 + Math.random() * 4.5,
+        (Math.random() - 0.5) * 3.8,
+        1.1,
+        1.4,
+        0.9,
+        radius * 0.34,
+        1.85,
+        isFlir
+          ? s % 2 === 0
+            ? _smokeFlirHotVaporColor
+            : _smokeFlirWarmVaporColor
+          : s % 2 === 0
+          ? _smokeDustLightColor
+          : _smokeDustMidColor,
+        1.15 + Math.random() * 0.45
+      );
+    }
+
+    const chunkMult = isHeavy ? 2 : 1;
+    this.spawnDebris(pos, isFlir ? _debrisFlirHotColor : _debrisEmberColor, 7 * chunkMult);
+    this.spawnDebris(pos, isFlir ? _smokeFlirHotVaporColor : _debrisWarmEarthColor, 5 * chunkMult);
   },
 
   addAmmoCrate(wx, wz, team = null, owner = 'FOB SUPPLY', permanent = true, duration = 120) {
@@ -913,6 +1127,97 @@ export const ProjectileManager = {
           fPool.mesh.instanceColor.clearUpdateRanges();
           fPool.mesh.instanceColor.addUpdateRange(0, fPool.count * 3);
           fPool.mesh.instanceColor.needsUpdate = true;
+        }
+      }
+    }
+
+    // 2B. Update Additive Incandescent Blast / Fireball / Shrapnel Glow Pool
+    const gPool = this._glowPool;
+    if (gPool && gPool.count > 0) {
+      let i = 0;
+      while (i < gPool.count) {
+        const nextLife = gPool.life[i] - dt;
+        if (nextLife <= 0) {
+          const last = --gPool.count;
+          if (i < last) {
+            gPool.px[i] = gPool.px[last];
+            gPool.py[i] = gPool.py[last];
+            gPool.pz[i] = gPool.pz[last];
+            gPool.vx[i] = gPool.vx[last];
+            gPool.vy[i] = gPool.vy[last];
+            gPool.vz[i] = gPool.vz[last];
+            gPool.rx[i] = gPool.rx[last];
+            gPool.ry[i] = gPool.ry[last];
+            gPool.rz[i] = gPool.rz[last];
+            gPool.rvx[i] = gPool.rvx[last];
+            gPool.rvy[i] = gPool.rvy[last];
+            gPool.rvz[i] = gPool.rvz[last];
+            gPool.scale[i] = gPool.scale[last];
+            gPool.growRate[i] = gPool.growRate[last];
+            gPool.cr[i] = gPool.cr[last];
+            gPool.cg[i] = gPool.cg[last];
+            gPool.cb[i] = gPool.cb[last];
+            gPool.life[i] = gPool.life[last];
+            gPool.maxLife[i] = gPool.maxLife[last];
+          }
+          continue;
+        }
+        gPool.life[i] = nextLife;
+        if (gPool.growRate[i] < 0) {
+          // Ballistic spark gravity
+          gPool.vy[i] -= 18 * dt;
+        }
+        const nx = gPool.px[i] + gPool.vx[i] * dt;
+        const ny = gPool.py[i] + gPool.vy[i] * dt;
+        const nz = gPool.pz[i] + gPool.vz[i] * dt;
+        gPool.px[i] = nx;
+        gPool.py[i] = ny;
+        gPool.pz[i] = nz;
+        gPool.rx[i] += gPool.rvx[i] * dt;
+        gPool.ry[i] += gPool.rvy[i] * dt;
+        gPool.rz[i] += gPool.rvz[i] * dt;
+        gPool.scale[i] = Math.max(0.05, gPool.scale[i] + gPool.growRate[i] * dt);
+
+        const lifeFrac = Math.max(0, Math.min(1, nextLife / Math.max(0.04, gPool.maxLife[i])));
+        const fadeScale = lifeFrac < 0.35 ? gPool.scale[i] * (0.35 + 0.65 * (lifeFrac / 0.35)) : gPool.scale[i];
+        const lumFade = Math.pow(lifeFrac, 0.55);
+
+        _poolDummy.position.set(nx, ny, nz);
+        _poolDummy.rotation.set(gPool.rx[i], gPool.ry[i], gPool.rz[i]);
+        _poolDummy.scale.setScalar(Math.max(0.02, fadeScale));
+        _poolDummy.updateMatrix();
+        gPool.mesh.setMatrixAt(i, _poolDummy.matrix);
+        _poolColor.setRGB(gPool.cr[i] * lumFade, gPool.cg[i] * lumFade, gPool.cb[i] * lumFade);
+        gPool.mesh.setColorAt(i, _poolColor);
+        i++;
+      }
+      gPool.mesh.count = gPool.count;
+      if (gPool.count > 0) {
+        gPool.mesh.instanceMatrix.clearUpdateRanges();
+        gPool.mesh.instanceMatrix.addUpdateRange(0, gPool.count * 16);
+        gPool.mesh.instanceMatrix.needsUpdate = true;
+        if (gPool.mesh.instanceColor) {
+          gPool.mesh.instanceColor.clearUpdateRanges();
+          gPool.mesh.instanceColor.addUpdateRange(0, gPool.count * 3);
+          gPool.mesh.instanceColor.needsUpdate = true;
+        }
+      }
+    }
+
+    // 2C. Update Pooled Dynamic Blast PointLights
+    if (this._blastLights) {
+      for (let i = 0; i < this._blastLights.length; i++) {
+        const bl = this._blastLights[i];
+        if (bl.life > 0) {
+          bl.life -= dt;
+          if (bl.life <= 0) {
+            bl.life = 0;
+            bl.light.intensity = 0;
+            bl.light.visible = false;
+          } else {
+            const f = bl.life / Math.max(0.05, bl.maxLife);
+            bl.light.intensity = bl.peakIntensity * f * f;
+          }
         }
       }
     }
@@ -1157,29 +1462,50 @@ export const ProjectileManager = {
             proj._lastTrailX = curPos.x;
             proj._lastTrailY = curPos.y;
             proj._lastTrailZ = curPos.z;
-            const trailCol =
-              pType === 'airstrike_bomb' ||
-              pType === 'jdam_bomb' ||
-              pType === 'gbu28_bomb' ||
-              pType === 'a2a_missile' ||
-              pType === 'ac130_105mm'
-                ? _airstrikeTrailColor
-                : _rocketTrailColor;
-            this._spawnFxSlot(
-              _projPrevPos.x,
-              _projPrevPos.y,
-              _projPrevPos.z,
-              (Math.random() - 0.5) * 1.4,
-              0.8 + Math.random() * 1.2,
-              (Math.random() - 0.5) * 1.4,
-              1.5,
-              1.5,
-              0,
-              pType === 'gbu28_bomb' || pType === 'ac130_105mm' ? 0.55 : 0.34,
-              0.9,
-              trailCol,
-              0.42
-            );
+            const isBrightTracer =
+              pType === 'ac130_105mm' ||
+              pType === 'ac130_40mm' ||
+              pType === 'tank_shell' ||
+              pType === 'a2a_missile';
+            if (isBrightTracer && typeof this._spawnGlowSlot === 'function') {
+              this._spawnGlowSlot(
+                _projPrevPos.x,
+                _projPrevPos.y,
+                _projPrevPos.z,
+                (Math.random() - 0.5) * 0.8,
+                0.4 + Math.random() * 0.6,
+                (Math.random() - 0.5) * 0.8,
+                2.0,
+                2.0,
+                2.0,
+                pType === 'ac130_105mm' ? 0.68 : 0.42,
+                0.65,
+                _airstrikeTrailColor,
+                0.34
+              );
+            } else {
+              const trailCol =
+                pType === 'airstrike_bomb' ||
+                pType === 'jdam_bomb' ||
+                pType === 'gbu28_bomb'
+                  ? _airstrikeTrailColor
+                  : _rocketTrailColor;
+              this._spawnFxSlot(
+                _projPrevPos.x,
+                _projPrevPos.y,
+                _projPrevPos.z,
+                (Math.random() - 0.5) * 1.4,
+                0.8 + Math.random() * 1.2,
+                (Math.random() - 0.5) * 1.4,
+                1.5,
+                1.5,
+                0,
+                pType === 'gbu28_bomb' ? 0.55 : 0.34,
+                0.9,
+                trailCol,
+                0.42
+              );
+            }
           }
         }
       }

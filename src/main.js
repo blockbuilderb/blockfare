@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=105';
-import { VehicleManager } from './vehicles.js?v=105';
-import { BotManager } from './bots.js?v=105';
-import { PlayerController } from './player.js?v=105';
-import { NetworkManager } from './network.js?v=105';
-import { UIManager } from './ui.js?v=105';
-import { TelemetryLogger } from './telemetry.js?v=105';
-import { sound } from './audio.js?v=105';
-import { CAMERA, LIGHTING, MATCH, WEATHER, SKY_FOG_COLOR } from './config.js?v=105';
-import { events, makeEventBridge } from './events.js?v=105';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=105';
+import { VoxelWorld } from './world.js?v=110';
+import { VehicleManager } from './vehicles.js?v=110';
+import { BotManager } from './bots.js?v=110';
+import { PlayerController } from './player.js?v=110';
+import { NetworkManager } from './network.js?v=110';
+import { UIManager } from './ui.js?v=110';
+import { TelemetryLogger } from './telemetry.js?v=110';
+import { sound } from './audio.js?v=110';
+import { CAMERA, LIGHTING, MATCH, WEATHER, SKY_FOG_COLOR } from './config.js?v=110';
+import { events, makeEventBridge } from './events.js?v=110';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=110';
 
 class BattleBitGame {
   constructor() {
@@ -80,12 +80,32 @@ class BattleBitGame {
     // Core Subsystems + Live Telemetry Logger
     const initParams = new URLSearchParams(window.location.search);
     const initialEra = initParams.get('era') || initParams.get('map') || 'modern';
+    const urlModeUpper = (initParams.get('mode') || '').trim().toUpperCase();
+    const isInitialMp =
+      urlModeUpper === 'MULTIPLAYER' ||
+      urlModeUpper === 'MP' ||
+      Boolean((initParams.get('room') || '').trim());
+    const urlBotsUpper = (initParams.get('bots') || '').trim().toUpperCase();
+    const initialBotsPerSide =
+      urlBotsUpper === 'SQUAD_AI' || urlBotsUpper === '32'
+        ? 25
+        : urlBotsUpper === 'TACTICAL_AI' || urlBotsUpper === '80'
+        ? 40
+        : urlBotsUpper === 'LARGE_AI' || urlBotsUpper === '160'
+        ? 80
+        : urlBotsUpper === 'FULL_AI' || urlBotsUpper === 'MASSIVE_AI' || urlBotsUpper === '250'
+        ? 125
+        : isInitialMp
+        ? 125
+        : 250;
+    this.syncMatchTicketsForArmyScale(initialBotsPerSide, true);
     this.telemetry = new TelemetryLogger(this);
     this.world = new VoxelWorld(this.scene, initialEra);
     this.activeEra = this.world.era || 'modern';
     this.vehicleManager = new VehicleManager(this.scene, this.world);
     this.botManager = new BotManager(this.scene, this.world);
-    this.botManager.initBots(125); // 125 US + 125 RU = 250 active BattleBit-scale AI soldiers across the valley
+    // Default Singleplayer 500-Player Scale: 1 Human Player + 499 AI Soldiers (249 US AI + 1 Player vs 250 RU AI)
+    this.botManager.initBots(initialBotsPerSide, isInitialMp ? null : 'US');
 
     this.player = new PlayerController(
       this.camera,
@@ -95,6 +115,7 @@ class BattleBitGame {
       this.vehicleManager
     );
     this.network = new NetworkManager(this.scene, this.world, this.player, this.botManager);
+    this.network.gameRef = this;
     this.ui = new UIManager(
       this.world,
       this.player,
@@ -129,8 +150,56 @@ class BattleBitGame {
     }
 
     window.addEventListener('resize', () => this.onResize());
+    this.uncappedFps = true;
+    try {
+      const savedUncapped = localStorage.getItem('bb_uncapped_fps');
+      if (savedUncapped === 'false') this.uncappedFps = false;
+    } catch (_) {}
+    this._framePending = false;
+    if (typeof MessageChannel !== 'undefined') {
+      this._fpsChannel = new MessageChannel();
+      this._fpsChannel.port1.onmessage = () => {
+        this._framePending = false;
+        this.loop();
+      };
+    }
     this.lastTime = performance.now();
-    requestAnimationFrame((t) => this.loop(t));
+    this.scheduleNextFrame();
+  }
+
+  syncMatchTicketsForArmyScale(countPerSide = 250, resetCurrent = false) {
+    const targetStart = countPerSide >= 200 ? 1200 : 800;
+    const prevStart = this.ticketEconomy.START_TICKETS;
+    this.ticketEconomy.START_TICKETS = targetStart;
+    if (resetCurrent || (this.ticketsUS === prevStart && this.ticketsRU === prevStart)) {
+      this.ticketsUS = targetStart;
+      this.ticketsRU = targetStart;
+    }
+  }
+
+  setUncappedFps(enabled) {
+    this.uncappedFps = Boolean(enabled);
+    try {
+      localStorage.setItem('bb_uncapped_fps', this.uncappedFps ? 'true' : 'false');
+    } catch (_) {}
+    return this.uncappedFps;
+  }
+
+  toggleUncappedFps() {
+    return this.setUncappedFps(!this.uncappedFps);
+  }
+
+  scheduleNextFrame() {
+    if (this._framePending) return;
+    this._framePending = true;
+    if (this.uncappedFps && this._fpsChannel && !document.hidden) {
+      this._fpsChannel.port2.postMessage(0);
+    } else {
+      requestAnimationFrame(() => {
+        this._framePending = false;
+        this.loop();
+      });
+    }
   }
 
   switchEra(eraId = 'modern', closeMainMenu = true) {
@@ -152,12 +221,24 @@ class BattleBitGame {
     }
 
     const prevBotsPerTeam =
-      (this.botManager && this.botManager.currentBotsPerTeam) || 125;
+      (this.botManager && this.botManager.currentBotsPerTeam) || 250;
+    const prevPlayerSlotTeam =
+      this.botManager && this.botManager.playerSlotTeam
+        ? this.botManager.playerSlotTeam
+        : !this.network || !this.network.isMultiplayer()
+        ? this.player?.team || 'US'
+        : null;
 
     if (this.player) {
-      if (this.player.activeVehicle) {
-        this.player.activeVehicle.driver = null;
-        this.player.activeVehicle = null;
+      if (typeof this.player.clearActiveVehicleOnReset === 'function') {
+        this.player.clearActiveVehicleOnReset('era-switch');
+      } else {
+        if (this.player.activeVehicle) {
+          this.player.activeVehicle.driver = null;
+          this.player.activeVehicle = null;
+        }
+        this.player.sensorMode = 'OFF';
+        this.player.nvgActive = false;
       }
       this.player.dead = true;
       this.player.downed = false;
@@ -220,7 +301,7 @@ class BattleBitGame {
     this.activeEra = this.world.era || targetEra;
     this.vehicleManager = new VehicleManager(this.scene, this.world);
     this.botManager = new BotManager(this.scene, this.world);
-    this.botManager.initBots(prevBotsPerTeam);
+    this.botManager.initBots(prevBotsPerTeam, prevPlayerSlotTeam);
 
     if (this.player) {
       this.player.world = this.world;
@@ -1465,9 +1546,10 @@ class BattleBitGame {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  loop(now) {
-    requestAnimationFrame((t) => this.loop(t));
-    const rawDt = Math.max(0.001, (now - this.lastTime) / 1000);
+  loop() {
+    this.scheduleNextFrame();
+    const now = performance.now();
+    const rawDt = Math.max(0.00002, (now - this.lastTime) / 1000);
     const dt = Math.min(0.05, rawDt);
     this.lastTime = now;
 
@@ -1775,9 +1857,13 @@ class BattleBitGame {
         }
       }
     }
+    if (this.world?._debrisPool?.mesh) {
+      tagRootThermal(this.world._debrisPool.mesh, true, false);
+    }
 
-    // Cool high-altitude sky clouds so they read as dark overcast vapor instead of hot white blocks
-    if (this.world?.skyCloudGroup) {
+    // Cool high-altitude sky clouds once per FLIR activation so they read as dark overcast vapor without per-frame traversal
+    if (this.world?.skyCloudGroup && this.world.skyCloudGroup.userData._flirCloudGen !== gen) {
+      this.world.skyCloudGroup.userData._flirCloudGen = gen;
       this.world.skyCloudGroup.traverse((c) => {
         if (c.isMesh && c.material && c.material.color) {
           if (c.material.userData._origCloudHex === undefined) {
@@ -1821,11 +1907,17 @@ class BattleBitGame {
     this.matchEnded = true;
     this.player.dead = true;
     this.player.downed = false;
-    if (this.player.activeVehicle) {
-      const exitedVehicle = this.player.activeVehicle;
-      this.player.activeVehicle.driver = null;
-      this.player.activeVehicle = null;
-      events.emit('player:exited-vehicle', { vehicle: exitedVehicle, reason: 'round-ended' });
+    if (typeof this.player.clearActiveVehicleOnReset === 'function') {
+      this.player.clearActiveVehicleOnReset('round-ended');
+    } else {
+      if (this.player.activeVehicle) {
+        const exitedVehicle = this.player.activeVehicle;
+        this.player.activeVehicle.driver = null;
+        this.player.activeVehicle = null;
+        events.emit('player:exited-vehicle', { vehicle: exitedVehicle, reason: 'round-ended' });
+      }
+      this.player.sensorMode = 'OFF';
+      this.player.nvgActive = false;
     }
     if (document.pointerLockElement === document.body) {
       document.exitPointerLock();
@@ -1844,12 +1936,23 @@ class BattleBitGame {
   }
 
   resetMatch() {
+    this.syncMatchTicketsForArmyScale(this.botManager?.currentBotsPerTeam || 250, true);
     this.ticketsUS = this.ticketEconomy.START_TICKETS;
     this.ticketsRU = this.ticketEconomy.START_TICKETS;
     this.ticketStats.US = { gainedCapture: 0, gainedPassive: 0, lostFlags: 0, lostBleed: 0, spentSoldiers: 0, spentCars: 0, spentArmor: 0, spentPlanes: 0 };
     this.ticketStats.RU = { gainedCapture: 0, gainedPassive: 0, lostFlags: 0, lostBleed: 0, spentSoldiers: 0, spentCars: 0, spentArmor: 0, spentPlanes: 0 };
     this.matchTimeRemaining = MATCH.DURATION;
     this.matchEnded = false;
+
+    // Reset AC-130 / Aircraft Infrared (WHOT / BHOT) & Night Vision back to normal daylight view for the new round!
+    if (this.player) {
+      if (typeof this.player.clearActiveVehicleOnReset === 'function') {
+        this.player.clearActiveVehicleOnReset('new-round');
+      } else {
+        this.player.sensorMode = 'OFF';
+        this.player.nvgActive = false;
+      }
+    }
 
     // 1. Clear ALL Forward Operating Base (FOB A–E) occupation statuses back to fair NEUTRAL (0%)!
     this.world?.resetFlagsForNewRound?.();
@@ -1943,16 +2046,32 @@ class BattleBitGame {
       b.hp = b.maxHp || 100;
       b.bleedOutTimer = 0;
       b.respawnTimer = 0;
-      const idx = b.team === 'US' ? usIdx++ : ruIdx++;
-      const base = b.team === 'US' ? usBase : ruBase;
-      const col = (idx % 10) - 4.5;
-      const row = Math.floor(idx / 10) - 6;
-      const bx = base.x + row * 4.2;
-      const bz = base.z + col * 3.8;
-      const by = this.world ? this.world.getGroundHeightAt(bx, bz) : 1.25;
-      b.pos.set(bx, by, bz);
+      b._losCache?.clear();
+      b._seekingVehicleRef = null;
+      b._defendedFlagRef = null;
+      if (typeof this.botManager.pickSpawnPosition === 'function') {
+        const spawnInfo = this.botManager.pickSpawnPosition(
+          b.team,
+          b.squad,
+          true,
+          b.subFaction
+        );
+        b.pos.copy(spawnInfo.pos);
+        b.lastSpawnSource = spawnInfo.source;
+      } else {
+        const idx = b.team === 'US' ? usIdx++ : ruIdx++;
+        const base = b.team === 'US' ? usBase : ruBase;
+        const col = (idx % 20) - 9.5;
+        const row = Math.floor(idx / 20) - 6;
+        const dirSign = b.team === 'US' ? 1 : -1;
+        const bx = base.x + dirSign * (24 + row * 3.4);
+        const bz = base.z + col * 3.2;
+        const by = this.world ? this.world.getGroundHeightAt(bx, bz) : 1.25;
+        b.pos.set(bx, by, bz);
+      }
       if (b.mesh) {
         b.mesh.position.copy(b.pos);
+        b.mesh.rotation.set(0, b.yaw || 0, 0);
         b.mesh.visible = true;
       }
     }

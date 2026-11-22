@@ -24,6 +24,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run unit & integrity test suite
+        run: node --test
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 

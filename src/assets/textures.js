@@ -6,6 +6,16 @@
 import * as THREE from '../../vendor/three.module.js';
 
 function makeCanvasTexture(width, height, drawFn, repeatX = 1, repeatY = 1) {
+  if (typeof document === 'undefined') {
+    const tex = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);
+    if (repeatX > 1 || repeatY > 1) {
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(repeatX, repeatY);
+    }
+    tex.needsUpdate = true;
+    return tex;
+  }
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;

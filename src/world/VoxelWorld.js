@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=105';
-import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=105';
-import { getMapDefinition } from '../maps/index.js?v=105';
-import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=105';
-import { events, makeEventBridge } from '../events.js?v=105';
-import { TerrainGenerator } from './TerrainGenerator.js?v=105';
-import { BuildingFactory } from './BuildingFactory.js?v=105';
-import { ConquestSystem } from './ConquestSystem.js?v=105';
-import { ProjectileManager } from './ProjectileManager.js?v=105';
-import { WeatherSystem } from './WeatherSystem.js?v=105';
+import { TEXTURES } from '../assets/textures.js?v=110';
+import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=110';
+import { getMapDefinition } from '../maps/index.js?v=110';
+import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=110';
+import { events, makeEventBridge } from '../events.js?v=110';
+import { TerrainGenerator } from './TerrainGenerator.js?v=110';
+import { BuildingFactory } from './BuildingFactory.js?v=110';
+import { ConquestSystem } from './ConquestSystem.js?v=110';
+import { ProjectileManager } from './ProjectileManager.js?v=110';
+import { WeatherSystem } from './WeatherSystem.js?v=110';
 
 export { VOXEL_SIZE, MAT_DEFS };
 
@@ -425,18 +425,23 @@ export class VoxelWorld {
    * and optional ray thickness (`rayRadius`).
    */
   raycastVoxel(origin, dir, maxDist = DISTANCES.RAYCAST_MAX, rayRadius = 0, ignoreVoxelKey = null) {
-    if (
-      origin.y > 46.0 &&
-      dir.y >= 0 &&
-      Math.abs(origin.x) < 2000 &&
-      Math.abs(origin.z) < 1300
-    ) {
-      return null;
-    }
-
+    // Fast O(1) sky-ceiling skip: highest voxel in the world is below y = 54m.
+    // When airborne above y = 54m, either exit immediately if aiming level/up, or jump straight down to y = 54m!
     const stepSize = VOXEL_SIZE * 0.36;
     const invVoxelSize = 1 / VOXEL_SIZE;
     const steps = Math.ceil(maxDist / stepSize);
+    let startStep = 1;
+    if (origin.y > 54.0) {
+      if (dir.y >= -0.0005) {
+        return null;
+      }
+      const distToVoxelCeiling = (origin.y - 54.0) / -dir.y;
+      if (distToVoxelCeiling >= maxDist) {
+        return null;
+      }
+      startStep = Math.max(1, Math.floor(distToVoxelCeiling / stepSize));
+    }
+
     const groundBias = rayRadius > 0 ? 0.08 : 0;
     const radSq = rayRadius * rayRadius;
 
@@ -444,7 +449,7 @@ export class VoxelWorld {
     let prevGy = null;
     let prevGz = null;
 
-    for (let i = 1; i <= steps; i++) {
+    for (let i = startStep; i <= steps; i++) {
       const dist = i * stepSize < maxDist ? i * stepSize : maxDist;
       const px = origin.x + dir.x * dist;
       const py = origin.y + dir.y * dist;

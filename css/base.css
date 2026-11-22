@@ -644,6 +644,11 @@ body, html {
   justify-content: center;
 }
 
+.tr-top-tag:empty,
+.tr-bottom-tag:empty {
+  display: none;
+}
+
 .tr-top-tag {
   position: absolute;
   top: -22px;

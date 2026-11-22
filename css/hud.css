@@ -113,7 +113,7 @@
   top: 100%;
   left: 50%;
   transform: translateX(-50%);
-  margin-top: 42px;
+  margin-top: 52px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -176,15 +176,15 @@
 /* Compass Bar (BattleBit Bearing Tape) */
 #compass-bar {
   position: absolute;
-  top: 94px;
+  top: 82px;
   left: 50%;
   transform: translateX(-50%);
   text-align: center;
   background: rgba(12, 18, 24, 0.78);
-  padding: 3px 18px;
+  padding: 2px 14px;
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  min-width: 240px;
+  min-width: 220px;
 }
 
 #compass-strip {
@@ -239,14 +239,14 @@
 /* Network & Controls Panel (Top Left) */
 #net-status-panel {
   position: absolute;
-  top: 108px;
+  top: 96px;
   left: 14px;
-  background: rgba(12, 18, 24, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 18, 24, 0.76);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   padding: 6px 10px;
   border-radius: 4px;
   font-size: 10px;
-  max-width: 245px;
+  max-width: 348px;
 }
 
 .net-indicator {
@@ -277,17 +277,18 @@
 
 .controls-mini-compact {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
+  gap: 4px 5px;
   font-size: 9.5px;
   color: #dfe6e9;
   margin-top: 2px;
 }
 
-/* Killfeed (Top Right) */
+/* Killfeed (Top Right — Clears #fps-counter-pill cleanly) */
 #killfeed {
   position: absolute;
-  top: 14px;
+  top: 48px;
   right: 14px;
   display: flex;
   flex-direction: column;
@@ -1134,7 +1135,7 @@
   border-radius: 10px 10px 6px 6px;
   padding: 7px 9px;
   width: auto;
-  max-width: min(650px, calc(100vw - 24px));
+  max-width: min(680px, calc(100vw - 24px));
   box-shadow:
     0 12px 32px rgba(0, 0, 0, 0.88),
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
@@ -1212,13 +1213,42 @@
 
 .air-cockpit-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 5px 6px;
   background: rgba(4, 9, 14, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 5px;
-  padding: 3px 8px;
+  padding: 3px 7px;
+}
+
+.air-cockpit-pills {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.air-hdr-pill {
+  position: static;
+  background: rgba(8, 18, 26, 0.92);
+  border: 1px solid rgba(0, 210, 211, 0.55);
+  color: #81ecec;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: 'Consolas', monospace;
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+.air-hdr-pill.tech {
+  background: rgba(0, 210, 211, 0.2);
+  border-color: #00d2d3;
 }
 
 .air-cockpit-id {
@@ -1562,100 +1592,23 @@
   color: #7bed9f;
 }
 
-/* Eye-Level Aviation Speed & Radar Altimeter HUD Tapes beside Center Crosshair */
-#air-center-hud {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  width: 440px;
-  height: 150px;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-  z-index: 8;
-}
-
-.air-hud-tape {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 82px;
-  padding: 5px 7px;
-  background: rgba(6, 14, 20, 0.62);
-  border-top: 1.5px solid rgba(0, 210, 211, 0.75);
-  border-bottom: 1.5px solid rgba(0, 210, 211, 0.75);
-  font-family: 'Consolas', monospace;
-  text-shadow: 0 1px 3px #000;
-}
-
-.air-hud-tape.left-spd {
-  left: 0;
-  border-right: 2.5px solid #00d2d3;
-  text-align: right;
-  border-radius: 4px 0 0 4px;
-}
-
-.air-hud-tape.right-alt {
-  right: 0;
-  border-left: 2.5px solid #00d2d3;
-  text-align: left;
-  border-radius: 0 4px 4px 0;
-}
-
-.air-hud-tape .aht-lbl {
-  font-size: 8.5px;
-  font-weight: 900;
-  color: #81ecec;
-  letter-spacing: 0.7px;
-}
-
-.air-hud-tape .aht-val {
-  font-size: 16px;
-  font-weight: 900;
-  color: #7bed9f;
-  line-height: 1.15;
-}
-
-.air-hud-tape .aht-sub {
-  font-size: 9px;
-  font-weight: 900;
-  color: #f1c40f;
-}
-
-#veh-cam-mode-pill {
-  position: absolute;
-  top: calc(50% + 36px);
-  left: 0;
-  transform: none;
-  background: rgba(8, 18, 26, 0.88);
-  border: 1px solid rgba(0, 210, 211, 0.65);
-  color: #81ecec;
-  border-radius: 4px;
-  padding: 2px 7px;
-  font-family: 'Consolas', monospace;
-  font-size: 8.8px;
-  font-weight: 900;
-  letter-spacing: 0.4px;
-  cursor: pointer;
-  pointer-events: auto;
-  white-space: nowrap;
-}
-
+/* Cockpit Header Mode Pills (Camera [C], IR Sensor [N], Auto-GCAS Avoid [G]) */
 #veh-sensor-mode-pill {
-  position: absolute;
-  top: calc(50% + 36px);
-  right: 0;
-  background: rgba(8, 22, 18, 0.88);
-  border: 1px solid rgba(46, 204, 113, 0.65);
+  background: rgba(8, 22, 18, 0.92);
+  border-color: rgba(46, 204, 113, 0.65);
   color: #7bed9f;
-  border-radius: 4px;
-  padding: 2px 7px;
-  font-family: 'Consolas', monospace;
-  font-size: 8.8px;
-  font-weight: 900;
-  letter-spacing: 0.4px;
-  cursor: pointer;
-  pointer-events: auto;
-  white-space: nowrap;
+}
+
+#veh-avoid-mode-pill {
+  background: rgba(16, 36, 26, 0.92);
+  border-color: rgba(46, 204, 113, 0.72);
+  color: #7bed9f;
+}
+
+#veh-avoid-mode-pill.avoid-off {
+  background: rgba(46, 16, 18, 0.92);
+  border-color: rgba(255, 71, 87, 0.78);
+  color: #ff7675;
 }
 
 /* AC-130J Fire-Control Operator (FCO) Sensor Monitor Bezel (Anchors Gunners inside the Gunship Station!) */

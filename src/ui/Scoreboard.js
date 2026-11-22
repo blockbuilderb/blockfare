@@ -1,4 +1,4 @@
-import { SQUAD_DEFS } from '../bots.js?v=105';
+import { SQUAD_DEFS } from '../bots.js?v=110';
 
 export const Scoreboard = {
   computeBattleStats() {
@@ -307,28 +307,44 @@ export const Scoreboard = {
       } (${ruUnits[0] ? ruUnits[0].score : 0} PTS)</span>`;
     }
 
-    const renderRows = (units) =>
-      units
-        .map(
-          (u, idx) =>
-            `<tr class="${u.isSelf ? 'self-row' : idx === 0 ? 'mvp-row' : ''}">
-              <td>${idx === 0 ? '★1' : idx + 1}</td>
-              <td>${u.name}${u.isSelf ? ' (YOU)' : ''}</td>
-              <td><span class="sq-pill">${u.squadShort}</span></td>
-              <td>${u.role.slice(0, 4)}</td>
-              <td>${u.kills}</td>
-              <td>${u.deaths}</td>
-              <td>${u.revives}</td>
-              <td style="color:${(u.planesDestroyed || 0) > 0 ? '#00d2d3' : '#7f8c8d'};font-weight:${(u.planesDestroyed || 0) > 0 ? '800' : '400'}">${u.planesDestroyed || 0}</td>
-              <td style="color:${(u.tanksDestroyed || 0) > 0 ? '#f39c12' : '#7f8c8d'};font-weight:${(u.tanksDestroyed || 0) > 0 ? '800' : '400'}">${u.tanksDestroyed || 0}</td>
-              <td style="color:${(u.carsDestroyed || 0) > 0 ? '#ffeaa7' : '#7f8c8d'};font-weight:${(u.carsDestroyed || 0) > 0 ? '800' : '400'}">${u.carsDestroyed || 0}</td>
-              <td style="color:${u.medicKills > 0 ? '#ff6b6b' : '#7f8c8d'};font-weight:${
-              u.medicKills > 0 ? '800' : '400'
-            }">${u.medicKills || 0}</td>
-              <td><strong>${u.score.toLocaleString()}</strong></td>
-            </tr>`
-        )
+    const MAX_RENDERED_ROWS = 40;
+    const renderUnitRow = (u, idx) =>
+      `<tr class="${u.isSelf ? 'self-row' : idx === 0 ? 'mvp-row' : ''}">
+        <td>${idx === 0 ? '★1' : idx + 1}</td>
+        <td>${u.name}${u.isSelf ? ' (YOU)' : ''}</td>
+        <td><span class="sq-pill">${u.squadShort}</span></td>
+        <td>${u.role.slice(0, 4)}</td>
+        <td>${u.kills}</td>
+        <td>${u.deaths}</td>
+        <td>${u.revives}</td>
+        <td style="color:${(u.planesDestroyed || 0) > 0 ? '#00d2d3' : '#7f8c8d'};font-weight:${(u.planesDestroyed || 0) > 0 ? '800' : '400'}">${u.planesDestroyed || 0}</td>
+        <td style="color:${(u.tanksDestroyed || 0) > 0 ? '#f39c12' : '#7f8c8d'};font-weight:${(u.tanksDestroyed || 0) > 0 ? '800' : '400'}">${u.tanksDestroyed || 0}</td>
+        <td style="color:${(u.carsDestroyed || 0) > 0 ? '#ffeaa7' : '#7f8c8d'};font-weight:${(u.carsDestroyed || 0) > 0 ? '800' : '400'}">${u.carsDestroyed || 0}</td>
+        <td style="color:${u.medicKills > 0 ? '#ff6b6b' : '#7f8c8d'};font-weight:${
+        u.medicKills > 0 ? '800' : '400'
+      }">${u.medicKills || 0}</td>
+        <td><strong>${u.score.toLocaleString()}</strong></td>
+      </tr>`;
+
+    const renderRows = (units) => {
+      if (units.length <= MAX_RENDERED_ROWS) {
+        return units.map((u, idx) => renderUnitRow(u, idx)).join('');
+      }
+      const topHtml = units
+        .slice(0, MAX_RENDERED_ROWS)
+        .map((u, idx) => renderUnitRow(u, idx))
         .join('');
+      const selfIdx = units.findIndex((u) => u.isSelf);
+      const selfRowHtml =
+        selfIdx >= MAX_RENDERED_ROWS ? renderUnitRow(units[selfIdx], selfIdx) : '';
+      const hiddenCount =
+        units.length - MAX_RENDERED_ROWS - (selfIdx >= MAX_RENDERED_ROWS ? 1 : 0);
+      const footerHtml =
+        hiddenCount > 0
+          ? `<tr style="opacity:0.75;font-size:11px;text-align:center;"><td colspan="12" style="padding:6px;color:#95a5a6;">+ ${hiddenCount} MORE SOLDIERS DEPLOYED ON THIS FACTION (${units.length} TOTAL)</td></tr>`
+          : '';
+      return topHtml + selfRowHtml + footerHtml;
+    };
 
     this.sbUsBody.innerHTML = renderRows(usUnits);
     this.sbRuBody.innerHTML = renderRows(ruUnits);

@@ -5,6 +5,18 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
+import {
+  buildTankModel,
+  buildHumveeModel,
+  buildApcModel,
+  buildSpaagModel
+} from './armor-models.js?v=110';
+import {
+  buildCasAircraftWingAndTail,
+  buildBomberAircraftWingAndTail,
+  buildEmplacementModel,
+  buildDinoMountModel
+} from './air-emplacement-models.js?v=110';
 
 // ─── SHARED VEHICLE GEOMETRY & WHEEL MERGE CACHES (userData.shared = true) ───
 const _vehGeoCache = new Map();
@@ -530,166 +542,28 @@ export function createVehicleMesh(cfg) {
   const wheels = [];
   const turretPivot = new THREE.Group();
   let barrelGroup = null;
+  const modelCtx = {
+    cfg,
+    isUS,
+    group,
+    wheels,
+    turretPivot,
+    hullMat,
+    eraMat,
+    darkMat,
+    barrelMat,
+    glassMat,
+    getBox: _getCachedBoxGeo,
+    getCyl: _getCachedCylGeo,
+    getTreadTire: _getMergedTreadTireGeo,
+    getSpokes: _getMergedSpokesGeo,
+    mergeParts: _mergePartGeometries
+  };
 
   if (cfg.type === 'tank') {
-    // 1. Left & Right Heavy Caterpillar Track Assemblies
-    const trackHousingGeo = new THREE.BoxGeometry(0.72, 1.05, 6.7);
-    for (const side of [-1, 1]) {
-      const trackPod = new THREE.Mesh(trackHousingGeo, darkMat);
-      trackPod.position.set(side * 1.42, 0.58, 0);
-      trackPod.castShadow = true;
-      group.add(trackPod);
-
-      // Armored Side Skirts + ERA Reactive Armor Blocks along the hull sides
-      const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.64, 6.5), hullMat);
-      skirt.position.set(side * 1.76, 1.02, 0.05);
-      skirt.castShadow = true;
-      group.add(skirt);
-
-      for (let b = -2; b <= 2; b++) {
-        const eraBrick = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.44, 1.05), eraMat);
-        eraBrick.position.set(side * 1.84, 1.04, b * 1.18);
-        group.add(eraBrick);
-      }
-    }
-
-    // 6 Tank Roadwheels + Front/Rear Sprockets per side
-    const roadWheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.56, 10);
-    roadWheelGeo.rotateZ(Math.PI / 2);
-    for (const wz of [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5]) {
-      for (const wx of [-1.42, 1.42]) {
-        const w = new THREE.Mesh(roadWheelGeo, barrelMat);
-        w.position.set(wx, 0.44, wz);
-        group.add(w);
-        wheels.push(w);
-      }
-    }
-
-    // 2. Main Armored Lower & Upper Hull + Sloped Composite Glacis Plate
-    const mainHull = new THREE.Mesh(new THREE.BoxGeometry(2.85, 0.96, 6.3), hullMat);
-    mainHull.position.set(0, 1.12, -0.1);
-    mainHull.castShadow = true;
-    mainHull.receiveShadow = true;
-    group.add(mainHull);
-
-    const glacis = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.68, 1.85), hullMat);
-    glacis.position.set(0, 1.18, 2.75);
-    glacis.rotation.x = 0.36;
-    glacis.castShadow = true;
-    group.add(glacis);
-
-    // Rear Engine Deck & Exhaust Louvers
-    const engineDeck = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.16, 1.9), darkMat);
-    engineDeck.position.set(0, 1.62, -2.1);
-    group.add(engineDeck);
-
-    // 3. Rotating Heavy Tank Turret + Composite Cheek Armor + 120mm/125mm Smoothbore Cannon
-    turretPivot.position.set(0, 1.95, 0.15);
-
-    const turretCore = new THREE.Mesh(new THREE.BoxGeometry(2.38, 0.84, 3.05), hullMat);
-    turretCore.position.set(0, 0, -0.22);
-    turretCore.castShadow = true;
-    turretPivot.add(turretCore);
-
-    // Angled Frontal Composite Turret Cheeks (Abrams / T-90M wedge profile)
-    for (const side of [-1, 1]) {
-      const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.78, 1.15), eraMat);
-      cheek.position.set(side * 0.68, -0.02, 1.18);
-      cheek.rotation.y = -side * 0.32;
-      cheek.castShadow = true;
-      turretPivot.add(cheek);
-    }
-
-    // Turret Bustle Rack & Commander Cupola + Roof Hatch
-    const bustle = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.56, 0.95), eraMat);
-    bustle.position.set(0, 0.08, -2.0);
-    turretPivot.add(bustle);
-
-    const cupola = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.34, 8), eraMat);
-    cupola.position.set(0.55, 0.54, -0.35);
-    turretPivot.add(cupola);
-
-    const roofSight = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.32, 0.42), darkMat);
-    roofSight.position.set(-0.55, 0.55, 0.35);
-    turretPivot.add(roofSight);
-
-    // Recoiling 120mm / 125mm Main Smoothbore Cannon Group
-    barrelGroup = new THREE.Group();
-    barrelGroup.position.set(0, 0.04, 1.35);
-
-    const mantlet = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.54, 0.58), darkMat);
-    barrelGroup.add(mantlet);
-
-    const mainTube = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.13, 0.145, 4.1, 10),
-      barrelMat
-    );
-    mainTube.rotation.x = Math.PI / 2;
-    mainTube.position.set(0, 0, 2.15);
-    mainTube.castShadow = true;
-    barrelGroup.add(mainTube);
-
-    const evacuator = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.19, 0.19, 0.68, 10),
-      hullMat
-    );
-    evacuator.rotation.x = Math.PI / 2;
-    evacuator.position.set(0, 0, 2.25);
-    barrelGroup.add(evacuator);
-
-    const muzzleCollar = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.17, 0.17, 0.32, 10),
-      darkMat
-    );
-    muzzleCollar.rotation.x = Math.PI / 2;
-    muzzleCollar.position.set(0, 0, 4.15);
-    barrelGroup.add(muzzleCollar);
-
-    const coaxBarrel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.15), darkMat);
-    coaxBarrel.position.set(0.28, 0.02, 0.65);
-    barrelGroup.add(coaxBarrel);
-
-    turretPivot.add(barrelGroup);
+    ({ barrelGroup } = buildTankModel(modelCtx));
   } else if (cfg.type === 'humvee') {
-    const chassis = new THREE.Mesh(new THREE.BoxGeometry(2.5, 1.15, 4.8), hullMat);
-    chassis.position.y = 1.05;
-    chassis.castShadow = true;
-    group.add(chassis);
-
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.9, 2.5), hullMat);
-    cabin.position.set(0, 1.95, -0.2);
-    cabin.castShadow = true;
-    group.add(cabin);
-
-    const windshield = new THREE.Mesh(new THREE.BoxGeometry(2.1, 0.62, 0.12), glassMat);
-    windshield.position.set(0, 1.95, 1.05);
-    windshield.rotation.x = -0.22;
-    group.add(windshield);
-
-    const wheelGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.42, 10);
-    wheelGeo.rotateZ(Math.PI / 2);
-    for (const [wx, wz] of [
-      [-1.3, 1.55],
-      [1.3, 1.55],
-      [-1.3, -1.55],
-      [1.3, -1.55]
-    ]) {
-      const w = new THREE.Mesh(wheelGeo, darkMat);
-      w.position.set(wx, 0.55, wz);
-      group.add(w);
-      wheels.push(w);
-    }
-
-    turretPivot.position.set(0, 2.5, -0.2);
-    const turretHead = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.58, 0.9), hullMat);
-    turretHead.castShadow = true;
-    turretPivot.add(turretHead);
-
-    barrelGroup = new THREE.Group();
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 1.55), darkMat);
-    barrel.position.set(0, 0.05, 0.95);
-    barrelGroup.add(barrel);
-    turretPivot.add(barrelGroup);
+    ({ barrelGroup } = buildHumveeModel(modelCtx));
   } else if (cfg.type === 'plane' || cfg.isAircraft) {
     // =========================================================================
     // 3D COMBAT AIRCRAFT MODELS (Nose points along -Z to match flight vector):
@@ -1628,131 +1502,27 @@ export function createVehicleMesh(cfg) {
       group.userData.cockpitCanopyParts = cockpitCanopyParts;
 
       if (role === 'cas') {
-        // US: A-10C Warthog (straight wings, high rear twin turbofan pods, twin H-tail, GAU-8)
-        // RU: Sukhoi Su-25SM Frogfoot (anhedral shoulder wings, under-wing-root R-195 turbojets, single tall tail fin, GSh-30-2)
-        const mainWing = new THREE.Mesh(new THREE.BoxGeometry(12.4, 0.22, 2.25), airWingMat);
-        mainWing.position.set(0, isUS ? 1.25 : 1.52, -0.2);
-        mainWing.castShadow = true;
-        group.add(mainWing);
-
-        barrelGroup = new THREE.Group();
-        const gauBarrel = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.14, 0.16, 1.65, 8),
-          barrelMat
-        );
-        gauBarrel.rotation.x = Math.PI / 2;
-        gauBarrel.position.set(isUS ? 0 : -0.22, 0.98, -bodyLen * 0.5 - 2.65);
-        barrelGroup.add(gauBarrel);
-        group.add(barrelGroup);
-        // Hide exterior GAU-8 barrel in 1P Cockpit so it never floats detached in mid-air below the HUD combiner!
-        cockpitCanopyParts.push(barrelGroup);
-
-        for (const side of [-1, 1]) {
-          const nacelle = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.55, 0.5, 2.8, 10),
-            airWingMat
-          );
-          nacelle.rotation.x = Math.PI / 2;
-          // US A-10C has high rear-mounted nacelles; RU Su-25SM has under-wing-root flank nacelles!
-          nacelle.position.set(
-            side * (isUS ? 1.18 : 0.96),
-            isUS ? 2.02 : 1.28,
-            isUS ? 2.1 : 0.45
-          );
-          group.add(nacelle);
-
-          const glow = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.46, 0.4), burnerMat);
-          glow.position.set(
-            side * (isUS ? 1.18 : 0.96),
-            isUS ? 2.02 : 1.28,
-            isUS ? 3.55 : 1.9
-          );
-          group.add(glow);
-
-          const rocketPod = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 1.65), ordOliveMat);
-          rocketPod.position.set(side * 2.8, 0.92, -0.25);
-          group.add(rocketPod);
-
-          const agm = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 1.55), ordWhiteMat);
-          agm.position.set(side * 4.3, 0.92, -0.25);
-          group.add(agm);
-        }
-
-        const hStab = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.18, 1.25), airWingMat);
-        hStab.position.set(0, 1.55, 3.8);
-        group.add(hStab);
-        const rudders = [];
-        if (isUS) {
-          // US A-10C Twin Vertical H-Tail Stabilizers
-          for (const side of [-1, 1]) {
-            const vFin = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.65, 1.45), airWingMat);
-            vFin.position.set(side * 2.2, 2.15, 3.8);
-            group.add(vFin);
-            const rudder = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.35, 0.42), darkMat);
-            rudder.position.set(side * 2.2, 2.15, 4.65);
-            group.add(rudder);
-            rudders.push(rudder);
-          }
-        } else {
-          // RU Sukhoi Su-25SM Single Tall Swept Vertical Tail Fin + Red Star Insignia
-          const suFin = new THREE.Mesh(new THREE.BoxGeometry(0.24, 2.25, 1.85), airWingMat);
-          suFin.position.set(0, 2.45, 3.65);
-          group.add(suFin);
-          const suRudder = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.85, 0.48), darkMat);
-          suRudder.position.set(0, 2.45, 4.68);
-          group.add(suRudder);
-          rudders.push(suRudder);
-        }
-        const leftAileron = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.12, 0.48), darkMat);
-        leftAileron.position.set(-4.6, 1.24, 0.98);
-        group.add(leftAileron);
-        const rightAileron = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.12, 0.48), darkMat);
-        rightAileron.position.set(4.6, 1.24, 0.98);
-        group.add(rightAileron);
-        const elevator = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.12, 0.44), darkMat);
-        elevator.position.set(0, 1.55, 4.52);
-        group.add(elevator);
-        group.userData.controlSurfaces = { leftAileron, rightAileron, elevator, rudders, wingSpan: 6.1 };
+        ({ barrelGroup } = buildCasAircraftWingAndTail({
+          ...modelCtx,
+          bodyLen,
+          cockpitCanopyParts,
+          airMat,
+          airWingMat,
+          burnerMat,
+          ordWhiteMat,
+          ordOliveMat
+        }));
       } else if (role === 'bomber') {
-        // F-15E Strike Eagle / Su-34 Fullback: Wide swept strike wings + twin afterburners + heavy bomb load
-        const sweptWing = new THREE.Mesh(new THREE.BoxGeometry(11.6, 0.22, 3.4), airWingMat);
-        sweptWing.position.set(0, 1.38, 0.4);
-        sweptWing.castShadow = true;
-        group.add(sweptWing);
-
-        const rudders = [];
-        for (const side of [-1, 1]) {
-          const vTail = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.95, 1.85), airWingMat);
-          vTail.position.set(side * 0.85, 2.35, 3.7);
-          group.add(vTail);
-          const rudder = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.55, 0.45), darkMat);
-          rudder.position.set(side * 0.85, 2.35, 4.75);
-          group.add(rudder);
-          rudders.push(rudder);
-
-          const burner = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 1.2), burnerMat);
-          burner.position.set(side * 0.45, 1.35, 4.9);
-          group.add(burner);
-
-          // Underwing 500lb JDAM Bombs
-          const jdam = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.38, 1.85), ordOliveMat);
-          jdam.position.set(side * 2.6, 0.92, 0.2);
-          group.add(jdam);
-        }
-        // Centerline 2,000lb GBU-28 Bunker Buster
-        const gbu = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.52, 2.6), ordOliveMat);
-        gbu.position.set(0, 0.72, 0.1);
-        group.add(gbu);
-        const leftAileron = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.12, 0.52), darkMat);
-        leftAileron.position.set(-4.3, 1.37, 2.15);
-        group.add(leftAileron);
-        const rightAileron = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.12, 0.52), darkMat);
-        rightAileron.position.set(4.3, 1.37, 2.15);
-        group.add(rightAileron);
-        const elevator = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.12, 0.48), darkMat);
-        elevator.position.set(0, 1.42, 4.55);
-        group.add(elevator);
-        group.userData.controlSurfaces = { leftAileron, rightAileron, elevator, rudders, wingSpan: 5.7 };
+        ({ barrelGroup } = buildBomberAircraftWingAndTail({
+          ...modelCtx,
+          bodyLen,
+          cockpitCanopyParts,
+          airMat,
+          airWingMat,
+          burnerMat,
+          ordWhiteMat,
+          ordOliveMat
+        }));
       } else {
         // US: F-15EX Eagle II / F-22A Strike Fighter • RU: Sukhoi Su-57 Felon / Su-34 Fullback
         // Sculpted swept trapezoidal delta-wings, twin side engine intakes + LERX strakes, twin afterburner nozzles & canted tails!
@@ -1855,119 +1625,9 @@ export function createVehicleMesh(cfg) {
       }
     }
   } else if (cfg.isEmplacement && cfg.type !== 'trebuchet') {
-    // =========================================================================
-    // SQUAD BASE-BUILDING MOUNTABLE EMPLACEMENTS (HMG Nest, AA Emplacement, Mortar Pit)
-    // =========================================================================
-    const basePedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.82, 0.72, 10), darkMat);
-    basePedestal.position.set(0, 0.36, 0);
-    group.add(basePedestal);
-
-    turretPivot.position.set(0, 0.95, 0);
-    barrelGroup = new THREE.Group();
-
-    if (cfg.type === 'emplace_aa') {
-      // ZU-23-2 Twin 23mm Anti-Air Autocannon + Side Stinger/Igla SAM Pod
-      const carriage = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.58, 1.25), hullMat);
-      carriage.castShadow = true;
-      turretPivot.add(carriage);
-
-      for (const side of [-1, 1]) {
-        const aaBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.075, 2.35, 8), barrelMat);
-        aaBarrel.rotation.x = Math.PI / 2;
-        aaBarrel.position.set(side * 0.22, 0.18, 1.15);
-        barrelGroup.add(aaBarrel);
-      }
-      const samPod = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.42, 1.25), eraMat);
-      samPod.position.set(0.68, 0.26, 0.25);
-      barrelGroup.add(samPod);
-      barrelGroup.rotation.x = -0.32; // Pitched slightly skyward by default
-      turretPivot.add(barrelGroup);
-    } else if (cfg.type === 'emplace_mortar') {
-      // 81mm M252 Indirect-Fire Mortar Tube + Baseplate + Bipod
-      const baseplate = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.85, 0.16, 12), eraMat);
-      baseplate.position.set(0, -0.52, 0);
-      turretPivot.add(baseplate);
-
-      const mortarTube = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 1.75, 10), barrelMat);
-      mortarTube.position.set(0, 0.45, 0.35);
-      mortarTube.rotation.x = 0.52; // High-angle indirect fire elevation
-      barrelGroup.add(mortarTube);
-
-      const bipod = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.85, 0.12), darkMat);
-      bipod.position.set(0, 0.12, 0.52);
-      bipod.rotation.x = -0.25;
-      barrelGroup.add(bipod);
-      turretPivot.add(barrelGroup);
-    } else {
-      // .50 Cal M2HB / NSV 12.7mm Heavy Machine Gun Tripod + Armored Gun Shield
-      const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.34, 0.95), darkMat);
-      receiver.position.set(0, 0.15, 0);
-      turretPivot.add(receiver);
-
-      const shield = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.68, 0.08), hullMat);
-      shield.position.set(0, 0.28, 0.42);
-      shield.rotation.x = -0.18;
-      turretPivot.add(shield);
-
-      const hmgBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 1.55, 8), barrelMat);
-      hmgBarrel.rotation.x = Math.PI / 2;
-      hmgBarrel.position.set(0, 0.18, 0.95);
-      barrelGroup.add(hmgBarrel);
-      turretPivot.add(barrelGroup);
-    }
+    ({ barrelGroup } = buildEmplacementModel(modelCtx));
   } else if (cfg.type === 'aa') {
-    // =========================================================================
-    // MOBILE ANTI-AIR (SPAAG / SHORAD): LAV-AD (US) & 2K22 Tunguska-M1 (RU)
-    // Twin 25mm/30mm AA Autocannon + Quad SAM Launch Pods + Search Radar Dish
-    // =========================================================================
-    const hull = new THREE.Mesh(new THREE.BoxGeometry(2.9, 1.45, 6.2), hullMat);
-    hull.position.y = 1.25;
-    hull.castShadow = true;
-    group.add(hull);
-
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(2.75, 0.9, 1.4), hullMat);
-    nose.position.set(0, 1.15, 3.1);
-    nose.rotation.x = 0.35;
-    group.add(nose);
-
-    const wheelGeo = new THREE.CylinderGeometry(0.58, 0.58, 0.45, 10);
-    wheelGeo.rotateZ(Math.PI / 2);
-    for (const wz of [-2.1, -0.7, 0.7, 2.1]) {
-      for (const wx of [-1.48, 1.48]) {
-        const w = new THREE.Mesh(wheelGeo, darkMat);
-        w.position.set(wx, 0.58, wz);
-        group.add(w);
-        wheels.push(w);
-      }
-    }
-
-    turretPivot.position.set(0, 2.22, -0.25);
-    const turretHead = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.76, 2.05), eraMat);
-    turretHead.castShadow = true;
-    turretPivot.add(turretHead);
-
-    // Roof-Mounted AA Search & Tracking Radar Dish
-    const radarMast = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.45, 0.24), darkMat);
-    radarMast.position.set(0, 0.55, -0.55);
-    turretPivot.add(radarMast);
-    const radarDish = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.42, 0.16), hullMat);
-    radarDish.position.set(0, 0.82, -0.55);
-    turretPivot.add(radarDish);
-
-    barrelGroup = new THREE.Group();
-    // Twin High-Velocity 25mm/30mm Anti-Air Autocannon Barrels
-    for (const side of [-1, 1]) {
-      const aaBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.09, 2.45, 8), barrelMat);
-      aaBarrel.rotation.x = Math.PI / 2;
-      aaBarrel.position.set(side * 0.42, 0.08, 1.55);
-      barrelGroup.add(aaBarrel);
-
-      // Left & Right Quad Stinger / 9M311 SAM Missile Pods
-      const samPod = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.48, 1.55), hullMat);
-      samPod.position.set(side * 1.12, 0.16, 0.15);
-      barrelGroup.add(samPod);
-    }
-    turretPivot.add(barrelGroup);
+    ({ barrelGroup } = buildSpaagModel(modelCtx));
   } else if (cfg.type === 'atv') {
     // =========================================================================
     // POLARIS SPORTSMAN MV850 TACTICAL 4x4 QUAD ATV (Advanced Multi-Part Model + 3D Rider)
@@ -3309,97 +2969,9 @@ export function createVehicleMesh(cfg) {
     barrelGroup = new THREE.Group();
     turretPivot.add(barrelGroup);
   } else if (cfg.type === 'trex_mount' || cfg.type === 'raptor_mount') {
-    // ─── JURASSIC ERA RIDEABLE ALPHA T-REX & ALPHA VELOCIRAPTOR ──────────────────
-    const isTRex = cfg.type === 'trex_mount';
-    const s = isTRex ? 2.85 : 1.95;
-    const dinoSkinMat = new THREE.MeshStandardMaterial({
-      color: isTRex ? 0x4a5d32 : 0x3b6e35,
-      roughness: 0.78,
-      flatShading: true
-    });
-    const dinoBellyMat = new THREE.MeshStandardMaterial({
-      color: 0xa89f78,
-      roughness: 0.85,
-      flatShading: true
-    });
-    const toothMat = new THREE.MeshStandardMaterial({ color: 0xf5f6fa, roughness: 0.4 });
-    const eyeGlowMat = new THREE.MeshBasicMaterial({ color: 0xffd32a });
-
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.15 * s, 1.1 * s, 2.35 * s), dinoSkinMat);
-    body.position.set(0, 1.45 * s, 0);
-    body.rotation.x = -0.15;
-    body.castShadow = true;
-    const belly = new THREE.Mesh(new THREE.BoxGeometry(1.05 * s, 0.45 * s, 2.15 * s), dinoBellyMat);
-    belly.position.set(0, 1.05 * s, 0);
-    belly.rotation.x = -0.15;
-
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.88 * s, 0.78 * s, 1.38 * s), dinoSkinMat);
-    head.position.set(0, 2.25 * s, -1.45 * s);
-    const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.76 * s, 0.32 * s, 1.22 * s), dinoBellyMat);
-    jaw.position.set(0, 1.72 * s, -1.38 * s);
-    jaw.rotation.x = 0.22;
-
-    for (const side of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 0.12 * s, 0.18 * s), eyeGlowMat);
-      eye.position.set(side * 0.45 * s, 2.42 * s, -1.42 * s);
-      group.add(eye);
-      for (let t = -0.45; t <= 0.35; t += 0.25) {
-        const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.05 * s, 0.22 * s, 4), toothMat);
-        tooth.rotation.x = Math.PI;
-        tooth.position.set(side * 0.36 * s, 1.88 * s, (-1.45 + t) * s);
-        group.add(tooth);
-      }
-      // Muscular Dino Hind Legs (`wheels`)
-      const legPivot = new THREE.Group();
-      legPivot.position.set(side * 0.62 * s, 1.35 * s, 0.2 * s);
-      const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.45 * s, 1.35 * s, 0.62 * s), dinoSkinMat);
-      thigh.position.set(0, -0.58 * s, 0);
-      legPivot.add(thigh);
-      group.add(legPivot);
-      wheels.push(legPivot);
-    }
-
-    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.48 * s, 2.85 * s, 6), dinoSkinMat);
-    tail.rotation.x = Math.PI / 2 - 0.12;
-    tail.position.set(0, 1.38 * s, 2.25 * s);
-    group.add(body, belly, head, jaw, tail);
-
-    turretPivot.position.set(0, 2.1 * s, -1.5 * s);
-    barrelGroup = new THREE.Group();
-    turretPivot.add(barrelGroup);
+    ({ barrelGroup } = buildDinoMountModel(modelCtx));
   } else {
-    // 8x8 LAV-25 / BTR-82A Armored Hull
-    const hull = new THREE.Mesh(new THREE.BoxGeometry(2.85, 1.45, 6.2), hullMat);
-    hull.position.y = 1.25;
-    hull.castShadow = true;
-    group.add(hull);
-
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.9, 1.4), hullMat);
-    nose.position.set(0, 1.15, 3.1);
-    nose.rotation.x = 0.35;
-    group.add(nose);
-
-    const wheelGeo = new THREE.CylinderGeometry(0.58, 0.58, 0.45, 10);
-    wheelGeo.rotateZ(Math.PI / 2);
-    for (const wz of [-2.1, -0.7, 0.7, 2.1]) {
-      for (const wx of [-1.48, 1.48]) {
-        const w = new THREE.Mesh(wheelGeo, darkMat);
-        w.position.set(wx, 0.58, wz);
-        group.add(w);
-        wheels.push(w);
-      }
-    }
-
-    turretPivot.position.set(0, 2.15, -0.2);
-    const turretHead = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.58, 1.65), hullMat);
-    turretHead.castShadow = true;
-    turretPivot.add(turretHead);
-
-    barrelGroup = new THREE.Group();
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 2.4), darkMat);
-    barrel.position.set(0, 0.05, 1.5);
-    barrelGroup.add(barrel);
-    turretPivot.add(barrelGroup);
+    ({ barrelGroup } = buildApcModel(modelCtx));
   }
 
   group.add(turretPivot);

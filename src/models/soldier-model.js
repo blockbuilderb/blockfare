@@ -5,9 +5,9 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=105';
-import { WEAPON_DEFS } from '../assets/weapon-defs.js?v=105';
-import { createWeaponViewModel } from './weapon-model.js?v=105';
+import { TEXTURES } from '../assets/textures.js?v=110';
+import { WEAPON_DEFS } from '../assets/weapon-defs.js?v=110';
+import { createWeaponViewModel } from './weapon-model.js?v=110';
 
 export function getDefaultWeaponIdForRole(team = 'US', role = 'ASSAULT') {
   const r = String(role || 'ASSAULT').toUpperCase();
@@ -817,6 +817,25 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
     marker
   };
   root.userData.parts = parts;
+  root.userData.lodDetailMeshes =
+    isMedievalRole || isDinoRole
+      ? null
+      : [
+          beltMesh,
+          leftKneePad,
+          rightKneePad,
+          ...magPouches,
+          backpack,
+          ...modernGearExtras.filter((ex) => ex !== rpgBackTube),
+          neck,
+          balaclava,
+          goggles,
+          nvgMount
+        ];
+  root.userData.farLimbLodMeshes =
+    isMedievalRole || isDinoRole
+      ? null
+      : [leftUpper, leftFore, rightUpper, rightFore, leftBoot, rightBoot];
 
   // Freeze static leaf Mesh matrices while keeping all Group pivots & dynamic parts auto-updating
   const dynamicSet = new Set(Object.values(parts).filter(Boolean));

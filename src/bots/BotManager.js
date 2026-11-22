@@ -1,17 +1,17 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT, FORMATION } from '../config.js?v=105';
-import { sound } from '../audio.js?v=105';
-import { tmpVec3 } from '../utils/VectorPool.js?v=105';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=105';
-import { events, makeEventBridge } from '../events.js?v=105';
-import { createSoldierMesh } from './SoldierMeshFactory.js?v=105';
-import { SightlineMethods } from './SightlineSystem.js?v=105';
-import { MedicAIMethods } from './MedicAI.js?v=105';
-import { BotAIMethods } from './BotAI.js?v=105';
+import { BOT, FORMATION } from '../config.js?v=110';
+import { sound } from '../audio.js?v=110';
+import { tmpVec3 } from '../utils/VectorPool.js?v=110';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=110';
+import { events, makeEventBridge } from '../events.js?v=110';
+import { createSoldierMesh } from './SoldierMeshFactory.js?v=110';
+import { SightlineMethods } from './SightlineSystem.js?v=110';
+import { MedicAIMethods } from './MedicAI.js?v=110';
+import { BotAIMethods } from './BotAI.js?v=110';
 import {
   createBaseProtectionFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=105';
+} from '../core/StateMachines.js?v=110';
 
 const BOT_NAMES_US = [
   'SgtOkiDoki', 'WakistanVet', 'VoxelMedic', 'EagleOne', 'BlockBuster',
@@ -58,10 +58,11 @@ export class BotManager {
     this.squadLeaders = { US: {}, RU: {} };
     this.downedByTeam = { US: [], RU: [] };
     this.aliveByTeam = { US: [], RU: [] };
-    this.spatialGrid = new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 450);
+    this.playerSlotTeam = null;
+    this.spatialGrid = new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 640);
     this.teamGrid = {
-      US: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 240),
-      RU: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 240)
+      US: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 320),
+      RU: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 320)
     };
     this.tracers = [];
     this._tracerPool = [];
@@ -868,21 +869,46 @@ export class BotManager {
     }
   }
 
-  initBots(countPerTeam = 125) {
+  initBots(countPerTeam = 125, playerSlotTeam = null) {
     this.currentBotsPerTeam = countPerTeam;
+    this.playerSlotTeam =
+      playerSlotTeam === 'US' || playerSlotTeam === 'RU' ? playerSlotTeam : null;
     this.squadLeaders = { US: {}, RU: {} };
-    for (let i = 0; i < countPerTeam; i++) {
-      const suffix = i >= BOT_NAMES_US.length ? `_${Math.floor(i / BOT_NAMES_US.length) + 1}` : '';
-      const usName = `${BOT_NAMES_US[i % BOT_NAMES_US.length]}${suffix}`;
-      const ruName = `${BOT_NAMES_RU[i % BOT_NAMES_RU.length]}${suffix}`;
-      this.spawnBot('US', usName, i);
-      this.spawnBot('RU', ruName, i);
+    const usTarget =
+      this.playerSlotTeam === 'US' ? Math.max(1, countPerTeam - 1) : countPerTeam;
+    const ruTarget =
+      this.playerSlotTeam === 'RU' ? Math.max(1, countPerTeam - 1) : countPerTeam;
+    const maxLoop = Math.max(usTarget, ruTarget);
+    for (let i = 0; i < maxLoop; i++) {
+      if (i < usTarget) {
+        const usSuffix =
+          i >= BOT_NAMES_US.length ? `_${Math.floor(i / BOT_NAMES_US.length) + 1}` : '';
+        const usName = `${BOT_NAMES_US[i % BOT_NAMES_US.length]}${usSuffix}`;
+        this.spawnBot('US', usName, i);
+      }
+      if (i < ruTarget) {
+        const ruSuffix =
+          i >= BOT_NAMES_RU.length ? `_${Math.floor(i / BOT_NAMES_RU.length) + 1}` : '';
+        const ruName = `${BOT_NAMES_RU[i % BOT_NAMES_RU.length]}${ruSuffix}`;
+        this.spawnBot('RU', ruName, i);
+      }
     }
   }
 
-  setBotCountPerSide(countPerTeam = 125) {
-    const cleanCount = Math.max(25, Math.min(200, Math.floor(countPerTeam)));
-    if (this.currentBotsPerTeam === cleanCount && this.bots.length === cleanCount * 2) {
+  setBotCountPerSide(countPerTeam = 125, opts = {}) {
+    const cleanCount = Math.max(25, Math.min(250, Math.floor(countPerTeam)));
+    const nextPlayerTeam =
+      opts && Object.prototype.hasOwnProperty.call(opts, 'playerTeam')
+        ? opts.playerTeam === 'US' || opts.playerTeam === 'RU'
+          ? opts.playerTeam
+          : null
+        : this.playerSlotTeam;
+    const expectedTotal = nextPlayerTeam ? cleanCount * 2 - 1 : cleanCount * 2;
+    if (
+      this.currentBotsPerTeam === cleanCount &&
+      this.playerSlotTeam === nextPlayerTeam &&
+      this.bots.length === expectedTotal
+    ) {
       return;
     }
     for (const b of this.bots) {
@@ -891,6 +917,10 @@ export class BotManager {
         if (b.drivingVehicle.npcDriver === b) b.drivingVehicle.npcDriver = null;
         b.drivingVehicle = null;
       }
+      if (b.parachuteMesh) {
+        this.scene.remove(b.parachuteMesh);
+        b.parachuteMesh = null;
+      }
       if (b.mesh) {
         this.scene.remove(b.mesh);
       }
@@ -898,7 +928,71 @@ export class BotManager {
     this.bots = [];
     this.hitMeshes = [];
     this.squadLeaders = { US: {}, RU: {} };
-    this.initBots(cleanCount);
+    this.initBots(cleanCount, nextPlayerTeam);
+  }
+
+  /**
+   * Reserves 1 faction slot on `playerTeam` ('US' or 'RU') for the human player so total combatants
+   * stay evenly balanced (e.g., 250 per side => 249 Friendly AI + 1 Player vs 250 Enemy AI = 500 Total).
+   */
+  syncPlayerTeamSlot(playerTeam) {
+    const cleanTeam =
+      playerTeam === 'US' || playerTeam === 'RU' ? playerTeam : null;
+    if (!cleanTeam || !this.currentBotsPerTeam) return;
+    if (this.playerSlotTeam === cleanTeam && this.bots.length === this.currentBotsPerTeam * 2 - 1) {
+      return;
+    }
+    const perTeam = this.currentBotsPerTeam;
+    // Fast O(N) incremental adjustment without rebuilding all 499 meshes!
+    this.playerSlotTeam = cleanTeam;
+    const wantUS = cleanTeam === 'US' ? Math.max(1, perTeam - 1) : perTeam;
+    const wantRU = cleanTeam === 'RU' ? Math.max(1, perTeam - 1) : perTeam;
+    let curUS = 0;
+    let curRU = 0;
+    for (let i = 0; i < this.bots.length; i++) {
+      if (this.bots[i].team === 'US') curUS++;
+      else if (this.bots[i].team === 'RU') curRU++;
+    }
+    const removeExcessFromTeam = (team, excess) => {
+      let rem = excess;
+      for (let i = this.bots.length - 1; i >= 0 && rem > 0; i--) {
+        const b = this.bots[i];
+        if (b.team !== team || b.isSquadLeader || b.isCommander) continue;
+        this.clearBotRescueLinks?.(b);
+        if (b.drivingVehicle) {
+          if (b.drivingVehicle.driver === b) b.drivingVehicle.driver = null;
+          if (b.drivingVehicle.npcDriver === b) b.drivingVehicle.npcDriver = null;
+          b.drivingVehicle = null;
+        }
+        if (b.parachuteMesh) {
+          this.scene.remove(b.parachuteMesh);
+          b.parachuteMesh = null;
+        }
+        if (b.mesh) {
+          this.scene.remove(b.mesh);
+        }
+        if (Array.isArray(b.hitMeshes) && b.hitMeshes.length > 0) {
+          const dropSet = new Set(b.hitMeshes);
+          this.hitMeshes = this.hitMeshes.filter((hm) => !dropSet.has(hm));
+        }
+        this.bots.splice(i, 1);
+        rem--;
+      }
+    };
+    if (curUS > wantUS) removeExcessFromTeam('US', curUS - wantUS);
+    if (curRU > wantRU) removeExcessFromTeam('RU', curRU - wantRU);
+    while (curUS < wantUS) {
+      const idx = curUS;
+      const suffix = idx >= BOT_NAMES_US.length ? `_${Math.floor(idx / BOT_NAMES_US.length) + 1}` : '';
+      this.spawnBot('US', `${BOT_NAMES_US[idx % BOT_NAMES_US.length]}${suffix}`, idx);
+      curUS++;
+    }
+    while (curRU < wantRU) {
+      const idx = curRU;
+      const suffix = idx >= BOT_NAMES_RU.length ? `_${Math.floor(idx / BOT_NAMES_RU.length) + 1}` : '';
+      this.spawnBot('RU', `${BOT_NAMES_RU[idx % BOT_NAMES_RU.length]}${suffix}`, idx);
+      curRU++;
+    }
   }
 
   spawnBot(team, name, index) {

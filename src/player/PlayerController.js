@@ -1,14 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=105';
-import { sound } from '../audio.js?v=105';
-import { PLAYER, DISTANCES, CLASS_TRAITS, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=105';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=105';
-import { events, makeEventBridge } from '../events.js?v=105';
-import { GunsmithMethods } from './GunsmithState.js?v=105';
-import { FortificationMethods } from './FortificationBuilder.js?v=105';
-import { CommanderMethods } from './CommanderAbilities.js?v=105';
-import { VehicleControlMethods } from './VehicleControl.js?v=105';
-import { CombatMethods } from './PlayerCombat.js?v=105';
+import { VOXEL_SIZE } from '../world.js?v=110';
+import { sound } from '../audio.js?v=110';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=110';
+import {
+  isMacPlatform,
+  hasAnyModifier,
+  shouldClearStuckKeysOnKeyup,
+  shouldControlLeftCrouch,
+  resolveFieldRoleShortcutIndex
+} from '../utils/KeyboardShortcuts.js?v=110';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=110';
+import { events, makeEventBridge } from '../events.js?v=110';
+import { GunsmithMethods } from './GunsmithState.js?v=110';
+import { FortificationMethods } from './FortificationBuilder.js?v=110';
+import { CommanderMethods } from './CommanderAbilities.js?v=110';
+import { VehicleControlMethods } from './VehicleControl.js?v=110';
+import { CombatMethods } from './PlayerCombat.js?v=110';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -16,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=105';
+} from '../core/StateMachines.js?v=110';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -161,9 +168,9 @@ export class PlayerController {
     // when turned OFF = false, planes use Realistic Crash Mode and explode on impact with ground, mountains, or buildings!)
     this.aircraftCollisionAvoidance = true;
     try {
-      const savedAirAvoid = localStorage.getItem('bb_aircraft_collision_avoidance_v1');
+      const savedAirAvoid = localStorage.getItem('bb_aircraft_collision_avoidance_v2');
       if (savedAirAvoid !== null) {
-        this.aircraftCollisionAvoidance = savedAirAvoid === 'true' || savedAirAvoid === '1';
+        this.aircraftCollisionAvoidance = savedAirAvoid !== 'false' && savedAirAvoid !== '0';
       }
     } catch (_) {}
     this.walkBobPhase = 0;
@@ -485,6 +492,8 @@ export class PlayerController {
         magTopBrass: mag ? mag.getObjectByName('magTopBrass') || null : null,
         leftArm: mesh.getObjectByName('leftArmGroup') || null,
         rightArm: mesh.getObjectByName('rightArmGroup') || null,
+        triggerFinger: mesh.getObjectByName('triggerFingerGroup') || null,
+        triggerBlade: mesh.getObjectByName('triggerBladeMesh') || null,
         bolt: mesh.getObjectByName('boltCarrierMesh') || null,
         packBullet: mesh.getObjectByName('packingBulletMesh') || null,
         rpgWarhead: mesh.getObjectByName('rpgWarhead') || null,
@@ -520,8 +529,10 @@ export class PlayerController {
 
     window.addEventListener('keydown', (e) => {
       this._modalCacheTime = 0;
-      this.keys[e.code] = true;
-      if (!e.repeat) {
+      if (!hasAnyModifier(e) || shouldControlLeftCrouch(e)) {
+        this.keys[e.code] = true;
+      }
+      if (!e.repeat && !hasAnyModifier(e)) {
         if (this._konamiReadyForA && e.code === 'KeyA') {
           this._konamiReadyForB = false;
           this._konamiReadyForA = false;
@@ -608,13 +619,13 @@ export class PlayerController {
         const gsOpen = Boolean(gsEl && !gsEl.classList.contains('hidden'));
         if (gsOpen) {
           // Pressing [F] again while the Manual Loot / Backpack modal is open closes it cleanly
-          if (e.code === 'KeyF' && !e.repeat && !this._justOpenedLootByHold) {
+          if (!hasAnyModifier(e) && e.code === 'KeyF' && !e.repeat && !this._justOpenedLootByHold) {
             e.preventDefault();
             window.game?.ui?.toggleGunsmithModal?.(false);
             return;
           }
           // Pressing [Space] in the Manual Loot view triggers Quick-Loot All Gear & 50% Cash (Tarkov / ABI style)
-          if (e.code === 'Space' && !e.repeat && window.game?.ui?._gunsmithActiveTab === 'backpack') {
+          if (!hasAnyModifier(e) && e.code === 'Space' && !e.repeat && window.game?.ui?._gunsmithActiveTab === 'backpack') {
             e.preventDefault();
             const packId = window.game.ui._activeLootPackId;
             const pack = (this.world?.lootPacks || []).find((p) => p.id === packId);
@@ -625,12 +636,12 @@ export class PlayerController {
             }
             return;
           }
-          if (e.code === 'KeyL' && !e.shiftKey && !e.repeat) {
+          if (!hasAnyModifier(e) && e.code === 'KeyL' && !e.shiftKey && !e.repeat) {
             e.preventDefault();
             window.game?.ui?.toggleGunsmithModal?.(false);
             return;
           }
-          if (e.code === 'KeyI' && !e.repeat) {
+          if (!e._backpackHandled && !hasAnyModifier(e) && e.code === 'KeyI' && !e.repeat) {
             e.preventDefault();
             e._backpackHandled = true;
             if (window.game?.ui?._gunsmithActiveTab === 'backpack') {
@@ -647,7 +658,7 @@ export class PlayerController {
 
       if (this.isModalOpen()) return;
 
-      if (e.code === 'KeyI' && !e.repeat && window.game?.ui) {
+      if (!e._backpackHandled && !hasAnyModifier(e) && e.code === 'KeyI' && !e.repeat && window.game?.ui) {
         e.preventDefault();
         e._backpackHandled = true;
         window.game.ui._gunsmithActiveTab = this.activeVehicle ? 'vehicles' : 'backpack';
@@ -655,7 +666,7 @@ export class PlayerController {
         return;
       }
 
-      if (e.code === 'KeyN' && !e.repeat) {
+      if (!hasAnyModifier(e) && e.code === 'KeyN' && !e.repeat) {
         const av = this.activeVehicle;
         let allowedModes = ['OFF', 'NVG'];
         if (av) {
@@ -713,12 +724,12 @@ export class PlayerController {
       if (this.downed) return;
 
       // [E] Enter / Exit Car or Armor, or Drag Downed Friendly Soldier to cover
-      if (e.code === 'KeyE' && !e.repeat) {
+      if (!hasAnyModifier(e) && e.code === 'KeyE' && !e.repeat) {
         this.handleVehicleAndDragKey();
       }
       // [F] Revive / Heal Ally, Pick Up Ammo from Crate, Quick-Loot (Tap) or Manual Side-by-Side Loot (Hold)
       //     OR in AC-130J Gunship: Lock Pylon Orbit Anchor directly onto FOB / Crosshair!
-      if (e.code === 'KeyF' && !e.repeat) {
+      if (!hasAnyModifier(e) && e.code === 'KeyF' && !e.repeat) {
         if (this.activeVehicle && this.activeVehicle.aircraftRole === 'gunship') {
           this.lockGunshipOrbitAtCrosshair?.();
         } else if (!this.activeVehicle) {
@@ -727,7 +738,7 @@ export class PlayerController {
           this.handleInteractKey();
         }
       }
-      if (e.code === 'KeyG' && !e.repeat) {
+      if (!hasAnyModifier(e) && e.code === 'KeyG' && !e.repeat) {
         if (this.activeVehicle && this.activeVehicle.isAircraft) {
           const avoidOn = this.toggleAircraftCollisionAvoidance();
           sound.playRadioBeep?.(true);
@@ -747,21 +758,21 @@ export class PlayerController {
           }
         }
       }
-      if (e.code === 'Digit1') {
+      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit1') {
         if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
           this.switchVehicleWeaponSlot(0);
         } else if (!this.activeVehicle) {
           this.switchSlot(0);
         }
       }
-      if (e.code === 'Digit2') {
+      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit2') {
         if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
           this.switchVehicleWeaponSlot(1);
         } else if (!this.activeVehicle) {
           this.switchSlot(1);
         }
       }
-      if (e.code === 'KeyQ' && !e.repeat) {
+      if (!hasAnyModifier(e) && e.code === 'KeyQ' && !e.repeat) {
         if (this.activeVehicle && this.activeVehicle.isAircraft && this.activeVehicle.aircraftRole === 'gunship') {
           // In AC-130 Gunship, [Q] = Climb UP & [Z] = Descend DOWN (Weapons use [1], [2], [3])!
         } else if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
@@ -775,7 +786,7 @@ export class PlayerController {
           this._keyQDownAt = performance.now();
         }
       }
-      if (e.code === 'Digit3' && !e.repeat) {
+      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit3' && !e.repeat) {
         if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
           this.switchVehicleWeaponSlot(2);
         } else if (!this.activeVehicle) {
@@ -792,8 +803,8 @@ export class PlayerController {
           }
         }
       }
-      if (e.code === 'Digit4' && !this.activeVehicle) this.switchSlot(3);
-      if (e.code === 'KeyR' && !e.repeat) {
+      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit4' && !this.activeVehicle) this.switchSlot(3);
+      if (!hasAnyModifier(e) && e.code === 'KeyR' && !e.repeat) {
         if (this.activeVehicle && this.activeVehicle.aircraftRole === 'gunship') {
           this.toggleGunshipFlightMode?.();
         } else if (!this.activeVehicle) {
@@ -801,7 +812,7 @@ export class PlayerController {
           this.startReload(false);
         }
       }
-      if (e.code === 'KeyP' && !e.repeat && !this.activeVehicle) {
+      if (!hasAnyModifier(e) && e.code === 'KeyP' && !e.repeat && !this.activeVehicle) {
         if (this.slowReloading) {
           this.slowReloading = false;
           this.magPackProgress = 0;
@@ -809,7 +820,7 @@ export class PlayerController {
           this.startSlowReload();
         }
       }
-      if (e.code === 'KeyV' && !e.repeat) {
+      if (!hasAnyModifier(e) && e.code === 'KeyV' && !e.repeat) {
         const cur = this.currentWeapon();
         const isMountedBow = Boolean(this.activeVehicle && this.activeVehicle.type === 'warhorse');
         if (isMountedBow || (cur && cur.def && (cur.def.isBow || cur.def.isCrossbow))) {
@@ -850,7 +861,7 @@ export class PlayerController {
           }
         }
       }
-      if (e.code === 'KeyX' && !e.repeat) {
+      if (!hasAnyModifier(e) && e.code === 'KeyX' && !e.repeat) {
         const cur = !this.activeVehicle ? this.currentWeapon() : null;
         if (this.parachuting && typeof this.cutParachute === 'function') {
           this.cutParachute();
@@ -864,31 +875,31 @@ export class PlayerController {
           this.zeroDistance = zeros[idx];
         }
       }
-      if (e.code === 'KeyB' && !this.activeVehicle) {
+      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'KeyB' && !this.activeVehicle) {
         this.buildBlueprintIndex = (this.buildBlueprintIndex + 1) % this.buildBlueprints.length;
       }
       // [5] Place Squad Leader Rally Point (mobile squad spawn)
-      if (e.code === 'Digit5' && !this.activeVehicle) {
+      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit5' && !this.activeVehicle) {
         this.placeRallyPoint();
       }
       // [6] Place Insertion Beacon (Recon class only)
-      if (e.code === 'Digit6' && !this.activeVehicle) {
+      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit6' && !this.activeVehicle) {
         this.placeInsertionBeacon();
       }
       // [7] Deploy Squad Field Ammo & Kit Stash (resupplies squad + allows field role changing!)
-      if (e.code === 'Digit7' && !e.repeat && !this.activeVehicle) {
+      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit7' && !e.repeat && !this.activeVehicle) {
         this.deployFieldAmmoStash();
       }
       // [8] Construct Fortified Command Bunker / 2-Story Tactical House ($1,000)
-      if (e.code === 'Digit8' && !e.repeat && !this.activeVehicle) {
+      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit8' && !e.repeat && !this.activeVehicle) {
         this.buildPaidHouseOrBunker('AUTO');
       }
       // [0] Request Light Recon Motorcycle ($150) • [Shift+0] Request 4x4 Tactical Quad ATV ($150) — Any Class!
-      if (e.code === 'Digit0' && !e.repeat && !this.activeVehicle) {
+      if (!hasAnyModifier(e) && e.code === 'Digit0' && !e.repeat && !this.activeVehicle) {
         this.requestReconBikeDelivery?.(e.shiftKey ? 'atv' : 'bike');
       }
       // [9] Armor Crew Requisition (Tank/IFV/AA 10m ahead) OR Pilot Aircraft Sortie ([Shift+9] cycles vehicle/role)
-      if (e.code === 'Digit9' && !e.repeat) {
+      if (!hasAnyModifier(e) && e.code === 'Digit9' && !e.repeat) {
         if (this.role === 'armor' && !(this.activeVehicle && this.activeVehicle.isAircraft)) {
           if (e.shiftKey) {
             this.cycleArmorOrderType?.();
@@ -904,7 +915,7 @@ export class PlayerController {
         }
       }
       // [L] Open Unified Role Selection, Weapon Selection, Gunsmith Workbench & Aircraft/Armor Customization Bay!
-      if (e.code === 'KeyL' && !e.shiftKey && !e.repeat) {
+      if (!hasAnyModifier(e) && e.code === 'KeyL' && !e.shiftKey && !e.repeat) {
         if (window.game && window.game.ui && typeof window.game.ui.openLoadoutAndGunsmithModal === 'function') {
           if (this.activeVehicle || this.role === 'pilot' || this.role === 'armor') {
             window.game.ui._gunsmithActiveTab = 'vehicles';
@@ -914,30 +925,26 @@ export class PlayerController {
           this.cycleFieldRole();
         }
       }
-      // [F5]–[F11] Direct Squad Role / Kit Swap when near an Ammo & Kit Stash / Base
-      if (
-        (e.code === 'F5' ||
-          e.code === 'F6' ||
-          e.code === 'F7' ||
-          e.code === 'F8' ||
-          e.code === 'F9' ||
-          e.code === 'F10' ||
-          e.code === 'F11') &&
-        !e.repeat &&
-        !this.activeVehicle
-      ) {
-        e.preventDefault();
-        const roleId = getRoleByHotkey(e.code, this.world?.era || 'modern', this.team);
-        if (roleId) {
-          this.changeRoleInField(roleId, true);
+      // [F5]–[F11] OR [Shift+1..7] Direct Squad Role / Kit Swap when near an Ammo & Kit Stash / Base
+      if (!this.activeVehicle && !e.repeat) {
+        const roleIdx = resolveFieldRoleShortcutIndex(e);
+        if (roleIdx >= 0) {
+          e.preventDefault();
+          const eraKey = this.world?.era || 'modern';
+          const roleList =
+            ERA_ROLES[eraKey] || getEraRoles(eraKey, this.team) || ERA_ROLES.modern;
+          const roleId = roleList[roleIdx]?.id || getRoleByHotkey(e.code, eraKey, this.team);
+          if (roleId) {
+            this.changeRoleInField(roleId, true);
+          }
         }
       }
       // [U] Commander UAV Scan (reveals all enemies & armor in 3D + minimap + AI datalink)
-      if (e.code === 'KeyU') {
+      if (!hasAnyModifier(e) && e.code === 'KeyU') {
         this.activateUAV();
       }
       // [J] Commander Airstrike (Shift+J cycles pattern; J calls strike at crosshair anywhere on map)
-      if (e.code === 'KeyJ') {
+      if (!hasAnyModifier(e) && e.code === 'KeyJ') {
         if (e.shiftKey) {
           this.cycleAirstrikePattern();
         } else {
@@ -945,7 +952,7 @@ export class PlayerController {
         }
       }
       // [Y] Commo Rose / Quick Chat Wheel (BattleBit-style)
-      if (e.code === 'KeyY' && !e.repeat && !this.activeVehicle) {
+      if (!hasAnyModifier(e) && e.code === 'KeyY' && !e.repeat && !this.activeVehicle) {
         this.commoRoseActive = true;
         this.commoCursorX = 0;
         this.commoCursorY = 0;
@@ -955,7 +962,7 @@ export class PlayerController {
           this.onCommoRoseOpen();
         }
       }
-      if (e.code === 'KeyT' && !e.repeat && !this.activeVehicle) {
+      if (!hasAnyModifier(e) && e.code === 'KeyT' && !e.repeat && !this.activeVehicle) {
         const nearTreb = this.vehicleManager?.findNearestTrebuchet?.(this.pos, 75.0, this.team);
         if (this.world?.era === 'medieval' || nearTreb) {
           this.callMenToSetupTrebuchet(nearTreb);
@@ -963,11 +970,11 @@ export class PlayerController {
           this.useHammer(false);
         }
       }
-      if (e.code === 'KeyZ' && !this.activeVehicle) {
+      if (!hasAnyModifier(e) && e.code === 'KeyZ' && !this.activeVehicle) {
         this.prone = !this.prone;
         if (this.prone) this.crouching = false;
       }
-      if (e.code === 'KeyC' || e.code === 'ControlLeft') {
+      if ((!hasAnyModifier(e) && e.code === 'KeyC') || shouldControlLeftCrouch(e)) {
         if (this.parachuting && e.code === 'KeyC' && typeof this.cutParachute === 'function') {
           this.cutParachute();
         } else if (this.activeVehicle && e.code === 'KeyC' && !e.repeat) {
@@ -985,6 +992,11 @@ export class PlayerController {
 
     window.addEventListener('keyup', (e) => {
       this.keys[e.code] = false;
+      if (shouldClearStuckKeysOnKeyup(e.code, isMacPlatform())) {
+        for (const k of Object.keys(this.keys)) {
+          this.keys[k] = false;
+        }
+      }
       // Close Commo Rose when [Y] released and dispatch selected radial command
       if (e.code === 'KeyY' && this.commoRoseActive) {
         this.commoRoseActive = false;
@@ -1032,6 +1044,13 @@ export class PlayerController {
         this._keyQDownAt = 0;
         this.triggerTacticalPing?.();
       }
+    });
+
+    window.addEventListener('blur', () => {
+      for (const k of Object.keys(this.keys)) {
+        this.keys[k] = false;
+      }
+      this.isFiring = false;
     });
 
     window.addEventListener('wheel', (e) => {
@@ -1271,11 +1290,40 @@ export class PlayerController {
     this.shakeTrauma = Math.min(1.0, this.shakeTrauma + amount);
   }
 
-  deploy(team, role, spawnPointVec) {
+  resetVisionSensors() {
+    this.sensorMode = 'OFF';
+    this.nvgActive = false;
+    if (this.ccipMarkerMesh) this.ccipMarkerMesh.visible = false;
+    if (this._gunshipOrbitVisGroup) this._gunshipOrbitVisGroup.visible = false;
+  }
+
+  clearActiveVehicleOnReset(reason = null) {
     if (this.activeVehicle) {
-      this.activeVehicle.driver = null;
+      const v = this.activeVehicle;
+      if (v.mesh && !v.dead) {
+        v.mesh.visible = true;
+      }
+      if (v.mesh?.userData?.riderGroup) {
+        v.mesh.userData.riderGroup.visible = false;
+      }
+      if (Array.isArray(v.mesh?.userData?.cockpitCanopyParts)) {
+        for (const p of v.mesh.userData.cockpitCanopyParts) {
+          if (p) p.visible = true;
+        }
+      }
+      v.driver = null;
       this.activeVehicle = null;
+      this.aircraftLockTarget = null;
+      this.aircraftLockProgress = 0;
+      if (reason) {
+        events.emit('player:exited-vehicle', { vehicle: v, reason });
+      }
     }
+    this.resetVisionSensors();
+  }
+
+  deploy(team, role, spawnPointVec) {
+    this.clearActiveVehicleOnReset('redeploy');
     this.team = team;
     const era = this.world?.era || 'modern';
     role = resolveRoleForEra(role, era, this.team);
@@ -2129,12 +2177,48 @@ export class PlayerController {
       nearDownedBot.mesh.rotation.y = this.yaw;
     }
 
-    // Decay recoil, weapon sway, suppression & explosion trauma
+    // Decay recoil, visual roll/bolt/trigger kinematics, weapon sway, suppression & explosion trauma
     this.recoilOffsetPitch *= Math.pow(0.08, dt);
     this.recoilKickZ *= Math.pow(0.02, dt);
+    this.recoilVisualPitch = (this.recoilVisualPitch || 0) * Math.pow(0.015, dt);
+    this.recoilVisualRoll = (this.recoilVisualRoll || 0) * Math.pow(0.018, dt);
+    this.boltCycleTimer = Math.max(0, (this.boltCycleTimer || 0) - dt);
+    this.triggerPullTimer = Math.max(0, (this.triggerPullTimer || 0) - dt);
+    this.weaponDrawTimer = Math.max(0, (this.weaponDrawTimer || 0) - dt);
     this.swayX *= Math.pow(0.04, dt);
     this.swayY *= Math.pow(0.04, dt);
     this.shakeTrauma = Math.max(0, this.shakeTrauma - dt * 1.8);
+
+    // Smooth airborne lift & boot-landing knee/arm compression spring
+    if (this._wasGroundedPrevFrame === false && this.isGrounded) {
+      const impactSpd = Math.min(18, Math.max(2.5, Math.abs(this._prevAirborneVelY || 6)));
+      this.landingDipVel = (this.landingDipVel || 0) - impactSpd * 0.032;
+    }
+    this._wasGroundedPrevFrame = this.isGrounded;
+    if (!this.isGrounded) {
+      this._prevAirborneVelY = this.vel.y;
+    }
+    const dipSpringK = 140;
+    const dipDamp = 16;
+    this.landingDipVel =
+      ((this.landingDipVel || 0) - (this.landingDip || 0) * dipSpringK * dt) *
+      Math.max(0, 1 - dipDamp * dt);
+    this.landingDip = THREE.MathUtils.clamp(
+      (this.landingDip || 0) + (this.landingDipVel || 0) * dt,
+      -0.055,
+      0.03
+    );
+    const targetAirLift = !this.isGrounded && !this.parachuting ? THREE.MathUtils.clamp(-this.vel.y * 0.0022, -0.02, 0.026) : 0;
+    this.airborneArmLift = THREE.MathUtils.lerp(this.airborneArmLift || 0, targetAirLift, Math.min(1, dt * 9));
+    this.idleBreathPhase = (this.idleBreathPhase || 0) + dt * (sprinting ? 3.2 : 1.75);
+    const wantSprintPose = Boolean(
+      sprinting && !this.reloading && !this.slowReloading && this.adsAmount < 0.2 && !(this.inspectTimer > 0)
+    );
+    this.sprintAnimBlend = THREE.MathUtils.lerp(
+      this.sprintAnimBlend || 0,
+      wantSprintPose ? 1 : 0,
+      Math.min(1, dt * 11.5)
+    );
 
     // Suppression decay + micro-flinch when suppressed (Squad-style)
     this.suppressionLevel = Math.max(0, this.suppressionLevel - this.suppressionDecayRate * dt);
@@ -2216,10 +2300,28 @@ export class PlayerController {
     }
 
     if (cur && cur.mesh) {
+      const breathScale = 1 - this.adsAmount * 0.9;
+      const idleBreathY = Math.sin(this.idleBreathPhase || 0) * 0.0032 * breathScale;
+      const idleBreathX = Math.cos((this.idleBreathPhase || 0) * 0.5) * 0.0018 * breathScale;
+      const vertInertiaY = ((this.landingDip || 0) + (this.airborneArmLift || 0)) * (1 - this.adsAmount * 0.72);
+      const drawDur = Math.max(0.12, this.weaponDrawDuration || 0.26);
+      const drawFrac =
+        (this.weaponDrawTimer || 0) > 0 && !this.reloading
+          ? Math.pow(THREE.MathUtils.clamp(this.weaponDrawTimer / drawDur, 0, 1), 1.65)
+          : 0;
+      const sprBlend = this.sprintAnimBlend || 0;
+      const sprSweepX = sprBlend * (-0.045 + Math.cos(this.walkBobPhase * 0.5) * 0.018);
+      const sprSweepY = sprBlend * (-0.032 + Math.abs(Math.sin(this.walkBobPhase * 0.5)) * 0.016);
+      const sprSweepZ = sprBlend * 0.035;
+      const bandageBlend =
+        (this.bandageProgress || 0) > 0
+          ? Math.sin(Math.min(1, this.bandageProgress * 4) * Math.PI * 0.5)
+          : 0;
+
       const hipPos = new THREE.Vector3(
-        0.22 + bobX + this.swayX,
-        -0.2 + bobY * 0.6 + this.swayY,
-        -0.31 + this.recoilKickZ
+        0.22 + bobX + idleBreathX + this.swayX + sprSweepX - bandageBlend * 0.06,
+        -0.2 + bobY * 0.65 + idleBreathY + vertInertiaY + this.swayY + sprSweepY - drawFrac * 0.16 - bandageBlend * 0.09,
+        -0.31 + this.recoilKickZ + sprSweepZ + drawFrac * 0.05
       );
       const isPistol =
         cur.def.slot === 'secondary' ||
@@ -2314,6 +2416,8 @@ export class PlayerController {
       }
       const leftArm = animRefs.leftArm;
       const rightArm = animRefs.rightArm;
+      const triggerFinger = animRefs.triggerFinger;
+      const triggerBlade = animRefs.triggerBlade;
       const boltMesh = animRefs.bolt;
       const packBulletMesh = animRefs.packBullet;
       const cantedRoll = isCantedActive ? -0.68 * this.adsAmount : 0;
@@ -2322,6 +2426,24 @@ export class PlayerController {
       const baseMagZ = magMesh && magMesh.userData.baseZ !== undefined ? magMesh.userData.baseZ : isPistol ? -0.195 : -0.29;
       const baseMagRotX = magMesh && magMesh.userData.baseRotX !== undefined ? magMesh.userData.baseRotX : isPistol ? 0.10 : -0.18;
       const baseBoltZ = boltMesh && boltMesh.userData.baseZ !== undefined ? boltMesh.userData.baseZ : isPistol ? -0.22 : -0.09;
+      const isTopMagP90 = cur.def.id === 'p90';
+      const isAkRockMag = cur.def.id === 'ak15';
+
+      // Trigger finger & trigger blade physical squeeze on every shot
+      const trigSqueeze =
+        (this.triggerPullTimer || 0) > 0
+          ? Math.sin(THREE.MathUtils.clamp((this.triggerPullTimer || 0) / 0.085, 0, 1) * Math.PI)
+          : this.isFiring && cur.clip > 0 && !this.reloading
+          ? 0.65
+          : 0;
+      if (triggerFinger) {
+        const bTrigX = triggerFinger.userData.baseRotX ?? 0.24;
+        triggerFinger.rotation.x = bTrigX + trigSqueeze * 0.42;
+      }
+      if (triggerBlade) {
+        const bBladeX = triggerBlade.userData.baseRotX ?? -0.35;
+        triggerBlade.rotation.x = bBladeX + trigSqueeze * 0.34;
+      }
 
       if (this.reloading) {
         const totalDur = Math.max(
@@ -2330,6 +2452,11 @@ export class PlayerController {
             (this.fastReload ? PLAYER.SPEED_RELOAD_MULT : 1.0)
         );
         const p = THREE.MathUtils.clamp(1 - Math.max(0, this.reloadTimer) / totalDur, 0, 1);
+        const emptyChamber = Boolean(this.reloadWasEmpty);
+        const lBasePos = leftArm?.userData?.basePos;
+        const lBaseRot = leftArm?.userData?.baseRot;
+        const rBasePos = rightArm?.userData?.basePos;
+        const rBaseRot = rightArm?.userData?.baseRot;
         if (packBulletMesh) packBulletMesh.visible = false;
 
         if (cur.def.isBow || cur.def.isCrossbow) {
@@ -2348,61 +2475,205 @@ export class PlayerController {
             Boolean(cur.def.isCrossbow),
             Boolean(this.fireArrowsActive)
           );
-        } else if (p < 0.36) {
-          const s = Math.sin(((p / 0.36) * Math.PI) * 0.5);
-          cur.mesh.rotation.set(0.26 * s, 0.34 * s, -0.32 * s);
-          if (magMesh) {
-            magMesh.position.set(0, baseMagY - s * 0.28, baseMagZ + s * 0.04);
-            magMesh.rotation.set(baseMagRotX + s * 0.35, 0, 0);
-          }
-          if (leftArm && leftArm.userData.basePos) {
-            leftArm.position.set(
-              leftArm.userData.basePos.x + 0.02 * s,
-              leftArm.userData.basePos.y - 0.19 * s,
-              baseMagZ + 0.04
-            );
-          }
-          if (boltMesh) boltMesh.position.z = baseBoltZ;
-        } else if (p < 0.74) {
-          const s = (p - 0.36) / 0.38;
-          const easeIn = 1 - Math.pow(1 - s, 2);
-          const seatSnap = s > 0.82 ? Math.sin(((s - 0.82) / 0.18) * Math.PI) : 0;
-          cur.mesh.rotation.set(0.26 - seatSnap * 0.12, 0.34 * (1 - s * 0.3), -0.32 * (1 - s * 0.25));
-          cur.mesh.position.y += seatSnap * 0.022;
-          if (magMesh) {
-            magMesh.position.set(0, baseMagY - (1 - easeIn) * 0.28, baseMagZ + (1 - easeIn) * 0.04);
-            magMesh.rotation.set(baseMagRotX + (1 - easeIn) * 0.3, 0, 0);
-          }
-          if (leftArm && leftArm.userData.basePos) {
-            leftArm.position.set(
-              leftArm.userData.basePos.x + 0.02 * (1 - easeIn),
-              baseMagY - (1 - easeIn) * 0.24 - 0.03,
-              baseMagZ + 0.04
-            );
-          }
-          if (boltMesh) boltMesh.position.z = baseBoltZ;
-        } else {
-          const s = (p - 0.74) / 0.26;
-          const rackWave = Math.sin(s * Math.PI);
+        } else if (p < 0.28) {
+          // PHASE 1 (0.00 -> 0.28): Tilt magwell into workspace & extract/drop magazine with articulated Left Hand!
+          const u = p / 0.28;
+          const reachMag = Math.min(1, u / 0.42);
+          const pullOut = u > 0.34 ? (u - 0.34) / 0.66 : 0;
+          const pullEase = pullOut * pullOut * (3 - 2 * pullOut);
+          const speedFlick = this.fastReload ? Math.sin(u * Math.PI) : 0;
+
           cur.mesh.rotation.set(
-            0.18 * (1 - s) - rackWave * 0.08,
-            0.22 * (1 - s),
-            -0.22 * (1 - s) + rackWave * 0.12
+            0.22 * reachMag - speedFlick * 0.05,
+            0.32 * reachMag + speedFlick * 0.14,
+            -0.38 * reachMag - speedFlick * 0.16
           );
-          cur.mesh.position.z -= rackWave * 0.024;
+          cur.mesh.position.x -= 0.025 * reachMag;
+          cur.mesh.position.y += 0.015 * reachMag;
+
+          if (magMesh) {
+            if (isTopMagP90) {
+              magMesh.position.set(
+                -0.04 * pullEase,
+                baseMagY + pullEase * 0.14,
+                baseMagZ + pullEase * 0.06
+              );
+              magMesh.rotation.set(baseMagRotX + pullEase * 0.28, 0, -pullEase * 0.2);
+            } else {
+              const dropDist = this.fastReload ? 0.38 : 0.29;
+              const rockPitch = isAkRockMag ? -Math.sin(Math.min(1, pullOut * 1.6) * Math.PI) * 0.28 : 0.28 * pullEase;
+              magMesh.position.set(
+                -0.045 * pullEase,
+                baseMagY - pullEase * dropDist,
+                baseMagZ + pullEase * (isAkRockMag ? -0.03 : 0.045)
+              );
+              magMesh.rotation.set(baseMagRotX + rockPitch, 0.08 * pullEase, -0.14 * pullEase);
+            }
+          }
+          if (leftArm && lBasePos && lBaseRot) {
+            const grabY = isTopMagP90 ? baseMagY + 0.02 : baseMagY - 0.015;
+            const handFollowY = this.fastReload
+              ? grabY - pullEase * 0.22
+              : grabY - pullEase * (isTopMagP90 ? -0.11 : 0.26);
+            leftArm.position.set(
+              THREE.MathUtils.lerp(lBasePos.x, -0.035 - pullEase * 0.045, reachMag),
+              THREE.MathUtils.lerp(lBasePos.y, handFollowY, reachMag),
+              THREE.MathUtils.lerp(lBasePos.z, baseMagZ + 0.055, reachMag)
+            );
+            leftArm.rotation.set(
+              THREE.MathUtils.lerp(lBaseRot.x, (isTopMagP90 ? 0.52 : -0.28) - pullEase * 0.22, reachMag),
+              THREE.MathUtils.lerp(lBaseRot.y, 0.56, reachMag),
+              THREE.MathUtils.lerp(lBaseRot.z, -0.42, reachMag)
+            );
+          }
+          if (rightArm && rBasePos && rBaseRot) {
+            rightArm.position.copy(rBasePos);
+            rightArm.rotation.set(rBaseRot.x + 0.04 * reachMag, rBaseRot.y, rBaseRot.z - 0.08 * reachMag);
+          }
+          if (boltMesh) {
+            boltMesh.position.z = emptyChamber && isPistol ? baseBoltZ + 0.045 : baseBoltZ;
+          }
+        } else if (p < 0.44) {
+          // PHASE 2 (0.28 -> 0.44): Left Hand indexes fresh magazine from Chest Rig Pouch up toward magwell
+          const u = (p - 0.28) / 0.16;
+          const pouchDip = Math.sin(u * Math.PI);
+          cur.mesh.rotation.set(
+            0.22 + pouchDip * 0.04,
+            0.32 - pouchDip * 0.04,
+            -0.38 + pouchDip * 0.05
+          );
+          cur.mesh.position.x -= 0.025;
+          cur.mesh.position.y += 0.015 - pouchDip * 0.014;
+
+          if (magMesh) {
+            const startY = isTopMagP90 ? baseMagY + 0.15 : baseMagY - 0.31;
+            const approachY = isTopMagP90 ? baseMagY + 0.11 : baseMagY - 0.19;
+            magMesh.position.set(
+              THREE.MathUtils.lerp(-0.08, -0.03, u),
+              THREE.MathUtils.lerp(startY, approachY, u),
+              THREE.MathUtils.lerp(baseMagZ + 0.08, baseMagZ + 0.03, u)
+            );
+            magMesh.rotation.set(
+              baseMagRotX + (isAkRockMag ? -0.24 : 0.25) * (1 - u * 0.35),
+              0.12 * (1 - u),
+              -0.18 * (1 - u)
+            );
+          }
+          if (leftArm && lBasePos && lBaseRot) {
+            leftArm.position.set(
+              THREE.MathUtils.lerp(-0.085, -0.04, u),
+              THREE.MathUtils.lerp(baseMagY - 0.26, isTopMagP90 ? baseMagY + 0.09 : baseMagY - 0.16, u),
+              THREE.MathUtils.lerp(baseMagZ + 0.09, baseMagZ + 0.05, u)
+            );
+            leftArm.rotation.set(-0.46 + u * 0.22, 0.58 - u * 0.08, -0.45 + u * 0.12);
+          }
+          if (boltMesh) {
+            boltMesh.position.z = emptyChamber && isPistol ? baseBoltZ + 0.045 : baseBoltZ;
+          }
+        } else if (p < 0.75) {
+          // PHASE 3 (0.44 -> 0.75): Guide fresh magazine into magwell + Crisp Positive Baseplate Slap!
+          const s = (p - 0.44) / 0.31;
+          const insertFrac = Math.min(1, s / 0.68);
+          const easeInsert = 1 - Math.pow(1 - insertFrac, 2.4);
+          // Positive baseplate palm-tap at s = 0.68..1.00
+          const slapWindow = s > 0.68 ? (s - 0.68) / 0.32 : 0;
+          const slapPulse = slapWindow > 0 ? Math.sin(slapWindow * Math.PI) : 0;
+
+          cur.mesh.rotation.set(
+            0.22 * (1 - s * 0.22) - slapPulse * 0.11,
+            0.30 * (1 - s * 0.25),
+            -0.36 * (1 - s * 0.22) + slapPulse * 0.1
+          );
+          cur.mesh.position.x -= 0.025 * (1 - s * 0.4);
+          cur.mesh.position.y += 0.012 + slapPulse * (isTopMagP90 ? -0.022 : 0.028);
+
+          if (magMesh) {
+            const rem = 1 - easeInsert;
+            const entryOffsetY = isTopMagP90 ? rem * 0.11 : -rem * 0.19;
+            const akRockRot = isAkRockMag ? -rem * 0.28 : rem * 0.2;
+            magMesh.position.set(-0.03 * rem, baseMagY + entryOffsetY, baseMagZ + rem * 0.03);
+            magMesh.rotation.set(baseMagRotX + akRockRot, 0, -0.08 * rem);
+          }
+          if (leftArm && lBasePos && lBaseRot) {
+            const seatY = isTopMagP90 ? baseMagY + 0.04 : baseMagY - 0.035;
+            const slapDip = slapWindow > 0 && slapWindow < 0.45 ? -0.035 * Math.sin((slapWindow / 0.45) * Math.PI) : 0;
+            leftArm.position.set(
+              -0.035 * (1 - slapPulse * 0.3),
+              THREE.MathUtils.lerp(isTopMagP90 ? baseMagY + 0.09 : baseMagY - 0.16, seatY, easeInsert) +
+                slapDip +
+                slapPulse * (isTopMagP90 ? -0.015 : 0.022),
+              baseMagZ + 0.052
+            );
+            leftArm.rotation.set(
+              -0.24 + easeInsert * 0.18 + slapPulse * 0.16,
+              0.5 - easeInsert * 0.12,
+              -0.34 + easeInsert * 0.12
+            );
+          }
+          if (boltMesh) {
+            boltMesh.position.z = emptyChamber && isPistol ? baseBoltZ + 0.045 : baseBoltZ;
+          }
+        } else {
+          // PHASE 4 (0.75 -> 1.00):
+          // - Empty Chamber: Rack Charging Handle / Pistol Slide & release into battery!
+          // - Tactical Reload (Round Chambered): Crisp Bolt-Catch Check & smooth C-Clamp re-grip!
+          const s = (p - 0.75) / 0.25;
           if (magMesh) {
             magMesh.position.set(0, baseMagY, baseMagZ);
             magMesh.rotation.set(baseMagRotX, 0, 0);
           }
-          if (boltMesh) {
-            boltMesh.position.z = baseBoltZ + rackWave * 0.068;
-          }
-          if (leftArm && leftArm.userData.basePos) {
-            leftArm.position.set(
-              THREE.MathUtils.lerp(-0.02, leftArm.userData.basePos.x, s),
-              THREE.MathUtils.lerp(0.035, leftArm.userData.basePos.y, s),
-              THREE.MathUtils.lerp(baseBoltZ + rackWave * 0.06, leftArm.userData.basePos.z, s)
+          if (emptyChamber || cur.def.clipSize <= 2) {
+            const pullBack = s < 0.52 ? Math.sin((s / 0.52) * Math.PI * 0.5) : Math.max(0, 1 - (s - 0.52) / 0.18);
+            const boltSnapFwd = s > 0.56 && s < 0.86 ? Math.sin(((s - 0.56) / 0.3) * Math.PI) : 0;
+            cur.mesh.rotation.set(
+              0.17 * (1 - s) + pullBack * 0.06 - boltSnapFwd * 0.07,
+              0.22 * (1 - s) - pullBack * 0.06,
+              -0.28 * (1 - s) + boltSnapFwd * 0.11
             );
+            cur.mesh.position.z += pullBack * 0.022 - boltSnapFwd * 0.018;
+            if (boltMesh) {
+              boltMesh.position.z = baseBoltZ + pullBack * (isPistol ? 0.055 : 0.074);
+            }
+            if (leftArm && lBasePos && lBaseRot) {
+              const reachBolt = s < 0.68 ? Math.sin(Math.min(1, s / 0.45) * Math.PI * 0.5) : 1 - (s - 0.68) / 0.32;
+              leftArm.position.set(
+                THREE.MathUtils.lerp(lBasePos.x, isAkRockMag ? 0.025 : -0.022, reachBolt),
+                THREE.MathUtils.lerp(lBasePos.y, 0.032, reachBolt),
+                THREE.MathUtils.lerp(lBasePos.z, baseBoltZ + 0.05 + pullBack * 0.065, reachBolt)
+              );
+              leftArm.rotation.set(
+                THREE.MathUtils.lerp(lBaseRot.x, 0.58, reachBolt),
+                THREE.MathUtils.lerp(lBaseRot.y, isAkRockMag ? 0.68 : 0.42, reachBolt),
+                THREE.MathUtils.lerp(lBaseRot.z, -0.35, reachBolt)
+              );
+            }
+          } else {
+            // Tactical reload (chamber already hot): smooth return from magwell to C-clamp foregrip
+            const easeHome = s * s * (3 - 2 * s);
+            const settleBump = Math.sin(s * Math.PI) * 0.04;
+            cur.mesh.rotation.set(
+              0.17 * (1 - easeHome) - settleBump * 0.4,
+              0.22 * (1 - easeHome),
+              -0.28 * (1 - easeHome) + settleBump
+            );
+            if (boltMesh) boltMesh.position.z = baseBoltZ;
+            if (leftArm && lBasePos && lBaseRot) {
+              const seatY = isTopMagP90 ? baseMagY + 0.04 : baseMagY - 0.035;
+              leftArm.position.set(
+                THREE.MathUtils.lerp(-0.035, lBasePos.x, easeHome),
+                THREE.MathUtils.lerp(seatY, lBasePos.y, easeHome),
+                THREE.MathUtils.lerp(baseMagZ + 0.052, lBasePos.z, easeHome)
+              );
+              leftArm.rotation.set(
+                THREE.MathUtils.lerp(-0.06, lBaseRot.x, easeHome),
+                THREE.MathUtils.lerp(0.38, lBaseRot.y, easeHome),
+                THREE.MathUtils.lerp(-0.22, lBaseRot.z, easeHome)
+              );
+            }
+          }
+          if (rightArm && rBasePos && rBaseRot) {
+            rightArm.position.copy(rBasePos);
+            rightArm.rotation.copy(rBaseRot);
           }
         }
       } else if (this.slowReloading && cur.mags && cur.def.clipSize > 1) {
@@ -2432,32 +2703,6 @@ export class PlayerController {
           leftArm.rotation.set(0.55 + pressWave * 0.18, 0.35, -0.2);
         }
         if (boltMesh) boltMesh.position.z = baseBoltZ;
-      } else if (sprinting && this.adsAmount < 0.2 && !(this.inspectTimer > 0)) {
-        // Tactical Sprint High-Ready Pose
-        if (packBulletMesh) packBulletMesh.visible = false;
-        cur.mesh.rotation.set(-0.22 + bobY * 1.5, 0.48, 0.18);
-        if (magMesh) {
-          magMesh.position.set(0, baseMagY, baseMagZ);
-          magMesh.rotation.set(baseMagRotX, 0, 0);
-        }
-        if (boltMesh) boltMesh.position.z = baseBoltZ;
-        if (leftArm && leftArm.userData.basePos) {
-          leftArm.position.copy(leftArm.userData.basePos);
-          leftArm.rotation.copy(leftArm.userData.baseRot);
-        }
-        if (rightArm && rightArm.userData.basePos) {
-          rightArm.position.copy(rightArm.userData.basePos);
-          rightArm.rotation.copy(rightArm.userData.baseRot);
-        }
-        if (cur.def.isBow || cur.def.isCrossbow) {
-          animateBowOrCrossbowMesh(
-            cur.mesh,
-            0,
-            this.adsAmount,
-            Boolean(cur.def.isCrossbow),
-            Boolean(this.fireArrowsActive)
-          );
-        }
       } else if (this.inspectTimer > 0 && !this.isFiring && this.adsAmount < 0.15) {
         // ─── CS2 WEAPON & KNIFE INSPECT ANIMATION ([F] / [V]) ──────────────────
         this.inspectTimer = Math.max(0, this.inspectTimer - dt);
@@ -2541,31 +2786,59 @@ export class PlayerController {
         const adsPitchTilt = isBareIronSights
           ? 0
           : (isPistol ? -0.012 : -0.008) * this.adsAmount;
+        const sprRotX = sprBlend * (-0.22 + Math.sin(this.walkBobPhase) * 0.045);
+        const sprRotY = sprBlend * (0.48 + Math.cos(this.walkBobPhase * 0.5) * 0.045);
+        const sprRotZ = sprBlend * (0.18 + Math.sin(this.walkBobPhase * 0.5) * 0.035);
+        const drawPitch = -drawFrac * 0.38;
+        const drawYaw = drawFrac * 0.16;
+        const drawRoll = drawFrac * 0.24;
+        const bandPitch = bandageBlend * 0.28;
+        const bandRoll = bandageBlend * 0.34;
+        const recVisPitch = (this.recoilVisualPitch || 0) * (1 - this.adsAmount * 0.42);
+        const recVisRoll = (this.recoilVisualRoll || 0) * (1 - this.adsAmount * 0.5);
+        const dipPitch = (this.landingDip || 0) * 1.15 * (1 - this.adsAmount * 0.75);
+
         cur.mesh.rotation.set(
-          this.swayY * 1.5 + adsPitchTilt,
-          this.swayX * 1.5,
-          cantedRoll
+          this.swayY * 1.5 + adsPitchTilt + sprRotX + drawPitch + bandPitch + recVisPitch + dipPitch,
+          this.swayX * 1.5 + sprRotY + drawYaw,
+          cantedRoll + sprRotZ + drawRoll + bandRoll + recVisRoll
         );
         if (magMesh) {
           magMesh.position.set(0, baseMagY, baseMagZ);
           magMesh.rotation.set(baseMagRotX, 0, 0);
         }
-        if (boltMesh) boltMesh.position.z = baseBoltZ;
+        if (boltMesh) {
+          // Live reciprocating bolt-carrier / pistol-slide blowback + last-round pistol slide lock-back!
+          const liveCycle =
+            (this.boltCycleTimer || 0) > 0
+              ? Math.sin(THREE.MathUtils.clamp((this.boltCycleTimer || 0) / 0.09, 0, 1) * Math.PI) *
+                (isPistol ? 0.052 : 0.062)
+              : 0;
+          const emptyLockBack =
+            isPistol && cur.def.type === 'gun' && cur.clip === 0 ? 0.045 : 0;
+          boltMesh.position.z = baseBoltZ + Math.max(liveCycle, emptyLockBack);
+        }
         const armAdsDropY = (isPistol ? 0.058 : 0.036) * this.adsAmount;
         const armAdsPushZ = (isPistol ? 0.035 : 0.02) * this.adsAmount;
         if (leftArm && leftArm.userData.basePos) {
+          const bandWrapWave =
+            bandageBlend > 0 ? Math.sin((this.bandageProgress || 0) * Math.PI * 6) * 0.035 * bandageBlend : 0;
           leftArm.position.set(
-            leftArm.userData.basePos.x,
-            leftArm.userData.basePos.y - armAdsDropY,
-            leftArm.userData.basePos.z - armAdsPushZ
+            leftArm.userData.basePos.x + bandageBlend * 0.08 + bandWrapWave,
+            leftArm.userData.basePos.y - armAdsDropY + bandageBlend * 0.04,
+            leftArm.userData.basePos.z - armAdsPushZ + bandageBlend * 0.08
           );
-          leftArm.rotation.copy(leftArm.userData.baseRot);
+          leftArm.rotation.set(
+            leftArm.userData.baseRot.x + bandageBlend * 0.45,
+            leftArm.userData.baseRot.y - bandageBlend * 0.2,
+            leftArm.userData.baseRot.z
+          );
         }
         if (rightArm && rightArm.userData.basePos) {
           rightArm.position.set(
             rightArm.userData.basePos.x,
             rightArm.userData.basePos.y - armAdsDropY,
-            rightArm.userData.basePos.z - armAdsPushZ
+            rightArm.userData.basePos.z - armAdsPushZ - (this.recoilKickZ || 0) * 0.18
           );
           rightArm.rotation.copy(rightArm.userData.baseRot);
         }

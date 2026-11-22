@@ -839,14 +839,15 @@ export const AUDIO = {
 };
 
 // ---------------------------------------------------------------------------
-// NETWORK & BATTLEBIT AI POPULATION SCALE (125 per side = 250 AI default)
+// NETWORK & BATTLEBIT AI POPULATION SCALE (Up to 250 per side = 500 Combatants: 1 Player + 499 AI)
 // ---------------------------------------------------------------------------
 export const NETWORK = {
-  BOTS_MASSIVE_AI: 125, // 125 US + 125 RU = 250 AI Soldiers (BattleBit 127v127 Scale)
-  BOTS_LARGE_AI: 80,    // 80 US + 80 RU = 160 AI Soldiers
-  BOTS_TACTICAL_AI: 40, // 40 US + 40 RU = 80 AI Soldiers
-  BOTS_FULL_AI: 125,    // Default: 250 Total AI Soldiers
-  BOTS_SQUAD_AI: 16,    // 16 US + 16 RU = 32 AI Soldiers
+  BOTS_ULTRA_AI: 250,    // 500 Total Combatants (1 Player + 499 AI = 250 US vs 250 RU)
+  BOTS_MASSIVE_AI: 125,  // 125 US + 125 RU = 250 Scale
+  BOTS_LARGE_AI: 80,     // 80 US + 80 RU = 160 Scale
+  BOTS_TACTICAL_AI: 40,  // 40 US + 40 RU = 80 Scale
+  BOTS_FULL_AI: 125,     // Classic 250 Scale
+  BOTS_SQUAD_AI: 16,     // 16 US + 16 RU = 32 Scale
   WS_SYNC_INTERVAL: 0.06,
   HTTP_SYNC_INTERVAL: 0.16,
   ROOM_POLL_INTERVAL: 2.2,

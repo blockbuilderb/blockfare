@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=105';
-import { BOT } from '../config.js?v=105';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=105';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=105';
-import { events } from '../events.js?v=105';
+import { sound } from '../audio.js?v=110';
+import { BOT } from '../config.js?v=110';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=110';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=110';
+import { events } from '../events.js?v=110';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -97,12 +97,12 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
   // 0. Rebuild 2D spatial grids & team lists once at the start of frame for O(1) queries
   this._frameRaycasts = 0;
   if (!this.spatialGrid) {
-    this.spatialGrid = new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 450);
+    this.spatialGrid = new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 640);
   }
   if (!this.teamGrid) {
     this.teamGrid = {
-      US: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 240),
-      RU: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 240)
+      US: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 320),
+      RU: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 320)
     };
   }
   this.spatialGrid.clear();
@@ -372,12 +372,20 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
   const opticZoomMag = THREE.MathUtils.clamp(75 / Math.max(8, activeCamFov), 1.0, 9.5);
   const playerInAircraft = Boolean(player?.activeVehicle && player.activeVehicle.isAircraft);
   const maxRenderDist = playerInAircraft
-    ? 3400
+    ? Math.min(3400, Math.round(Math.max(950, camY * 1.9 + 480) * Math.sqrt(opticZoomMag)))
     : Math.min(3000, Math.round(440 * opticZoomMag));
   const maxRenderDistSq = maxRenderDist * maxRenderDist;
-  const fullGaitDist = Math.min(2600, (playerInAircraft ? 280 : 125) * opticZoomMag);
+  const ultraScale = this.bots.length >= 360;
+  const fullGaitDist = Math.min(
+    2600,
+    (playerInAircraft ? (ultraScale ? 175 : 220) : ultraScale ? 105 : 125) * opticZoomMag
+  );
   const fullGaitDistSq = fullGaitDist * fullGaitDist;
-  const halfRateGaitDistSq = Math.min(900, 48 * opticZoomMag) ** 2;
+  const halfRateGaitDistSq = Math.min(900, (ultraScale ? 38 : 48) * opticZoomMag) ** 2;
+  // Sub-pixel 3D weapon assembly LOD (~26 child meshes per gun) & micro-gear LOD: hide beyond ~75m * zoomMag!
+  const gunLodDistSq = Math.min(1400, 75 * opticZoomMag) ** 2;
+  // Far limb/boot LOD (6 child meshes: upper/forearms + boots): hide beyond ~135m * zoomMag (~2,400 fewer draw calls at 500P)!
+  const farLimbLodDistSq = Math.min(1800, 135 * opticZoomMag) ** 2;
 
   for (let bIdx = 0; bIdx < this.bots.length; bIdx++) {
     const bot = this.bots[bIdx];
@@ -515,10 +523,34 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
 
     // Apply 3D visibility & frustum matrix flag BEFORE early-return states (`downed`, `updateMedicRescue`, `trebuchet`)
     // so downed casualties & rescuing/healing Medics NEVER stay invisible after entering range or zooming in!
-    if (bot.mesh.visible !== within3DRender) {
-      bot.mesh.visible = within3DRender;
+    const shouldDraw3D = within3DRender && !offFrustum;
+    if (bot.mesh.visible !== shouldDraw3D) {
+      bot.mesh.visible = shouldDraw3D;
     }
-    bot.mesh._culledOffFrustum = !within3DRender || offFrustum;
+    bot.mesh._culledOffFrustum = !shouldDraw3D;
+    if (shouldDraw3D && !bot.isDinosaur) {
+      const showCloseDetail = distSqCam <= gunLodDistSq;
+      if (parts.gunGroup && parts.gunGroup.visible !== showCloseDetail) {
+        parts.gunGroup.visible = showCloseDetail;
+      }
+      const lodMeshes = bot.mesh.userData.lodDetailMeshes;
+      if (lodMeshes && bot._lodCloseDetail !== showCloseDetail) {
+        bot._lodCloseDetail = showCloseDetail;
+        for (let li = 0; li < lodMeshes.length; li++) {
+          lodMeshes[li].visible = showCloseDetail;
+        }
+      }
+      const farLimbMeshes = bot.mesh.userData.farLimbLodMeshes;
+      if (farLimbMeshes) {
+        const showLimbs = distSqCam <= farLimbLodDistSq;
+        if (bot._lodFarLimbs !== showLimbs) {
+          bot._lodFarLimbs = showLimbs;
+          for (let li = 0; li < farLimbMeshes.length; li++) {
+            farLimbMeshes[li].visible = showLimbs;
+          }
+        }
+      }
+    }
 
     // Mid-Air Ejected Pilot Parachute Descent
     if (bot.parachuting) {
@@ -706,18 +738,27 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     }
 
     // Check if this bot is currently inside a Friendly Captured Forward Base (`bot.inFriendlyForwardBase`)
-    // and apply Real-Life & Tactical Shooter Entrenched Defender Advantages!
-    let defendedFlag = null;
-    for (let fIdx = 0; fIdx < this.world.flags.length; fIdx++) {
-      const fl = this.world.flags[fIdx];
-      if (fl.owner === bot.team) {
-        const dxFl = bot.pos.x - fl.pos.x;
-        const dzFl = bot.pos.z - fl.pos.z;
-        if (dxFl * dxFl + dzFl * dzFl <= (fl.radius + 4) * (fl.radius + 4)) {
-          defendedFlag = fl;
-          break;
+    // and apply Real-Life & Tactical Shooter Entrenched Defender Advantages! (Throttled scan at 4 Hz for 500-player scale)
+    bot._fobCheckTimer = (bot._fobCheckTimer || 0) - dt;
+    let defendedFlag =
+      bot._defendedFlagRef && bot._defendedFlagRef.owner === bot.team
+        ? bot._defendedFlagRef
+        : null;
+    if (bot._fobCheckTimer <= 0) {
+      bot._fobCheckTimer = 0.22 + (bIdx % 5) * 0.02;
+      defendedFlag = null;
+      for (let fIdx = 0; fIdx < this.world.flags.length; fIdx++) {
+        const fl = this.world.flags[fIdx];
+        if (fl.owner === bot.team) {
+          const dxFl = bot.pos.x - fl.pos.x;
+          const dzFl = bot.pos.z - fl.pos.z;
+          if (dxFl * dxFl + dzFl * dzFl <= (fl.radius + 4) * (fl.radius + 4)) {
+            defendedFlag = fl;
+            break;
+          }
         }
       }
+      bot._defendedFlagRef = defendedFlag;
     }
     bot.inFriendlyForwardBase = Boolean(defendedFlag);
     bot.defendedFlagStage = defendedFlag ? defendedFlag.defenseStage || 0 : 0;
@@ -837,83 +878,105 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
 
     // =======================================================================
     // PHYSICAL BASE VEHICLE SEEKING & BOARDING (BRAVO Armor Squad prioritizes crewing Tanks/IFVs/Cars!)
+    // Staggered 4 Hz candidate scan across 499 bots while checking boarding distance every frame!
     // =======================================================================
     let seekingVehicle = null;
     if (vehicleManager && !bot.rescueTarget) {
-      const boardableList = vehicleManager.boardableGroundByTeam
-        ? vehicleManager.boardableGroundByTeam[bot.team]
-        : vehicleManager.vehicles;
-      if (boardableList && boardableList.length > 0) {
-        const isBravoArmorCrew = bot.squad === 'BRAVO';
-        const strictDoctrine =
-          (!player || player.squadDoctrineEnabled !== false) &&
-          (this.world?.era || 'modern') === 'modern';
-        const seekRangeSq = isBravoArmorCrew
-          ? BOT.VEHICLE_SEEK_RANGE_BRAVO * BOT.VEHICLE_SEEK_RANGE_BRAVO
-          : BOT.VEHICLE_SEEK_RANGE_OTHER * BOT.VEHICLE_SEEK_RANGE_OTHER;
-        let bestVehDistSq = seekRangeSq;
-        for (let vi = 0; vi < boardableList.length; vi++) {
-          const veh = boardableList[vi];
-          if (
-            veh.dead ||
-            veh.isAircraft ||
-            veh.isEmplacement ||
-            veh.isWarehouseBike ||
-            veh.driver ||
-            veh.npcDriver ||
-            veh.team !== bot.team ||
-            (veh.claimedByPlayer && (veh.claimedByPlayerTimer || 0) > 0)
-          ) {
-            continue;
-          }
-          // When Squad Role & Rank Doctrine is ON, only BRAVO Armor Squad bots can crew Tanks, IFVs & Mobile AA!
-          const isHeavyArmorVeh =
-            veh.type === 'tank' || veh.type === 'apc' || veh.type === 'aa';
-          if (strictDoctrine && isHeavyArmorVeh && !isBravoArmorCrew) {
-            continue;
-          }
-          const dSq = bot.pos.distanceToSquared(veh.pos);
-          if (dSq >= bestVehDistSq) continue;
-          // Check if another closer friendly bot (or a BRAVO Armor Squad crewman) is already sprinting to claim this vehicle
-          if (
-            veh.claimedByBot &&
-            veh.claimedByBot !== bot &&
-            !veh.claimedByBot.dead &&
-            !veh.claimedByBot.downed &&
-            !veh.claimedByBot.drivingVehicle &&
-            ((veh.claimedByBot.squad === 'BRAVO' && !isBravoArmorCrew) ||
-              veh.claimedByBot.pos.distanceToSquared(veh.pos) < dSq)
-          ) {
-            continue;
-          }
-          bestVehDistSq = dSq;
-          seekingVehicle = veh;
-        }
-
-        if (seekingVehicle) {
-          seekingVehicle.claimedByBot = bot;
-          if (bestVehDistSq <= BOT.VEHICLE_BOARD_DISTANCE * BOT.VEHICLE_BOARD_DISTANCE) {
-            // NPC has reached the vehicle at the Base Motor Pool -> Climb Inside & Drive!
-            seekingVehicle.npcDriver = bot;
-            seekingVehicle.claimedByBot = null;
-            bot.drivingVehicle = seekingVehicle;
-            bot.mesh.visible = false;
-            if (this.onTelemetryEvent) {
-              this.onTelemetryEvent('NPC_BOARDED_VEHICLE', {
-                npc: bot.name,
-                team: bot.team,
-                squad: bot.squad,
-                role: bot.role,
-                vehicleId: seekingVehicle.id,
-                vehicleName: seekingVehicle.name,
-                x: Math.round(seekingVehicle.pos.x),
-                z: Math.round(seekingVehicle.pos.z)
-              });
+      const cachedSeek = bot._seekingVehicleRef;
+      const cachedStillValid = Boolean(
+        cachedSeek &&
+          !cachedSeek.dead &&
+          !cachedSeek.isAircraft &&
+          !cachedSeek.isEmplacement &&
+          !cachedSeek.isWarehouseBike &&
+          !cachedSeek.driver &&
+          !cachedSeek.npcDriver &&
+          cachedSeek.team === bot.team &&
+          !(cachedSeek.claimedByPlayer && (cachedSeek.claimedByPlayerTimer || 0) > 0) &&
+          (!cachedSeek.claimedByBot || cachedSeek.claimedByBot === bot)
+      );
+      bot._vehSeekTimer = (bot._vehSeekTimer || 0) - dt;
+      if (cachedStillValid && bot._vehSeekTimer > 0) {
+        seekingVehicle = cachedSeek;
+      } else if (bot._vehSeekTimer <= 0) {
+        bot._vehSeekTimer = 0.24 + (bIdx % 7) * 0.015;
+        const boardableList = vehicleManager.boardableGroundByTeam
+          ? vehicleManager.boardableGroundByTeam[bot.team]
+          : vehicleManager.vehicles;
+        if (boardableList && boardableList.length > 0) {
+          const isBravoArmorCrew = bot.squad === 'BRAVO';
+          const strictDoctrine =
+            (!player || player.squadDoctrineEnabled !== false) &&
+            (this.world?.era || 'modern') === 'modern';
+          const seekRangeSq = isBravoArmorCrew
+            ? BOT.VEHICLE_SEEK_RANGE_BRAVO * BOT.VEHICLE_SEEK_RANGE_BRAVO
+            : BOT.VEHICLE_SEEK_RANGE_OTHER * BOT.VEHICLE_SEEK_RANGE_OTHER;
+          let bestVehDistSq = seekRangeSq;
+          for (let vi = 0; vi < boardableList.length; vi++) {
+            const veh = boardableList[vi];
+            if (
+              veh.dead ||
+              veh.isAircraft ||
+              veh.isEmplacement ||
+              veh.isWarehouseBike ||
+              veh.driver ||
+              veh.npcDriver ||
+              veh.team !== bot.team ||
+              (veh.claimedByPlayer && (veh.claimedByPlayerTimer || 0) > 0)
+            ) {
+              continue;
             }
-            continue;
+            const isHeavyArmorVeh =
+              veh.type === 'tank' || veh.type === 'apc' || veh.type === 'aa';
+            if (strictDoctrine && isHeavyArmorVeh && !isBravoArmorCrew) {
+              continue;
+            }
+            const dSq = bot.pos.distanceToSquared(veh.pos);
+            if (dSq >= bestVehDistSq) continue;
+            if (
+              veh.claimedByBot &&
+              veh.claimedByBot !== bot &&
+              !veh.claimedByBot.dead &&
+              !veh.claimedByBot.downed &&
+              !veh.claimedByBot.drivingVehicle &&
+              ((veh.claimedByBot.squad === 'BRAVO' && !isBravoArmorCrew) ||
+                veh.claimedByBot.pos.distanceToSquared(veh.pos) < dSq)
+            ) {
+              continue;
+            }
+            bestVehDistSq = dSq;
+            seekingVehicle = veh;
           }
+        }
+        bot._seekingVehicleRef = seekingVehicle;
+      }
+
+      if (seekingVehicle) {
+        seekingVehicle.claimedByBot = bot;
+        const curVehDistSq = bot.pos.distanceToSquared(seekingVehicle.pos);
+        if (curVehDistSq <= BOT.VEHICLE_BOARD_DISTANCE * BOT.VEHICLE_BOARD_DISTANCE) {
+          seekingVehicle.npcDriver = bot;
+          seekingVehicle.claimedByBot = null;
+          bot._seekingVehicleRef = null;
+          bot.drivingVehicle = seekingVehicle;
+          bot.mesh.visible = false;
+          if (this.onTelemetryEvent) {
+            this.onTelemetryEvent('NPC_BOARDED_VEHICLE', {
+              npc: bot.name,
+              team: bot.team,
+              squad: bot.squad,
+              role: bot.role,
+              vehicleId: seekingVehicle.id,
+              vehicleName: seekingVehicle.name,
+              x: Math.round(seekingVehicle.pos.x),
+              z: Math.round(seekingVehicle.pos.z)
+            });
+          }
+          continue;
         }
       }
+    } else if (bot._seekingVehicleRef) {
+      bot._seekingVehicleRef = null;
     }
 
     // =======================================================================
@@ -1133,11 +1196,14 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       ? tmpVec3Copy(seekingVehicle.pos)
       : tmpVec3Copy(targetFlag.pos).add(bot.waypointOffset);
 
+    let hasDynamicGoal = false;
     if (!seekingVehicle && bot.playerOrderTimer > 0 && !player.dead) {
       if (bot.playerOrderMode === 'FOLLOW') {
         goal.copy(player.pos).add(bot.waypointOffset);
+        hasDynamicGoal = true;
       } else if (bot.playerOrderMode === 'HOLD' || bot.playerOrderMode === 'RETREAT') {
         goal.copy(bot.playerOrderPos).add(bot.waypointOffset);
+        hasDynamicGoal = true;
       }
     }
 
@@ -1153,14 +1219,25 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       }
       if (squadLeaderBot && bot.memberClusterOffset && squadLeaderBot.pos.distanceTo(goal) < 55) {
         goal.copy(squadLeaderBot.pos).add(bot.memberClusterOffset);
+        hasDynamicGoal = true;
       }
     }
 
-    // Ensure goal coordinate never lies inside a building or container footprint!
-    if (!seekingVehicle && this.world.pushOutOfBuildingFootprint) {
-      const safeGoal = this.world.pushOutOfBuildingFootprint(goal.x, goal.z, 2.2);
-      goal.x = safeGoal.x;
-      goal.z = safeGoal.z;
+    // Ensure dynamic goal coordinate never lies inside a building or container footprint (static flag waypoints are pre-pushed!)
+    if (!seekingVehicle && hasDynamicGoal && this.world.pushOutOfBuildingFootprint) {
+      const gdx = goal.x - (bot._lastRawGoalX ?? 1e9);
+      const gdz = goal.z - (bot._lastRawGoalZ ?? 1e9);
+      if (gdx * gdx + gdz * gdz > 0.64) {
+        bot._lastRawGoalX = goal.x;
+        bot._lastRawGoalZ = goal.z;
+        const safeGoal = this.world.pushOutOfBuildingFootprint(goal.x, goal.z, 2.2);
+        bot._safeGoalX = safeGoal.x;
+        bot._safeGoalZ = safeGoal.z;
+      }
+      if (bot._safeGoalX !== undefined) {
+        goal.x = bot._safeGoalX;
+        goal.z = bot._safeGoalZ;
+      }
     }
 
     // Autonomous Contextual Proximity & Squad Teammate Callouts + Mount & Blade Battle Cries

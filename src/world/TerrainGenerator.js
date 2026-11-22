@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../textures.js?v=105';
-import { TERRAIN } from '../config.js?v=105';
-import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=105';
+import { TEXTURES } from '../textures.js?v=110';
+import { TERRAIN } from '../config.js?v=110';
+import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=110';
 
 const VOXEL_SIZE = 1.25;
 
@@ -869,12 +869,6 @@ export const TerrainGenerator = {
       });
       const b2GoldStripeMat = new THREE.MeshBasicMaterial({ color: 0xffd32a });
       const b2BeaconTintMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      const b2CanopyMat = new THREE.MeshStandardMaterial({
-        color: 0x1e272e,
-        roughness: 0.55,
-        metalness: 0.45,
-        flatShading: true
-      });
 
       const b2PianoMatrices = [];
       const b2DashMatrices = [];
@@ -944,34 +938,6 @@ export const TerrainGenerator = {
             pushHexColor(b2BeaconColors, beaconHex);
           }
         }
-
-        // B-2A Spirit Open-Sided Stealth Canopy Shelter parked on the OUTER SIDE APRON (Bay 2: hangarZ = ∓138), leaving Runway 2 100% clear!
-        for (const px of [-11, 11]) {
-          for (const pzSide of [-1, 1]) {
-            const pilX = b2Lane.hangarX + px;
-            const pilZ = b2Lane.hangarZ + pzSide * 13.4;
-            this.registerStaticStructureBox?.(
-              pilX - 0.85,
-              pilX + 0.85,
-              pilZ - 0.85,
-              pilZ + 0.85,
-              'b2_canopy_pillar'
-            );
-            const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.65, 6.4, 0.65), b2CanopyMat);
-            pillar.position.set(pilX, baseH + 3.2, pilZ);
-            laneGroup.add(pillar);
-          }
-        }
-        const canopyRoof = new THREE.Mesh(new THREE.BoxGeometry(26, 0.45, 28.2), b2CanopyMat);
-        canopyRoof.position.set(b2Lane.hangarX, baseH + 6.5, b2Lane.hangarZ);
-        laneGroup.add(canopyRoof);
-
-        const canopyTrim = new THREE.Mesh(
-          new THREE.BoxGeometry(26.4, 0.22, 28.6),
-          b2GoldStripeMat
-        );
-        canopyTrim.position.set(b2Lane.hangarX, baseH + 6.75, b2Lane.hangarZ);
-        laneGroup.add(canopyTrim);
 
         this.scene.add(laneGroup);
         if (this._ownedWorldObjects) this._ownedWorldObjects.push(laneGroup);

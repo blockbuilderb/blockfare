@@ -1,12 +1,12 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=105';
-import { sound } from './audio.js?v=105';
-import { NETWORK } from './config.js?v=105';
-import { events, makeEventBridge } from './events.js?v=105';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=110';
+import { sound } from './audio.js?v=110';
+import { NETWORK } from './config.js?v=110';
+import { events, makeEventBridge } from './events.js?v=110';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=105';
+} from './core/StateMachines.js?v=110';
 
 export class NetworkManager {
   constructor(scene, world, player, botManager) {
@@ -38,8 +38,9 @@ export class NetworkManager {
       this.gameMode = 'SINGLEPLAYER';
     }
 
-    // Bot population preset: 'FULL_AI' / 'MASSIVE_AI' (125v125 = 250 bots), 'LARGE_AI' (80v80 = 160 bots),
-    // 'TACTICAL_AI' (40v40 = 80 bots), 'SQUAD_AI' (16v16 = 32 bots), 'NO_AI' (0 bots Pure PvP)
+    // Bot population preset: 'ULTRA_AI' (500P: 1 Player + 499 AI = 250v250),
+    // 'FULL_AI' / 'MASSIVE_AI' (250P: 125v125), 'LARGE_AI' (160P: 80v80),
+    // 'TACTICAL_AI' (80P: 40v40), 'SQUAD_AI' (32P: 16v16), 'NO_AI' (0 bots Pure PvP)
     if (urlBots === 'NO_AI' || urlBots === 'PVP' || urlBots === '0') {
       this.botPopulateMode = 'NO_AI';
     } else if (urlBots === 'SQUAD_AI' || urlBots === '32') {
@@ -48,8 +49,12 @@ export class NetworkManager {
       this.botPopulateMode = 'TACTICAL_AI';
     } else if (urlBots === 'LARGE_AI' || urlBots === '160') {
       this.botPopulateMode = 'LARGE_AI';
-    } else {
+    } else if (urlBots === 'FULL_AI' || urlBots === 'MASSIVE_AI' || urlBots === '250') {
       this.botPopulateMode = 'FULL_AI';
+    } else if (urlBots === 'ULTRA_AI' || urlBots === '500' || urlBots === '499') {
+      this.botPopulateMode = 'ULTRA_AI';
+    } else {
+      this.botPopulateMode = this.gameMode === 'SINGLEPLAYER' ? 'ULTRA_AI' : 'FULL_AI';
     }
 
     const urlName = (params.get('name') || '').trim();
@@ -108,20 +113,36 @@ export class NetworkManager {
     if (this.botPopulateMode === 'SQUAD_AI') return NETWORK.BOTS_SQUAD_AI;
     if (this.botPopulateMode === 'TACTICAL_AI') return NETWORK.BOTS_TACTICAL_AI || 40;
     if (this.botPopulateMode === 'LARGE_AI') return NETWORK.BOTS_LARGE_AI || 80;
+    if (this.botPopulateMode === 'ULTRA_AI') return NETWORK.BOTS_ULTRA_AI || 250;
     return NETWORK.BOTS_FULL_AI || 125;
   }
 
   applyBotPopulationMode() {
     if (!this.botManager || typeof this.botManager.setBotCountPerSide !== 'function') return;
     const countPerSide = this.getTargetBotsPerTeam();
-    this.botManager.setBotCountPerSide(countPerSide);
+    if (countPerSide <= 0) return;
+    const playerTeam =
+      this.gameMode === 'SINGLEPLAYER' ? this.player?.team || 'US' : null;
+    this.botManager.setBotCountPerSide(countPerSide, { playerTeam });
+    if (this.gameRef && typeof this.gameRef.syncMatchTicketsForArmyScale === 'function') {
+      this.gameRef.syncMatchTicketsForArmyScale(countPerSide);
+    }
   }
 
   setBotPopulateMode(botMode) {
-    const validModes = ['FULL_AI', 'MASSIVE_AI', 'LARGE_AI', 'TACTICAL_AI', 'SQUAD_AI', 'NO_AI'];
-    const clean = validModes.includes(botMode) ? botMode : 'FULL_AI';
+    const validModes = [
+      'ULTRA_AI',
+      'FULL_AI',
+      'MASSIVE_AI',
+      'LARGE_AI',
+      'TACTICAL_AI',
+      'SQUAD_AI',
+      'NO_AI'
+    ];
+    const clean = validModes.includes(botMode) ? botMode : 'ULTRA_AI';
     // In Singleplayer, prevent 0-bot empty world unless in Multiplayer PvP
-    this.botPopulateMode = this.gameMode === 'SINGLEPLAYER' && clean === 'NO_AI' ? 'FULL_AI' : clean;
+    this.botPopulateMode =
+      this.gameMode === 'SINGLEPLAYER' && clean === 'NO_AI' ? 'ULTRA_AI' : clean;
     this.applyBotPopulationMode();
     if (this.onLobbyUpdated) {
       this.onLobbyUpdated();

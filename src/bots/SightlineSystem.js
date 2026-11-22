@@ -1,5 +1,5 @@
-import { BOT } from '../config.js?v=105';
-import { tmpVec3 } from '../utils/VectorPool.js?v=105';
+import { BOT } from '../config.js?v=110';
+import { tmpVec3 } from '../utils/VectorPool.js?v=110';
 
 /**
  * Multi-Ray "Vision Tube" Sightline Check:
@@ -87,14 +87,14 @@ export function canBotSeeTarget(bot, targetKey, targetPos, checkFov = true) {
   if (cached && now < cached.exp) {
     return !cached.blocked;
   }
-  // Cap uncached raycasts per bot (2) and globally per frame (28) to prevent frame-time spikes across 250 bots
-  if ((bot._raycastsThisFrame || 0) >= 2 || (this._frameRaycasts || 0) >= 28) {
+  // Cap uncached raycasts per bot (2) and globally per frame (38) to prevent frame-time spikes across 499 AI bots
+  if ((bot._raycastsThisFrame || 0) >= 2 || (this._frameRaycasts || 0) >= 38) {
     return cached ? !cached.blocked : false;
   }
   bot._raycastsThisFrame = (bot._raycastsThisFrame || 0) + 1;
   this._frameRaycasts = (this._frameRaycasts || 0) + 1;
   const vis = this.hasClearSightline(bot, targetPos, checkFov);
-  const ttl = 260 + Math.random() * 160;
+  const ttl = 320 + Math.random() * 200;
   if (cached) {
     cached.blocked = !vis;
     cached.vis = vis;

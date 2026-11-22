@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=105';
-import { VEHICLE_STATS, PROJECTILES } from './config.js?v=105';
+import { sound } from './audio.js?v=110';
+import { VEHICLE_STATS, PROJECTILES } from './config.js?v=110';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=105';
-import { createVehicleMesh } from './models/vehicle-model.js?v=105';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=105';
-import { events, makeEventBridge } from './events.js?v=105';
+} from './assets/vehicle-defs.js?v=110';
+import { createVehicleMesh } from './models/vehicle-model.js?v=110';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=110';
+import { events, makeEventBridge } from './events.js?v=110';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=105';
+} from './core/StateMachines.js?v=110';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -102,7 +102,23 @@ export class VehicleManager {
       if (!v) continue;
       v.fleetIndex = i;
       if (v.dead) continue;
-      const team = v.team === 'RU' ? 'RU' : 'US';
+      if (v.team !== 'US' && v.team !== 'RU') {
+        // Neutral unoccupied FOB motorpool bikes/ATVs are boardable by either team,
+        // while neutral unoccupied FOB emplacements are never treated as hostile targets!
+        if (
+          !v.isAircraft &&
+          !v.isEmplacement &&
+          !v.isWarehouseBike &&
+          !v.driver &&
+          !v.npcDriver &&
+          !(v.claimedByPlayer && (v.claimedByPlayerTimer || 0) > 0)
+        ) {
+          this.boardableGroundByTeam.US.push(v);
+          this.boardableGroundByTeam.RU.push(v);
+        }
+        continue;
+      }
+      const team = v.team;
       const enemyTeam = team === 'US' ? 'RU' : 'US';
 
       if (v.isAircraft) {
@@ -2791,8 +2807,8 @@ export class VehicleManager {
         // Unoccupied vehicle sits stationary at the Motor Pool (or wherever parked)
         v.forwardSpeed *= Math.pow(0.05, dt);
 
-        // Autonomous Base Air-Defense Sentry for constructed ZU-23-2 / C-RAM AA Emplacements
-        if (v.type === 'emplace_aa') {
+        // Autonomous Base Air-Defense Sentry for constructed ZU-23-2 / C-RAM AA Emplacements (owned by US or RU only)
+        if (v.type === 'emplace_aa' && (v.team === 'US' || v.team === 'RU')) {
           let airTarget = null;
           let bestAirSq = VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT * VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT;
           const enemyTeam = v.team === 'US' ? 'RU' : 'US';

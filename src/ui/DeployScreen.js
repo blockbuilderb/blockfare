@@ -1,11 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=105';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=105';
-import { events } from '../events.js?v=105';
+import { SQUAD_DEFS } from '../bots.js?v=110';
+import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=110';
+import { events } from '../events.js?v=110';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=105';
+} from '../core/StateMachines.js?v=110';
+import {
+  isMacPlatform,
+  hasAnyModifier,
+  resolveGlobalCommandShortcut
+} from '../utils/KeyboardShortcuts.js?v=110';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -41,6 +46,9 @@ export const DeployScreen = {
         btn.classList.add('active');
         this.selectedTeam = btn.dataset.team;
         this.selectedSubFaction = btn.dataset.subfaction || btn.dataset.team;
+        if (!this.network || !this.network.isMultiplayer()) {
+          this.botManager?.syncPlayerTeamSlot?.(this.selectedTeam);
+        }
         this.syncEraUI?.();
       });
     });
@@ -565,218 +573,208 @@ export const DeployScreen = {
       setTimeout(() => this.updateMultiplayerLobbyUI(), 200);
     }
 
-    window.addEventListener('keydown', (e) => {
-      const tag = document.activeElement ? document.activeElement.tagName : '';
-      if (tag === 'INPUT' || tag === 'TEXTAREA') {
-        if (e.code === 'Escape') {
-          document.activeElement.blur();
-        }
-        return;
-      }
-
-      if (e.code === 'F2') {
-        e.preventDefault();
-        this.toggleFpsCounter();
-        return;
-      }
-
-      if (e.code === 'KeyI' || (e.code === 'KeyB' && e.shiftKey)) {
-        e.preventDefault();
-        this.toggleBackpackModal();
-        return;
-      }
-      if (e.code === 'KeyO') {
-        e.preventDefault();
-        this.toggleMultiplayerModal();
-        return;
-      }
-      if (e.code === 'KeyK' || e.code === 'CapsLock') {
-        e.preventDefault();
-        this.toggleCommandModal();
-        return;
-      }
-
-      // If [Y] Commander Radial Wheel (#commo-rose) is open, allow pressing 1-8 or -/+ to execute order immediately
-      const activeWheel = this.el('commo-rose');
-      if (activeWheel) {
-        const wheelMap = {
-          Digit1: { action: 'OBJECTIVE', flagId: 'A' },
-          Numpad1: { action: 'OBJECTIVE', flagId: 'A' },
-          Digit2: { action: 'OBJECTIVE', flagId: 'B' },
-          Numpad2: { action: 'OBJECTIVE', flagId: 'B' },
-          Digit3: { action: 'OBJECTIVE', flagId: 'C' },
-          Numpad3: { action: 'OBJECTIVE', flagId: 'C' },
-          Digit4: { action: 'OBJECTIVE', flagId: 'D' },
-          Numpad4: { action: 'OBJECTIVE', flagId: 'D' },
-          Digit5: { action: 'OBJECTIVE', flagId: 'E' },
-          Numpad5: { action: 'OBJECTIVE', flagId: 'E' },
-          Digit6: { action: 'FOLLOW' },
-          Numpad6: { action: 'FOLLOW' },
-          Digit7: { action: 'HOLD' },
-          Numpad7: { action: 'HOLD' },
-          Digit8: { action: 'TOGGLE_SCOPE' },
-          Numpad8: { action: 'TOGGLE_SCOPE' },
-          NumpadSubtract: { action: 'SPACING', spacingMode: 'STAY_CLOSE' },
-          Minus: { action: 'SPACING', spacingMode: 'STAY_CLOSE' },
-          NumpadAdd: { action: 'SPACING', spacingMode: 'FAN_OUT' },
-          Equal: { action: 'SPACING', spacingMode: 'FAN_OUT' }
-        };
-        if (wheelMap[e.code]) {
-          e.preventDefault();
-          const ord = wheelMap[e.code];
-          if (ord.action === 'TOGGLE_SCOPE') {
-            this.setCommandScope(this.player.commandScope === 'ALL' ? 'SQUAD' : 'ALL');
-            this.openCommoRose();
-          } else if (ord.action === 'SPACING') {
-            this.issueHudFormationSpacing(ord.spacingMode);
-            this.closeCommoRose();
-          } else {
-            this.issueHudStrategicOrder(ord);
-            this.closeCommoRose();
+    window.addEventListener(
+      'keydown',
+      (e) => {
+        const tag = document.activeElement ? document.activeElement.tagName : '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA') {
+          if (e.code === 'Escape') {
+            document.activeElement.blur();
           }
           return;
         }
-      }
 
-      // Formation Spacing Hotkeys: [Num -] / [-] = STAY CLOSE, [Num +] / [+] = FAN OUT
-      if (e.code === 'NumpadSubtract' || e.code === 'Minus') {
-        e.preventDefault();
-        this.issueHudFormationSpacing('STAY_CLOSE');
-        return;
-      }
-      if (e.code === 'NumpadAdd' || e.code === 'Equal') {
-        e.preventDefault();
-        this.issueHudFormationSpacing('FAN_OUT');
-        return;
-      }
+        // If [Y] Commander Radial Wheel (#commo-rose) is open, allow pressing bare 1-8 or -/+ to execute order immediately
+        const activeWheel = this.el('commo-rose');
+        if (activeWheel && !hasAnyModifier(e) && !e.shiftKey) {
+          const wheelMap = {
+            Digit1: { action: 'OBJECTIVE', flagId: 'A' },
+            Numpad1: { action: 'OBJECTIVE', flagId: 'A' },
+            Digit2: { action: 'OBJECTIVE', flagId: 'B' },
+            Numpad2: { action: 'OBJECTIVE', flagId: 'B' },
+            Digit3: { action: 'OBJECTIVE', flagId: 'C' },
+            Numpad3: { action: 'OBJECTIVE', flagId: 'C' },
+            Digit4: { action: 'OBJECTIVE', flagId: 'D' },
+            Numpad4: { action: 'OBJECTIVE', flagId: 'D' },
+            Digit5: { action: 'OBJECTIVE', flagId: 'E' },
+            Numpad5: { action: 'OBJECTIVE', flagId: 'E' },
+            Digit6: { action: 'FOLLOW' },
+            Numpad6: { action: 'FOLLOW' },
+            Digit7: { action: 'HOLD' },
+            Numpad7: { action: 'HOLD' },
+            Digit8: { action: 'TOGGLE_SCOPE' },
+            Numpad8: { action: 'TOGGLE_SCOPE' },
+            NumpadSubtract: { action: 'SPACING', spacingMode: 'STAY_CLOSE' },
+            Minus: { action: 'SPACING', spacingMode: 'STAY_CLOSE' },
+            NumpadAdd: { action: 'SPACING', spacingMode: 'FAN_OUT' },
+            Equal: { action: 'SPACING', spacingMode: 'FAN_OUT' }
+          };
+          if (wheelMap[e.code]) {
+            e.preventDefault();
+            if (!e.repeat) {
+              const ord = wheelMap[e.code];
+              if (ord.action === 'TOGGLE_SCOPE') {
+                this.setCommandScope(this.player.commandScope === 'ALL' ? 'SQUAD' : 'ALL');
+                this.openCommoRose();
+              } else if (ord.action === 'SPACING') {
+                this.issueHudFormationSpacing(ord.spacingMode);
+                this.closeCommoRose();
+              } else {
+                this.issueHudStrategicOrder(ord);
+                this.closeCommoRose();
+              }
+            }
+            return;
+          }
+        }
 
-      // Direct Commander & Squad Leader Order Hotkeys (Alt+1..5, Alt+F Follow, Alt+H/D Defend Here, Alt+A Auto, Alt+0 Scope, or Numpad 1..8)
-      if (
-        (e.altKey && ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].includes(e.code)) ||
-        ['Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Numpad5'].includes(e.code)
-      ) {
-        e.preventDefault();
-        const flagMap = {
-          Digit1: 'A',
-          Digit2: 'B',
-          Digit3: 'C',
-          Digit4: 'D',
-          Digit5: 'E',
-          Numpad1: 'A',
-          Numpad2: 'B',
-          Numpad3: 'C',
-          Numpad4: 'D',
-          Numpad5: 'E'
-        };
-        this.issueHudStrategicOrder({ action: 'OBJECTIVE', flagId: flagMap[e.code] });
-        return;
-      }
-      if (e.altKey && e.code === 'KeyG') {
-        e.preventDefault();
-        this.issueHudStrategicOrder({ action: 'GARRISON' });
-        return;
-      }
-      if (e.altKey && e.code === 'KeyC') {
-        e.preventDefault();
-        this.issueHudStrategicOrder({ action: 'CHARGE' });
-        return;
-      }
-      if (e.altKey && e.code === 'KeyR') {
-        e.preventDefault();
-        this.issueHudStrategicOrder({ action: 'RETREAT' });
-        return;
-      }
-      if ((e.altKey && e.code === 'KeyF') || e.code === 'Numpad6') {
-        e.preventDefault();
-        this.issueHudStrategicOrder({ action: 'FOLLOW' });
-        return;
-      }
-      if ((e.altKey && (e.code === 'KeyH' || e.code === 'KeyD')) || e.code === 'Numpad7') {
-        e.preventDefault();
-        this.issueHudStrategicOrder({ action: 'HOLD' });
-        return;
-      }
-      if ((e.altKey && e.code === 'KeyA') || e.code === 'Numpad8') {
-        e.preventDefault();
-        this.issueHudStrategicOrder({ action: 'AUTO' });
-        return;
-      }
-      if ((e.altKey && e.code === 'Digit0') || e.code === 'Numpad0') {
-        e.preventDefault();
-        this.setCommandScope(this.player.commandScope === 'ALL' ? 'SQUAD' : 'ALL');
-        const perTeam = (this.botManager && this.botManager.currentBotsPerTeam) || 125;
-        const sqTotal = SQUAD_DEFS.length || 6;
-        const perSquad = Math.round(perTeam / sqTotal);
-        const nextScopeLabel =
-          this.player.commandScope === 'ALL'
-            ? `★ ALL ${sqTotal} SQUADS (${perTeam} NPCs)`
-            : `▲ ${this.player.squad || 'ALPHA'} SQUAD (${perSquad} NPCs)`;
-        this.addXpNotification(0, `COMMAND SCOPE: ${nextScopeLabel}`);
-        return;
-      }
-      if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') {
-        const deployVisible =
-          this.deployScreenEl && !this.deployScreenEl.classList.contains('hidden');
-        const victoryVisible =
-          this.victoryScreenEl && !this.victoryScreenEl.classList.contains('hidden');
-        if (victoryVisible && this.onPlayNextRound) {
-          e.preventDefault();
-          this.onPlayNextRound();
-          return;
-        }
-        if (deployVisible) {
-          e.preventDefault();
-          this.triggerDeploy();
-          return;
-        }
-      }
-      // [Shift + L] or [F4] cycles Time of Day (so [L] is dedicated to Squad Field Role Cycling!)
-      if ((e.code === 'KeyL' && e.shiftKey) || e.code === 'F4') {
-        e.preventDefault();
-        const modes = ['DAY', 'SUNSET', 'NIGHT'];
-        const nextIdx = (modes.indexOf(this.selectedAtmos) + 1) % modes.length;
-        this.selectedAtmos = modes[nextIdx];
-        atmosBtns.forEach((b) => {
-          b.classList.toggle('active', b.dataset.atmos === this.selectedAtmos);
+        // Cross-Platform Global Utility & Commander/Squad Order Shortcuts (Mac ⌥/⌃/⌘+G & Windows/Linux Alt+...)
+        const globalShortcut = resolveGlobalCommandShortcut(e, {
+          isPointerLocked: Boolean(document.pointerLockElement),
+          inGunship: Boolean(this.player?.activeVehicle?.aircraftRole === 'gunship')
         });
-        if (this.onAtmosphereChange) {
-          this.onAtmosphereChange(this.selectedAtmos);
+        if (globalShortcut) {
+          e.preventDefault();
+          if (!e.repeat) {
+            switch (globalShortcut.type) {
+              case 'TOGGLE_MANUAL':
+                this.toggleControlsOverlay();
+                break;
+              case 'TOGGLE_FPS':
+                this.toggleFpsCounter();
+                break;
+              case 'TOGGLE_TELEMETRY':
+                if (this.telemetryPanelEl) {
+                  this.telemetryPanelEl.classList.toggle('hidden');
+                  this.updateTelemetryPanel(true);
+                }
+                break;
+              case 'CYCLE_ATMOS': {
+                const modes = ['DAY', 'SUNSET', 'NIGHT'];
+                const nextIdx = (modes.indexOf(this.selectedAtmos) + 1) % modes.length;
+                this.selectedAtmos = modes[nextIdx];
+                atmosBtns.forEach((b) => {
+                  b.classList.toggle('active', b.dataset.atmos === this.selectedAtmos);
+                });
+                if (this.onAtmosphereChange) {
+                  this.onAtmosphereChange(this.selectedAtmos);
+                }
+                this.addXpNotification(0, `TIME OF DAY: ${this.selectedAtmos}`);
+                break;
+              }
+              case 'STRATEGIC_ORDER':
+                this.issueHudStrategicOrder({
+                  action: globalShortcut.action,
+                  flagId: globalShortcut.flagId || null
+                });
+                break;
+              case 'TOGGLE_SCOPE': {
+                this.setCommandScope(this.player.commandScope === 'ALL' ? 'SQUAD' : 'ALL');
+                const perTeam = (this.botManager && this.botManager.currentBotsPerTeam) || 125;
+                const sqTotal = SQUAD_DEFS.length || 6;
+                const perSquad = Math.round(perTeam / sqTotal);
+                const nextScopeLabel =
+                  this.player.commandScope === 'ALL'
+                    ? `★ ALL ${sqTotal} SQUADS (${perTeam} NPCs)`
+                    : `▲ ${this.player.squad || 'ALPHA'} SQUAD (${perSquad} NPCs)`;
+                this.addXpNotification(0, `COMMAND SCOPE: ${nextScopeLabel}`);
+                break;
+              }
+              case 'SPACING':
+                this.issueHudFormationSpacing(globalShortcut.spacingMode);
+                break;
+            }
+          }
+          return;
         }
-        this.addXpNotification(0, `TIME OF DAY: ${this.selectedAtmos}`);
-      }
-      if (e.code === 'KeyM' && !this.player.dead) {
-        this.player.dead = true;
-        this.player.downed = false;
-        if (this.player.activeVehicle) {
-          this.player.activeVehicle.driver = null;
-          this.player.activeVehicle = null;
+
+        if (!hasAnyModifier(e) && (e.code === 'KeyI' || (e.code === 'KeyB' && e.shiftKey))) {
+          e.preventDefault();
+          if (!e.repeat && !e._backpackHandled) {
+            e._backpackHandled = true;
+            const gsModal = this.el('gunsmith-modal');
+            const gsOpen = Boolean(gsModal && !gsModal.classList.contains('hidden'));
+            if (
+              e.code === 'KeyI' &&
+              !gsOpen &&
+              this.player &&
+              !this.player.dead &&
+              this.player.activeVehicle
+            ) {
+              this._gunsmithActiveTab = 'vehicles';
+              this.toggleGunsmithModal(true);
+            } else {
+              this.toggleBackpackModal();
+            }
+          }
+          return;
         }
-        if (document.pointerLockElement === document.body) {
-          document.exitPointerLock();
+        if (!hasAnyModifier(e) && e.code === 'KeyO') {
+          e.preventDefault();
+          if (!e.repeat) {
+            this.toggleMultiplayerModal();
+          }
+          return;
         }
-        this.showDeployScreen();
-      }
-      if (e.code === 'Tab') {
-        e.preventDefault();
-        if (!e.repeat && this.scoreboardEl && this.scoreboardEl.classList.contains('hidden')) {
-          this.scoreboardEl.classList.remove('hidden');
-          this._scoreboardTimer = 0.25;
-          this.renderScoreboard(true);
+        if (
+          !hasAnyModifier(e) &&
+          (e.code === 'KeyK' || (!isMacPlatform() && e.code === 'CapsLock'))
+        ) {
+          e.preventDefault();
+          if (!e.repeat) {
+            this.toggleCommandModal();
+          }
+          return;
         }
-      }
-      if (e.code === 'F3') {
-        e.preventDefault();
-        if (!e.repeat && this.telemetryPanelEl) {
-          this.telemetryPanelEl.classList.toggle('hidden');
-          this.updateTelemetryPanel(true);
+
+        if (
+          !hasAnyModifier(e) &&
+          (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space')
+        ) {
+          const deployVisible =
+            this.deployScreenEl && !this.deployScreenEl.classList.contains('hidden');
+          const victoryVisible =
+            this.victoryScreenEl && !this.victoryScreenEl.classList.contains('hidden');
+          if (victoryVisible && this.onPlayNextRound) {
+            e.preventDefault();
+            this.onPlayNextRound();
+            return;
+          }
+          if (deployVisible) {
+            e.preventDefault();
+            this.triggerDeploy();
+            return;
+          }
         }
-      }
-      // [F1] Controls Reference Overlay
-      if (e.code === 'F1') {
-        e.preventDefault();
-        this.toggleControlsOverlay();
-      }
-    });
+        if (!hasAnyModifier(e) && !e.repeat && e.code === 'KeyM' && !this.player.dead) {
+          this.player.dead = true;
+          this.player.downed = false;
+          if (typeof this.player.clearActiveVehicleOnReset === 'function') {
+            this.player.clearActiveVehicleOnReset('redeploy-menu');
+          } else {
+            if (this.player.activeVehicle) {
+              this.player.activeVehicle.driver = null;
+              this.player.activeVehicle = null;
+            }
+            this.player.sensorMode = 'OFF';
+            this.player.nvgActive = false;
+          }
+          if (document.pointerLockElement === document.body) {
+            document.exitPointerLock();
+          }
+          this.showDeployScreen();
+        }
+        if (!hasAnyModifier(e) && e.code === 'Tab') {
+          e.preventDefault();
+          if (!e.repeat && this.scoreboardEl && this.scoreboardEl.classList.contains('hidden')) {
+            this.scoreboardEl.classList.remove('hidden');
+            this._scoreboardTimer = 0.25;
+            this.renderScoreboard(true);
+          }
+        }
+      },
+      true
+    );
 
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Tab') {
@@ -885,10 +883,11 @@ export const DeployScreen = {
         </label>
         <label style="font-size:12px;font-weight:700;">AI BOTS:
           <select id="mp-modal-bots" style="background:#0d161e;color:#7bed9f;border:1px solid rgba(46,204,113,0.45);padding:5px 6px;border-radius:4px;font-weight:800;margin-left:4px;">
-            <option value="FULL_AI" ${this.network.botPopulateMode === 'FULL_AI' || this.network.botPopulateMode === 'MASSIVE_AI' ? 'selected' : ''}>250 AI (125v125 MASSIVE)</option>
-            <option value="LARGE_AI" ${this.network.botPopulateMode === 'LARGE_AI' ? 'selected' : ''}>160 AI (80v80 LARGE)</option>
-            <option value="TACTICAL_AI" ${this.network.botPopulateMode === 'TACTICAL_AI' ? 'selected' : ''}>80 AI (40v40 TACTICAL)</option>
-            <option value="SQUAD_AI" ${this.network.botPopulateMode === 'SQUAD_AI' ? 'selected' : ''}>32 AI (16v16 SQUAD)</option>
+            <option value="ULTRA_AI" ${this.network.botPopulateMode === 'ULTRA_AI' ? 'selected' : ''}>500P (499 AI ULTRA)</option>
+            <option value="FULL_AI" ${this.network.botPopulateMode === 'FULL_AI' || this.network.botPopulateMode === 'MASSIVE_AI' ? 'selected' : ''}>250P (125v125 MASSIVE)</option>
+            <option value="LARGE_AI" ${this.network.botPopulateMode === 'LARGE_AI' ? 'selected' : ''}>160P (80v80 LARGE)</option>
+            <option value="TACTICAL_AI" ${this.network.botPopulateMode === 'TACTICAL_AI' ? 'selected' : ''}>80P (40v40 TACTICAL)</option>
+            <option value="SQUAD_AI" ${this.network.botPopulateMode === 'SQUAD_AI' ? 'selected' : ''}>32P (16v16 SQUAD)</option>
             <option value="NO_AI" ${this.network.botPopulateMode === 'NO_AI' ? 'selected' : ''}>0 AI (PURE PVP)</option>
           </select>
         </label>
@@ -1509,6 +1508,9 @@ export const DeployScreen = {
     this.player.commandRank = this.selectedRank || 'COMMANDER';
     this.player.commandScope = this.player.commandRank === 'COMMANDER' ? 'ALL' : 'SQUAD';
     this.setCommandScope(this.player.commandScope);
+    if (!this.network || !this.network.isMultiplayer()) {
+      this.botManager?.syncPlayerTeamSlot?.(this.selectedTeam);
+    }
     this.player.deploy(this.selectedTeam, this.selectedClass, spawnVec);
     if (
       this.pendingDeployOrder &&
@@ -1587,6 +1589,21 @@ export const DeployScreen = {
     this.scopeOverlayEl.classList.add('hidden');
     this.vehicleOverlayEl.classList.add('hidden');
     if (this.downedOverlayEl) this.downedOverlayEl.classList.add('hidden');
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.remove(
+        'nvg-green-mode',
+        'flir-whot-mode',
+        'flir-bhot-mode',
+        'flir-scope-mode'
+      );
+    }
+    const nvgOv = this.el('nvg-overlay');
+    if (nvgOv) {
+      nvgOv.classList.add('hidden');
+      nvgOv.classList.remove('sensor-whot', 'sensor-bhot');
+    }
+    const flirFs = this.el('flir-fullscreen-canvas');
+    if (flirFs) flirFs.classList.add('hidden');
     const topBtn = this.el('deploy-top-btn');
     const botBtn = this.el('deploy-btn');
     if (topBtn) {

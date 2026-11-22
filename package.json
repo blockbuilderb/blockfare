@@ -6,7 +6,8 @@
   "description": "BLOCKFARE: Modern Blockfare, Medieval Blockfare & Jurassic Blockfare — Multi-Era Voxel Combined Arms FPS with 250 AI Bots & Multiplayer",
   "scripts": {
     "start": "python server.py",
-    "dev": "vite"
+    "dev": "vite",
+    "test": "node --test"
   },
   "dependencies": {
     "three": "^0.170.0"

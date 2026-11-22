@@ -4,8 +4,8 @@
 // panning, distance air-absorption filtering, and procedural sub-bass layers.
 // ============================================================================
 
-import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=105';
-import { AUDIO } from '../config.js?v=105';
+import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=110';
+import { AUDIO } from '../config.js?v=110';
 
 const AUDIO_STORAGE_KEY = 'bb_audio_settings_v1';
 
@@ -1333,12 +1333,25 @@ export class SoundManager {
     return this._airEngineNodes;
   }
 
+  _setAirParam(param, key, target, now, tc) {
+    if (!param) return;
+    if (!this._airParamCache) this._airParamCache = Object.create(null);
+    const prev = this._airParamCache[key];
+    const tol = Math.max(0.0005, Math.abs(target) * 0.008);
+    if (prev !== undefined && Math.abs(prev - target) <= tol) return;
+    this._airParamCache[key] = target;
+    if (typeof param.cancelScheduledValues === 'function') {
+      param.cancelScheduledValues(now);
+    }
+    param.setTargetAtTime(target, now, tc);
+  }
+
   updateAircraftEngineAudio(playerVehicle, allVehicles = [], listenerPos = null, listenerYaw = 0, wHeld = false) {
     if (this.volumes.muted) {
       if (this._airEngineNodes && this.ctx) {
         const now = this.ctx.currentTime;
-        this._airEngineNodes.selfBusGain.gain.setTargetAtTime(0.0001, now, 0.05);
-        this._airEngineNodes.extBusGain.gain.setTargetAtTime(0.0001, now, 0.05);
+        this._setAirParam(this._airEngineNodes.selfBusGain.gain, 'selfBus', 0.0001, now, 0.05);
+        this._setAirParam(this._airEngineNodes.extBusGain.gain, 'extBus', 0.0001, now, 0.05);
       }
       return;
     }
@@ -1346,6 +1359,14 @@ export class SoundManager {
     const isPilotingPlane = Boolean(
       playerVehicle && playerVehicle.isAircraft && !playerVehicle.dead
     );
+
+    const wallNow = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const pilotingChanged = isPilotingPlane !== Boolean(this._lastPilotingPlane);
+    if (!pilotingChanged && this._lastAirAudioWallMs && wallNow - this._lastAirAudioWallMs < 40) {
+      return;
+    }
+    this._lastAirAudioWallMs = wallNow;
+    this._lastPilotingPlane = isPilotingPlane;
 
     // Find nearest active external aircraft within 450m
     let nearestExtPlane = null;
@@ -1370,8 +1391,8 @@ export class SoundManager {
     if (!isPilotingPlane && !nearestExtPlane) {
       if (this._airEngineNodes && this.ctx) {
         const now = this.ctx.currentTime;
-        this._airEngineNodes.selfBusGain.gain.setTargetAtTime(0.0001, now, 0.08);
-        this._airEngineNodes.extBusGain.gain.setTargetAtTime(0.0001, now, 0.08);
+        this._setAirParam(this._airEngineNodes.selfBusGain.gain, 'selfBus', 0.0001, now, 0.08);
+        this._setAirParam(this._airEngineNodes.extBusGain.gain, 'extBus', 0.0001, now, 0.08);
       }
       return;
     }
@@ -1394,60 +1415,57 @@ export class SoundManager {
       const abBoost = wHeld ? 0.25 : 0;
       const power = Math.min(1.25, spool * 0.55 + thr * 0.45 + abBoost);
 
+      if (nodes.coreOsc.type !== 'sawtooth') nodes.coreOsc.type = 'sawtooth';
       if (role === 'wright_flyer') {
         // 1903 4-cylinder chugging piston engine + twin chain-driven wooden propellers
-        nodes.coreOsc.type = 'sawtooth';
-        nodes.coreOsc.frequency.setTargetAtTime(34 + power * 28, now, 0.06);
-        nodes.coreFilter.frequency.setTargetAtTime(190 + power * 180, now, 0.06);
-        nodes.coreGain.gain.setTargetAtTime(0.24, now, 0.06);
-        nodes.bladeLfo.frequency.setTargetAtTime(10 + power * 9, now, 0.06);
-        nodes.bladeDepth.gain.setTargetAtTime(0.11, now, 0.06);
-        nodes.whineOsc.frequency.setTargetAtTime(140 + power * 95, now, 0.06);
-        nodes.whineGain.gain.setTargetAtTime(0.03, now, 0.06);
-        nodes.roarFilter.frequency.setTargetAtTime(260 + power * 220, now, 0.06);
-        nodes.roarGain.gain.setTargetAtTime(0.14 + spdNorm * 0.14, now, 0.06);
+        this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 34 + power * 28, now, 0.06);
+        this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 190 + power * 180, now, 0.06);
+        this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.24, now, 0.06);
+        this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 10 + power * 9, now, 0.06);
+        this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.11, now, 0.06);
+        this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 140 + power * 95, now, 0.06);
+        this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.03, now, 0.06);
+        this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 260 + power * 220, now, 0.06);
+        this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.14 + spdNorm * 0.14, now, 0.06);
       } else if (role === 'gunship') {
         // AC-130J / Tu-95MS 4-Engine Turboprop Drone + Blade-Pass Hum
-        nodes.coreOsc.type = 'sawtooth';
-        nodes.coreOsc.frequency.setTargetAtTime(64 + power * 36, now, 0.07);
-        nodes.coreFilter.frequency.setTargetAtTime(240 + power * 210, now, 0.07);
-        nodes.coreGain.gain.setTargetAtTime(0.26, now, 0.07);
-        nodes.bladeLfo.frequency.setTargetAtTime(19 + power * 10, now, 0.07);
-        nodes.bladeDepth.gain.setTargetAtTime(0.09, now, 0.07);
-        nodes.whineOsc.frequency.setTargetAtTime(360 + power * 240, now, 0.07);
-        nodes.whineGain.gain.setTargetAtTime(0.045, now, 0.07);
-        nodes.roarFilter.frequency.setTargetAtTime(310 + power * 290, now, 0.07);
-        nodes.roarGain.gain.setTargetAtTime(0.2 + power * 0.16, now, 0.07);
+        this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 64 + power * 36, now, 0.07);
+        this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 240 + power * 210, now, 0.07);
+        this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.26, now, 0.07);
+        this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 19 + power * 10, now, 0.07);
+        this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.09, now, 0.07);
+        this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 360 + power * 240, now, 0.07);
+        this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.045, now, 0.07);
+        this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 310 + power * 290, now, 0.07);
+        this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.2 + power * 0.16, now, 0.07);
       } else if (role === 'cas') {
         // A-10C / Su-25 High-Bypass Twin-Turbofan Whine + Jet Roar
-        nodes.coreOsc.type = 'sawtooth';
-        nodes.coreOsc.frequency.setTargetAtTime(78 + power * 58, now, 0.06);
-        nodes.coreFilter.frequency.setTargetAtTime(310 + power * 340, now, 0.06);
-        nodes.coreGain.gain.setTargetAtTime(0.2, now, 0.06);
-        nodes.bladeLfo.frequency.setTargetAtTime(28 + power * 16, now, 0.06);
-        nodes.bladeDepth.gain.setTargetAtTime(0.035, now, 0.06);
-        nodes.whineOsc.frequency.setTargetAtTime(390 + power * 420, now, 0.06);
-        nodes.whineGain.gain.setTargetAtTime(0.07 + power * 0.04, now, 0.06);
-        nodes.roarFilter.frequency.setTargetAtTime(380 + power * 520, now, 0.06);
-        nodes.roarGain.gain.setTargetAtTime(0.24 + power * 0.22, now, 0.06);
+        this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 78 + power * 58, now, 0.06);
+        this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 310 + power * 340, now, 0.06);
+        this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.2, now, 0.06);
+        this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 28 + power * 16, now, 0.06);
+        this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.035, now, 0.06);
+        this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 390 + power * 420, now, 0.06);
+        this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.07 + power * 0.04, now, 0.06);
+        this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 380 + power * 520, now, 0.06);
+        this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.24 + power * 0.22, now, 0.06);
       } else {
         // F-15EX / F-22A / Su-57 / B-2A Spirit Low-Bypass Afterburning Turbofan
-        nodes.coreOsc.type = 'sawtooth';
-        nodes.coreOsc.frequency.setTargetAtTime(72 + power * 68, now, 0.06);
-        nodes.coreFilter.frequency.setTargetAtTime(290 + power * 420, now, 0.06);
-        nodes.coreGain.gain.setTargetAtTime(0.21 + (wHeld ? 0.08 : 0), now, 0.06);
-        nodes.bladeLfo.frequency.setTargetAtTime(32 + power * 18, now, 0.06);
-        nodes.bladeDepth.gain.setTargetAtTime(0.025, now, 0.06);
-        nodes.whineOsc.frequency.setTargetAtTime(480 + power * 540, now, 0.06);
-        nodes.whineGain.gain.setTargetAtTime(0.055 + power * 0.035, now, 0.06);
-        nodes.roarFilter.frequency.setTargetAtTime(340 + power * 640 + (wHeld ? 240 : 0), now, 0.06);
-        nodes.roarGain.gain.setTargetAtTime(0.26 + power * 0.24 + (wHeld ? 0.14 : 0), now, 0.06);
+        this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 72 + power * 68, now, 0.06);
+        this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 290 + power * 420, now, 0.06);
+        this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.21 + (wHeld ? 0.08 : 0), now, 0.06);
+        this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 32 + power * 18, now, 0.06);
+        this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.025, now, 0.06);
+        this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 480 + power * 540, now, 0.06);
+        this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.055 + power * 0.035, now, 0.06);
+        this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 340 + power * 640 + (wHeld ? 240 : 0), now, 0.06);
+        this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.26 + power * 0.24 + (wHeld ? 0.14 : 0), now, 0.06);
       }
 
       const targetSelfVol = Math.min(0.42, (0.16 + power * 0.18 + (wHeld ? 0.06 : 0)) * catMult);
-      nodes.selfBusGain.gain.setTargetAtTime(targetSelfVol, now, 0.06);
+      this._setAirParam(nodes.selfBusGain.gain, 'selfBus', targetSelfVol, now, 0.06);
     } else {
-      nodes.selfBusGain.gain.setTargetAtTime(0.0001, now, 0.08);
+      this._setAirParam(nodes.selfBusGain.gain, 'selfBus', 0.0001, now, 0.08);
     }
 
     // 2. Update External 3D Spatial Flyby Aircraft Engine Sound
@@ -1457,7 +1475,6 @@ export class SoundManager {
       const spd = Math.max(10, nearestExtPlane.forwardSpeed || 45);
       // Simple radial velocity Doppler pitch shift
       const dx = nearestExtPlane.pos.x - listenerPos.x;
-      const dy = nearestExtPlane.pos.y - listenerPos.y;
       const dz = nearestExtPlane.pos.z - listenerPos.z;
       const invD = 1 / Math.max(1, nearestExtDist);
       const vx = -Math.sin(nearestExtPlane.yaw || 0) * spd;
@@ -1465,21 +1482,21 @@ export class SoundManager {
       const radialVel = (dx * vx + dz * vz) * invD; // negative = approaching, positive = receding
       const doppler = Math.max(0.68, Math.min(1.42, 1.0 - radialVel / 220));
 
-      nodes.extOsc.frequency.setTargetAtTime(92 * doppler, now, 0.07);
-      nodes.extLp.frequency.setTargetAtTime((280 + (1 - distRatio) * 520) * doppler, now, 0.07);
-      nodes.extNoiseBp.frequency.setTargetAtTime((360 + (1 - distRatio) * 480) * doppler, now, 0.07);
+      this._setAirParam(nodes.extOsc.frequency, 'extOsc', 92 * doppler, now, 0.07);
+      this._setAirParam(nodes.extLp.frequency, 'extLp', (280 + (1 - distRatio) * 520) * doppler, now, 0.07);
+      this._setAirParam(nodes.extNoiseBp.frequency, 'extBp', (360 + (1 - distRatio) * 480) * doppler, now, 0.07);
 
       if (nodes.extPanner) {
         const rightX = Math.cos(listenerYaw);
         const rightZ = -Math.sin(listenerYaw);
         const pan = Math.max(-0.9, Math.min(0.9, (dx * rightX + dz * rightZ) * invD));
-        nodes.extPanner.pan.setTargetAtTime(pan, now, 0.06);
+        this._setAirParam(nodes.extPanner.pan, 'extPan', pan, now, 0.06);
       }
 
       const extVol = Math.min(0.32, 0.28 * atten * catMult);
-      nodes.extBusGain.gain.setTargetAtTime(Math.max(0.0001, extVol), now, 0.07);
+      this._setAirParam(nodes.extBusGain.gain, 'extBus', Math.max(0.0001, extVol), now, 0.07);
     } else {
-      nodes.extBusGain.gain.setTargetAtTime(0.0001, now, 0.08);
+      this._setAirParam(nodes.extBusGain.gain, 'extBus', 0.0001, now, 0.08);
     }
   }
 }

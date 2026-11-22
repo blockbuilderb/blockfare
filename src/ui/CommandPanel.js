@@ -1,5 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SQUAD_DEFS } from '../bots.js?v=105';
+import { SQUAD_DEFS } from '../bots.js?v=110';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=110';
 
 export const CommandPanel = {
   setCommandScope(scope) {
@@ -155,10 +156,13 @@ export const CommandPanel = {
         ? `ALL 5 SQUADS (${res.unitsOrdered} NPCs + ARMOR)`
         : `${targetSquad} SQUAD (${res.unitsOrdered} NPCs)`;
 
+    const isMac = isMacPlatform();
+    const closeKeyHint = isMac ? '[-]' : '[Num -]';
+    const fanKeyHint = isMac ? '[+]' : '[Num +]';
     const spacingSummary =
       res.spacingMode === 'STAY_CLOSE'
-        ? `🤝 ${scopeLabel} -> STAY CLOSE [Num -] (TIGHT 2–4m SQUADS • 15m STANDOFF • ARMOR 35–42m)!`
-        : `↔️ ${scopeLabel} -> FAN OUT [Num +] (SPREAD 7–12m SQUADS • 25m+ STANDOFF • ARMOR ~100m)!`;
+        ? `🤝 ${scopeLabel} -> STAY CLOSE ${closeKeyHint} (TIGHT 2–4m SQUADS • 15m STANDOFF • ARMOR 35–42m)!`
+        : `↔️ ${scopeLabel} -> FAN OUT ${fanKeyHint} (SPREAD 7–12m SQUADS • 25m+ STANDOFF • ARMOR ~100m)!`;
 
     this.addXpNotification(15, spacingSummary);
     this.showKillStreakAnnouncement(
@@ -264,18 +268,51 @@ export const CommandPanel = {
       .map(([fid, sq]) => `${fid}:${sq.slice(0, 3)}`)
       .join(' ');
 
+    const isMac = isMacPlatform();
+    const modShort = getShortOrderModifierLabel(isMac);
+    if (isMac && !this._macLabelsSynced) {
+      const cmdPanel = this.el('command-order-panel');
+      if (cmdPanel) {
+        cmdPanel.querySelectorAll('.cmd-hk').forEach((hk) => {
+          hk.textContent = hk.textContent
+            .replace(/Alt\+/g, `${modShort}+`)
+            .replace('[Num -]', '[-]')
+            .replace('[Num +]', '[+]');
+        });
+        cmdPanel.querySelectorAll('[title]').forEach((node) => {
+          const t = node.getAttribute('title');
+          if (t) {
+            node.setAttribute(
+              'title',
+              t
+                .replace(/Alt\+/g, `${modShort}+`)
+                .replace(/\[Num -\]/g, '[-]')
+                .replace(/\[Num \+\]/g, '[+]')
+                .replace(/Numpad - or Minus/g, '- or ⌥+-')
+                .replace(/Numpad \+ or Plus/g, '+ or ⌥++')
+            );
+          }
+        });
+        document.querySelectorAll('#flags-hud .flag-badge[title]').forEach((badge) => {
+          const t = badge.getAttribute('title');
+          if (t) badge.setAttribute('title', t.replace(/Alt\+/g, `${modShort}+`));
+        });
+        this._macLabelsSynced = true;
+      }
+    }
+
     const isAutoAiOn = !(activeOrder && activeOrder.timer > 0);
     document.querySelectorAll('.cmd-order-btn').forEach((btn) => {
       const act = btn.dataset.action;
       const flg = btn.dataset.flag;
       if (act === 'GARRISON') {
         btn.innerHTML = garrisonOn
-          ? '🏰 GARRISON: ON <span class="cmd-hk">[Alt+G]</span>'
-          : '🏰 GARRISON: OFF <span class="cmd-hk">[Alt+G]</span>';
+          ? `🏰 GARRISON: ON <span class="cmd-hk">[${modShort}+G]</span>`
+          : `🏰 GARRISON: OFF <span class="cmd-hk">[${modShort}+G]</span>`;
       } else if (act === 'AUTO') {
         btn.innerHTML = isAutoAiOn
-          ? '🤖 AI: ON <span class="cmd-hk">[Alt+A]</span>'
-          : '🤖 AI: OFF <span class="cmd-hk">[Alt+A]</span>';
+          ? `🤖 AI: ON <span class="cmd-hk">[${modShort}+A]</span>`
+          : `🤖 AI: OFF <span class="cmd-hk">[${modShort}+A]</span>`;
       }
       const isMatch =
         act === 'GARRISON'
@@ -438,6 +475,19 @@ export const CommandPanel = {
             ? '🌧️ ARTY'
             : '✈️ CARPET';
       }
+    }
+    const isInAircraft = Boolean(
+      this.player?.activeVehicle &&
+        this.player.activeVehicle.isAircraft &&
+        !this.player.activeVehicle.isSecretOmegaFlyer
+    );
+    const hudBuildBtn = this.el('hud-build-bunker-btn');
+    if (hudBuildBtn) {
+      hudBuildBtn.style.display = isInAircraft ? 'none' : '';
+    }
+    const hudBikeBtn = this.el('hud-request-bike-btn');
+    if (hudBikeBtn) {
+      hudBikeBtn.style.display = isModernEra && !isInAircraft ? '' : 'none';
     }
     const hudLaunchPlaneBtn = this.el('hud-launch-plane-btn');
     if (hudLaunchPlaneBtn) {
@@ -713,17 +763,17 @@ export const CommandPanel = {
               return `<button class="modal-sq-order-btn" data-scope="ALL" data-action="OBJECTIVE" data-flag="${fid}" style="flex:1;background:#d35400;color:#fff;border:1px solid #f1c40f;border-radius:4px;padding:5px 6px;font-size:11px;font-weight:900;cursor:pointer;">ALL -> OBJ ${fid} (${ownerTag})</button>`;
             })
             .join('')}
-          <button class="modal-sq-order-btn" data-scope="ALL" data-action="CHARGE" style="background:#c0392b;color:#fff;border:1px solid #ff7675;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Mount &amp; Blade All-Out Charge [Alt+C]">⚔️ ALL CHARGE</button>
-          <button class="modal-sq-order-btn" data-scope="ALL" data-action="HOLD" style="background:#8e44ad;color:#fff;border:none;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Defend / Shield Wall [Alt+H]">🛡️ ALL DEFEND</button>
-          <button class="modal-sq-order-btn" data-scope="ALL" data-action="RETREAT" style="background:#2980b9;color:#fff;border:none;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Tactical Retreat / Fall Back [Alt+R]">🏳️ ALL RETREAT</button>
+          <button class="modal-sq-order-btn" data-scope="ALL" data-action="CHARGE" style="background:#c0392b;color:#fff;border:1px solid #ff7675;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Mount &amp; Blade All-Out Charge [${getShortOrderModifierLabel()}+C]">⚔️ ALL CHARGE</button>
+          <button class="modal-sq-order-btn" data-scope="ALL" data-action="HOLD" style="background:#8e44ad;color:#fff;border:none;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Defend / Shield Wall [${getShortOrderModifierLabel()}+H]">🛡️ ALL DEFEND</button>
+          <button class="modal-sq-order-btn" data-scope="ALL" data-action="RETREAT" style="background:#2980b9;color:#fff;border:none;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Tactical Retreat / Fall Back [${getShortOrderModifierLabel()}+R]">🏳️ ALL RETREAT</button>
           <button class="modal-sq-order-btn" data-scope="ALL" data-action="FOLLOW" style="background:#27ae60;color:#fff;border:none;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;">🏃 ALL FOLLOW</button>
           <button class="modal-sq-order-btn" data-scope="ALL" data-action="GARRISON" style="background:${
             this.botManager?.garrisonDoctrineEnabled?.[team] ? '#16a085' : 'rgba(255,255,255,0.12)'
           };color:#fff;border:1px solid ${
             this.botManager?.garrisonDoctrineEnabled?.[team] ? '#1abc9c' : 'rgba(255,255,255,0.28)'
-          };border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Click or press [Alt+G] to toggle Garrison Defense Doctrine ON/OFF (leaves 1 dedicated Squad at each captured Forward Base when ON)">🏰 GARRISON BASES: ${
+          };border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Click or press [${getShortOrderModifierLabel()}+G] to toggle Garrison Defense Doctrine ON/OFF (leaves 1 dedicated Squad at each captured Forward Base when ON)">🏰 GARRISON BASES: ${
             this.botManager?.garrisonDoctrineEnabled?.[team] ? 'ON' : 'OFF'
-          } [Alt+G]</button>
+          } [${getShortOrderModifierLabel()}+G]</button>
           <button class="modal-sq-order-btn" data-scope="ALL" data-action="AUTO" style="background:rgba(255,255,255,0.14);color:#fff;border:none;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;">RESET TO AI</button>
         </div>
       </div>
