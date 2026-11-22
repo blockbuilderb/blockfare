@@ -1,7 +1,7 @@
 # Blockfare Cloud Multiplayer Relay (Option 2 — Cloudflare Workers + Durable Objects)
 
 Zero-dependency WebSocket + HTTP Room Relay for **Blockfare** (`https://blockbuilderb.github.io/blockfare/`).
-Uses Cloudflare's **Durable Object WebSocket Hibernation API** + `new_sqlite_classes` so it runs on Cloudflare's **$0 Free Plan** and supports 16–64+ players per room even across strict corporate NATs.
+Uses Cloudflare's **Durable Object WebSocket Hibernation API** + `new_sqlite_classes` so it runs on Cloudflare's **$0 Free Plan** and supports **32–64 players per room** (compared to **8–12 players per room** on Option 1 WebRTC P2P Mesh), even across strict corporate/university NATs.
 
 ## 1-Command Deploy
 ```bash

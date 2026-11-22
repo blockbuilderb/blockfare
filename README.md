@@ -2,9 +2,10 @@
 
 # 🧱 BLOCKFARE
 ### **Modern Blockfare • Medieval Blockfare • Jurassic Blockfare**
-*A 250-Unit Multi-Era Destructible Voxel Combined-Arms Sandbox FPS in Pure WebGL / Three.js*
+*A 500-Unit Multi-Era Online Multiplayer & Destructible Voxel Combined-Arms Sandbox FPS in Pure WebGL / Three.js*
 
 [![Play Live on GitHub Pages](https://img.shields.io/badge/%F0%9F%8E%AE_PLAY_NOW_IN_BROWSER-blockbuilderb.github.io%2Fblockfare-00d2d3?style=for-the-badge&labelColor=0b1116)](https://blockbuilderb.github.io/blockfare/)
+[![Multiplayer Capacity](https://img.shields.io/badge/%F0%9F%8C%90_ONLINE_MULTIPLAYER-32--64_Players_(Cloud)_%7C_8--12_(P2P)-a29bfe?style=for-the-badge&labelColor=0b1116)](./MULTIPLAYER.md)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero_Bundler_%7C_Vanilla_ESM-2ecc71?style=for-the-badge&labelColor=0b1116)](./ARCHITECTURE.md)
 [![Controls Reference](https://img.shields.io/badge/%E2%8C%A8%EF%B8%8F_Full_Keybinds-CONTROLS.md-f1c40f?style=for-the-badge&labelColor=0b1116)](./CONTROLS.md)
 
@@ -51,12 +52,26 @@ Switch seamlessly from the Main Menu between **three full-scale combined-arms th
 
 ---
 
+## 🌐 Online Multiplayer Architecture & Room Capacity
+
+Blockfare boots directly into **🌐 Online Room Mode (`FRUGIS-1`, `500P` scale)** by default—meaning a 1-person room plays seamlessly like Singleplayer (`1 Player + 499 AI = 500`), while friends or visitors opening the URL drop straight into your live battle. Full details in **[`MULTIPLAYER.md`](./MULTIPLAYER.md)**.
+
+| Transport Tier | Human Players / Room | Total Combatants (Humans + AI) | How It Works |
+| :--- | :---: | :---: | :--- |
+| **Option 2 — Cloudflare Edge Relay *(Default)*** (`cloudflare-relay/`) | **32–64 players** | **Up to 500** *(250 US vs. 250 RU)* | Cloudflare Worker + `BattleRoom` SQLite Durable Object (`wss://blockfare-relay.blockbuilderb.workers.dev/ws`). Each browser maintains **1** low-latency edge WebSocket (works across strict corporate/school NATs on Cloudflare's `$0` Free Plan). |
+| **Option 1 — WebRTC P2P Swarm Mesh *(Fallback / Toggle)*** (`src/network/WebRtcTransport.js`) | **8–12 players** | **Up to 500** *(250 US vs. 250 RU)* | Zero-server peer-to-peer mesh over dual `fast` (unreliable 20 Hz) + `reliable` `RTCDataChannel`s via deterministic 20-byte room `info_hash` discovery. Automatic fallback or 1-click toggle (`🌐 USE P2P WEBRTC`). |
+| **Local LAN / Python Server** (`server.py`) | **32–64 players** | **Up to 500** *(250 US vs. 250 RU)* | Built-in RFC 6455 WebSocket + `/api/mp/sync` HTTP relay inside zero-dependency `python server.py` for offline LAN parties. |
+
+- **Graceful Dead-AI Slot Retirement**: Rooms stay filled with AI up to full battle scale (`500P` = `250 vs. 250`). Whenever a real player joins (or switches factions), `BotManager.syncHumanTeamCounts()` retires **1 already-dead non-leader AI** on that team immediately—or if all AI on that team are currently alive, defers retirement (`pendingRetireQuota`) until the next AI dies naturally in combat so **live AI soldiers never vanish mid-fight**. Retired AI slots automatically reactivate if a player disconnects.
+
+---
+
 ## 🚀 Play Online or Run Locally
 
 ### 1. Play Instantly in Your Browser (No Install)
-Open **[https://blockbuilderb.github.io/blockfare/](https://blockbuilderb.github.io/blockfare/)** in Chrome, Edge, or Firefox.
+Open **[https://blockbuilderb.github.io/blockfare/](https://blockbuilderb.github.io/blockfare/)** in Chrome, Edge, Safari, or Firefox. Press **`[O]`** (or click the top-left room status pill) anytime to switch room codes (`FRUGIS-1`, `ALPHA-SQUAD`, `ARMOR-WAR`), copy an invite link, or toggle between **Cloudflare Edge Relay (32–64 players)** and **WebRTC P2P Mesh (8–12 players)**.
 
-### 2. Run Locally (with Full LAN / Online WebSocket Multiplayer Rooms)
+### 2. Run Locally (Zero-Dependency Python Dev / LAN Server)
 Requires only **Python 3.8+** (100% standard library—zero `pip` or `npm` install required):
 
 ```bash
@@ -64,10 +79,11 @@ git clone https://github.com/blockbuilderb/blockfare.git
 cd blockfare
 python server.py
 ```
-Then open **`http://localhost:8080`** in your browser. Press **`[O]`** (or switch from **Solo** to **Co-Op** on the Deploy Screen) to share a live LAN/tunnel invite link across rooms (`FRUGIS-1`, `ALPHA-SQUAD`, `ARMOR-WAR`).
+Then open **`http://localhost:8080`** in your browser.
 
 ---
 
 ## 📚 Documentation
+- 🌐 **[Multiplayer Architecture & Capacity Guide (`MULTIPLAYER.md`)](./MULTIPLAYER.md)** — Option 1 WebRTC P2P (`8–12 players/room`) vs. Option 2 Cloudflare Durable Object Relay (`32–64 players/room`), graceful dead-AI slot retirement, and self-hosting guide.
 - 🎮 **[Complete Controls & Keybind Reference (`CONTROLS.md`)](./CONTROLS.md)** — Infantry, Aircraft, Tanks, Medieval Melee/Shields, Commander Orders & UI shortcuts.
 - 🏗️ **[System Architecture (`ARCHITECTURE.md`)](./ARCHITECTURE.md)** — Module breakdown, 60Hz game loop, `InstancedMesh` voxel engine, 12 formal finite-state machines (`src/core/StateMachines.js`), and AI pipelines.
