@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=92';
-import { COMBAT, DEPLOYABLES } from '../config.js?v=92';
-import { events } from '../events.js?v=92';
+import { sound } from '../audio.js?v=105';
+import { COMBAT, DEPLOYABLES } from '../config.js?v=105';
+import { events } from '../events.js?v=105';
 import {
   COMMANDER_UAV_EVENTS,
   COMMANDER_AIRSTRIKE_EVENTS,
   COMMANDER_AIRSTRIKE_STATES,
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM
-} from '../core/StateMachines.js?v=92';
+} from '../core/StateMachines.js?v=105';
 
 function markShared(asset) {
   if (asset) {
@@ -151,10 +151,13 @@ export const CommanderMethods = {
     this.camera.getWorldQuaternion(_cmdQuat);
     _cmdDir.set(0, 0, -1).applyQuaternion(_cmdQuat);
 
-    // Check if aiming near an enemy soldier to Spot them
+    // Check if aiming near an enemy soldier or enemy vehicle to Spot / JTAC Laser-Paint them
+    const isReconJtac = this.role === 'recon';
+    const maxSpotDist = isReconJtac ? 420 : COMBAT.SPOT_DISTANCE;
     let bestEnemy = null;
-    let bestDist = COMBAT.SPOT_DISTANCE;
-    const spotPerpSq = COMBAT.SPOT_PERP_RADIUS * COMBAT.SPOT_PERP_RADIUS;
+    let bestDist = maxSpotDist;
+    const spotPerpRadius = isReconJtac ? COMBAT.SPOT_PERP_RADIUS * 1.45 : COMBAT.SPOT_PERP_RADIUS;
+    const spotPerpSq = spotPerpRadius * spotPerpRadius;
     for (let i = 0; i < this.botManager.bots.length; i++) {
       const bot = this.botManager.bots[i];
       if (bot.dead || bot.downed || bot.team === this.team) continue;
@@ -172,20 +175,75 @@ export const CommanderMethods = {
     }
 
     if (bestEnemy) {
-      bestEnemy.spottedTimer = COMBAT.SPOTTED_TIMER;
+      const paintDur = isReconJtac ? 20.0 : COMBAT.SPOTTED_TIMER;
+      bestEnemy.spottedTimer = paintDur;
+      bestEnemy.jtacLaserPainted = isReconJtac;
       const distM = Math.round(bestEnemy.pos.distanceTo(this.pos));
       this.activePing = {
         pos: new THREE.Vector3(bestEnemy.pos.x, bestEnemy.pos.y + 2.1, bestEnemy.pos.z),
-        timer: COMBAT.PING_TIMER_ENEMY,
+        timer: isReconJtac ? 20.0 : COMBAT.PING_TIMER_ENEMY,
         isEnemy: true,
-        label: `ENEMY ${bestEnemy.role}`
+        isJtac: isReconJtac,
+        label: isReconJtac ? `🎯 JTAC LASER: ${bestEnemy.role}` : `ENEMY ${bestEnemy.role}`
       };
-      if (this.onAwardXp) this.onAwardXp(COMBAT.SPOT_XP, `SPOTTED ENEMY (${bestEnemy.name})`);
+      const spotPts = isReconJtac ? 40 : COMBAT.SPOT_XP;
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          spotPts,
+          isReconJtac
+            ? `🎯 JTAC LASER TARGET PAINTED FOR 20S (${bestEnemy.name} • ${distM}M)`
+            : `SPOTTED ENEMY (${bestEnemy.name})`
+        );
+      }
       if (this.onCommoCommand) {
-        this.onCommoCommand('ping', `HOSTILE ${bestEnemy.role} SPOTTED (${distM}m)!`, '🎯');
+        this.onCommoCommand(
+          'ping',
+          isReconJtac
+            ? `JTAC LASER DESIGNATION ON ${bestEnemy.role} (${distM}m • 20S PAINT)!`
+            : `HOSTILE ${bestEnemy.role} SPOTTED (${distM}m)!`,
+          '🎯'
+        );
       }
       sound.playRadioBeep(false);
       return;
+    }
+
+    // Recon JTAC can also laser-designate enemy armor & aircraft for 20s!
+    if (isReconJtac && this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+      let bestVeh = null;
+      let bestVehDist = 550;
+      for (let i = 0; i < this.vehicleManager.vehicles.length; i++) {
+        const v = this.vehicleManager.vehicles[i];
+        if (!v || v.dead || v.team === this.team) continue;
+        const vx = v.pos.x - _cmdOrigin.x;
+        const vy = v.pos.y + 1.5 - _cmdOrigin.y;
+        const vz = v.pos.z - _cmdOrigin.z;
+        const proj = vx * _cmdDir.x + vy * _cmdDir.y + vz * _cmdDir.z;
+        if (proj > 4 && proj < bestVehDist) {
+          const perpSq = vx * vx + vy * vy + vz * vz - proj * proj;
+          if (perpSq < 7.5 * 7.5) {
+            bestVehDist = proj;
+            bestVeh = v;
+          }
+        }
+      }
+      if (bestVeh) {
+        bestVeh.uavRevealed = true;
+        bestVeh.jtacLaserTimer = 20.0;
+        const distM = Math.round(bestVeh.pos.distanceTo(this.pos));
+        this.activePing = {
+          pos: new THREE.Vector3(bestVeh.pos.x, bestVeh.pos.y + 3.2, bestVeh.pos.z),
+          timer: 20.0,
+          isEnemy: true,
+          isJtac: true,
+          label: `🎯 JTAC LASER: ${bestVeh.name.split(' (')[0]}`
+        };
+        if (this.onAwardXp) {
+          this.onAwardXp(45, `🎯 JTAC LASER PAINTED ARMOR FOR 20S (${bestVeh.name.split(' (')[0]} • ${distM}M)!`);
+        }
+        sound.playRadioBeep(false);
+        return;
+      }
     }
 
     const voxelHit = this.world.raycastVoxel(_cmdOrigin, _cmdDir, COMBAT.SPOT_DISTANCE);
@@ -213,6 +271,20 @@ export const CommanderMethods = {
   // =========================================================================
   placeRallyPoint() {
     if (this.dead || this.downed || this.activeVehicle) return;
+    if (
+      this.squadDoctrineEnabled !== false &&
+      this.commandRank !== 'COMMANDER' &&
+      this.commandRank !== 'SQUAD_LEADER'
+    ) {
+      sound.playEmptyClick?.();
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          '🔒 SQUAD RALLY POINT [5] REQUIRES [▲ SQUAD LEADER] OR [★ COMMANDER] RANK! (OR TOGGLE DOCTRINE OFF IN ⚙️ SETTINGS)'
+        );
+      }
+      return;
+    }
     if (this.rallyCooldown > 0) {
       if (this.onAwardXp) this.onAwardXp(0, `RALLY COOLDOWN: ${Math.ceil(this.rallyCooldown)}s`);
       return;
@@ -443,8 +515,50 @@ export const CommanderMethods = {
       bestCount > 0 ? `HOTSPOT: OBJ ${bestFlagId} (${bestCount} HOSTILES)` : 'ALL SECTORS SWEPT';
   },
 
-  activateUAV() {
+  activateUAV(bypassRankCheck = false) {
     if ((this.world?.era || 'modern') !== 'modern') {
+      return false;
+    }
+    if (!bypassRankCheck && this.squadDoctrineEnabled !== false && this.commandRank !== 'COMMANDER') {
+      if (this.commandRank === 'SQUAD_LEADER') {
+        sound.playRadioBeep?.(false);
+        const sqName = this.squad || 'ALPHA';
+        if (this.onCommoCommand) {
+          this.onCommoCommand(
+            'uav_req',
+            `Command, ${sqName} SL requesting MQ-9 UAV Recon Sweep at my grid!`,
+            '📻'
+          );
+        }
+        const aiCmd =
+          this.botManager?.bots?.find((b) => !b.dead && b.team === this.team && b.isCommander) ||
+          this.botManager?.bots?.find((b) => !b.dead && b.team === this.team && b.isSquadLeader);
+        if (aiCmd && this.uavCooldown <= 0 && !this.uavActive) {
+          this.botManager?.emitBotComms?.(
+            aiCmd,
+            this,
+            `Solid copy ${sqName} SL! Command approving MQ-9 UAV Recon Datalink over your grid now!`,
+            'COMMAND',
+            true,
+            'CMD NET'
+          );
+          return this.activateUAV(true);
+        }
+        if (this.onAwardXp) {
+          this.onAwardXp(
+            0,
+            `📻 CMD NET UAV REQUEST SENT BY ${sqName} SL — UAV REARMING (${Math.ceil(this.uavCooldown || 0)}s) • DEPLOY AS ★ COMMANDER FOR DIRECT [U]`
+          );
+        }
+        return false;
+      }
+      sound.playEmptyClick?.();
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          '🔒 [U] MQ-9 UAV DATALINK REQUIRES [★ COMMANDER] RANK! (SQUAD LEADERS CAN REQUEST ON CMD NET • OR TOGGLE DOCTRINE OFF IN ⚙️)'
+        );
+      }
       return false;
     }
     if (this.uavCooldown > 0 && !this.uavActive) {
@@ -721,25 +835,27 @@ export const CommanderMethods = {
     }
   },
 
-  // ─── FLEXIBLE COMMANDER AIRSTRIKE & ARTILLERY BARRAGE [J] ─────────
+  // ─── INFANTRY JTAC CLOSE AIR SUPPORT (A-10 BRRRT), BOMBING & COMMANDER BARRAGE [J] ─────────
   cycleAirstrikePattern(forcePattern = null) {
     if ((this.world?.era || 'modern') !== 'modern') {
       return null;
     }
-    const patterns = ['CARPET', 'BUNKER_BUSTER', 'ARTILLERY'];
+    const patterns = ['A10_CAS', 'CARPET', 'BUNKER_BUSTER', 'ARTILLERY'];
+    const curPat = patterns.includes(this.airstrikePattern) ? this.airstrikePattern : 'A10_CAS';
     if (forcePattern && patterns.includes(forcePattern)) {
       this.airstrikePattern = forcePattern;
     } else {
-      const idx = (patterns.indexOf(this.airstrikePattern) + 1) % patterns.length;
+      const idx = (patterns.indexOf(curPat) + 1) % patterns.length;
       this.airstrikePattern = patterns[idx];
     }
     const labels = {
-      CARPET: '✈️ F-15E CARPET BOMBING RUN (8x 500LB JDAM ROLLING LINE)',
+      A10_CAS: '✈️ A-10C / SU-25 CLOSE AIR SUPPORT (30MM GAU-8 BRRRT STRAFE + HYDRA ROCKETS)',
+      CARPET: '💣 F-15E CARPET BOMBING RUN (9x 500LB JDAM ROLLING LINE)',
       BUNKER_BUSTER: '🎯 2,000LB GBU-28 BUNKER BUSTER (HEAVY ANTI-ARMOR & BUILDING DEMOLITION)',
       ARTILLERY: '🌧️ 155MM HE ARTILLERY BARRAGE (12-SHELL WIDE SATURATION)'
     };
     if (this.onAwardXp) {
-      this.onAwardXp(0, `💥 STRIKE ORDNANCE SELECTED: ${labels[this.airstrikePattern]}`);
+      this.onAwardXp(0, `📻 CAS / STRIKE ORDNANCE SELECTED: ${labels[this.airstrikePattern]}`);
     }
     return this.airstrikePattern;
   },
@@ -750,8 +866,8 @@ export const CommanderMethods = {
 
   resolveAirstrikeTargetPos(customWorldPos = null) {
     if (customWorldPos && typeof customWorldPos.x === 'number' && typeof customWorldPos.z === 'number') {
-      const tx = THREE.MathUtils.clamp(customWorldPos.x, -1020, 1020);
-      const tz = THREE.MathUtils.clamp(customWorldPos.z, -580, 580);
+      const tx = THREE.MathUtils.clamp(customWorldPos.x, -2450, 2450);
+      const tz = THREE.MathUtils.clamp(customWorldPos.z, -1650, 1650);
       const ty = this.world.getGroundHeightAt(tx, tz);
       return new THREE.Vector3(tx, ty, tz);
     }
@@ -787,11 +903,11 @@ export const CommanderMethods = {
       }
     }
 
-    // 2. Raycast against any 3D voxel building, wall, roof, bridge, or terrain up to 850m!
-    const voxelHit = this.world.raycastVoxel(_cmdOrigin, _cmdDir, 850);
+    // 2. Raycast against any 3D voxel building, wall, roof, bridge, or terrain up to 1,250m!
+    const voxelHit = this.world.raycastVoxel(_cmdOrigin, _cmdDir, 1250);
     if (voxelHit && voxelHit.point) {
-      const tx = THREE.MathUtils.clamp(voxelHit.point.x, -1020, 1020);
-      const tz = THREE.MathUtils.clamp(voxelHit.point.z, -580, 580);
+      const tx = THREE.MathUtils.clamp(voxelHit.point.x, -2450, 2450);
+      const tz = THREE.MathUtils.clamp(voxelHit.point.z, -1650, 1650);
       const ty = this.world.getGroundHeightAt(tx, tz);
       return new THREE.Vector3(tx, ty, tz);
     }
@@ -799,9 +915,9 @@ export const CommanderMethods = {
     // 3. If aiming downward at open ground beyond voxel raycast
     if (_cmdDir.y < -0.03) {
       const groundBaseY = this.pos.y;
-      const t = THREE.MathUtils.clamp((groundBaseY - _cmdOrigin.y) / _cmdDir.y, 12, 750);
-      const tx = THREE.MathUtils.clamp(_cmdOrigin.x + _cmdDir.x * t, -1020, 1020);
-      const tz = THREE.MathUtils.clamp(_cmdOrigin.z + _cmdDir.z * t, -580, 580);
+      const t = THREE.MathUtils.clamp((groundBaseY - _cmdOrigin.y) / _cmdDir.y, 12, 1150);
+      const tx = THREE.MathUtils.clamp(_cmdOrigin.x + _cmdDir.x * t, -2450, 2450);
+      const tz = THREE.MathUtils.clamp(_cmdOrigin.z + _cmdDir.z * t, -1650, 1650);
       const ty = this.world.getGroundHeightAt(tx, tz);
       return new THREE.Vector3(tx, ty, tz);
     }
@@ -840,8 +956,8 @@ export const CommanderMethods = {
       }
     }
 
-    const tx = THREE.MathUtils.clamp(this.pos.x + _cmdScratch.x * 85, -1020, 1020);
-    const tz = THREE.MathUtils.clamp(this.pos.z + _cmdScratch.z * 85, -580, 580);
+    const tx = THREE.MathUtils.clamp(this.pos.x + _cmdScratch.x * 85, -2450, 2450);
+    const tz = THREE.MathUtils.clamp(this.pos.z + _cmdScratch.z * 85, -1650, 1650);
     const ty = this.world.getGroundHeightAt(tx, tz);
     return new THREE.Vector3(tx, ty, tz);
   },
@@ -873,16 +989,39 @@ export const CommanderMethods = {
     return group;
   },
 
-  callAirstrike(customWorldPos = null, customPattern = null) {
+  callAirstrike(customWorldPos = null, customPattern = null, bypassRankCheck = false) {
     if ((this.world?.era || 'modern') !== 'modern') {
       return false;
     }
+    // Infantry Squads (ALPHA, CHARLIE, DELTA, ECHO) & Squad Leaders / Recon JTACs can request Close Air Support (A-10 Strafe / Bombing) directly!
+    const isInfantryGroundCaller =
+      !this.activeVehicle &&
+      this.role !== 'pilot' &&
+      this.role !== 'armor';
+    if (!bypassRankCheck && this.squadDoctrineEnabled !== false && this.commandRank !== 'COMMANDER') {
+      if (!isInfantryGroundCaller) {
+        sound.playEmptyClick?.();
+        if (this.onAwardXp) {
+          this.onAwardXp(
+            0,
+            '🔒 [J] FIRE SUPPORT REQUIRES [★ COMMANDER] OR DISMOUNTED INFANTRY SQUAD JTAC RADIO!'
+          );
+        }
+        return false;
+      }
+      // Dismounted Infantry Squad members/leaders default to Close Air Support (A-10 Strafe / Bombing); 155mm Artillery stays Commander/SL-level
+      if ((customPattern || this.airstrikePattern) === 'ARTILLERY' && this.commandRank === 'MEMBER') {
+        this.airstrikePattern = 'A10_CAS';
+      }
+    }
     if (customPattern) {
       this.airstrikePattern = customPattern;
+    } else if (!this.airstrikePattern) {
+      this.airstrikePattern = isInfantryGroundCaller && this.commandRank !== 'COMMANDER' ? 'A10_CAS' : 'A10_CAS';
     }
     if (this.airstrikeCooldown > 0 && !customWorldPos) {
       if (this.onAwardXp) {
-        this.onAwardXp(0, `💥 AIRSTRIKE REARMING (${Math.ceil(this.airstrikeCooldown)}s)`);
+        this.onAwardXp(0, `📻 FALCON AIR WING REARMING (${Math.ceil(this.airstrikeCooldown)}s)`);
       }
       return false;
     }
@@ -894,7 +1033,62 @@ export const CommanderMethods = {
     }
 
     const targetPos = this.resolveAirstrikeTargetPos(customWorldPos);
-    const pattern = this.airstrikePattern || 'CARPET';
+    const pattern = this.airstrikePattern || 'A10_CAS';
+
+    // Paint & highlight all enemy infantry and enemy armor within 46m of the marked CAS zone (Video/3D Target Designation!)
+    let paintedHostiles = 0;
+    let paintedArmor = 0;
+    const paintRadiusSq = 46 * 46;
+    if (this.botManager && Array.isArray(this.botManager.bots)) {
+      for (let i = 0; i < this.botManager.bots.length; i++) {
+        const b = this.botManager.bots[i];
+        if (!b || b.dead || b.team === this.team) continue;
+        const dx = b.pos.x - targetPos.x;
+        const dz = b.pos.z - targetPos.z;
+        if (dx * dx + dz * dz <= paintRadiusSq) {
+          b.spottedTimer = Math.max(b.spottedTimer || 0, 14.0);
+          b.uavRevealed = true;
+          b.uavRevealTimer = Math.max(b.uavRevealTimer || 0, 12.0);
+          paintedHostiles++;
+        }
+      }
+    }
+    if (this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+      for (let i = 0; i < this.vehicleManager.vehicles.length; i++) {
+        const v = this.vehicleManager.vehicles[i];
+        if (!v || v.dead || v.team === this.team) continue;
+        const dx = v.pos.x - targetPos.x;
+        const dz = v.pos.z - targetPos.z;
+        if (dx * dx + dz * dz <= paintRadiusSq * 1.35) {
+          v.uavRevealed = true;
+          paintedArmor++;
+        }
+      }
+    }
+
+    // Broadcast active Infantry JTAC CAS Smoke Marker to friendly human & AI Falcon Pilots!
+    const sqName = this.squad || 'ALPHA';
+    if (this.world) {
+      this.world.activeCasRequest = {
+        pos: targetPos.clone(),
+        team: this.team,
+        squad: sqName,
+        callerName: this.name || 'INFANTRY JTAC',
+        pattern,
+        hostiles: paintedHostiles,
+        armor: paintedArmor,
+        timer: 14.0
+      };
+    }
+    this.activePing = {
+      pos: new THREE.Vector3(targetPos.x, targetPos.y + 2.4, targetPos.z),
+      timer: 10.0,
+      isEnemy: true,
+      label:
+        paintedHostiles + paintedArmor > 0
+          ? `🎯 CAS PAINTED (${paintedHostiles} INF${paintedArmor > 0 ? ` + ${paintedArmor} ARMOR` : ''})`
+          : `🎯 ${sqName} CAS TARGET SMOKE`
+    };
 
     // Compute strike run vector (along player's look azimuth or from HQ toward target)
     const strikeDir = new THREE.Vector3(targetPos.x - this.pos.x, 0, targetPos.z - this.pos.z);
@@ -924,71 +1118,121 @@ export const CommanderMethods = {
 
     this.scene.add(markerGroup);
     _cmdScratch.set(targetPos.x, targetPos.y + 1.2, targetPos.z);
-    this.world.spawnDebris(_cmdScratch, _strikeFlareColor, 6);
+    this.world.spawnDebris(_cmdScratch, _strikeFlareColor, 10);
 
-    const leadTime = 2.4; // Fast 2.4s strike lead-in!
+    const leadTime = pattern === 'A10_CAS' ? 2.1 : 2.4;
     this.airstrikeTarget = {
       pos: targetPos,
       timer: leadTime,
       maxTimer: leadTime,
       pattern,
       strikeDir,
+      paintedHostiles,
+      paintedArmor,
       markers: markerGroup,
       outerRing: ring
     };
-    this.airstrikeCooldown = 16; // Fast 16s tactical rearm cooldown
+    this.airstrikeCooldown =
+      this.commandRank === 'COMMANDER'
+        ? 16
+        : this.role === 'recon' || this.commandRank === 'SQUAD_LEADER'
+        ? 18
+        : 22;
     if (this.airstrikeFSM) {
       if (!this.airstrikeFSM.send(COMMANDER_AIRSTRIKE_EVENTS.DESIGNATE_TARGET)) {
         this.airstrikeFSM.send(COMMANDER_AIRSTRIKE_EVENTS.FORCE_REDESIGNATE);
       }
     }
 
-    // Spawn 3D Strike Fighter Jet screaming in across the sky toward the target!
+    // Spawn 3D A-10C Warthog (low-altitude screaming gun run) or Strike Fighter Jet across the sky!
     if (pattern !== 'ARTILLERY') {
+      const isLowCas = pattern === 'A10_CAS';
+      const flyAlt = isLowCas ? 34 : 62;
+      const flySpd = isLowCas ? 98 : 115;
       const jetMesh = this.buildStrikeJetMesh();
       jetMesh.position.set(
         targetPos.x - strikeDir.x * 195,
-        targetPos.y + 62,
+        targetPos.y + flyAlt,
         targetPos.z - strikeDir.z * 195
       );
       _cmdScratch.set(
         targetPos.x + strikeDir.x * 195,
-        targetPos.y + 62,
+        targetPos.y + (isLowCas ? flyAlt - 6 : flyAlt),
         targetPos.z + strikeDir.z * 195
       );
       jetMesh.lookAt(_cmdScratch);
       this.scene.add(jetMesh);
       this.activeAirstrikeJets.push({
         mesh: jetMesh,
-        vel: strikeDir.clone().multiplyScalar(115),
+        vel: strikeDir.clone().multiplyScalar(flySpd),
         life: 4.4
       });
     }
 
     const distM = Math.round(this.pos.distanceTo(targetPos));
     const patLabel =
-      pattern === 'BUNKER_BUSTER'
+      pattern === 'A10_CAS'
+        ? this.team === 'RU'
+          ? 'SU-25 30MM CAS GUN RUN'
+          : 'A-10C 30MM BRRRT CAS RUN'
+        : pattern === 'BUNKER_BUSTER'
         ? '2,000LB GBU BUNKER-BUSTER'
         : pattern === 'ARTILLERY'
         ? '155MM ARTILLERY BARRAGE'
         : 'F-15E CARPET BOMBING RUN';
+
+    // Authentic Ground-to-Air JTAC Radio Callout + Falcon Air Wing Readback Audio!
+    sound.playRadioBeep(false);
+    const contactSummary =
+      paintedHostiles + paintedArmor > 0
+        ? `${paintedHostiles} hostiles${paintedArmor > 0 ? ` & ${paintedArmor} armor` : ''} painted in red smoke`
+        : `target marked with red smoke (${distM}m)`;
+    if (this.onCommoCommand) {
+      this.onCommoCommand(
+        'cas_req',
+        `FALCON 1-1, ${sqName} GROUND: REQUESTING ${patLabel} — ${contactSummary.toUpperCase()}!`,
+        '📻'
+      );
+    }
+    if (this.botManager && typeof this.botManager.emitBotComms === 'function') {
+      const pilotSpeaker =
+        this.botManager.bots.find((b) => !b.dead && b.team === this.team && b.squad === 'FALCON') ||
+        this.botManager.bots.find((b) => !b.dead && b.team === this.team && b.isSquadLeader);
+      if (pilotSpeaker) {
+        setTimeout(() => {
+          sound.playRadioBeep?.(false);
+          this.botManager?.emitBotComms?.(
+            pilotSpeaker,
+            this,
+            `Copy ${sqName}! Falcon 1-1 tally red smoke — TGP video locked on ${contactSummary}. Rolling in hot, guns guns guns!`,
+            'COMMAND',
+            true,
+            'AIR NET'
+          );
+        }, 550);
+      }
+    }
+
     events.emit('airstrike:called', {
       pos: targetPos.clone(),
       pattern,
       label: patLabel,
       leadTime,
-      distance: distM
+      distance: distM,
+      paintedHostiles,
+      paintedArmor
     });
     if (this.onAwardXp) {
       this.onAwardXp(
         25,
-        `💥 ${patLabel} DESIGNATED AT (${Math.round(targetPos.x)}, ${Math.round(targetPos.z)}) • ${distM}m — IMPACT IN ${leadTime}s!`
+        `🎯 ${patLabel} INBOUND (${distM}m) • TGP VIDEO PAINTED ${paintedHostiles} INFANTRY & ${paintedArmor} ARMOR — IMPACT IN ${leadTime}s!`
       );
     }
     if (this.onKillStreakAnnouncement) {
-      this.onKillStreakAnnouncement(`💥 ${patLabel} INBOUND (${distM}m)!`);
+      this.onKillStreakAnnouncement(
+        `✈️ ${patLabel} INBOUND (${distM}m • ${paintedHostiles} INF / ${paintedArmor} ARMOR PAINTED)!`
+      );
     }
-    sound.playRadioBeep(false);
     return true;
   },
 
@@ -1037,7 +1281,33 @@ export const CommanderMethods = {
     const rx = -dir.z;
     const rz = dir.x;
 
-    if (pattern === 'BUNKER_BUSTER') {
+    if (pattern === 'A10_CAS') {
+      // A-10C / Su-25 Close Air Support Run: Roaring 30mm GAU-8 "BRRRRRRT!" 14-round AP-HEI strafing line + 4 Hydra-70 Rockets!
+      const distForAudio = Math.min(180, this.pos.distanceTo(target.pos) * 0.45);
+      for (let b = 0; b < 8; b++) {
+        setTimeout(() => {
+          sound.playGunshot?.('lmg', distForAudio);
+        }, b * 48);
+      }
+      sound.playRocketLaunch?.(distForAudio);
+      const strafeRounds = 14;
+      for (let i = 0; i < strafeRounds; i++) {
+        const along = (i - (strafeRounds - 1) * 0.5) * 3.4; // Tight 44m 30mm GAU-8 beaten zone
+        const lateral = (Math.random() - 0.5) * 3.6;
+        const ix = target.pos.x + dir.x * along + rx * lateral;
+        const iz = target.pos.z + dir.z * along + rz * lateral;
+        const iy = this.world.getGroundHeightAt(ix, iz);
+        this.pendingAirstrikeBombs.push({
+          delay: i * 0.045,
+          spawnPos: new THREE.Vector3(ix - dir.x * 22, iy + 28, iz - dir.z * 22),
+          vel: new THREE.Vector3(dir.x * 46, -68, dir.z * 46),
+          blastRadius: i % 4 === 0 ? 11.5 : 7.8,
+          blastDamage: i % 4 === 0 ? 480 : 290,
+          weaponLabel: this.team === 'RU' ? 'SU-25 30MM GSh-30 + S-8 CAS' : 'A-10C 30MM GAU-8 BRRRT CAS',
+          isHeavyGbu: false
+        });
+      }
+    } else if (pattern === 'BUNKER_BUSTER') {
       // 1 Massive 2,000lb GBU-28 Bunker-Buster dead-center + 4 secondary cluster submunitions
       this.pendingAirstrikeBombs.push({
         delay: 0.01,

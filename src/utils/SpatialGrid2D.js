@@ -6,10 +6,10 @@
 
 export class SpatialGrid2D {
   constructor(
-    minX = -2432,
-    maxX = 2432,
-    minZ = -1632,
-    maxZ = 1632,
+    minX = -3840,
+    maxX = 3840,
+    minZ = -2624,
+    maxZ = 2624,
     cellSize = 32,
     initialCapacity = 384
   ) {

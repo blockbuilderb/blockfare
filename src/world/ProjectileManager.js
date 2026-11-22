@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=92';
-import { TERRAIN } from '../config.js?v=92';
-import { events } from '../events.js?v=92';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=92';
+import { sound } from '../audio.js?v=105';
+import { TERRAIN } from '../config.js?v=105';
+import { events } from '../events.js?v=105';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=105';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;
@@ -1044,16 +1044,47 @@ export const ProjectileManager = {
 
       _projPrevPos.copy(proj.mesh.position);
 
-      // Proportional Navigation Homing for AIM-9X / R-73 Air-to-Air & Stinger SAM Missiles
+      // Active Radar "Pitbull" Autonomous Seeker + Proportional Navigation Homing for AIM-120D / AIM-9X / R-77M Fire-and-Forget Missiles
+      if (
+        proj.type === 'a2a_missile' &&
+        proj.isPitbullActiveSeeker &&
+        (!proj.targetVehicle || proj.targetVehicle.dead || proj.targetVehicle.isShotDown) &&
+        this.vehicleManager?.vehicles
+      ) {
+        _projCurDir.copy(proj.vel).normalize();
+        let bestCand = null;
+        let bestScore = Infinity;
+        const ownerTeam = proj.owner?.team;
+        for (let vIdx = 0; vIdx < this.vehicleManager.vehicles.length; vIdx++) {
+          const cand = this.vehicleManager.vehicles[vIdx];
+          if (!cand || !cand.isAircraft || cand.dead || cand.isShotDown || cand.team === ownerTeam) continue;
+          const cGh = this.getGroundHeightAt(cand.pos.x, cand.pos.z);
+          if (cand.pos.y - cGh < 22.0) continue;
+          _projToTarget.copy(cand.pos).sub(proj.mesh.position);
+          const dist = _projToTarget.length();
+          if (dist < 8 || dist > 2300) continue;
+          const dot = _projToTarget.dot(_projCurDir) / dist;
+          if (dot > 0.52) {
+            const score = dist * (1.35 - dot * 0.5);
+            if (score < bestScore) {
+              bestScore = score;
+              bestCand = cand;
+            }
+          }
+        }
+        if (bestCand) {
+          proj.targetVehicle = bestCand;
+        }
+      }
       if (proj.type === 'a2a_missile' && proj.targetVehicle && !proj.targetVehicle.dead) {
         const tgt = proj.targetVehicle;
         const tgtGroundY = this.getGroundHeightAt(tgt.pos.x, tgt.pos.z);
         const tgtAltAgl = Math.max(0, tgt.pos.y - tgtGroundY);
-        if (tgt.isAircraft && tgtAltAgl < 28.0 && (tgt.airborneRadarTimer || 0) >= 2.0) {
+        if (tgt.isAircraft && tgtAltAgl < 24.0 && (tgt.airborneRadarTimer || 0) >= 2.0) {
           proj.targetVehicle = null;
           if (tgt.driver && typeof tgt.driver.onActionPopup === 'function') {
             tgt.driver.onActionPopup(
-              '🏔️ LOW-ALTITUDE RADAR MASKING (<28M AGL) — INCOMING MISSILE LOCK BROKEN!'
+              '🏔️ LOW-ALTITUDE RADAR MASKING (<24M AGL) — INCOMING MISSILE LOCK BROKEN!'
             );
           }
         }
@@ -1064,16 +1095,22 @@ export const ProjectileManager = {
         !proj.targetVehicle.dead &&
         !(proj.targetVehicle.flareActiveTimer > 0)
       ) {
-        const curSpeed = Math.max(160, proj.vel.length());
+        const curSpeed = Math.max(220, proj.vel.length());
+        const tgt = proj.targetVehicle;
+        const rawDist = proj.mesh.position.distanceTo(tgt.pos);
+        const leadTime = Math.min(1.6, rawDist / Math.max(220, curSpeed * 1.15));
+        const leadVx = tgt.velVector ? tgt.velVector.x : -Math.sin(tgt.yaw || 0) * (tgt.forwardSpeed || 60);
+        const leadVy = tgt.velVector ? tgt.velVector.y : 0;
+        const leadVz = tgt.velVector ? tgt.velVector.z : -Math.cos(tgt.yaw || 0) * (tgt.forwardSpeed || 60);
         _projToTarget.set(
-          proj.targetVehicle.pos.x - proj.mesh.position.x,
-          proj.targetVehicle.pos.y + 1.4 - proj.mesh.position.y,
-          proj.targetVehicle.pos.z - proj.mesh.position.z
+          tgt.pos.x + leadVx * leadTime - proj.mesh.position.x,
+          tgt.pos.y + 1.4 + leadVy * leadTime - proj.mesh.position.y,
+          tgt.pos.z + leadVz * leadTime - proj.mesh.position.z
         );
         if (_projToTarget.lengthSq() > 1) {
           _projToTarget.normalize();
           _projCurDir.copy(proj.vel).normalize();
-          const steerRate = Math.min(1, (proj.turnRate || 4.2) * dt);
+          const steerRate = Math.min(1, (proj.turnRate || 5.8) * dt);
           _projCurDir.lerp(_projToTarget, steerRate).normalize();
           proj.vel.copy(_projCurDir).multiplyScalar(curSpeed);
           _projLookAt.copy(proj.mesh.position).add(_projCurDir);
@@ -1083,6 +1120,13 @@ export const ProjectileManager = {
 
       proj.vel.y -= proj.gravity * dt;
       proj.mesh.position.addScaledVector(proj.vel, dt);
+      if (
+        (proj.type === 'jdam_bomb' || proj.type === 'gbu28_bomb' || proj.type === 'airstrike_bomb') &&
+        proj.vel.lengthSq() > 1
+      ) {
+        _projLookAt.copy(proj.mesh.position).add(proj.vel);
+        proj.mesh.lookAt(_projLookAt);
+      }
 
       const curPos = proj.mesh.position;
       const pType = proj.type;

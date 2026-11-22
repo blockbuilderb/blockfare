@@ -1,4 +1,4 @@
-import { UI, getEraRoles } from '../config.js?v=92';
+import { UI, getEraRoles } from '../config.js?v=105';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -74,47 +74,161 @@ export const HudRenderer = {
     this.fpsPillEl.classList.toggle('fps-low', avgFps < 30);
   },
 
-  // Controls Reference Overlay [F1]
-  toggleControlsOverlay() {
+  toggleControlsHelp(initialTab = null) {
+    return this.toggleControlsOverlay(initialTab);
+  },
+
+  // Comprehensive Tabbed Field & Flight Operations Manual [F1]
+  toggleControlsOverlay(initialTab = null) {
     let el = this.el('controls-overlay');
     if (el) {
       el.remove();
-      return;
+      if (this._domCache) this._domCache.delete('controls-overlay');
+      if (!initialTab) return;
     }
+    const defaultTab =
+      initialTab ||
+      (this.player?.activeVehicle?.aircraftRole === 'gunship'
+        ? 'ac130'
+        : this.player?.activeVehicle?.isAircraft
+        ? 'jets'
+        : this.player?.activeVehicle
+        ? 'armor'
+        : 'infantry');
+
     el = document.createElement('div');
     el.id = 'controls-overlay';
     el.style.cssText = `
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      background: rgba(0,0,0,0.92); border: 1px solid rgba(255,255,255,0.15);
-      border-radius: 8px; padding: 24px 32px; z-index: 10000;
+      background: linear-gradient(180deg, rgba(10,16,24,0.98), rgba(6,10,15,0.99));
+      border: 1.5px solid rgba(0,210,211,0.65); border-top: 3px solid #00d2d3;
+      border-radius: 10px; padding: 18px 22px; z-index: 10000;
       font-family: 'Rajdhani', 'Segoe UI', sans-serif; color: #ecf0f1;
-      max-width: 560px; font-size: 13px; line-height: 1.65;
-      pointer-events: auto; cursor: pointer;
+      width: min(760px, 94vw); max-height: 88vh; overflow-y: auto;
+      font-size: 13px; line-height: 1.55; pointer-events: auto;
+      box-shadow: 0 20px 55px rgba(0,0,0,0.9);
     `;
-    el.innerHTML = `
-      <div style="font-size:18px;font-weight:800;color:#f1c40f;margin-bottom:12px;letter-spacing:2px">⌨️ CONTROLS REFERENCE</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 24px;">
-        <div><b>WASD</b> — Move</div><div><b>Shift</b> — Sprint</div>
-        <div><b>Space</b> — Jump / Vault</div><div><b>C / Ctrl</b> — Crouch</div>
-        <div><b>Z</b> — Prone</div><div><b>E</b> — Enter/Exit Vehicle • Drag Ally</div>
-        <div><b>LMB</b> — Fire</div><div><b>RMB</b> — ADS / Scope</div>
-        <div><b>R</b> — Reload (2x = Speed)</div><div><b>H</b> — Self Bandage</div>
-        <div><b>G</b> — Frag Grenade</div><div><b>F</b> — Revive/Heal • Ammo • Build Chest Wall</div>
-        <div><b>1-4</b> — Weapon Slots</div><div><b>5</b> — Place Rally Point</div>
-        <div><b>6</b> — Recon Spawn Beacon</div><div><b>Y (Hold)</b> — Commo Rose</div>
-        <div><b>K / CapsLock</b> — Squad &amp; Commander Map</div><div><b>Alt+1..5</b> — Order Take Obj A–E</div>
-        <div><b>Num - / -</b> — Formation: Stay Close</div><div><b>Num + / =</b> — Formation: Fan Out</div>
-        <div><b>U</b> — UAV Recon Datalink</div><div><b>J / Shift+J</b> — Airstrike / Cycle Mode</div>
-        <div><b>V</b> — Canted Sight Toggle</div><div><b>X</b> — Zero Range Cycle</div>
-        <div><b>B</b> — Blueprint Cycle</div><div><b>T</b> — Build Fortification</div>
-        <div><b>P</b> — Pack Magazines</div><div><b>N</b> — Night Vision (NVG)</div>
-        <div><b>L</b> — Atmosphere Cycle</div><div><b>M</b> — Redeploy</div>
-        <div><b>MMB</b> — Tactical Ping</div><div><b>Tab</b> — Scoreboard</div>
-        <div><b>F1</b> — This Help</div><div><b>F3</b> — Telemetry Panel</div>
-      </div>
-      <div style="margin-top:12px;color:#95a5a6;font-size:11px;text-align:center">Click to close or press [F1] again</div>
-    `;
-    el.addEventListener('click', () => el.remove());
+
+    const sections = {
+      ac130: `
+        <div style="background:rgba(46,204,113,0.1);border:1px solid rgba(46,204,113,0.45);border-radius:6px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;">
+          <b style="color:#7bed9f;">🛸 AC-130 GUNSHIP EVOLUTION (1968 VIETNAM ➔ 2024 GHOSTRIDER):</b> All heavy cannons fire strictly out the <b>LEFT (PORT)</b> side! Use <b>[R]</b> to switch between flying straight to a new sector (<b>Transit Mode</b>) and banking in a left-hand circle around a FOB (<b>Orbit Mode</b>).
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;">
+          <div><b style="color:#00d2d3;">[R] Key</b> — <b>TRANSIT FLIGHT ⇄ PYLON ORBIT</b> Toggle</div>
+          <div><b style="color:#00d2d3;">[C] Key</b> — Left-Window HUD / Belly FLIR Pod / 3P</div>
+          <div><b style="color:#f1c40f;">[A / D] (1968 Manual)</b> — Steepen / Shallow Left Pylon Bank</div>
+          <div><b style="color:#f1c40f;">[WASD] (Coupled AP)</b> — Slide GPS Orbit Circle Across Map</div>
+          <div><b style="color:#7bed9f;">[F] Key</b> — Snap GPS Orbit Anchor onto FOB / Crosshair</div>
+          <div><b style="color:#7bed9f;">[↑ / ↓] Arrows</b> — Adjust Loiter Altitude (125m – 310m AGL)</div>
+          <div><b>[1] / LMB</b> — 20mm/25mm Gatling Cannon</div>
+          <div><b>[2] / LMB</b> — 40mm L/60 Bofors HE Autocannon</div>
+          <div><b>[3] or [Space]</b> — 105mm M102 Heavy Howitzer</div>
+          <div><b>[RMB]</b> — Sensor / Sight Zoom Toggle</div>
+          <div><b style="color:#ff9f43;">[N] Key</b> — Cycle Day / NVG / White-Hot / Black-Hot IR</div>
+          <div><b style="color:#a29bfe;">[L] Hangar</b> — Unlock EOTech, FLIR MFD &amp; Coupled Autopilot</div>
+          <div><b>[X] Key</b> — Deploy Angel-Wing Flares &amp; ECM Repair</div>
+          <div><b>[E] Key</b> — Eject with Tactical Parachute</div>
+        </div>
+      `,
+      jets: `
+        <div style="background:rgba(72,219,251,0.1);border:1px solid rgba(72,219,251,0.45);border-radius:6px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;">
+          <b style="color:#48dbfb;">✈️ FIGHTERS (F-15EX / SU-57), A-10C CAS &amp; B-2A SPIRIT:</b> Hold enemy planes inside your forward HUD cone for <b>~1.1s</b> until <b>🔒 LOCKED</b>, then press <b>[Space]</b> for an autonomous <b>FOX-3 Shoot-and-Forget</b> A2A missile!
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;">
+          <div><b>[W / S]</b> — Afterburner Boost / Airbrake Slowdown</div>
+          <div><b>Mouse / [↑ ↓]</b> — Pitch &amp; Full 360° Backflip Loops</div>
+          <div><b>[A / D]</b> — Coordinated Bank &amp; Turn</div>
+          <div><b>[C] Key</b> — Cycle 3P Chase / 1P Bubble Cockpit / Nose HUD</div>
+          <div><b style="color:#ff6b81;">[Space] (Slot 1/2)</b> — <b>AIM-120D Shoot-and-Forget A2A</b> (1.1s Lock)</div>
+          <div><b>[3] + LMB / Space</b> — Drop JDAM / GBU-28 onto CCIP Ring</div>
+          <div><b>[N] Key</b> — Cycle Installed Sensor Pod (NVG / WHOT / BHOT IR)</div>
+          <div><b>[G] Key</b> — Toggle Auto Terrain Collision Avoidance</div>
+          <div><b>[X] Key</b> — Flares / ECM / B-2 Active RAM Cloak</div>
+          <div><b>[9] / [Shift+9]</b> — Launch Sortie / Cycle Plane Type</div>
+          <div><b>[L] Key</b> — Open Aircraft Hangar &amp; Sensor Upgrades</div>
+          <div><b>[E] Key</b> — Zero-Zero Ejection Seat &amp; Parachute</div>
+        </div>
+      `,
+      armor: `
+        <div style="background:rgba(241,196,15,0.1);border:1px solid rgba(241,196,15,0.45);border-radius:6px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;">
+          <b style="color:#f1c40f;">🛡️ MAIN BATTLE TANKS, 8×8 IFVs, SPAAG AA &amp; BIKES:</b> Watch the bottom-right <b>Hull vs. View</b> dial to angle frontal armor while aiming your turret independently.
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;">
+          <div><b>[W / A / S / D]</b> — Drive &amp; Pivot Hull</div>
+          <div><b>Mouse</b> — Independent 360° Stabilized Turret Aim</div>
+          <div><b>[LMB] / [1]</b> — Fire 120mm APFSDS / 30mm Autocannon</div>
+          <div><b>[Space] / [2]</b> — Fire Coaxial 7.62mm MG / Lock SAM (AA)</div>
+          <div><b style="color:#00d2d3;">[C] Key</b> — 1P Commander Periscope / Gunner Optic / 3P</div>
+          <div><b style="color:#ff9f43;">[N] Key</b> — Cycle Crew NVG / CITV White-Hot &amp; Black-Hot IR</div>
+          <div><b>[X] Key</b> — Pop 360° IR Smoke / Trophy APS Rocket Shield</div>
+          <div><b>[RMB]</b> — Magnified FCS Gunner Zoom</div>
+          <div><b>[L] Key</b> — Armor Upgrade Bay (CITV FLIR, ERA, APS, Dozer)</div>
+          <div><b>[E] Key</b> — Enter / Disembark Vehicle</div>
+        </div>
+      `,
+      infantry: `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;">
+          <div><b>WASD + Shift</b> — Move &amp; Tactical Sprint</div>
+          <div><b>Space / C / Z</b> — Jump &amp; Vault / Crouch / Prone</div>
+          <div><b>LMB / RMB / R</b> — Fire / ADS Scope / Reload (2× = Fast)</div>
+          <div><b style="color:#7bed9f;">[V] Key</b> — Toggle Variable Scope Zoom (1x⇄4x/6x) or Canted Sight</div>
+          <div><b style="color:#ff7675;">[J] / [Shift+J]</b> — Request Infantry A-10 CAS Strafe / Cycle Strike</div>
+          <div><b style="color:#f1c40f;">[L] Key</b> — Gunsmith &amp; Hangar (at Base, Friendly FOB, or Ammo Box)</div>
+          <div><b>[I] Key</b> — Tactical Backpack &amp; Loot Inventory</div>
+          <div><b>[F] Key</b> — Revive/Heal • Resupply • Engineer Build Chest Wall</div>
+          <div><b>[E] Key</b> — Drag Downed Teammate to Cover / Board Vehicle</div>
+          <div><b>[H] / [P]</b> — Hold to Bandage Bleed / Repack Loose Mags</div>
+          <div><b>[7] / [8] / [B]</b> — Class Deployable / Engineer Bunker Blueprint</div>
+          <div><b>[N] Key</b> — Night Vision / GPNVG-18 Thermal</div>
+          <div><b>[K] / Hold [Y]</b> — Full Tactical Map / Squad Command Wheel</div>
+          <div><b>[Tab] / [F1]</b> — Scoreboard &amp; Stats / Close Manual</div>
+        </div>
+      `
+    };
+
+    const renderManualTab = (tabKey) => {
+      const tabsMeta = [
+        { id: 'ac130', lbl: '🛸 AC-130 GUNSHIP' },
+        { id: 'jets', lbl: '✈️ JETS & BOMBERS' },
+        { id: 'armor', lbl: '🛡️ TANKS & ARMOR' },
+        { id: 'infantry', lbl: '🪖 INFANTRY & CAS' }
+      ];
+      el.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;">
+          <div style="font-size:18px;font-weight:900;color:#00d2d3;letter-spacing:1.5px;">📖 FIELD &amp; FLIGHT OPERATIONS MANUAL [F1]</div>
+          <button type="button" id="manual-close-btn" style="background:#e74c3c;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:900;cursor:pointer;">✕ CLOSE [F1]</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">
+          ${tabsMeta
+            .map(
+              (t) => `<button type="button" class="manual-tab-btn" data-mtab="${t.id}" style="flex:1;min-width:135px;padding:6px 8px;border-radius:5px;border:1.5px solid ${
+                tabKey === t.id ? '#00d2d3' : 'rgba(255,255,255,0.16)'
+              };background:${
+                tabKey === t.id ? 'rgba(0,210,211,0.22)' : 'rgba(15,24,34,0.92)'
+              };color:${
+                tabKey === t.id ? '#81ecec' : '#cbd5e1'
+              };font-size:11.5px;font-weight:900;cursor:pointer;">${t.lbl}</button>`
+            )
+            .join('')}
+        </div>
+        <div>${sections[tabKey] || sections.infantry}</div>
+        <div style="margin-top:12px;color:#95a5a6;font-size:11px;text-align:center;">Press <b>[F1]</b> anytime in battle or cockpit to open/close this manual</div>
+      `;
+      el.querySelectorAll('.manual-tab-btn').forEach((btn) => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          renderManualTab(btn.dataset.mtab);
+        });
+      });
+      el.querySelector('#manual-close-btn')?.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        el.remove();
+        if (this._domCache) this._domCache.delete('controls-overlay');
+      });
+    };
+
+    renderManualTab(defaultTab);
     document.body.appendChild(el);
     if (this._domCache) this._domCache.set('controls-overlay', el);
   },
@@ -138,7 +252,9 @@ export const HudRenderer = {
     const sign = isGain ? '+' : '';
     const borderCol = isGain
       ? '#2ecc71'
-      : category === 'ARMOR'
+      : category === 'PLANE'
+      ? '#00d2d3'
+      : category === 'TANK' || category === 'ARMOR'
       ? '#e67e22'
       : category === 'CAR'
       ? '#f1c40f'
@@ -355,10 +471,53 @@ export const HudRenderer = {
       return;
     }
 
+    const activeSensorMode = this.player.nvgActive
+      ? this.player.sensorMode && this.player.sensorMode !== 'OFF'
+        ? this.player.sensorMode
+        : 'NVG'
+      : 'OFF';
+    const curInfWep = !this.player.activeVehicle ? this.player.currentWeapon?.() : null;
+    const isScopeFlir = Boolean(
+      !this.player.activeVehicle &&
+        this.player.isAds &&
+        (this.player.adsAmount || 0) > 0.45 &&
+        curInfWep?.def?.opticType === 'flir'
+    );
+    const isFlirMode = activeSensorMode === 'WHOT' || activeSensorMode === 'BHOT';
+    if (document.body) {
+      document.body.classList.toggle('nvg-green-mode', activeSensorMode === 'NVG');
+      document.body.classList.toggle('flir-whot-mode', activeSensorMode === 'WHOT');
+      document.body.classList.toggle('flir-bhot-mode', activeSensorMode === 'BHOT');
+      document.body.classList.toggle('flir-scope-mode', isScopeFlir && !isFlirMode);
+    }
     if (this.nvgOverlayEl) {
-      const hideNvg = !this.player.nvgActive;
+      const hideNvg = activeSensorMode === 'OFF';
       if (this.nvgOverlayEl.classList.contains('hidden') !== hideNvg) {
         this.nvgOverlayEl.classList.toggle('hidden', hideNvg);
+      }
+      if (!hideNvg) {
+        this.nvgOverlayEl.classList.toggle('sensor-whot', activeSensorMode === 'WHOT');
+        this.nvgOverlayEl.classList.toggle('sensor-bhot', activeSensorMode === 'BHOT');
+        const tagEl = this.el('nvg-mode-tag');
+        if (tagEl) {
+          this._setText(
+            tagEl,
+            activeSensorMode === 'WHOT'
+              ? 'FLIR // WHITE-HOT INFRARED (WHOT IR) ACTIVE [N]'
+              : activeSensorMode === 'BHOT'
+              ? 'FLIR // BLACK-HOT INFRARED (BHOT IR) ACTIVE [N]'
+              : this.player.activeVehicle?.isAircraft
+              ? 'AN/AVS-9 AVIATOR NIGHT VISION ACTIVE [N]'
+              : 'AN/PVS-14 GEN-3 NIGHT VISION ACTIVE [N]'
+          );
+        }
+      }
+    }
+    const flirFsCanvas = this.el('flir-fullscreen-canvas');
+    if (flirFsCanvas) {
+      flirFsCanvas.classList.toggle('hidden', !isFlirMode);
+      if (isFlirMode) {
+        this.renderFullScreenFlirThermal(activeSensorMode);
       }
     }
 
@@ -675,6 +834,16 @@ export const HudRenderer = {
     const activeVeh = this.player.activeVehicle;
     const ammoPanelEl = this.el('ammo-panel');
     const airCockpitHudEl = this.el('aircraft-cockpit-hud');
+    const airCenterHudEl = this.el('air-center-hud');
+    const cockpitFrameEl = this.el('vehicle-cockpit-frame');
+    const camModePillEl = this.el('veh-cam-mode-pill');
+    if (camModePillEl && !this._vehCamPillBound) {
+      this._vehCamPillBound = true;
+      camModePillEl.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.player?.cycleVehicleCameraMode?.();
+      });
+    }
     const vehOrientPanelEl = this.el('veh-orientation-panel');
     const reticleHullRingEl = this.el('reticle-hull-ring');
     const slotListEl = this.el('slot-list');
@@ -718,15 +887,157 @@ export const HudRenderer = {
       }
 
       const showHullRing =
+        activeVeh.isAircraft ||
         activeVeh.type === 'tank' ||
         activeVeh.type === 'apc' ||
         activeVeh.type === 'aa' ||
         activeVeh.type === 'humvee';
       if (reticleHullRingEl) {
-        reticleHullRingEl.classList.toggle('hidden', !showHullRing);
+        let hideRing = !showHullRing;
+        if (showHullRing) {
+          let hullDegR = Math.round(((-(activeVeh.yaw || 0) * 180) / Math.PI) % 360);
+          if (hullDegR < 0) hullDegR += 360;
+          let viewDegR = Math.round(((-(this.player.yaw || 0) * 180) / Math.PI) % 360);
+          if (viewDegR < 0) viewDegR += 360;
+          const relHullDeg = ((hullDegR - viewDegR + 540) % 360) - 180;
+          if (activeVeh.isAircraft && Math.abs(relHullDeg) < 4) {
+            hideRing = true;
+          } else {
+            reticleHullRingEl.style.transform = `translate(-50%, -50%) rotate(${relHullDeg.toFixed(1)}deg)`;
+            const chevEl = this.el('reticle-hull-chevron');
+            if (chevEl) {
+              this._setText(chevEl, activeVeh.isAircraft ? '▲ NOSE' : '▲ HULL');
+            }
+          }
+        }
+        reticleHullRingEl.classList.toggle('hidden', hideRing);
       }
 
       this.updateVehicleCenterReticle(activeVeh);
+
+      const vCamMode =
+        this.player.vehicleCameraMode || (this.player.thirdPersonVehicle ? 'CHASE_3P' : 'COCKPIT_1P');
+      if (cockpitFrameEl) {
+        const showCkp = vCamMode === 'COCKPIT_1P' && activeVeh.type !== 'warhorse';
+        cockpitFrameEl.classList.toggle('hidden', !showCkp);
+        if (showCkp) {
+          const isHeavyTank =
+            !activeVeh.isAircraft &&
+            (activeVeh.type === 'tank' || activeVeh.type === 'apc' || activeVeh.type === 'aa');
+          const isGunshipOrbitWindow =
+            activeVeh.isAircraft &&
+            activeVeh.aircraftRole === 'gunship' &&
+            !activeVeh.gunshipManualFlight;
+          const isJetBubbleCockpit =
+            activeVeh.isAircraft && !isGunshipOrbitWindow;
+          cockpitFrameEl.classList.toggle('ckp-tank', isHeavyTank);
+          cockpitFrameEl.classList.toggle('ckp-jet', isJetBubbleCockpit || isGunshipOrbitWindow);
+
+          const jetCanopySvg = this.el('jet-cockpit-canopy-svg');
+          if (jetCanopySvg) {
+            jetCanopySvg.classList.toggle('hidden', !isJetBubbleCockpit);
+          }
+          const leftWinSightEl = this.el('ac130-left-window-sight');
+          if (leftWinSightEl) {
+            leftWinSightEl.classList.toggle('hidden', !isGunshipOrbitWindow);
+            if (isGunshipOrbitWindow) {
+              const useEotech = Boolean(activeVeh.ac130HasEotechSight);
+              this.el('ac130-sideways-hud-svg')?.classList.toggle('hidden', useEotech);
+              this.el('ac130-eotech-sight-svg')?.classList.toggle('hidden', !useEotech);
+              const bDeg = Math.round(((activeVeh.roll || 0) * 180) / Math.PI);
+              const sideHudTel = this.el('ac130-side-hud-telemetry');
+              const eoTel = this.el('ac130-eotech-telemetry');
+              const telStr = activeVeh.ac130HasCoupledAutopilot
+                ? `COUPLED ORBIT (${activeVeh.orbitAnchorLabel || 'FOB'}) • BANK ${bDeg}° L • [R] TRANSIT`
+                : `MANUAL PYLON • BANK ${bDeg}° L ([A/D] BANK) • [R] TRANSIT`;
+              if (sideHudTel) this._setText(sideHudTel, telStr);
+              if (eoTel) this._setText(eoTel, telStr);
+            }
+          }
+
+          const ckpTagEl = this.el('ckp-mode-tag');
+          if (ckpTagEl) {
+            this._setText(
+              ckpTagEl,
+              isGunshipOrbitWindow
+                ? activeVeh.ac130HasEotechSight
+                  ? `🎯 PILOT LEFT-WINDOW AFSOC EOTECH EXPS3 • ${activeVeh.ac130EraLabel || 'AC-130'} • [R] TRANSIT/ORBIT • [C] CAM`
+                  : `🪟 PILOT SIDEWAYS LEFT-WINDOW PYLON HUD • ${activeVeh.ac130EraLabel || '1968 AC-130A'} • [R] TRANSIT/ORBIT • [C] CAM`
+                : activeVeh.isAircraft
+                ? `🛩️ 1P BUBBLE COCKPIT & HUD • ${activeVeh.name.split(' (')[0]} • [C] SWITCH CAM`
+                : isHeavyTank
+                ? `🛡️ 1P COMMANDER VISION BLOCK • ${activeVeh.name.split(' (')[0]} • [C] SWITCH CAM`
+                : activeVeh.type === 'bike' || activeVeh.type === 'atv'
+                ? `🏍️ 1P RIDER HELMET VISOR • [C] SWITCH CAM`
+                : `🚙 1P DRIVER CABIN WINDSHIELD • [C] SWITCH CAM`
+            );
+          }
+        }
+      }
+      const ac130FcoEl = this.el('ac130-fco-overlay');
+      if (ac130FcoEl) {
+        const showFco =
+          activeVeh.isAircraft &&
+          activeVeh.aircraftRole === 'gunship' &&
+          !activeVeh.gunshipManualFlight &&
+          vCamMode === 'OPTIC_NOSE';
+        ac130FcoEl.classList.toggle('hidden', !showFco);
+        if (showFco) {
+          const portCenterYaw = (activeVeh.yaw || 0) + Math.PI * 0.5;
+          let pOff = (this.player.yaw || 0) - portCenterYaw;
+          while (pOff > Math.PI) pOff -= Math.PI * 2;
+          while (pOff < -Math.PI) pOff += Math.PI * 2;
+          const pDeg = Math.round((-pOff * 180) / Math.PI);
+          const maxArcDeg = Math.max(9, Math.round(((activeVeh.ac130MaxMountArc || 0.62) * 180) / Math.PI));
+          const pipPct = Math.max(4, Math.min(96, 50 + (pDeg / maxArcDeg) * 46));
+          const pipEl = this.el('ac130-fco-gimbal-pip');
+          const lblEl = this.el('ac130-fco-gimbal-lbl');
+          if (pipEl) pipEl.style.left = `${pipPct.toFixed(1)}%`;
+          if (lblEl) {
+            const elevDeg = Math.round(((this.player.pitch || 0) * 180) / Math.PI);
+            this._setText(
+              lblEl,
+              `TRAINABLE GUN MOUNT (±${maxArcDeg}°): ${pDeg >= 0 ? `+${pDeg}° AFT` : `${pDeg}° FWD`} • ELEV ${elevDeg}° • [RMB] ZOOM`
+            );
+          }
+        }
+      }
+      if (airCenterHudEl) {
+        airCenterHudEl.classList.toggle('hidden', !activeVeh.isAircraft);
+      }
+      if (camModePillEl) {
+        const camShort =
+          vCamMode === 'COCKPIT_1P'
+            ? activeVeh.aircraftRole === 'gunship' && !activeVeh.gunshipManualFlight
+              ? 'PORT BAY 1P'
+              : '1P COCKPIT'
+            : vCamMode === 'OPTIC_NOSE'
+            ? activeVeh.aircraftRole === 'gunship'
+              ? 'FCO SENSOR POD'
+              : 'NOSE / OPTIC'
+            : '3P CHASE';
+        this._setText(camModePillEl, `🎥 CAM [C]: ${camShort}`);
+      }
+      const sensorPillEl = this.el('veh-sensor-mode-pill');
+      if (sensorPillEl) {
+        if (!this._vehSensorPillBound) {
+          this._vehSensorPillBound = true;
+          sensorPillEl.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyN' }));
+          });
+        }
+        const sMode = this.player.nvgActive ? this.player.sensorMode || 'NVG' : 'OFF';
+        const sLabel =
+          sMode === 'WHOT'
+            ? '🌡️ [N]: WHOT IR'
+            : sMode === 'BHOT'
+            ? '🌡️ [N]: BHOT IR'
+            : sMode === 'NVG'
+            ? '🥽 [N]: NVG GREEN'
+            : '☀️ [N]: DAY TV';
+        this._setText(sensorPillEl, sLabel);
+      }
 
       const isHorseMount = activeVeh.type === 'warhorse';
       const gunTagsEl = this.ammoPanelEl ? this.ammoPanelEl.querySelector('.tactical-gun-tags') : null;
@@ -795,6 +1106,10 @@ export const HudRenderer = {
     } else if (!this.player.downed) {
       this._lastVehOverlayTheme = null;
       this.vehicleOverlayEl.className = 'hidden';
+      if (cockpitFrameEl) cockpitFrameEl.classList.add('hidden');
+      if (airCenterHudEl) airCenterHudEl.classList.add('hidden');
+      const ac130FcoOff = this.el('ac130-fco-overlay');
+      if (ac130FcoOff) ac130FcoOff.classList.add('hidden');
       const gunTagsEl = this.ammoPanelEl ? this.ammoPanelEl.querySelector('.tactical-gun-tags') : null;
       if (gunTagsEl) gunTagsEl.style.display = '';
       if (ammoPanelEl) ammoPanelEl.classList.remove('hidden');
@@ -806,30 +1121,59 @@ export const HudRenderer = {
 
       if (inAdsOptic && this.opticFrameEl) {
         this.scopeOverlayEl.classList.remove('hidden');
-        const isBlackout = opticType === 'sniper8x';
+        const curWepDef = cur && cur.def ? cur.def : null;
+        const zLevels = Array.isArray(curWepDef?.zoomLevels) ? curWepDef.zoomLevels : null;
+        const zIdx = Math.min(
+          zLevels ? zLevels.length - 1 : 0,
+          Math.max(0, this.player.opticZoomIndex || 0)
+        );
+        const activeZoom =
+          this.player.useCantedSight
+            ? '1.0X'
+            : zLevels && zLevels[zIdx]
+            ? `${zLevels[zIdx]}X`
+            : null;
+        const isBlackout =
+          !this.player.useCantedSight &&
+          (opticType === 'sniper8x' ||
+            opticType === 'sniper12x' ||
+            opticType === 'lpvo36' ||
+            opticType === 'flir' ||
+            ((opticType === 'elcan4x' || opticType === 'valday6x' || opticType === 'holo3x') &&
+              zIdx > 0));
         this.scopeOverlayEl.classList.toggle('full-blackout', isBlackout);
         this.scopeOverlayEl.classList.toggle('reflex-vignette', !isBlackout);
         this.opticFrameEl.className = `optic-${opticType}`;
 
+        const zHint = zLevels && zLevels.length > 1 ? ` [SCROLL/V: ${activeZoom}]` : '';
         const opticLabels = {
-          holo: 'EOTECH EXPS3 • 1.0X HOLOGRAPHIC',
-          kobra: 'KOBRA EKP-8-18 • REFLEX SIGHT',
+          rmr: 'TRIJICON RMR TYPE 2 • 1.0X MICRO DOT',
           reddot: this.player.useCantedSight
             ? 'CANTED 45° AIMPOINT • 1.0X RED DOT'
-            : 'AIMPOINT MICRO T-2 • RED DOT',
+            : 'AIMPOINT MICRO T-2 • 1.0X RED DOT',
+          kobra: 'KOBRA EKP-8-18 • 1.0X REFLEX',
+          okp7: 'OKP-7 DOVETAIL • 1.0X GREEN CHEVRON',
+          holo: 'EOTECH EXPS3 • 1.0X HOLOGRAPHIC',
+          uh1: 'VORTEX AMG UH-1 GEN II • 1.0X HOLO',
+          prism2x: `PRIMARY ARMS GLX • 2.0X PRISM (ZERO ${this.player.zeroDistance}M)`,
+          holo3x: `EOTECH HHS-II + G33 • ${activeZoom || '3.0X'}${zHint}`,
           acog: `TRIJICON ACOG • 3.4X (ZERO ${this.player.zeroDistance}M)`,
+          elcan4x: `ELCAN SPECTER DR • ${activeZoom || '4.0X'}${zHint}`,
+          valday6x: `VALDAY PS-320 • ${activeZoom || '6.0X'} LPVO${zHint}`,
+          lpvo36: `EOTECH VUDU • ${activeZoom || '3.0X-6.0X'} DUAL-ZOOM${zHint}`,
+          flir: `FLIR RS-32 WHITE-HOT THERMAL • ${activeZoom || '2.5X'}${zHint}`,
           sniper8x: `RAZOR HD • 8.0X MIL-DOT (ZERO ${this.player.zeroDistance}M)`,
+          sniper12x: `NIGHTFORCE ATACR • ${activeZoom || '12.0X'} BALLISTIC${zHint}`,
           rpgSight: 'PGO-7V • ROCKET OPTICAL GRID'
         };
         if (this.opticLabelEl) {
-          this.opticLabelEl.textContent = opticLabels[opticType] || 'OPTIC SIGHT';
+          this._setText(this.opticLabelEl, opticLabels[opticType] || 'OPTIC SIGHT');
         }
-        // Subtle zoom-pulse kick on the ADS optic housing when firing (zero Y translation
-        // so the aiming dot always stays locked to the exact 50vw, 50vh barrel axis)
+        if (opticType === 'flir') {
+          this.renderFlirThermalLens?.();
+        }
         this.opticFrameEl.style.transform = `scale(${1 + this.player.recoilKickZ * 0.28})`;
       } else {
-        // When opticType is null (Bare Iron Sights / Aim Down Barrel), keep 2D scope overlay hidden
-        // so the player aims directly down the 3D barrel and glowing tritium front sight pin!
         this.scopeOverlayEl.classList.add('hidden');
       }
 
@@ -948,18 +1292,33 @@ export const HudRenderer = {
               : `⚠️ 0/${maxDressings} FIELD DRESSINGS LEFT — RESUPPLY AT AMMO STASH [7] TO REVIVE ${downedMate.name} • [E] DRAG`;
         } else if (nearVeh) {
           const isModernEra = (this.world?.era || 'modern') === 'modern';
-          const needsPilot = Boolean(nearVeh.isAircraft && isModernEra && this.player.role !== 'pilot');
+          const strictDoc = this.player.squadDoctrineEnabled !== false;
+          const needsPilot = Boolean(
+            nearVeh.isAircraft && isModernEra && strictDoc && this.player.role !== 'pilot'
+          );
+          const needsArmor = Boolean(
+            !nearVeh.isAircraft &&
+              (nearVeh.type === 'tank' || nearVeh.type === 'apc' || nearVeh.type === 'aa') &&
+              isModernEra &&
+              strictDoc &&
+              this.player.role !== 'armor'
+          );
           const vehPrompt = needsPilot
-            ? `🔒 ${nearVeh.name} — ONLY [PILOT] CLASS CAN FLY AIRCRAFT! (SWITCH TO PILOT AT AMMO STASH [L] / DEPLOY)`
+            ? `🔒 ${nearVeh.name} — REQUIRES [COMBAT PILOT] LICENSE! (SWITCH AT BASE/FOB [L] OR TOGGLE DOCTRINE OFF)`
+            : needsArmor
+            ? `🔒 ${nearVeh.name} — REQUIRES [ARMOR CREWMAN] LICENSE! (SWITCH AT BASE/FOB [L] OR TOGGLE DOCTRINE OFF)`
             : nearVeh.npcDriver
             ? `PRESS [E] TO COMMANDEER ${nearVeh.name} FROM ${nearVeh.npcDriver.name}`
             : `PRESS [E] TO ENTER ${nearVeh.name}`;
+          const canBuildHere = !isModernEra || !strictDoc || this.player.role === 'engineer';
           const fSuffix = nearCrate
-            ? ' • [F] RESUPPLY ALL • [L] ROLE/GUN/GUNSMITH'
-            : damagedBld
+            ? ' • [F] RESUPPLY ALL • [L] GUNSMITH WORKBENCH'
+            : damagedBld && canBuildHere
             ? ` • [F] REPAIR BUILDING (${damagedBld.info.integrityPct}%)`
             : nearFlag && nearFlag.owner === this.player.team
-            ? ` • [F] BUILD ${bpName}`
+            ? canBuildHere
+              ? ` • [F] BUILD ${bpName} • [L] FOB GUNSMITH`
+              : ' • [L] FOB GUNSMITH WORKBENCH'
             : '';
           promptTxt = `${vehPrompt}${fSuffix}`;
         } else if (nearFriendlyMedic) {
@@ -972,7 +1331,7 @@ export const HudRenderer = {
           )}/100 HP)`;
         } else if (nearCrate) {
           promptTxt =
-            '📦 AMMO & KIT STASH — PRESS [F] TO RESUPPLY ALL • PRESS [L] FOR ROLE, WEAPON & GUNSMITH MENU';
+            '📦 AMMO & KIT STASH — PRESS [F] TO RESUPPLY ALL • PRESS [L] FOR ROLE, WEAPON & GUNSMITH WORKBENCH';
         } else if (nearBuildingKey) {
           promptTxt =
             '🔑 ARMORY CASE KEY FOUND IN BUILDING ROOM — PRESS [F] OR WALK OVER TO COLLECT (+1 🔑 KEY & +50 XP)!';
@@ -986,14 +1345,24 @@ export const HudRenderer = {
             ? `💵 +$${nearEnemyLoot.halfLootCash || 140} (50% CASH LOOTED)`
             : `💵 +$${nearEnemyLoot.halfLootCash || 140} (50% OF $${nearEnemyLoot.ownerMatchCash || 280} CASH)`;
           promptTxt = `🎒 ENEMY LOOT: ${nearEnemyLoot.ownerRank} ${nearEnemyLoot.ownerName} • ${cashTag} • TAP [F] AUTO-LOOT GEAR & 50% CASH • HOLD [F] / [I] MANUAL LOOT (${remItems} ITEMS)`;
-        } else if (damagedBld) {
+        } else if (
+          damagedBld &&
+          ((this.world?.era || 'modern') !== 'modern' ||
+            this.player.squadDoctrineEnabled === false ||
+            this.player.role === 'engineer')
+        ) {
           promptTxt = `🔨 BUILDING COVER DAMAGED (${damagedBld.info.integrityPct}% INTACT) — PRESS [F] OR [T] TO REPAIR BUILDING (+75 XP)`;
         } else if (nearFlag && nearFlag.owner === this.player.team) {
           const defSt = nearFlag.defenseStage || 0;
-          promptTxt =
-            defSt < 4
-              ? `PRESS [F] TO BUILD ${bpName} & FORTIFY OBJ ${nearFlag.id} DEFENSES (${defSt}/4) • [B] CYCLE`
-              : `PRESS [F] TO BUILD ${bpName} AT OBJ ${nearFlag.id} • [B] CYCLE`;
+          const canEngBuild =
+            (this.world?.era || 'modern') !== 'modern' ||
+            this.player.squadDoctrineEnabled === false ||
+            this.player.role === 'engineer';
+          promptTxt = canEngBuild
+            ? defSt < 4
+              ? `🛠️ PRESS [F] TO BUILD ${bpName} & FORTIFY OBJ ${nearFlag.id} (${defSt}/4) • [L] FOB GUNSMITH WORKBENCH`
+              : `🛠️ PRESS [F] TO BUILD ${bpName} AT OBJ ${nearFlag.id} • [L] FOB GUNSMITH WORKBENCH`
+            : `📍 FRIENDLY FOB ${nearFlag.id} — PRESS [L] FOR GUNSMITH WORKBENCH • PRESS [J] FOR INFANTRY A-10 CAS`;
         }
 
         if (promptTxt && !this.player.reloading && !this.player.slowReloading) {
@@ -1232,94 +1601,134 @@ export const HudRenderer = {
       this.crosshairEl.style.opacity = '1';
     } else if (activeVeh) {
       const activeSlot = activeVeh.activeWeaponSlot || 0;
-      this.weaponNameEl.textContent = activeVeh.name;
+      this._setText(this.weaponNameEl, activeVeh.name);
       if (activeVeh.isAircraft) {
         const aRole = activeVeh.aircraftRole || activeVeh.type;
         if (aRole === 'cas') {
-          this.ammoClipEl.textContent = activeSlot === 1 ? 'POD' : 'BRRT';
-          this.ammoReserveEl.textContent = activeSlot === 1 ? '70MM' : '30MM';
-          this.fireModeEl.textContent =
-            '[1] 30MM GAU-8 AVENGER [LMB] • [2] HYDRA-70 ROCKETS [SPACE] • [9] SWITCH JET • [E] EJECT PARACHUTE';
+          this._setText(this.ammoClipEl, activeSlot === 1 ? 'POD' : 'BRRT');
+          this._setText(this.ammoReserveEl, activeSlot === 1 ? '70MM' : '30MM');
+          this._setText(
+            this.fireModeEl,
+            '[1] 30MM GAU-8 AVENGER [LMB] • [2] HYDRA-70 ROCKETS [SPACE] • [9] SWITCH JET • [E] EJECT PARACHUTE'
+          );
         } else if (aRole === 'gunship') {
-          this.ammoClipEl.textContent = activeSlot === 2 ? '105' : activeSlot === 1 ? '40MM' : '25MM';
-          this.ammoReserveEl.textContent = activeSlot === 2 ? 'HOWZ' : activeSlot === 1 ? 'BOFR' : 'GATL';
-          this.fireModeEl.textContent =
-            '[1] 25MM GATLING • [2] 40MM BOFORS • [3/SPACE] 105MM HOWITZER • [9] SWITCH JET • [E] EJECT PARACHUTE';
+          this._setText(this.ammoClipEl, activeSlot === 2 ? '105' : activeSlot === 1 ? '40MM' : '25MM');
+          this._setText(this.ammoReserveEl, activeSlot === 2 ? 'HOWZ' : activeSlot === 1 ? 'BOFR' : 'GATL');
+          const tgtAlt = Math.round(activeVeh.targetGunshipAlt || 200);
+          const orbR = Math.round(activeVeh.orbitRadius || 220);
+          const slantR = Math.round(activeVeh.slantRangeM || Math.hypot(tgtAlt, orbR));
+          const bnkDeg = Math.round(((activeVeh.idealBankRad || 0.5) * 180) / Math.PI);
+          this._setText(
+            this.fireModeEl,
+            activeVeh.gunshipManualFlight
+              ? `✈️ ALT SET: ${tgtAlt}M [Q / Z OR ↑↓ = HEIGHT & RING] • [SCROLL] ZOOM • CYAN RING: ${orbR}M • [R] CIRCLE ${activeVeh.previewOrbitLabel || 'TARGET'}`
+              : `🔄 ORBIT ${activeVeh.orbitAnchorLabel || 'TARGET'} • ALT ${tgtAlt}M [Q / Z OR ↑↓] • [SCROLL] ZOOM • CIRCLE ${orbR}M • SLANT ${slantR}M • [WASD] MOVE`
+          );
         } else {
           // Combined Strike Fighter + Precision Ground Bomber
           const lockReady = this.player.aircraftLockTarget && this.player.aircraftLockProgress >= 1;
-          this.ammoClipEl.textContent =
-            activeSlot === 2 ? 'JDAM' : activeSlot === 1 ? (lockReady ? 'LOCK' : 'SEEK') : '20MM';
-          this.ammoReserveEl.textContent =
-            activeSlot === 2 ? 'GBU' : activeSlot === 1 ? 'A2A' : 'VULC';
-          this.fireModeEl.textContent =
-            '[1] 20MM VULCAN • [2] AIM-9X A2A [SPACE] • [3] JDAM/GBU-28 BOMBS (CCIP) • [9] SWITCH JET • [E] EJECT';
+          this._setText(
+            this.ammoClipEl,
+            activeSlot === 2 ? 'JDAM' : activeSlot === 1 ? (lockReady ? 'LOCK' : 'SEEK') : '20MM'
+          );
+          this._setText(
+            this.ammoReserveEl,
+            activeSlot === 2 ? 'GBU' : activeSlot === 1 ? 'A2A' : 'VULC'
+          );
+          this._setText(
+            this.fireModeEl,
+            '[1] 20MM VULCAN • [2] AIM-120D A2A [SPACE] • [3] JDAM/GBU-28 BOMBS (CCIP) • [9] SWITCH JET • [E] EJECT'
+          );
         }
       } else if (activeVeh.type === 'aa' || activeVeh.type === 'emplace_aa') {
         const lockReady = this.player.aircraftLockTarget && this.player.aircraftLockProgress >= 1;
-        this.ammoClipEl.textContent = activeSlot === 1 ? (lockReady ? 'LOCK' : 'SAM') : '1050';
-        this.ammoReserveEl.textContent = activeSlot === 1 ? 'POD' : 'PROX';
-        this.fireModeEl.textContent =
-          '[1] TWIN 25/30MM PROXIMITY AA [LMB] • [2] STINGER/9M311 SAM [SPACE] • [E] EXIT';
+        this._setText(this.ammoClipEl, activeSlot === 1 ? (lockReady ? 'LOCK' : 'SAM') : '1050');
+        this._setText(this.ammoReserveEl, activeSlot === 1 ? 'POD' : 'PROX');
+        this._setText(
+          this.fireModeEl,
+          '[1] TWIN 25/30MM PROXIMITY AA [LMB] • [2] STINGER/9M311 SAM [SPACE] • [E] EXIT'
+        );
       } else if (activeVeh.type === 'emplace_mortar') {
         const mRange = Math.round(this.player.mortarRangeM || 200);
-        this.ammoClipEl.textContent = activeSlot === 1 ? '3xHE' : '81MM';
-        this.ammoReserveEl.textContent = `${mRange}M`;
-        this.fireModeEl.textContent =
-          `[1] 81MM INDIRECT HE (${mRange}M) [LMB] • [2] 3-ROUND BARRAGE [SPACE] • PITCH TO AIM RANGE`;
+        this._setText(this.ammoClipEl, activeSlot === 1 ? '3xHE' : '81MM');
+        this._setText(this.ammoReserveEl, `${mRange}M`);
+        this._setText(
+          this.fireModeEl,
+          `[1] 81MM INDIRECT HE (${mRange}M) [LMB] • [2] 3-ROUND BARRAGE [SPACE] • PITCH TO AIM RANGE`
+        );
       } else if (activeVeh.type === 'trebuchet') {
         const mRange = Math.round(this.player.mortarRangeM || 200);
-        this.ammoClipEl.textContent =
-          activeVeh.fireCooldown > 0 ? `${activeVeh.fireCooldown.toFixed(1)}s` : '90KG';
-        this.ammoReserveEl.textContent = `${mRange}M`;
-        this.fireModeEl.textContent =
-          `FLAMING SIEGE BOULDER (${mRange}M ARC) [LMB] • [W/S] RANGE • [T] CREW / [G] WINCH`;
+        this._setText(
+          this.ammoClipEl,
+          activeVeh.fireCooldown > 0 ? `${activeVeh.fireCooldown.toFixed(1)}s` : '90KG'
+        );
+        this._setText(this.ammoReserveEl, `${mRange}M`);
+        this._setText(
+          this.fireModeEl,
+          `FLAMING SIEGE BOULDER (${mRange}M ARC) [LMB] • [W/S] RANGE • [T] CREW / [G] WINCH`
+        );
       } else if (activeVeh.type === 'warhorse') {
         const spdKmh = Math.round(Math.abs(activeVeh.forwardSpeed || 0) * 3.6);
-        this.ammoClipEl.textContent =
-          activeVeh.fireCooldown > 0 ? `${activeVeh.fireCooldown.toFixed(1)}s` : 'YEW';
-        this.ammoReserveEl.textContent = `${spdKmh}KMH`;
-        this.fireModeEl.textContent =
-          'MOUNTED YEW WARBOW (BODKIN ARROWS [LMB]) • CAVALRY GALLOP & TRAMPLE [WASD + SPACE]';
+        this._setText(
+          this.ammoClipEl,
+          activeVeh.fireCooldown > 0 ? `${activeVeh.fireCooldown.toFixed(1)}s` : 'YEW'
+        );
+        this._setText(this.ammoReserveEl, `${spdKmh}KMH`);
+        this._setText(
+          this.fireModeEl,
+          'MOUNTED YEW WARBOW (BODKIN ARROWS [LMB]) • CAVALRY GALLOP & TRAMPLE [WASD + SPACE]'
+        );
       } else if (activeVeh.type === 'trex_mount' || activeVeh.type === 'raptor_mount') {
         const isTrex = activeVeh.type === 'trex_mount';
         const spdKmh = Math.round(Math.abs(activeVeh.forwardSpeed || 0) * 3.6);
-        this.ammoClipEl.textContent = isTrex ? 'JAWS' : 'CLAW';
-        this.ammoReserveEl.textContent = `${spdKmh}KMH`;
-        this.fireModeEl.textContent = isTrex
-          ? 'CRUSHING THEROPOD JAWS & STOMP [LMB] • APEX ROAR & CHARGE [SPACE]'
-          : 'SICKLE TALONS & VENOM SPIT [LMB] • PREDATOR POUNCE LEAP [SPACE]';
+        this._setText(this.ammoClipEl, isTrex ? 'JAWS' : 'CLAW');
+        this._setText(this.ammoReserveEl, `${spdKmh}KMH`);
+        this._setText(
+          this.fireModeEl,
+          isTrex
+            ? 'CRUSHING THEROPOD JAWS & STOMP [LMB] • APEX ROAR & CHARGE [SPACE]'
+            : 'SICKLE TALONS & VENOM SPIT [LMB] • PREDATOR POUNCE LEAP [SPACE]'
+        );
       } else if (activeVeh.type === 'bike' || activeVeh.type === 'atv') {
         const spdKmh = Math.round(Math.abs(activeVeh.forwardSpeed || 0) * 3.6);
         const gearStr = activeVeh.isElectric ? 'EV' : `G${activeVeh.currentGear || 'N'}`;
-        this.ammoClipEl.textContent = `${spdKmh}`;
-        this.ammoReserveEl.textContent = `KM/H (${gearStr})`;
-        this.fireModeEl.textContent =
+        this._setText(this.ammoClipEl, `${spdKmh}`);
+        this._setText(this.ammoReserveEl, `KM/H (${gearStr})`);
+        this._setText(
+          this.fireModeEl,
           activeVeh.type === 'atv'
             ? 'TWIN 9MM QUAD PDW [LMB] • [SPACE] OVERDRIVE BOOST • [WASD] STEER'
-            : '9MM HANDLEBAR SMG [LMB] • [SPACE] WHEELIE / BOOST • [A/D] LEAN';
+            : '9MM HANDLEBAR SMG [LMB] • [SPACE] WHEELIE / BOOST • [A/D] LEAN'
+        );
       } else if (activeVeh.weaponType === 'tank_cannon') {
         if (activeSlot === 1) {
-          this.ammoClipEl.textContent = activeVeh.coaxOverheated ? 'HOT' : 'INF';
-          this.ammoReserveEl.textContent = '7.62 AP';
-          this.fireModeEl.textContent = '[2] 950 RPM AP COAX MG (FLAT AIM AT +) • [1] CANNON';
+          this._setText(this.ammoClipEl, activeVeh.coaxOverheated ? 'HOT' : 'INF');
+          this._setText(this.ammoReserveEl, '7.62 AP');
+          this._setText(this.fireModeEl, '[2] 950 RPM AP COAX MG (FLAT AIM AT +) • [1] CANNON');
         } else {
-          this.ammoClipEl.textContent =
-            activeVeh.fireCooldown > 0 ? `${activeVeh.fireCooldown.toFixed(1)}s` : 'RDY';
-          this.ammoReserveEl.textContent = 'APHE';
-          this.fireModeEl.textContent = '[1] MAIN CANNON [LMB] (ARC >135M) • COAX MG [SPACE / 2] (FLAT)';
+          this._setText(
+            this.ammoClipEl,
+            activeVeh.fireCooldown > 0 ? `${activeVeh.fireCooldown.toFixed(1)}s` : 'RDY'
+          );
+          this._setText(this.ammoReserveEl, 'APHE');
+          this._setText(
+            this.fireModeEl,
+            '[1] MAIN CANNON [LMB] (ARC >135M) • COAX MG [SPACE / 2] (FLAT)'
+          );
         }
       } else if (activeVeh.weaponType === 'autocannon') {
-        this.ammoClipEl.textContent = activeSlot === 1 ? 'COAX' : '30MM';
-        this.ammoReserveEl.textContent = 'BELT';
-        this.fireModeEl.textContent =
+        this._setText(this.ammoClipEl, activeSlot === 1 ? 'COAX' : '30MM');
+        this._setText(this.ammoReserveEl, 'BELT');
+        this._setText(
+          this.fireModeEl,
           activeSlot === 1
             ? '[2] 950 RPM 7.62MM AP COAX [LMB / SPACE] (FLAT) • [1] 30MM'
-            : '[1] 330 RPM 30MM HE [LMB] • COAX MG [SPACE / 2] (FLAT)';
+            : '[1] 330 RPM 30MM HE [LMB] • COAX MG [SPACE / 2] (FLAT)'
+        );
       } else {
-        this.ammoClipEl.textContent = '50BMG';
-        this.ammoReserveEl.textContent = 'AP-I';
-        this.fireModeEl.textContent = 'ROOF .50 CAL M2HB RWS (720 RPM AP-I • FLAT AIM AT +)';
+        this._setText(this.ammoClipEl, '50BMG');
+        this._setText(this.ammoReserveEl, 'AP-I');
+        this._setText(this.fireModeEl, 'ROOF .50 CAL M2HB RWS (720 RPM AP-I • FLAT AIM AT +)');
       }
       if (this.magBarsRowEl) this.magBarsRowEl.innerHTML = '';
     } else if (cur) {
@@ -1402,6 +1811,12 @@ export const HudRenderer = {
         cantedCol = isFire ? '#ff7f50' : '#7bed9f';
       } else if (!cur.def.opticType) {
         cantedTxt = 'OPTIC: IRON SIGHTS';
+      } else if (Array.isArray(cur.def.zoomLevels) && cur.def.zoomLevels.length > 1) {
+        const zIdx = Math.min(cur.def.zoomLevels.length - 1, Math.max(0, this.player.opticZoomIndex || 0));
+        cantedTxt = this.player.useCantedSight
+          ? 'OPTIC [V]: CANTED 45° (1X)'
+          : `OPTIC [WHEEL/V]: ${cur.def.zoomLevels[zIdx]}X (${cur.def.zoomLevels.join('⇄')}X)`;
+        cantedCol = '#00d2d3';
       } else if (cur.def.hasCantedSight) {
         cantedTxt = `OPTIC [V]: ${
           this.player.useCantedSight ? 'CANTED 45°' : cur.def.opticType.toUpperCase()
@@ -1666,20 +2081,55 @@ export const HudRenderer = {
       hdgPillEl.style.color = v.isShotDown || v.isStalling ? '#ff6b6b' : '';
     }
 
-    // 2. Speedometer (Airspeed Indicator Dial) + Vertical Throttle Bar
+    // 2. Per-Aircraft Realistic Speedometer Envelope & Dynamic SVG Arcs
     const spdMs = Math.max(0, v.forwardSpeed || 0);
     const kmh = Math.round(spdMs * 3.6);
     const kts = Math.round(spdMs * 1.94384);
     const mach = (spdMs / 340.3).toFixed(2);
-    const scaleMaxKmh = isWright ? 900 : 720;
+    const scaleMaxKmh = isWright
+      ? kmh <= 115
+        ? 120
+        : 900
+      : isGunship
+      ? 300
+      : isCas
+      ? 420
+      : isB2 || aRole === 'bomber'
+      ? 600
+      : 720;
 
-    if (this._lastAsiScaleMax !== scaleMaxKmh) {
-      this._lastAsiScaleMax = scaleMaxKmh;
+    const minKmh = (v.minSpeed || 30) * 3.6;
+    const cruiseKmh = (v.speed || 62) * 3.6;
+    const maxKmh = (v.maxSpeed || 96) * 3.6;
+    const asiArcSig = `${aRole}_${scaleMaxKmh}_${Math.round(minKmh)}_${Math.round(maxKmh)}`;
+
+    if (this._lastAsiScaleSig !== asiArcSig) {
+      this._lastAsiScaleSig = asiArcSig;
       const step = scaleMaxKmh / 6;
       for (let i = 0; i <= 6; i++) {
         const lblEl = this.el(`asi-lbl-${i}`);
         if (lblEl) lblEl.textContent = String(Math.round(i * step));
       }
+      const makeArc = (deg0, deg1) => {
+        const a0 = Math.max(-120, Math.min(120, deg0));
+        const a1 = Math.max(a0 + 1, Math.min(120, deg1));
+        const r0 = ((a0 - 90) * Math.PI) / 180;
+        const r1 = ((a1 - 90) * Math.PI) / 180;
+        const x0 = (65 + 48 * Math.cos(r0)).toFixed(1);
+        const y0 = (65 + 48 * Math.sin(r0)).toFixed(1);
+        const x1 = (65 + 48 * Math.cos(r1)).toFixed(1);
+        const y1 = (65 + 48 * Math.sin(r1)).toFixed(1);
+        const largeArc = a1 - a0 > 180 ? 1 : 0;
+        return `M ${x0} ${y0} A 48 48 0 ${largeArc} 1 ${x1} ${y1}`;
+      };
+      const stallDeg = -120 + Math.min(0.45, Math.max(0.05, minKmh / scaleMaxKmh)) * 240;
+      const greenEndDeg = -120 + Math.min(0.85, Math.max(0.32, (cruiseKmh * 1.18) / scaleMaxKmh)) * 240;
+      const yellowEndDeg = -120 + Math.min(0.95, Math.max(0.55, (maxKmh * 0.9) / scaleMaxKmh)) * 240;
+      const maxArcDeg = -120 + Math.min(1.0, Math.max(0.68, maxKmh / scaleMaxKmh)) * 240;
+      this.el('asi-arc-stall')?.setAttribute('d', makeArc(-120, stallDeg));
+      this.el('asi-arc-green')?.setAttribute('d', makeArc(stallDeg, greenEndDeg));
+      this.el('asi-arc-yellow')?.setAttribute('d', makeArc(greenEndDeg, yellowEndDeg));
+      this.el('asi-arc-ab')?.setAttribute('d', makeArc(yellowEndDeg, Math.max(yellowEndDeg + 6, maxArcDeg)));
     }
 
     // Rotate Speedometer Needle (-120° at 0 km/h to +120° at scaleMaxKmh)
@@ -1693,13 +2143,10 @@ export const HudRenderer = {
     // Rotate Cruise Speed Bug on outer dial rim
     const cruiseBugEl = this.el('air-asi-cruise-bug');
     if (cruiseBugEl) {
-      const cruiseKmh = (v.speed || 62) * 3.6;
       const cruiseDeg = -120 + Math.max(0, Math.min(1, cruiseKmh / scaleMaxKmh)) * 240;
       cruiseBugEl.setAttribute('transform', `rotate(${cruiseDeg.toFixed(1)} 65 65)`);
     }
 
-    const minKmh = (v.minSpeed || 30) * 3.6;
-    const maxKmh = (v.maxSpeed || 96) * 3.6;
     const wHeld = Boolean(this.player?.keys?.['KeyW']);
     const sHeld = Boolean(this.player?.keys?.['KeyS']);
 
@@ -1877,6 +2324,38 @@ export const HudRenderer = {
       vsiValEl.style.color = vsiMs > 2 ? '#7bed9f' : vsiMs < -8 ? '#ff7675' : '#bdc3c7';
     }
 
+    // Update Center Eye-Level Digital Speed & Radar Altimeter (AGL + VSI) HUD Tapes!
+    const cSpdEl = this.el('air-center-spd');
+    const cMachEl = this.el('air-center-mach');
+    const cAltEl = this.el('air-center-alt');
+    const cVsiEl = this.el('air-center-vsi');
+    if (cSpdEl) {
+      this._setText(cSpdEl, `${kmh}`);
+      cSpdEl.style.color = v.isStalling ? '#ff4757' : wHeld && !isGunship ? '#00d2d3' : '#7bed9f';
+    }
+    if (cMachEl) {
+      this._setText(
+        cMachEl,
+        v.isStalling ? '⚠️ STALL' : isGunship && !v.gunshipManualFlight ? 'ORBIT SPD' : `KM/H • M${mach}`
+      );
+    }
+    if (cAltEl) {
+      this._setText(cAltEl, `${altAgl}M`);
+      cAltEl.style.color = altAgl < 28 ? '#00ffcc' : altAgl > 680 && altAgl < 1250 ? '#dfe6e9' : '#74b9ff';
+    }
+    if (cVsiEl) {
+      this._setText(
+        cVsiEl,
+        altAgl < 28
+          ? '🦇 RADAR MASK'
+          : isGunship && !v.gunshipManualFlight
+          ? `🔄 R:${Math.round(v.orbitRadius || 220)}M • RNG:${Math.round(v.slantRangeM || 300)}M`
+          : isGunship && v.gunshipManualFlight
+          ? `🎯 SET ${Math.round(v.targetGunshipAlt || 200)}M [WHEEL/↑↓]`
+          : `VSI ${vsiStr}`
+      );
+    }
+
     // 5. Visual Weapon Bay Pylon & Countermeasure Strip ([1], [2], [3], [X])
     const activeSlot = v.activeWeaponSlot || 0;
     const pylonDefs = isWright
@@ -1905,9 +2384,62 @@ export const HudRenderer = {
         ]
       : [
           { icon: '🔥', lbl: '20MM VULC' },
-          { icon: '🚀', lbl: 'AIM-9X AA' },
+          { icon: '🚀', lbl: 'AIM120 FOX3' },
           { icon: '💣', lbl: 'JDAM/GBU' }
         ];
+
+    // 4B. Update Aircraft Body vs. Viewpoint Dial (`#air-bvv-svg` — Tank-style Airframe Heading vs. Pilot/Gunner View!)
+    const bvvBodyGroup = this.el('air-bvv-body-group');
+    const bvvShapeEl = this.el('air-bvv-shape');
+    const bvvFooterEl = this.el('air-bvv-footer');
+    if (bvvShapeEl && this._lastAirBvvRole !== aRole) {
+      this._lastAirBvvRole = aRole;
+      if (isB2) {
+        bvvShapeEl.innerHTML = `<polygon points="56,24 92,62 84,69 68,58 60,67 56,62 52,67 44,58 28,69 20,62" fill="rgba(0,210,211,0.3)" stroke="#00d2d3" stroke-width="1.6"/>`;
+      } else if (isGunship) {
+        // AC-130J Silhouette + Port (-X / Left) 25mm/40mm/105mm Barrels!
+        bvvShapeEl.innerHTML = `
+          <rect x="20" y="47" width="72" height="7" rx="1.5" fill="rgba(241,196,15,0.32)" stroke="#f1c40f" stroke-width="1.4"/>
+          <rect x="51" y="26" width="10" height="54" rx="3" fill="rgba(241,196,15,0.42)" stroke="#f1c40f" stroke-width="1.5"/>
+          <rect x="42" y="76" width="28" height="5" rx="1" fill="rgba(241,196,15,0.35)" stroke="#f1c40f" stroke-width="1.2"/>
+          <line x1="51" y1="42" x2="36" y2="42" stroke="#ff6b6b" stroke-width="2"/>
+          <line x1="51" y1="56" x2="34" y2="56" stroke="#ff9f43" stroke-width="2.3"/>
+          <line x1="51" y1="67" x2="32" y2="67" stroke="#ffd32a" stroke-width="2.8"/>
+        `;
+      } else {
+        bvvShapeEl.innerHTML = `<polygon points="56,22 61,44 88,58 88,64 61,58 59,76 68,83 68,87 56,84 44,87 44,83 53,76 51,58 24,64 24,58 51,44" fill="rgba(241,196,15,0.32)" stroke="#f1c40f" stroke-width="1.5"/>`;
+      }
+    }
+    if (bvvBodyGroup) {
+      let planeHdg = Math.round(((-(v.yaw || 0) * 180) / Math.PI) % 360);
+      if (planeHdg < 0) planeHdg += 360;
+      let lookHdg = Math.round(((-((this.player?.yaw ?? v.yaw) || 0) * 180) / Math.PI) % 360);
+      if (lookHdg < 0) lookHdg += 360;
+      const bodyRelDeg = ((planeHdg - lookHdg + 540) % 360) - 180;
+      const viewOffDeg = ((lookHdg - planeHdg + 540) % 360) - 180;
+      bvvBodyGroup.setAttribute('transform', `rotate(${bodyRelDeg.toFixed(1)} 56 56)`);
+      if (bvvFooterEl) {
+        const lookPitchDeg = Math.round((((this.player?.pitch ?? v.pitch) || 0) * 180) / Math.PI);
+        const pitchTag = lookPitchDeg >= 0 ? `+${lookPitchDeg}°` : `${lookPitchDeg}°`;
+        const azTag =
+          Math.abs(viewOffDeg) <= 3
+            ? 'NOSE 0°'
+            : viewOffDeg < 0
+            ? `VIEW ${Math.abs(viewOffDeg)}° L`
+            : `VIEW ${viewOffDeg}° R`;
+        this._setText(bvvFooterEl, `${azTag} • P ${pitchTag}`);
+      }
+    }
+
+    // 4C. AC-130 Cockpit Dashboard FLIR Video Repeater MFD (Active when FLIR MFD or Coupled Autopilot is installed!)
+    const mfdCardEl = this.el('ac130-flir-mfd-card');
+    if (mfdCardEl) {
+      const showMfd = Boolean(isGunship && v.ac130HasFlirRepeater);
+      mfdCardEl.classList.toggle('hidden', !showMfd);
+      if (showMfd) {
+        this.renderAc130CockpitFlirMfd(v);
+      }
+    }
 
     const secCd = v.secondaryCooldown || 0;
     const maxSecCd = isGunship ? 3.2 : aRole === 'fighter' ? 1.8 : 0.6;
@@ -1980,6 +2512,289 @@ export const HudRenderer = {
   },
 
   /**
+   * Renders the AC-130 Cockpit Dashboard FLIR Video Repeater MFD (`#ac130-mfd-canvas`),
+   * giving the pilot a live White-Hot thermal top-down feed of targets inside the left-wing firing zone!
+   */
+  renderAc130CockpitFlirMfd(v) {
+    const canvas = this.el('ac130-mfd-canvas');
+    if (!canvas || !v) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const cw = canvas.width;
+    const ch = canvas.height;
+
+    ctx.fillStyle = '#071114';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.fillStyle = 'rgba(46, 213, 115, 0.05)';
+    for (let y = 0; y < ch; y += 3) ctx.fillRect(0, y, cw, 1);
+
+    // Center of MFD represents the Port-Side Ground Target Area (~185m off left wing, or v.orbitCenter)
+    const portX = -Math.cos(v.yaw || 0);
+    const portZ = Math.sin(v.yaw || 0);
+    const focusX =
+      v.ac130HasCoupledAutopilot && v.orbitCenter
+        ? v.orbitCenter.x
+        : v.pos.x + portX * 185;
+    const focusZ =
+      v.ac130HasCoupledAutopilot && v.orbitCenter
+        ? v.orbitCenter.z
+        : v.pos.z + portZ * 185;
+    const scale = 0.24; // ~330m wide thermal sector window
+
+    const toMfd = (wx, wz) => {
+      const dx = wx - focusX;
+      const dz = wz - focusZ;
+      // Orient MFD so Port Firing Direction is UP on the screen!
+      const rightX = -portZ;
+      const rightZ = portX;
+      const sx = cw * 0.5 + (dx * rightX + dz * rightZ) * scale;
+      const sy = ch * 0.5 - (dx * portX + dz * portZ) * scale;
+      return { sx, sy };
+    };
+
+    // Draw Objective Flags inside MFD
+    if (this.world?.flags) {
+      ctx.font = 'bold 8px Consolas, monospace';
+      for (const f of this.world.flags) {
+        const { sx, sy } = toMfd(f.pos.x, f.pos.z);
+        if (sx < 4 || sx > cw - 4 || sy < 4 || sy > ch - 4) continue;
+        ctx.strokeStyle = '#2ed573';
+        ctx.strokeRect(sx - 5, sy - 5, 10, 10);
+        ctx.fillStyle = '#7bed9f';
+        ctx.fillText(f.id, sx + 7, sy + 3);
+      }
+    }
+
+    // Draw White-Hot Enemy & Cyan Friendly Thermal Signatures on MFD (crewed/active vehicles & foot soldiers only)!
+    if (this.botManager?.bots) {
+      for (const b of this.botManager.bots) {
+        if (!b || b.dead || b.drivingVehicle) continue;
+        const { sx, sy } = toMfd(b.pos.x, b.pos.z);
+        if (sx < 0 || sx > cw || sy < 0 || sy > ch) continue;
+        ctx.fillStyle = b.team !== this.player.team ? '#ffffff' : 'rgba(0, 210, 211, 0.75)';
+        ctx.fillRect(sx - 1.3, sy - 1.3, 2.6, 2.6);
+      }
+    }
+    if (this.vehicleManager?.vehicles) {
+      for (const ov of this.vehicleManager.vehicles) {
+        if (!ov || ov.dead || ov === v) continue;
+        const isCrewed = Boolean(ov.driver || ov.npcDriver || ov.aiPilotActive);
+        if (!isCrewed) continue;
+        const { sx, sy } = toMfd(ov.pos.x, ov.pos.z);
+        if (sx < 0 || sx > cw || sy < 0 || sy > ch) continue;
+        ctx.fillStyle = ov.team !== this.player.team ? '#fff200' : '#00d2d3';
+        ctx.fillRect(sx - 2.6, sy - 2.6, 5.2, 5.2);
+      }
+    }
+
+    // Draw Live Aim Impact Point Crosshair (`+`) on MFD
+    if (this.player?._ccipPoint) {
+      const aimMfd = toMfd(this.player._ccipPoint.x, this.player._ccipPoint.z);
+      const ax = Math.max(6, Math.min(cw - 6, aimMfd.sx));
+      const ay = Math.max(6, Math.min(ch - 6, aimMfd.sy));
+      ctx.strokeStyle = '#00d2d3';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(ax - 7, ay);
+      ctx.lineTo(ax + 7, ay);
+      ctx.moveTo(ax, ay - 7);
+      ctx.lineTo(ax, ay + 7);
+      ctx.stroke();
+    }
+
+    const apBadge = this.el('ac130-mfd-ap-badge');
+    const eraEl = this.el('ac130-mfd-era');
+    const tgtEl = this.el('ac130-mfd-tgt');
+    const slewEl = this.el('ac130-mfd-slew');
+    if (apBadge) {
+      const apTxt = v.gunshipManualFlight
+        ? 'TRANSIT [R]'
+        : v.ac130HasCoupledAutopilot
+        ? '🔄 COUPLED AP [R]'
+        : '🕹️ MANUAL PYLON [R]';
+      this._setText(apBadge, apTxt);
+      apBadge.style.color = v.ac130HasCoupledAutopilot && !v.gunshipManualFlight ? '#00d2d3' : '#f1c40f';
+    }
+    if (eraEl) this._setText(eraEl, `AIRFRAME: ${v.ac130EraLabel || '1968 AC-130A'}`);
+    if (tgtEl) {
+      this._setText(
+        tgtEl,
+        v.gunshipManualFlight
+          ? 'MODE: FORWARD TRANSIT'
+          : `TARGET: ${v.orbitAnchorLabel || 'PORT SECTOR'}`
+      );
+    }
+    if (slewEl) {
+      const arcDeg = Math.round(((v.ac130MaxMountArc || 0.16) * 180) / Math.PI);
+      this._setText(slewEl, `GUN MOUNT: ±${arcDeg}° ${arcDeg <= 12 ? 'RIGID' : 'SERVO TGM'}`);
+    }
+  },
+
+  /**
+   * Call of Duty ("Death From Above" / MW2 AC-130) Full-Screen FLIR HUD & Friendly IFF Strobe Renderer:
+   * - ZERO fake 2D radial dots (3D soldiers, limbs, helmets, treads & engines now glow natively in WebGL!)
+   * - Renders crisp 3.6 Hz blinking IR Glint Strobes ONLY on Friendly Soldiers & Friendly Vehicles
+   *   ("Crew, do NOT fire on strobes — those are friendlies!") + crisp target-track brackets on enemy armor!
+   */
+  renderFullScreenFlirThermal(mode = 'WHOT') {
+    const canvas = this.el('flir-fullscreen-canvas');
+    if (!canvas || !this.player?.camera) return;
+    const vw = window.innerWidth || 1280;
+    const vh = window.innerHeight || 720;
+    const targetW = Math.min(1280, vw);
+    const targetH = Math.min(720, vh);
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+    }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const cw = canvas.width;
+    const ch = canvas.height;
+    ctx.clearRect(0, 0, cw, ch);
+
+    const isBhot = mode === 'BHOT';
+    const cam = this.player.camera;
+    const scaleX = cw / Math.max(1, vw);
+    const scaleY = ch / Math.max(1, vh);
+    const refPos = this.player.activeVehicle ? this.player.activeVehicle.pos : this.player.pos;
+    const maxSoldierDist = this.player.activeVehicle?.isAircraft ? 2200 : 850;
+    const maxVehDist = this.player.activeVehicle?.isAircraft ? 3200 : 1400;
+
+    // Subtle rolling FLIR interlace refresh bar (authentic AN/AAQ-33 / CoD4 CRT sensor feel)
+    const scanY = ((performance.now() * 0.085) % (ch + 40)) - 20;
+    ctx.fillStyle = isBhot ? 'rgba(0, 0, 0, 0.035)' : 'rgba(255, 255, 255, 0.035)';
+    ctx.fillRect(0, scanY, cw, 5);
+
+    // 3.6 Hz Call of Duty Friendly IR Helmet/Hull Glint Strobe ("Do NOT fire on targets marked by a strobe!")
+    const strobeWave = Math.sin(performance.now() * 0.0226);
+    const strobeBright = strobeWave > -0.15;
+    const strobeAlpha = strobeBright ? 0.96 : 0.28;
+
+    const drawFriendlyIrStrobe = (worldPos, yOff, sz, isVeh = false) => {
+      const scr = this.projectWorldToScreen(worldPos, yOff, cam, vw, vh);
+      if (!scr || scr.behind) return;
+      const lx = scr.x * scaleX;
+      const ly = scr.y * scaleY;
+      if (lx < -24 || lx > cw + 24 || ly < -24 || ly > ch + 24) return;
+
+      ctx.save();
+      ctx.strokeStyle = isBhot
+        ? `rgba(10, 14, 18, ${strobeAlpha})`
+        : `rgba(255, 255, 255, ${strobeAlpha})`;
+      ctx.fillStyle = isBhot
+        ? `rgba(10, 14, 18, ${strobeAlpha})`
+        : `rgba(255, 255, 255, ${strobeAlpha})`;
+      ctx.lineWidth = isVeh ? 1.5 : 1.2;
+
+      // Crisp diamond IFF beacon + 4-point blinking IR glint spikes when strobe flashes ON
+      ctx.beginPath();
+      ctx.moveTo(lx, ly - sz);
+      ctx.lineTo(lx + sz, ly);
+      ctx.lineTo(lx, ly + sz);
+      ctx.lineTo(lx - sz, ly);
+      ctx.closePath();
+      ctx.stroke();
+
+      if (strobeBright) {
+        const ray = sz * 1.9;
+        ctx.beginPath();
+        ctx.moveTo(lx - ray, ly);
+        ctx.lineTo(lx + ray, ly);
+        ctx.moveTo(lx, ly - ray);
+        ctx.lineTo(lx, ly + ray);
+        ctx.stroke();
+        ctx.fillRect(lx - 1.2, ly - 1.2, 2.4, 2.4);
+      }
+      ctx.restore();
+    };
+
+    const drawEnemyVehicleTrackBox = (worldPos, yOff, halfSz) => {
+      const scr = this.projectWorldToScreen(worldPos, yOff, cam, vw, vh);
+      if (!scr || scr.behind) return;
+      const lx = scr.x * scaleX;
+      const ly = scr.y * scaleY;
+      if (lx < -28 || lx > cw + 28 || ly < -28 || ly > ch + 28) return;
+
+      const s = Math.max(6, halfSz);
+      const tick = Math.max(3, s * 0.42);
+      ctx.strokeStyle = isBhot ? 'rgba(12, 16, 20, 0.88)' : 'rgba(255, 255, 255, 0.86)';
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      // 4 crisp corner L-brackets around enemy armor/aircraft (no solid box cluttering the 3D thermal hull!)
+      ctx.moveTo(lx - s, ly - s + tick); ctx.lineTo(lx - s, ly - s); ctx.lineTo(lx - s + tick, ly - s);
+      ctx.moveTo(lx + s - tick, ly - s); ctx.lineTo(lx + s, ly - s); ctx.lineTo(lx + s, ly - s + tick);
+      ctx.moveTo(lx - s, ly + s - tick); ctx.lineTo(lx - s, ly + s); ctx.lineTo(lx - s + tick, ly + s);
+      ctx.moveTo(lx + s - tick, ly + s); ctx.lineTo(lx + s, ly + s); ctx.lineTo(lx + s, ly + s - tick);
+      ctx.stroke();
+    };
+
+    if (this.botManager?.bots) {
+      for (const b of this.botManager.bots) {
+        if (!b || b.dead || b.drivingVehicle) continue;
+        if (b.team !== this.player.team) continue; // Enemy 3D soldiers glow pure unmarked white-hot / black-hot!
+        const d = refPos.distanceTo(b.pos);
+        if (d > maxSoldierDist) continue;
+        drawFriendlyIrStrobe(b.pos, 1.85, 3.8, false);
+      }
+    }
+    if (this.vehicleManager?.vehicles) {
+      for (const v of this.vehicleManager.vehicles) {
+        if (!v || v.dead || v === this.player.activeVehicle) continue;
+        const isCrewed = Boolean(v.driver || v.npcDriver || v.aiPilotActive);
+        if (!isCrewed) continue; // Unoccupied FOB bikes / empty emplacements NEVER emit active IFF strobes or radar boxes!
+        const d = refPos.distanceTo(v.pos);
+        if (d > maxVehDist) continue;
+        if (v.team === this.player.team) {
+          drawFriendlyIrStrobe(v.pos, 2.8, 5.6, true);
+        } else if (this.player.activeVehicle?.hasThermalFlir && v.team && v.team !== 'NEUTRAL') {
+          const boxHalf = Math.max(7, Math.min(20, 820 / Math.max(28, d)));
+          drawEnemyVehicleTrackBox(v.pos, 1.6, boxHalf);
+        }
+      }
+    }
+  },
+
+  /**
+   * Renders crisp FLIR RS-32 Rifle Scope scanlines & Friendly IFF IR Strobes
+   * (3D soldiers & vehicles already glow White-Hot in the live WebGL viewport inside the scope!).
+   */
+  renderFlirThermalLens() {
+    const canvas = this.el('flir-thermal-canvas');
+    if (!canvas || !this.player?.camera) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const cw = canvas.width;
+    const ch = canvas.height;
+    ctx.clearRect(0, 0, cw, ch);
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+    for (let y = 0; y < ch; y += 4) {
+      ctx.fillRect(0, y, cw, 1);
+    }
+
+    const strobeBright = Math.sin(performance.now() * 0.0226) > -0.15;
+    if (!strobeBright || !this.botManager?.bots) return;
+    const cam = this.player.camera;
+    const vw = window.innerWidth || 1280;
+    const vh = window.innerHeight || 720;
+    const lensScaleX = cw / Math.max(1, vw * 0.34);
+    const lensScaleY = ch / Math.max(1, vh * 0.42);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.lineWidth = 1.1;
+    for (const b of this.botManager.bots) {
+      if (!b || b.dead || b.team !== this.player.team) continue;
+      if (this.player.pos.distanceTo(b.pos) > 520) continue;
+      const scr = this.projectWorldToScreen(b.pos, 1.85, cam, vw, vh);
+      if (!scr || scr.behind) continue;
+      const lx = cw * 0.5 + (scr.x - vw * 0.5) * lensScaleX;
+      const ly = ch * 0.5 + (scr.y - vh * 0.5) * lensScaleY;
+      if (lx < 4 || lx > cw - 4 || ly < 4 || ly > ch - 4) continue;
+      ctx.strokeRect(lx - 2.5, ly - 2.5, 5, 5);
+    }
+  },
+
+  /**
    * Vehicle-Specific Center-Screen Reticle (`#turret-reticle-box`):
    * Every vehicle class renders its own distinct sight geometry, color palette, and telemetry tags
    * so non-tank vehicles never display a generic tank gunner box.
@@ -1994,7 +2809,20 @@ export const HudRenderer = {
     const centerEl = this.el('tr-center-mark');
     if (!boxEl || !dynLayer) return;
 
-    const rKey = v.isAircraft ? `air_${v.aircraftRole || v.type}` : v.type;
+    const isGunshipSight = Boolean(
+      v.isAircraft &&
+        v.aircraftRole === 'gunship' &&
+        (!v.gunshipManualFlight || this.player?.vehicleCameraMode === 'OPTIC_NOSE')
+    );
+    const activeSlot = v.activeWeaponSlot || 0;
+    const isFlirHud = Boolean(
+      this.player?.nvgActive && (this.player?.sensorMode === 'WHOT' || this.player?.sensorMode === 'BHOT')
+    );
+    const rKey = isGunshipSight
+      ? `ac130_slot_${activeSlot}_${isFlirHud ? this.player.sensorMode : 'tv'}`
+      : v.isAircraft
+      ? `air_${v.aircraftRole || v.type}`
+      : v.type;
     if (this._lastCenterReticleType !== rKey) {
       this._lastCenterReticleType = rKey;
       const corners = boxEl.querySelectorAll('.tr-corner');
@@ -2007,17 +2835,79 @@ export const HudRenderer = {
         });
       };
 
-      if (v.isAircraft) {
+      if (isGunshipSight) {
+        // Call of Duty ("Death From Above" / MW2) Authentic AC-130 105mm / 40mm / 25mm FLIR Reticles!
+        const retCol = isFlirHud
+          ? this.player.sensorMode === 'BHOT'
+            ? '#101418'
+            : '#f5f7fa'
+          : '#00d2d3';
+        const shadowCss = isFlirHud
+          ? this.player.sensorMode === 'BHOT'
+            ? 'drop-shadow(0 0 2px rgba(255,255,255,0.85))'
+            : 'drop-shadow(0 0 2px rgba(0,0,0,0.95))'
+          : 'drop-shadow(0 0 3px rgba(0,210,211,0.55))';
         setCorners(false);
         if (ladderEl) ladderEl.style.display = 'none';
         if (centerEl) {
-          centerEl.textContent = '⊕';
+          centerEl.textContent = activeSlot === 2 ? '' : '•';
+          centerEl.style.color = retCol;
+          centerEl.style.textShadow = isFlirHud ? '0 0 3px #000' : `0 0 6px ${retCol}`;
+        }
+
+        if (activeSlot === 2) {
+          // [3] 105MM M102 HOWITZER (CoD Wide FOV Overwatch — Outer L-Corners + Inner Blast-Radius Box + Broken Cross)
+          dynLayer.innerHTML = `
+            <svg viewBox="0 0 320 240" width="320" height="240" style="filter:${shadowCss}">
+              <path d="M 52 54 L 52 34 L 76 34 M 244 34 L 268 34 L 268 54 M 52 186 L 52 206 L 76 206 M 244 206 L 268 206 L 268 186" fill="none" stroke="${retCol}" stroke-width="2.2"/>
+              <rect x="116" y="86" width="88" height="68" fill="none" stroke="${retCol}" stroke-width="1.6"/>
+              <line x1="78" y1="120" x2="116" y2="120" stroke="${retCol}" stroke-width="1.8"/>
+              <line x1="204" y1="120" x2="242" y2="120" stroke="${retCol}" stroke-width="1.8"/>
+              <line x1="160" y1="54" x2="160" y2="86" stroke="${retCol}" stroke-width="1.8"/>
+              <line x1="160" y1="154" x2="160" y2="186" stroke="${retCol}" stroke-width="1.8"/>
+              <line x1="153" y1="120" x2="167" y2="120" stroke="${retCol}" stroke-width="1.4"/>
+              <line x1="160" y1="113" x2="160" y2="127" stroke="${retCol}" stroke-width="1.4"/>
+            </svg>
+          `;
+        } else if (activeSlot === 1) {
+          // [2] 40MM L/60 BOFORS (CoD Medium FOV — 4-Way Graduated Mil-Hash Lead Stadia Crosshair)
+          dynLayer.innerHTML = `
+            <svg viewBox="0 0 320 240" width="320" height="240" style="filter:${shadowCss}">
+              <line x1="56" y1="120" x2="146" y2="120" stroke="${retCol}" stroke-width="1.7"/>
+              <line x1="174" y1="120" x2="264" y2="120" stroke="${retCol}" stroke-width="1.7"/>
+              <line x1="160" y1="32" x2="160" y2="106" stroke="${retCol}" stroke-width="1.7"/>
+              <line x1="160" y1="134" x2="160" y2="208" stroke="${retCol}" stroke-width="1.7"/>
+              <g stroke="${retCol}" stroke-width="1.5">
+                <line x1="128" y1="115" x2="128" y2="125"/><line x1="104" y1="113" x2="104" y2="127"/><line x1="80" y1="115" x2="80" y2="125"/>
+                <line x1="192" y1="115" x2="192" y2="125"/><line x1="216" y1="113" x2="216" y2="127"/><line x1="240" y1="115" x2="240" y2="125"/>
+                <line x1="155" y1="88" x2="165" y2="88"/><line x1="153" y1="64" x2="167" y2="64"/>
+                <line x1="155" y1="152" x2="165" y2="152"/><line x1="153" y1="176" x2="167" y2="176"/>
+              </g>
+            </svg>
+          `;
+        } else {
+          // [1] 25MM GAU-12 GATLING (CoD Narrow High-Zoom FOV — Tight Corner-Bracket Tracking Box + Fine Cross)
+          dynLayer.innerHTML = `
+            <svg viewBox="0 0 320 240" width="320" height="240" style="filter:${shadowCss}">
+              <path d="M 136 106 L 136 96 L 146 96 M 174 96 L 184 96 L 184 106 M 136 134 L 136 144 L 146 144 M 174 144 L 184 144 L 184 134" fill="none" stroke="${retCol}" stroke-width="2"/>
+              <line x1="112" y1="120" x2="132" y2="120" stroke="${retCol}" stroke-width="1.5"/>
+              <line x1="188" y1="120" x2="208" y2="120" stroke="${retCol}" stroke-width="1.5"/>
+              <line x1="160" y1="74" x2="160" y2="92" stroke="${retCol}" stroke-width="1.5"/>
+              <line x1="160" y1="148" x2="160" y2="166" stroke="${retCol}" stroke-width="1.5"/>
+            </svg>
+          `;
+        }
+      } else if (v.isAircraft) {
+        setCorners(false);
+        if (ladderEl) ladderEl.style.display = 'none';
+        if (centerEl) {
+          centerEl.textContent = '+';
           centerEl.style.color = '#00d2d3';
           centerEl.style.textShadow = '0 0 8px #00d2d3';
         }
         dynLayer.innerHTML = `
           <svg viewBox="0 0 320 240" width="320" height="240">
-            <!-- Aviation Velocity Vector & Pitch Ladder Bars -->
+            <!-- Aviation Velocity Vector & Pitch Ladder Bars (Pure SVG, zero font encoding issues!) -->
             <line x1="95" y1="85" x2="132" y2="85" stroke="#00d2d3" stroke-width="1.8"/>
             <line x1="95" y1="85" x2="95" y2="93" stroke="#00d2d3" stroke-width="1.8"/>
             <line x1="188" y1="85" x2="225" y2="85" stroke="#00d2d3" stroke-width="1.8"/>
@@ -2026,6 +2916,7 @@ export const HudRenderer = {
             <line x1="178" y1="120" x2="205" y2="120" stroke="#2ecc71" stroke-width="2"/>
             <line x1="95" y1="155" x2="132" y2="155" stroke="#00d2d3" stroke-width="1.8" stroke-dasharray="4 3"/>
             <line x1="188" y1="155" x2="225" y2="155" stroke="#00d2d3" stroke-width="1.8" stroke-dasharray="4 3"/>
+            <circle cx="160" cy="120" r="10" fill="none" stroke="#00d2d3" stroke-width="1.6"/>
             <circle cx="160" cy="120" r="36" fill="none" stroke="rgba(0, 210, 211, 0.35)" stroke-width="1.4" stroke-dasharray="6 4"/>
           </svg>
         `;
@@ -2197,12 +3088,31 @@ export const HudRenderer = {
         const alt = Math.max(0, Math.round(v.pos.y - gY));
         const avoidAuto = this.player ? this.player.aircraftCollisionAvoidance !== false : true;
         const avoidTag = avoidAuto ? '🛡️ AVOID: AUTO [G]' : '💥 AVOID: OFF (CRASH) [G]';
-        topTagEl.textContent = `✈️ ${v.name.split(' (')[0]} • IAS ${kmh} KM/H • ALT ${alt}M • ${avoidTag}`;
-        botTagEl.textContent = v.isStalling
-          ? '⚠️ STALL WARNING — HOLD [W] & LOWER NOSE'
-          : (v.flareActiveTimer || 0) > 0
-          ? `✨ COUNTERMEASURES ACTIVE (${v.flareActiveTimer.toFixed(1)}S) — ANGEL-WING FLARES & ECM SPOOFING MISSILES!`
-          : '[LMB] PRIMARY • [SPACE] ORDNANCE • [X] COUNTERMEASURES • [G] COLLISION AVOIDANCE';
+        if (v.aircraftRole === 'gunship') {
+          const wpnStrip =
+            activeSlot === 2
+              ? '[3: 105MM]  2:40MM  1:25MM'
+              : activeSlot === 1
+              ? '3:105MM  [2: 40MM]  1:25MM'
+              : '3:105MM  2:40MM  [1: 25MM]';
+          const curFov = Math.round(this.player?.camera?.fov || 60);
+          const mag = (75 / Math.max(12, curFov)).toFixed(1);
+          const sensTag = this.player?.nvgActive ? `${this.player.sensorMode} IR` : 'TV';
+          const slant = Math.round(v.slantRangeM || Math.hypot(alt, v.orbitRadius || 240));
+          topTagEl.textContent = v.gunshipManualFlight
+            ? `🛸 ${v.name.split(' (')[0]} • ✈️ TRANSIT [R] • IAS ${kmh} KM/H • ALT ${alt}M AGL`
+            : `${wpnStrip}  •  ${sensTag} [N]  •  FOV ${curFov}° (${mag}X)  •  AGL ${alt}M  •  SLANT ${slant}M`;
+          botTagEl.textContent = v.gunshipManualFlight
+            ? '[W/S] THROTTLE • [Q / Z] OR [↑ / ↓] HEIGHT & RING • [SCROLL] ZOOM • PRESS [R] TO CIRCLE'
+            : 'FF: BLINKING IR STROBE = FRIENDLY! • [SCROLL] OPTIC ZOOM • [1/2/3] GUNS • [Q/Z] OR [↑/↓] ALT 180-1800M • [WASD] MOVE RING';
+        } else {
+          topTagEl.textContent = `✈️ ${v.name.split(' (')[0]} • IAS ${kmh} KM/H • ALT ${alt}M AGL • ${avoidTag}`;
+          botTagEl.textContent = v.isStalling
+            ? '⚠️ STALL WARNING — HOLD [W] & LOWER NOSE'
+            : (v.flareActiveTimer || 0) > 0
+            ? `✨ COUNTERMEASURES ACTIVE (${v.flareActiveTimer.toFixed(1)}S) — ANGEL-WING FLARES & ECM SPOOFING MISSILES!`
+            : '[LMB] PRIMARY • [SPACE] ORDNANCE • [MOUSE/↑↓] 360° LOOP • [C] COCKPIT/3P CAM • [X] FLARES';
+        }
       } else if (v.type === 'bike' || v.type === 'atv') {
         const leanDeg = Math.round(((v.roll || 0) * 180) / Math.PI);
         const gearStr = v.isElectric ? 'EV' : `G${v.currentGear || 'N'}`;

@@ -390,17 +390,29 @@ export const WorldMarkers = {
       }
     }
 
-    // 2a. UAV-Revealed Enemy Armor & Vehicles (3D Orange Target Boxes in World View!)
-    if (this.player.uavActive && this.vehicleManager && this.vehicleManager.vehicles) {
+    // 2a. UAV / JTAC / Infantry CAS-Revealed Enemy Armor & Vehicles (3D Orange Target Boxes in World View!)
+    if (this.vehicleManager && this.vehicleManager.vehicles) {
       for (const v of this.vehicleManager.vehicles) {
-        if (v.dead || v.team === this.player.team || !v.uavRevealed) continue;
+        if (v.dead || v.team === this.player.team) continue;
+        const isPainted =
+          (this.player.uavActive && v.uavRevealed) ||
+          (v.jtacLaserTimer && v.jtacLaserTimer > 0) ||
+          (v.spottedTimer && v.spottedTimer > 0);
+        if (!isPainted) continue;
         const vDist = Math.round(this.player.pos.distanceTo(v.pos));
-        if (vDist > 420) continue;
+        if (vDist > 520) continue;
         const scr = projectToScreen(v.pos, 3.4);
         if (scr) {
           const op = getSightlineOpacity(scr.centerDist, 0.92, 0.28);
-          const vTypeLabel =
-            v.type === 'tank' ? 'TANK' : v.type === 'apc' ? 'BTR/APC' : 'ARMORED CAR';
+          const vTypeLabel = v.isAircraft
+            ? 'AIRCRAFT'
+            : v.type === 'tank'
+            ? 'TANK'
+            : v.type === 'apc'
+            ? 'BTR/IFV'
+            : v.type === 'aa'
+            ? 'SPAAG AA'
+            : 'ARMORED CAR';
           const slot = this._acquireWorldMarkerSlot('misc');
           this._configureMarkerSlot(slot, {
             x: scr.x,
@@ -409,10 +421,68 @@ export const WorldMarkers = {
             iconClass: '',
             iconStyle:
               'background:rgba(211,84,0,0.88);border:1.5px solid #f1c40f;color:#fff;font-size:9.5px;font-weight:900;padding:1.5px 5px;border-radius:3px;white-space:nowrap;',
-            iconText: `⚠️ ${v.team} ${vTypeLabel} (${vDist}m)`,
+            iconText: `🎯 ${v.team} ${vTypeLabel} (${vDist}m)`,
             distText: ''
           });
         }
+      }
+    }
+
+    // 2a-1b. Friendly Infantry Close Air Support (CAS) Request Beacon & Pilot Turn Arrow
+    const activeCasReq =
+      this.world &&
+      this.world.activeCasRequest &&
+      this.world.activeCasRequest.timer > 0 &&
+      this.world.activeCasRequest.team === this.player.team
+        ? this.world.activeCasRequest
+        : null;
+    if (activeCasReq && activeCasReq.pos) {
+      const casRaw = this.projectWorldToScreen(activeCasReq.pos, 3.2, cam, w, h);
+      const casDist = Math.round(this.player.pos.distanceTo(activeCasReq.pos));
+      const casSecs = Math.max(0, activeCasReq.timer).toFixed(0);
+      const onScreenCas =
+        !casRaw.behind && casRaw.x >= 44 && casRaw.x <= w - 44 && casRaw.y >= 44 && casRaw.y <= h - 44;
+      if (onScreenCas) {
+        const slot = this._acquireWorldMarkerSlot('misc');
+        this._configureMarkerSlot(slot, {
+          x: casRaw.x,
+          y: casRaw.y,
+          opacity: 0.96,
+          iconClass: '',
+          iconStyle:
+            'background:rgba(231,76,60,0.92);border:2px solid #ffd32a;color:#fff;font-size:10px;font-weight:900;padding:2px 7px;border-radius:3px;white-space:nowrap;box-shadow:0 0 14px rgba(255,71,87,0.9);',
+          iconText: `🐗 ${activeCasReq.squad || 'INF'} CAS TARGET • RED SMOKE (${casDist}m • ${casSecs}s)`,
+          distText: ''
+        });
+      } else if (this.player.activeVehicle && this.player.activeVehicle.isAircraft) {
+        const invCamQ = (this._invCamQuat || (this._invCamQuat = new THREE.Quaternion()))
+          .copy(cam.quaternion)
+          .invert();
+        const relV = (this._offScreenVec || (this._offScreenVec = new THREE.Vector3()))
+          .copy(activeCasReq.pos)
+          .sub(this.player.activeVehicle.pos)
+          .applyQuaternion(invCamQ);
+        let dx = relV.x;
+        let dy = -relV.y;
+        const len = Math.hypot(dx, dy) || 1;
+        dx /= len;
+        dy /= len;
+        const ringR = Math.min(w, h) * 0.28;
+        const ax = Math.round(w * 0.5 + dx * ringR);
+        const ay = Math.round(h * 0.5 + dy * ringR);
+        const angDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+        const slot = this._acquireWorldMarkerSlot('misc');
+        this._configureMarkerSlot(slot, {
+          x: ax,
+          y: ay,
+          opacity: 0.96,
+          iconClass: '',
+          iconStyle: `width:26px;height:26px;display:flex;align-items:center;justify-content:center;background:rgba(231,76,60,0.28);border:1.8px solid #ffd32a;border-radius:50%;color:#ffd32a;font-size:13px;font-weight:900;transform:rotate(${angDeg.toFixed(1)}deg);box-shadow:0 0 10px rgba(255,211,42,0.75);`,
+          iconText: '➤',
+          distText: `🐗 CAS SMOKE ${casDist}m`,
+          distColor: '#ffd32a',
+          distWeight: '900'
+        });
       }
     }
 
@@ -449,8 +519,13 @@ export const WorldMarkers = {
     const holdingStinger = Boolean(curWep && curWep.def && curWep.def.type === 'stinger');
 
     if (activeAircraft || isAaGround || isMortarEmplace || holdingStinger) {
-      // 1) True Hollow Circular CCIP / Gun Pipper Reticle Ring (Zero opaque background over the impact point!)
-      if (this.player.aircraftCcipPoint && (activeAircraft || isMortarEmplace)) {
+      // 1) True Hollow Circular CCIP / Gun Pipper Reticle Ring (Hidden in AC-130 Gunner Sight where CoD Reticle is exact bore-sight!)
+      const hideCcipInGunshipSight = Boolean(
+        activeAircraft &&
+          activeAircraft.aircraftRole === 'gunship' &&
+          (!activeAircraft.gunshipManualFlight || this.player.vehicleCameraMode === 'OPTIC_NOSE')
+      );
+      if (this.player.aircraftCcipPoint && (activeAircraft || isMortarEmplace) && !hideCcipInGunshipSight) {
         const ccipScr = projectToScreen(this.player.aircraftCcipPoint, 0.8);
         if (ccipScr) {
           const refPos = activeVeh ? activeVeh.pos : this.player.pos;
@@ -519,14 +594,83 @@ export const WorldMarkers = {
                 continue;
               }
             }
-            const scr = projectToScreen(v.pos, 0);
-            if (!scr) continue;
-            const vx = scr.x;
-            const vy = scr.y;
-            const vCenterDist = scr.centerDist;
+            const rawScr = this.projectWorldToScreen(v.pos, 0, cam, w, h);
+            const isOffScreenOrBehind =
+              rawScr.behind ||
+              rawScr.x < 52 ||
+              rawScr.x > w - 52 ||
+              rawScr.y < 52 ||
+              rawScr.y > h - 52;
+            const shortModel = v.name ? v.name.split(' ')[0] : v.type.toUpperCase();
             const isLocked = lockTgt === v && lockProg >= 1;
             const isSeeking = lockTgt === v && lockProg > 0.05 && lockProg < 1;
-            const shortModel = v.name ? v.name.split(' ')[0] : v.type.toUpperCase();
+            const dAltM = Math.round(v.pos.y - refPos.y);
+            const relAltTag =
+              Math.abs(dAltM) >= 12 ? ` ${dAltM > 0 ? `▲+${dAltM}m` : `▼${dAltM}m`}` : ' =ALT';
+
+            // 360° Off-Boresight Dogfight Directional Turn Indicator Arrow (when enemy plane is behind/above/below/off-screen!)
+            if (isOffScreenOrBehind) {
+              if (isEnemy && (activeAircraft || isAaGround || holdingStinger) && vDist < 1950) {
+                const invCamQ = (this._invCamQuat || (this._invCamQuat = new THREE.Quaternion()))
+                  .copy(cam.quaternion)
+                  .invert();
+                const camWorldPos = (this._camWorldPosTmp || (this._camWorldPosTmp = new THREE.Vector3()));
+                cam.getWorldPosition(camWorldPos);
+                const relV = (this._offScreenVec || (this._offScreenVec = new THREE.Vector3()))
+                  .copy(v.pos)
+                  .sub(camWorldPos)
+                  .applyQuaternion(invCamQ);
+                // Camera local space: +X right, +Y up, -Z forward (+Z behind!)
+                let dirX = relV.x;
+                let dirY = -relV.y;
+                const planarLen = Math.hypot(dirX, dirY);
+                if (planarLen < 0.001) {
+                  dirX = 0;
+                  dirY = -1;
+                } else {
+                  dirX /= planarLen;
+                  dirY /= planarLen;
+                }
+                const ringRadius = Math.min(198, Math.min(w, h) * 0.25);
+                let ax = Math.round(w * 0.5 + dirX * ringRadius);
+                let ay = Math.round(h * 0.5 + dirY * ringRadius);
+                // Keep horizontal arrows clear of the +/-175px SPD & ALT HUD tapes
+                if (Math.abs(ay - h * 0.5) < 42 && Math.abs(ax - w * 0.5) > 115) {
+                  ay = Math.round(h * 0.5 + (dirY < 0 ? -56 : 56));
+                }
+                const arrowAngleDeg = (Math.atan2(dirY, dirX) * 180) / Math.PI;
+                const isSixOClock = relV.z > Math.abs(relV.x) * 0.55 && relV.z > 0;
+                const arrowCol = isSixOClock ? '#ff3838' : '#ff9f43';
+                const pulseGlow =
+                  isSixOClock && Math.floor(performance.now() * 0.008) % 2 === 0
+                    ? '0 0 14px rgba(255,56,56,0.95)'
+                    : '0 0 7px rgba(0,0,0,0.85)';
+                const aspectLbl = isSixOClock
+                  ? '⚠️ 6 O\'CLOCK'
+                  : relV.y > Math.abs(relV.x) * 0.85
+                  ? '▲ ABOVE'
+                  : relV.y < -Math.abs(relV.x) * 0.85
+                  ? '▼ BELOW'
+                  : 'TURN';
+                const arrowSlot = this._acquireWorldMarkerSlot('airBox');
+                this._configureMarkerSlot(arrowSlot, {
+                  x: ax,
+                  y: ay,
+                  opacity: 0.96,
+                  iconClass: '',
+                  iconStyle: `width:26px;height:26px;display:flex;align-items:center;justify-content:center;background:rgba(20,8,10,0.72);border:1.8px solid ${arrowCol};border-radius:50%;color:${arrowCol};font-size:13px;font-weight:900;transform:rotate(${arrowAngleDeg.toFixed(1)}deg);box-shadow:${pulseGlow};box-sizing:border-box;`,
+                  iconText: '➤',
+                  distText: `${aspectLbl} ${shortModel} • ${vDist}m${relAltTag}`,
+                  distColor: arrowCol,
+                  distWeight: '900'
+                });
+              }
+              continue;
+            }
+
+            const vx = rawScr.x;
+            const vy = rawScr.y;
+            const vCenterDist = rawScr.centerDist;
 
             // Hollow Wireframe TD Box (28x28px) with 100% transparent interior so the 3D plane is never covered!
             const boxCol = !isEnemy
@@ -544,33 +688,35 @@ export const WorldMarkers = {
 
             const telemetryTag = !isEnemy
               ? `ALLY ${shortModel} • ${vDist}m`
+              : v.isShotDown
+              ? `💥 ${shortModel} GOING DOWN`
               : isLocked
-              ? `🔒 LOCK ${shortModel} • ${vDist}m [${holdingStinger ? 'LMB' : 'SPACE'}]`
+              ? `🔒 LOCK ${shortModel} • ${vDist}m${relAltTag} [${holdingStinger ? 'LMB' : 'SPACE'}]`
               : isSeeking
-              ? `📡 SEEK ${shortModel} (${Math.round(lockProg * 100)}%) • ${vDist}m`
-              : `${shortModel} • ${vDist}m`;
+              ? `📡 SEEK ${shortModel} (${Math.round(lockProg * 100)}%) • ${vDist}m${relAltTag}`
+              : `${shortModel} • ${vDist}m${activeAircraft ? relAltTag : ''}`;
 
             const slot = this._acquireWorldMarkerSlot('airBox');
             this._configureMarkerSlot(slot, {
               x: vx,
               y: vy,
-              opacity: isLocked || isSeeking ? 0.98 : 0.88,
+              opacity: v.isShotDown ? 0.5 : isLocked || isSeeking ? 0.98 : 0.88,
               iconClass: '',
-              iconStyle: `width:26px;height:26px;background:transparent;border:${boxBorder};border-radius:2px;box-sizing:border-box;`,
+              iconStyle: `width:26px;height:26px;background:transparent;border:${v.isShotDown ? '1.4px dashed #95a5a6' : boxBorder};border-radius:2px;box-sizing:border-box;`,
               iconText: '',
               distText: telemetryTag,
-              distColor: boxCol,
+              distColor: v.isShotDown ? '#bdc3c7' : boxCol,
               distWeight: '900'
             });
 
             // 2b) Dogfight Machine Gun / Rotary Cannon Ballistic Lead Indicator (EEGS / LCOS Lead Pipper):
-            // Projects where to aim ahead of the enemy aircraft based on its 3D flight velocity vector,
-            // relative distance, bullet speed (360 m/s), and gravity drop!
+            // Suppressed as soon as an aircraft is shot down (`!v.isShotDown`) so pilots never chase a falling wreck!
             const showMgLead =
               isEnemy &&
+              !v.isShotDown &&
               !holdingStinger &&
               !isMortarEmplace &&
-              vDist < 1250 &&
+              vDist < 1450 &&
               typeof this.player.computeAircraftLeadData === 'function';
             if (showMgLead) {
               const leadData = this.player.computeAircraftLeadData(v, refPos, 360, 4.5);

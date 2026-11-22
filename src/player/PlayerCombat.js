@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=92';
+import { sound } from '../audio.js?v=105';
 import {
   PLAYER,
   COMBAT,
@@ -8,9 +8,9 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=92';
-import { events } from '../events.js?v=92';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=92';
+} from '../config.js?v=105';
+import { events } from '../events.js?v=105';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=105';
 
 function markShared(asset) {
   if (asset) {
@@ -214,23 +214,28 @@ export const CombatMethods = {
   },
 
   /**
-   * Returns true if the player is standing near an Ammo & Kit Stash, inside their Main HQ Base,
-   * or inside a Friendly Captured Objective Flag zone where they can resupply [F] and swap Loadout/Weapons [L].
+   * Returns true if the player is standing near an Ammo & Kit Stash (<= 5.5m), inside their Main HQ Base (<= 145m),
+   * or inside a Friendly Captured Objective FOB zone (<= flag.radius + 14m) where they can resupply [F],
+   * swap Roles [F5–F11], and access the Gunsmith Workbench [L].
    */
-  isAtResupplyPoint(maxCrateDist = DISTANCES.INTERACT_RANGE + 1.5) {
+  isAtResupplyPoint(maxCrateDist = 5.5) {
+    if (this.squadDoctrineEnabled === false) return true;
+    if (typeof this.canAccessGunsmithWorkbench === 'function' && this.canAccessGunsmithWorkbench()) {
+      return true;
+    }
     if (this.findNearestAmmoCrate(maxCrateDist)) return true;
     const basePos =
       this.team === 'RU'
         ? this.world?.spawns?.RU_BASE || this.world?.ruBase
         : this.world?.spawns?.US_BASE || this.world?.usBase;
-    if (basePos && Math.hypot(this.pos.x - basePos.x, this.pos.z - basePos.z) <= 52) {
+    if (basePos && Math.hypot(this.pos.x - basePos.x, this.pos.z - basePos.z) <= 145) {
       return true;
     }
     if (this.world && Array.isArray(this.world.flags)) {
       for (const f of this.world.flags) {
         if (
           f.owner === this.team &&
-          Math.hypot(this.pos.x - f.pos.x, this.pos.z - f.pos.z) <= (f.radius || 28)
+          Math.hypot(this.pos.x - f.pos.x, this.pos.z - f.pos.z) <= (f.radius || 28) + 14
         ) {
           return true;
         }
@@ -872,9 +877,12 @@ export const CombatMethods = {
     const targetRole = resolveRoleForEra(newRole, era, this.team);
 
     if (requireCrate) {
-      if (!this.isAtResupplyPoint(DISTANCES.INTERACT_RANGE + 1.5)) {
+      if (!this.isAtResupplyPoint(5.5)) {
         if (this.onAwardXp) {
-          this.onAwardXp(0, '⚠️ MOVE NEAR AN AMMO STASH / BASE OR PRESS [7] TO DEPLOY ONE TO CHANGE KIT!');
+          this.onAwardXp(
+            0,
+            '⚠️ MOVE TO MAIN BASE HQ, A CAPTURED FRIENDLY FOB, OR AN AMMO STASH [7] TO CHANGE ROLE!'
+          );
         }
         return false;
       }
@@ -937,6 +945,11 @@ export const CombatMethods = {
     this.magPackProgress = 0;
     this.isAds = false;
     this.useCantedSight = false;
+    const nextSlot = this.slots[index];
+    const zCount = Array.isArray(nextSlot?.def?.zoomLevels) ? nextSlot.def.zoomLevels.length : 0;
+    if (!zCount || (this.opticZoomIndex || 0) >= zCount) {
+      this.opticZoomIndex = 0;
+    }
 
     while (this.viewModelGroup.children.length > 0) {
       this.viewModelGroup.remove(this.viewModelGroup.children[0]);
@@ -977,15 +990,46 @@ export const CombatMethods = {
   // =========================================================================
   deployFieldAmmoStash() {
     if (this.dead || this.downed || this.activeVehicle) return false;
-    // Support class has dedicated Ammo Crate charges on slot [3]; other roles use [7] field stash cooldown
     if (this.role !== 'support' && (this.ammoStashCooldown || 0) > 0) {
       if (this.onAwardXp) {
         this.onAwardXp(
           0,
-          `⏳ FIELD AMMO & KIT STASH COOLDOWN: ${Math.ceil(this.ammoStashCooldown)}s`
+          this.role === 'assault'
+            ? `⏳ RIFLEMAN AMMO POUCH COOLDOWN: ${Math.ceil(this.ammoStashCooldown)}s`
+            : `⏳ FIELD AMMO & KIT STASH COOLDOWN: ${Math.ceil(this.ammoStashCooldown)}s`
         );
       }
       return false;
+    }
+    if (this.role === 'assault') {
+      // Shock Assault Specialty: Fast 18s-cooldown Rifleman Ammo Pouch (instant mag + +1 grenade top-up)!
+      this.ammoStashCooldown = PLAYER.ASSAULT_POUCH_COOLDOWN || 18;
+      const prim = this.slots[0];
+      if (prim && prim.def && prim.def.clipSize > 1) {
+        if (!Array.isArray(prim.mags)) prim.mags = [];
+        const maxPouches = (prim.def.spareMagSlots || 6) + 2;
+        if (prim.mags.length < maxPouches) {
+          prim.mags.unshift(prim.def.clipSize);
+        } else {
+          for (let i = 0; i < prim.mags.length; i++) {
+            if (prim.mags[i] < prim.def.clipSize) {
+              prim.mags[i] = prim.def.clipSize;
+              break;
+            }
+          }
+        }
+        prim.looseAmmo = Math.min(prim.maxLooseAmmo || 150, (prim.looseAmmo || 0) + prim.def.clipSize);
+        this.syncReserveFromMags(prim);
+      }
+      this.grenades = Math.min(5, (this.grenades || 0) + 1);
+      this.dropAmmoCrate(true);
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          25,
+          `💥 RIFLEMAN AMMO POUCH DROPPED (18S CD): +1 LOADED MAG & +1 FRAG GRENADE (${this.grenades} FRAGS)!`
+        );
+      }
+      return true;
     }
     this.ammoStashCooldown = this.role === 'support' ? 12 : DEPLOYABLES.AMMO_STASH_COOLDOWN || 45;
     this.dropAmmoCrate(true);
@@ -1057,7 +1101,8 @@ export const CombatMethods = {
     this.reloading = false;
     this.fastReload = false;
     this.isAds = false;
-    const bulletTime = PLAYER.MAG_PACK_BULLET_TIME || 0.22;
+    const cohesionReloadMult = this.inSquadCohesion ? 0.82 : 1.0;
+    const bulletTime = (PLAYER.MAG_PACK_BULLET_TIME || 0.22) * cohesionReloadMult;
     this.magPackBulletTimer = bulletTime;
     this.magPackBulletDuration = bulletTime;
     this.magPackProgress = 0.02;
@@ -1153,11 +1198,12 @@ export const CombatMethods = {
       return;
     }
 
+    const cohesionReloadMult = this.inSquadCohesion ? 0.82 : 1.0;
     this.reloading = true;
     this.fastReload = false;
     this.slowReloading = false;
-    this.reloadTotalTime = cur.def.reloadTime;
-    this.reloadTimer = cur.def.reloadTime;
+    this.reloadTotalTime = cur.def.reloadTime * cohesionReloadMult;
+    this.reloadTimer = this.reloadTotalTime;
     this.isAds = false;
     sound.playReload();
     events.emit('player:reloaded', {
@@ -1323,7 +1369,7 @@ export const CombatMethods = {
     this.camera.getWorldPosition(_fireOrigin);
     _fireFwdDir.set(0, 0, -1).applyQuaternion(_fireCamQuat);
     const muzzleWorldPos = this.getWeaponMuzzleWorldPosition(_fireOrigin, _fireFwdDir, _fireMuzzlePos);
-    const pelletCount = Math.max(1, def.pellets || 1);
+    const pelletCount = def.isSlugAmmo ? 1 : Math.max(1, def.pellets || 1);
     const armorPenMult = def.armorPenMult || 1.0;
 
     for (let p = 0; p < pelletCount; p++) {
@@ -1986,10 +2032,12 @@ export const CombatMethods = {
             bullet.wepDef,
             bullet.pelletCount
           );
+          const incendiaryMult = bullet.wepDef?.isIncendiaryAmmo ? 1.15 : 1.0;
           const dmg = Math.max(
             1,
             Math.round(
               bullet.damage *
+                incendiaryMult *
                 distMult *
                 bodyPenMult *
                 envMult *
@@ -2020,13 +2068,18 @@ export const CombatMethods = {
           bullet.collateralHits++;
           _stepImpactPt.copy(bestBotHit.point);
 
-          const impactColor =
-            res.hitType === 'armor'
-              ? _hitArmorColor
-              : isHeadshot
-              ? _hitHeadColor
-              : _hitBodyColor;
-          this.world.spawnDebris(bestBotHit.point, impactColor, res.killed ? 6 : 3);
+          const impactColor = bullet.wepDef?.isIncendiaryAmmo
+            ? _hitVehColor
+            : res.hitType === 'armor'
+            ? _hitArmorColor
+            : isHeadshot
+            ? _hitHeadColor
+            : _hitBodyColor;
+          this.world.spawnDebris(
+            bestBotHit.point,
+            impactColor,
+            bullet.wepDef?.isIncendiaryAmmo ? 7 : res.killed ? 6 : 3
+          );
           if (bot.mesh.userData.parts && bot.mesh.userData.parts.upperBody) {
             bot.mesh.userData.parts.upperBody.rotation.x = -0.42;
           }
@@ -2060,20 +2113,25 @@ export const CombatMethods = {
           if (res.killed && !isFriendlyBot) {
             bullet.collateralKills++;
             this.kills++;
-            const pts = isHeadshot ? COMBAT.KILL_XP_HEADSHOT : COMBAT.KILL_XP_NORMAL;
+            const rawPts = isHeadshot ? COMBAT.KILL_XP_HEADSHOT : COMBAT.KILL_XP_NORMAL;
+            const pts = this.inSquadCohesion ? Math.round(rawPts * 1.25) : rawPts;
+            const cohTag = this.inSquadCohesion ? ' • 🤝 +25% COHESION' : '';
             this.score += pts;
             if (this.onAwardXp) {
               this.onAwardXp(
                 pts,
                 isHeadshot
-                  ? `ENEMY KILLED [HEADSHOT${colTag}] (${bot.name})`
-                  : `ENEMY KILLED${colTag} (${bot.name})`
+                  ? `ENEMY KILLED [HEADSHOT${colTag}] (${bot.name})${cohTag}`
+                  : `ENEMY KILLED${colTag} (${bot.name})${cohTag}`
               );
             }
             if (bot.role === 'MEDIC') {
               this.registerMedicWarCrime(bot.name, Boolean(res.wasRescuing));
             }
             const killInfo = this.registerKill(bot.name);
+            if (this.activeVehicle && this.activeVehicle.isAircraft) {
+              this.recordAirCombatKill?.(1);
+            }
             if (killInfo.announcement && this.onKillStreakAnnouncement) {
               this.onKillStreakAnnouncement(killInfo.announcement);
             }
@@ -2102,12 +2160,19 @@ export const CombatMethods = {
               Math.round(bullet.voxelDamage * 0.45 * bullet.armorPenMult)
             );
             if (this.onHitmarker) {
-              this.onHitmarker(
-                'armor',
-                bullet.isMountedMg ? `AP ARMOR HIT -${apDmg}` : 'VEHICLE ARMOR'
-              );
+              if (veh.isAircraft) {
+                this.onHitmarker(
+                  'armor',
+                  bullet.isMountedMg ? `✈️ AIRFRAME HIT -${apDmg}` : `✈️ AIRCRAFT HIT -${apDmg}`
+                );
+              } else {
+                this.onHitmarker(
+                  'armor',
+                  bullet.isMountedMg ? `AP ARMOR HIT -${apDmg}` : `VEHICLE ARMOR -${apDmg}`
+                );
+              }
             }
-            const destroyed = this.vehicleManager.damageVehicle(
+            this.vehicleManager.damageVehicle(
               veh,
               apDmg,
               this.name,
@@ -2116,9 +2181,6 @@ export const CombatMethods = {
               this.onKillEvent,
               this.onAwardXp
             );
-            if (destroyed) {
-              this.vehiclesDestroyed = (this.vehiclesDestroyed || 0) + 1;
-            }
           }
           terminatedOnEntity = true;
           break;
@@ -2199,7 +2261,7 @@ export const CombatMethods = {
               bullet.isMountedMg ? `✈️ AIRFRAME HIT -${apDmg}` : 'AIRCRAFT HIT'
             );
           }
-          const destroyed = this.vehicleManager.damageVehicle(
+          this.vehicleManager.damageVehicle(
             airV,
             apDmg,
             this.name,
@@ -2208,9 +2270,6 @@ export const CombatMethods = {
             this.onKillEvent,
             this.onAwardXp
           );
-          if (destroyed) {
-            this.vehiclesDestroyed = (this.vehiclesDestroyed || 0) + 1;
-          }
           terminatedOnEntity = true;
           break;
         }
@@ -2269,20 +2328,26 @@ export const CombatMethods = {
       terminatedOnEntity || stoppedByVoxel || reachedMaxRange
     );
 
-    // 5. Near-miss suppression along this frame's segment (O(1) spatial grid + fast AABB pre-reject)
+    // 5. Near-miss suppression along this frame's segment (Support LMG deals 1.75x enemy suppression!)
     if (this.botManager) {
       const ix = _stepImpactPt.x;
       const iy = _stepImpactPt.y;
       const iz = _stepImpactPt.z;
+      const isSupportLmg =
+        this.role === 'support' &&
+        (bullet.wepDef?.soundType === 'lmg' || (bullet.wepDef?.clipSize || 0) >= 50 || bullet.damage >= 26);
+      const suppStep = isSupportLmg ? 0.15 * 1.75 : 0.15;
+      const suppRad = isSupportLmg ? 6.8 : 5.2;
+      const suppRadSq = suppRad * suppRad;
       if (this.botManager.spatialGrid && this.botManager.spatialGrid.count > 0) {
-        this.botManager.spatialGrid.forEachInRadius(ix, iz, 5.2, (bot, dSqXZ) => {
+        this.botManager.spatialGrid.forEachInRadius(ix, iz, suppRad, (bot, dSqXZ) => {
           if (bot.dead || bot.downed || bot.team === this.team) return;
           const dy = bot.pos.y - iy;
-          if (dy > 5.2 || dy < -5.2) return;
+          if (dy > suppRad || dy < -suppRad) return;
           const dSq = dSqXZ + dy * dy;
-          if (dSq < 27.04 && dSq > 0.01) {
-            bot.suppressionLevel = Math.min(1.0, (bot.suppressionLevel || 0) + 0.15);
-            bot.underFireTimer = 2.4;
+          if (dSq < suppRadSq && dSq > 0.01) {
+            bot.suppressionLevel = Math.min(1.0, (bot.suppressionLevel || 0) + suppStep);
+            bot.underFireTimer = isSupportLmg ? 3.2 : 2.4;
             if (!bot.lastShooterPos) bot.lastShooterPos = new THREE.Vector3();
             bot.lastShooterPos.copy(this.pos);
           }
@@ -2292,15 +2357,15 @@ export const CombatMethods = {
           const bot = this.botManager.bots[i];
           if (bot.dead || bot.downed || bot.team === this.team) continue;
           const dx = bot.pos.x - ix;
-          if (dx > 5.2 || dx < -5.2) continue;
+          if (dx > suppRad || dx < -suppRad) continue;
           const dz = bot.pos.z - iz;
-          if (dz > 5.2 || dz < -5.2) continue;
+          if (dz > suppRad || dz < -suppRad) continue;
           const dy = bot.pos.y - iy;
-          if (dy > 5.2 || dy < -5.2) continue;
+          if (dy > suppRad || dy < -suppRad) continue;
           const dSq = dx * dx + dy * dy + dz * dz;
-          if (dSq < 27.04 && dSq > 0.01) {
-            bot.suppressionLevel = Math.min(1.0, (bot.suppressionLevel || 0) + 0.15);
-            bot.underFireTimer = 2.4;
+          if (dSq < suppRadSq && dSq > 0.01) {
+            bot.suppressionLevel = Math.min(1.0, (bot.suppressionLevel || 0) + suppStep);
+            bot.underFireTimer = isSupportLmg ? 3.2 : 2.4;
             if (!bot.lastShooterPos) bot.lastShooterPos = new THREE.Vector3();
             bot.lastShooterPos.copy(this.pos);
           }
@@ -2757,8 +2822,11 @@ export const CombatMethods = {
 
   // Squad-style suppression: call this when bullets land near the player (within ~4m)
   applySuppression(intensity = 0.25) {
-    // Entrenched defenders inside a Friendly Forward Base take 50% less suppression!
-    const effIntensity = this.inFriendlyForwardBase ? intensity * 0.5 : intensity;
+    // Entrenched defenders (-50%) & Squad Cohesion Members (-35%) resist incoming suppression!
+    let effIntensity = this.inFriendlyForwardBase ? intensity * 0.5 : intensity;
+    if (this.inSquadCohesion) {
+      effIntensity *= 0.65;
+    }
     this.suppressionLevel = Math.min(1.0, this.suppressionLevel + effIntensity);
     this.lastSuppressionHitTime = performance.now();
   },
@@ -2976,7 +3044,10 @@ export const CombatMethods = {
           }
           if (res?.killed) {
             this.kills++;
-            this.score += COMBAT.KILL_XP_NORMAL;
+            const pts = this.inSquadCohesion
+              ? Math.round(COMBAT.KILL_XP_NORMAL * 1.25)
+              : COMBAT.KILL_XP_NORMAL;
+            this.score += pts;
             this.registerKill(bot.name);
           }
         }
@@ -3034,8 +3105,25 @@ export const CombatMethods = {
     }
   },
 
-  takeDamage(amount, attackerName, attackerTeam, weaponName, onKillFn, attackerPos = null) {
+  takeDamage(
+    amount,
+    attackerName,
+    attackerTeam,
+    weaponName,
+    onKillFn,
+    attackerPos = null,
+    isHeadshot = false
+  ) {
     if (this.dead || this.downed) return;
+    this.outOfCombatTimer = 0;
+    if (
+      isHeadshot &&
+      typeof this.headshotTakenMult === 'number' &&
+      this.headshotTakenMult > 0 &&
+      this.headshotTakenMult !== 1
+    ) {
+      amount = Math.max(1, Math.round(amount * this.headshotTakenMult));
+    }
 
     // Mount & Blade Shield Wall, Passive Off-Hand Shield Coverage & Directional Chamber Parry Mechanics:
     // 1. Directional Frontal Arc Check: Shields & Parries protect your frontal/flank arc (dot >= -0.25)!

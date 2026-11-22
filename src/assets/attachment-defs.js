@@ -1,7 +1,7 @@
 // ============================================================================
 // GUNSMITH ATTACHMENT & ARMORY DEFINITIONS (src/assets/attachment-defs.js)
 // Edit this file to patch muzzle devices, magazines, optics, foregrips,
-// ammunition types, and body armor vests.
+// ammunition types, body armor vests, backpacks, and tactical headgear/NVG/stims.
 // ============================================================================
 
 export const ATTACHMENT_CATALOG = {
@@ -29,6 +29,19 @@ export const ATTACHMENT_CATALOG = {
       desc: 'Eliminates 82% of muzzle flash in ADS & hipfire; -15% vertical recoil.'
     },
     {
+      id: 'warden_blast',
+      name: 'SUREFIRE WARDEN BLAST REGULATOR',
+      shortName: 'WARDEN BLAST',
+      price: 1100,
+      flashMult: 0.35,
+      recoilMult: 0.80,
+      velocityMult: 1.04,
+      spreadMult: 0.92,
+      silenced: false,
+      hideTracers: false,
+      desc: 'Direct-thread blast diffuser: -65% muzzle flash, -20% recoil, +4% velocity & tighter grouping.'
+    },
+    {
       id: 'compensator',
       name: 'TACTICAL MUZZLE COMPENSATOR',
       shortName: 'COMPENSATOR',
@@ -40,6 +53,17 @@ export const ATTACHMENT_CATALOG = {
       desc: 'Vented muzzle brake cuts vertical & horizontal recoil by 28% and flash by 45%.'
     },
     {
+      id: 'lantac_dragon',
+      name: 'LANTAC DRAGON MUZZLE BRAKE',
+      shortName: 'LANTAC DRAGON',
+      price: 1550,
+      flashMult: 0.7,
+      recoilMult: 0.65,
+      silenced: false,
+      hideTracers: false,
+      desc: 'Competition dual-chamber brake: -35% vertical/horizontal recoil for flat full-auto beams.'
+    },
+    {
       id: 'silencer',
       name: 'SOCOM TACTICAL SILENCER',
       shortName: 'SILENCER',
@@ -49,6 +73,17 @@ export const ATTACHMENT_CATALOG = {
       silenced: true,
       hideTracers: true,
       desc: '100% Zero Muzzle Flash, suppressed subsonic audio, hides tracers & -20% recoil!'
+    },
+    {
+      id: 'qdc_suppressor',
+      name: 'KAC QDC / SANDMAN-S HEAVY SUPPRESSOR',
+      shortName: 'QDC SUPPRESSOR',
+      price: 3100,
+      flashMult: 0.0,
+      recoilMult: 0.72,
+      silenced: true,
+      hideTracers: true,
+      desc: 'Tier-1 QD heavy suppressor: 100% Zero Flash, hides tracers, suppressed audio & -28% recoil!'
     }
   ],
   magazine: [
@@ -71,6 +106,15 @@ export const ATTACHMENT_CATALOG = {
       desc: 'High-speed ranger floorplate cuts reload duration by 28% with standard capacity.'
     },
     {
+      id: 'jungle_taped',
+      name: 'TAPED JUNGLE DUAL-MAG',
+      shortName: 'JUNGLE TAPED',
+      price: 1150,
+      capMult: 1.0,
+      reloadMult: 0.62,
+      desc: '-38% ultra-fast flip reload with twin combat-taped magazines!'
+    },
+    {
       id: 'ext_mag',
       name: 'EXTENDED TACTICAL MAG',
       shortName: 'EXT MAG (+50%)',
@@ -78,6 +122,15 @@ export const ATTACHMENT_CATALOG = {
       capMult: 1.5,
       reloadMult: 1.05,
       desc: '+50% Magazine & Reserve Ammo capacity (45 rnds Rifle / 60 SMG / 15 Sniper).'
+    },
+    {
+      id: 'quad_60',
+      name: 'PMAG D-60 / 6L31 QUAD-STACK',
+      shortName: 'QUAD-60 (+75%)',
+      price: 2200,
+      capMult: 1.75,
+      reloadMult: 1.06,
+      desc: '+75% Magazine & Reserve Ammo capacity with fast quad-stack handling.'
     },
     {
       id: 'drum_mag',
@@ -92,7 +145,7 @@ export const ATTACHMENT_CATALOG = {
   optic: [
     {
       id: 'factory',
-      name: 'BARE IRON SIGHTS (AIM DOWN BARREL)',
+      name: 'BARE IRON SIGHTS (1.0X)',
       shortName: 'IRON SIGHTS',
       price: 0,
       opticType: null,
@@ -101,9 +154,19 @@ export const ATTACHMENT_CATALOG = {
       desc: 'No optic mounted — unobstructed aim straight down the receiver rail and front barrel post.'
     },
     {
+      id: 'rmr_mini',
+      name: 'TRIJICON RMR MICRO REFLEX (1.0X)',
+      shortName: 'RMR 1.0X',
+      price: 550,
+      opticType: 'rmr',
+      adsFov: 50,
+      grantCanted: false,
+      desc: 'Ultra-low-profile pistol & carbine amber/red 3.25 MOA reflex dot with zero peripheral obstruction.'
+    },
+    {
       id: 'reddot',
       name: 'AIMPOINT MICRO T-2 (1.0X)',
-      shortName: 'RED DOT 1X',
+      shortName: 'MICRO T-2 1X',
       price: 650,
       opticType: 'reddot',
       adsFov: 48,
@@ -118,37 +181,140 @@ export const ATTACHMENT_CATALOG = {
       opticType: 'kobra',
       adsFov: 46,
       grantCanted: false,
-      desc: 'Russian open-top 1.0x tactical chevron reflex sight.'
+      desc: 'Russian open-top 1.0x tactical chevron-and-bars reflex sight.'
+    },
+    {
+      id: 'okp7',
+      name: 'OKP-7 RIMLESS GREEN REFLEX (1.0X)',
+      shortName: 'OKP-7 GREEN',
+      price: 900,
+      opticType: 'okp7',
+      adsFov: 47,
+      grantCanted: false,
+      desc: 'Iconic Escape from Tarkov rimless green chevron-circle sight with crystal-clear field of view!'
     },
     {
       id: 'holo',
-      name: 'EOTECH EXPS3 HOLO (1.0X)',
-      shortName: 'EOTECH HOLO',
+      name: 'EOTECH EXPS3-0 HOLO (1.0X)',
+      shortName: 'EXPS3 HOLO',
       price: 1150,
       opticType: 'holo',
       adsFov: 44,
       grantCanted: true,
-      desc: '1.0x holographic ring-and-dot reticle + unlocks [V] Canted Sight.'
+      desc: '1.0x 68-MOA holographic ring-and-dot reticle + unlocks [V] 45° Canted Sight.'
+    },
+    {
+      id: 'vortex_uh1',
+      name: 'VORTEX AMG UH-1 GEN II HOLO (1.0X)',
+      shortName: 'UH-1 HOLO',
+      price: 1250,
+      opticType: 'uh1',
+      adsFov: 44,
+      grantCanted: true,
+      desc: 'Boxy tactical holographic EBR-CQB reticle with CQB triangle reference + [V] 45° Canted Sight.'
+    },
+    {
+      id: 'prism_2x',
+      name: 'PRIMARY ARMS GLX PRISM (2.0X)',
+      shortName: 'PRISM 2.0X',
+      price: 1400,
+      opticType: 'prism2x',
+      adsFov: 35,
+      grantCanted: true,
+      desc: 'Crisp 2.0x etched ACSS horseshoe-chevron mid-close combat optic + [V] 45° Canted Red Dot!'
+    },
+    {
+      id: 'holo_g33',
+      name: 'EOTECH HHS-I HYBRID (1.0X ⇄ 3.0X FLIP)',
+      shortName: 'HOLO 1X/3X',
+      price: 1950,
+      opticType: 'holo3x',
+      adsFov: 44,
+      zoomLevels: [1.0, 3.0],
+      zoomFovs: [44, 28],
+      grantCanted: false,
+      desc: 'EXPS3 Holo + G33 3x Flip-to-Side Magnifier — Scroll Wheel or [V] in ADS flips between 1.0x & 3.0x!'
     },
     {
       id: 'acog',
-      name: 'TRIJICON ACOG (3.4X + CANTED)',
+      name: 'TRIJICON ACOG TA31 (3.4X + CANTED)',
       shortName: 'ACOG 3.4X',
       price: 1750,
       opticType: 'acog',
-      adsFov: 28,
+      adsFov: 26,
       grantCanted: true,
-      desc: '3.4x medium-range ballistic chevron scope + [V] 45° Canted Red Dot!'
+      desc: '3.4x fiber-optic ballistic chevron scope + [V] 45° Canted Red Dot!'
+    },
+    {
+      id: 'elcan_dr',
+      name: 'ELCAN SPECTER-DR (1.0X ⇄ 4.0X LEVER)',
+      shortName: 'ELCAN 1X/4X',
+      price: 2250,
+      opticType: 'elcan4x',
+      adsFov: 22,
+      zoomLevels: [1.0, 4.0],
+      zoomFovs: [46, 22],
+      grantCanted: true,
+      desc: 'Tarkov & CoD legend: Scroll Wheel in ADS throws lever instantly between 1x CQB & 4x ballistic cross (+ [V] Canted)!'
+    },
+    {
+      id: 'valday_1_6x',
+      name: 'VALDAY PS-320 LPVO (1.0X ⇄ 6.0X)',
+      shortName: 'VALDAY 1-6X',
+      price: 2500,
+      opticType: 'valday6x',
+      adsFov: 45,
+      zoomLevels: [1.0, 6.0],
+      zoomFovs: [45, 16.5],
+      grantCanted: true,
+      desc: '1.0x–6.0x Low Power Variable Optic: Scroll Wheel toggles true 1x CQB dot to 6x precision BDC (+ [V] Canted)!'
+    },
+    {
+      id: 'vudu_3_6x',
+      name: 'EOTECH VUDU DUAL-ZOOM (3.0X ⇄ 6.0X + CANTED)',
+      shortName: 'VUDU 3X/6X',
+      price: 2700,
+      opticType: 'lpvo36',
+      adsFov: 28,
+      zoomLevels: [3.0, 6.0],
+      zoomFovs: [28, 16.0],
+      grantCanted: true,
+      desc: '3.0x & 6.0x first-focal-plane speed-ring variable scope (Scroll Wheel) + [V] 45° Canted Red Dot!'
+    },
+    {
+      id: 'flir_thermal',
+      name: 'TRIJICON REAP-IR / FLIR THERMAL (2.5X ⇄ 5.0X IR)',
+      shortName: 'FLIR IR 2.5-5X',
+      price: 3800,
+      opticType: 'flir',
+      adsFov: 31,
+      zoomLevels: [2.5, 5.0],
+      zoomFovs: [31, 18.5],
+      isThermal: true,
+      grantCanted: true,
+      desc: 'Infrared Thermal Imaging (2.5x ⇄ 5.0x) — highlights live enemies & vehicles in glowing white-hot/amber contrast (+ [V] Canted)!'
     },
     {
       id: 'sniper8x',
-      name: 'RAZOR HD (8.0X SCOPE + CANTED)',
-      shortName: '8.0X SCOPE',
+      name: 'VORTEX RAZOR HD (8.0X MIL-DOT + CANTED)',
+      shortName: 'RAZOR 8.0X',
       price: 2800,
       opticType: 'sniper8x',
-      adsFov: 15,
+      adsFov: 14.5,
       grantCanted: true,
       desc: 'High-power 8.0x mil-dot marksman optic + [V] 45° Canted Red Dot!'
+    },
+    {
+      id: 'nightforce_12x',
+      name: 'NIGHTFORCE ATACR (6.0X ⇄ 12.0X BALLISTIC)',
+      shortName: 'ATACR 6-12X',
+      price: 3400,
+      opticType: 'sniper12x',
+      adsFov: 16.5,
+      zoomLevels: [6.0, 12.0],
+      zoomFovs: [16.5, 9.5],
+      grantCanted: true,
+      desc: 'Extreme long-range 6.0x ⇄ 12.0x Horus Tremor3 ballistic sniper optic (Scroll Wheel) + [V] 45° Canted Red Dot!'
     }
   ],
   grip: [
@@ -173,6 +339,36 @@ export const ATTACHMENT_CATALOG = {
       desc: '-22% Vertical/Horizontal Recoil & tighter aim stability.'
     },
     {
+      id: 'vert_foregrip',
+      name: 'MAGPUL RVG VERTICAL FOREGRIP',
+      shortName: 'RVG VERTICAL',
+      price: 950,
+      recoilMult: 0.75,
+      spreadMult: 0.90,
+      rpmMult: 1.0,
+      desc: '-25% Vertical Recoil & -10% Spread for controlled full-auto bursts.'
+    },
+    {
+      id: 'bipod_grip',
+      name: 'HARRIS SWIVEL BIPOD + FOREGRIP',
+      shortName: 'BIPOD + GRIP',
+      price: 1400,
+      recoilMult: 0.64,
+      spreadMult: 0.78,
+      rpmMult: 1.0,
+      desc: '-36% sustained recoil & -22% bullet spread for DMR/LMG fire support.'
+    },
+    {
+      id: 'rk1_b25u',
+      name: 'ZENITCO RK-1 ON B-25U 45° CANT MOUNT',
+      shortName: 'RK-1 B-25U 45°',
+      price: 1650,
+      recoilMult: 0.68,
+      spreadMult: 0.82,
+      rpmMult: 1.0,
+      desc: 'Tarkov meta 45° canted Zenitco foregrip: -32% recoil & -18% spread!'
+    },
+    {
       id: 'match_laser',
       name: 'PEQ-15 LASER + MATCH TRIGGER',
       shortName: 'MATCH + LASER',
@@ -181,6 +377,16 @@ export const ATTACHMENT_CATALOG = {
       spreadMult: 0.62,
       rpmMult: 1.08,
       desc: '-28% Recoil, -38% Hipfire Spread & +8% Cyclic Rate of Fire!'
+    },
+    {
+      id: 'mawl_c1',
+      name: 'BE MEYERS MAWL-C1+ GREEN/IR LASER + GEISSELE TRIGGER',
+      shortName: 'MAWL-C1+ LASER',
+      price: 2900,
+      recoilMult: 0.68,
+      spreadMult: 0.52,
+      rpmMult: 1.11,
+      desc: '-48% hipfire spread, -32% recoil & +11% RPM with Geissele 3-Gun trigger!'
     }
   ],
   ammoType: [
@@ -198,6 +404,20 @@ export const ATTACHMENT_CATALOG = {
       desc: 'Standard M855/7N6 full metal jacket ball ammunition (factory muzzle velocity).'
     },
     {
+      id: 'subsonic_match',
+      name: 'MATCH-GRADE SUBSONIC LOAD (305 M/S)',
+      shortName: 'MATCH SUBSONIC',
+      price: 950,
+      dmgMult: 1.0,
+      armorPenMult: 1.0,
+      recoilMult: 0.85,
+      spreadMult: 0.8,
+      voxelMult: 1.0,
+      velocityMult: 0.65,
+      subsonicCap: 305,
+      desc: '305 m/s Subsonic velocity (quiet, no crack), -15% Recoil & -20% Bullet Spread for laser accuracy.'
+    },
+    {
       id: 'ap_rounds',
       name: 'M995 TUNGSTEN ARMOR-PIERCING',
       shortName: 'AP TUNGSTEN',
@@ -208,7 +428,20 @@ export const ATTACHMENT_CATALOG = {
       spreadMult: 1.0,
       voxelMult: 1.25,
       velocityMult: 1.08,
-      desc: '+35% Armor & Vehicle Penetration, +8% Muzzle Velocity, +25% Structural Damage, +6% Base Damage'
+      desc: '+35% Armor & Vehicle Penetration, +8% Muzzle Velocity, +25% Structural Damage, +6% Base Damage.'
+    },
+    {
+      id: 'rip_flesh',
+      name: 'TARKOV RIP / HOLLOW-POINT FLESH ROUNDS',
+      shortName: 'RIP FLESH',
+      price: 1700,
+      dmgMult: 1.24,
+      armorPenMult: 0.78,
+      recoilMult: 1.04,
+      spreadMult: 0.95,
+      voxelMult: 0.9,
+      velocityMult: 0.96,
+      desc: '+24% raw flesh/limb stopping power & fragmenting CQB trauma (-22% armor pen).'
     },
     {
       id: 'overpressure',
@@ -221,21 +454,35 @@ export const ATTACHMENT_CATALOG = {
       spreadMult: 1.0,
       voxelMult: 1.0,
       velocityMult: 1.15,
-      desc: '+15% Stopping Power & +15% High-Velocity Muzzle Speed, +6% Recoil kick'
+      desc: '+15% Stopping Power & +15% High-Velocity Muzzle Speed, +6% Recoil kick.'
     },
     {
-      id: 'subsonic_match',
-      name: 'MATCH-GRADE SUBSONIC LOAD (305 M/S)',
-      shortName: 'MATCH SUBSONIC',
-      price: 950,
-      dmgMult: 1.0,
-      armorPenMult: 1.0,
-      recoilMult: 0.85,
-      spreadMult: 0.8,
-      voxelMult: 1.0,
-      velocityMult: 0.65,
-      subsonicCap: 305,
-      desc: '305 m/s Subsonic velocity (quiet, no crack), -15% Recoil & -20% Bullet Spread for laser accuracy'
+      id: 'ap20_slug',
+      name: '12G AP-20 ARMOR-PIERCING SOLID SLUG / SNIPER SABOT',
+      shortName: 'AP-20 SLUG',
+      price: 2100,
+      dmgMult: 1.10,
+      armorPenMult: 1.55,
+      recoilMult: 1.08,
+      spreadMult: 0.35,
+      voxelMult: 1.4,
+      velocityMult: 1.22,
+      isSlugAmmo: true,
+      desc: 'Converts 12G Shotguns to 1-Shot Precision Slugs (<110m) & +55% AP on rifles!'
+    },
+    {
+      id: 'm855a1_bp',
+      name: 'M855A1 / 7N23 ENHANCED PENETRATOR',
+      shortName: 'M855A1 / 7N23',
+      price: 2400,
+      dmgMult: 1.12,
+      armorPenMult: 1.48,
+      recoilMult: 1.05,
+      spreadMult: 0.95,
+      voxelMult: 1.35,
+      velocityMult: 1.12,
+      isIncendiaryAmmo: true,
+      desc: '+48% armor pen, +12% damage & velocity + hardened steel penetrator core!'
     }
   ],
   vest: [
@@ -375,6 +622,68 @@ export const ATTACHMENT_CATALOG = {
       bonusGrenades: 3,
       bonusGadgets: 4,
       desc: 'Massive 36-cell Tarkov Raid Pack: +660 Loose Rifle Bullets, +260 Pistol Bullets, +4 Spare Mags, +3 Frags & +4 Rockets/C4!'
+    }
+  ],
+  tacticalGear: [
+    {
+      id: 'std_helmet',
+      name: '6B47 / ACH INFANTRY HELMET',
+      shortName: 'ACH HELMET',
+      price: 0,
+      bonusArmor: 0,
+      moveMult: 1.0,
+      passiveRegen: 0,
+      headshotTakenMult: 1.0,
+      hasThermalGoggles: false,
+      desc: 'Standard ballistic helmet.'
+    },
+    {
+      id: 'fast_mt_comtac',
+      name: 'OPS-CORE FAST MT + PELTOR COMTAC IV',
+      shortName: 'FAST MT + COMTAC',
+      price: 1200,
+      bonusArmor: 18,
+      moveMult: 1.04,
+      passiveRegen: 0,
+      headshotTakenMult: 0.9,
+      hasThermalGoggles: false,
+      desc: '+18 Armor HP & +4% Combat Mobility.'
+    },
+    {
+      id: 'altyn_faceshield',
+      name: 'ALTYN / RYS-T TITANIUM FACESHIELD HELMET',
+      shortName: 'ALTYN SHIELD',
+      price: 2600,
+      bonusArmor: 45,
+      moveMult: 0.95,
+      passiveRegen: 0,
+      headshotTakenMult: 0.6,
+      hasThermalGoggles: false,
+      desc: '+45 Heavy Armor & -40% Headshot Damage Taken (-5% speed).'
+    },
+    {
+      id: 'propital_rig',
+      name: 'TARKOV PROPITAL + ZAGUSTIN AUTO-STIM POUCH',
+      shortName: 'PROPITAL STIM',
+      price: 2900,
+      bonusArmor: 12,
+      moveMult: 1.02,
+      passiveRegen: 2.5,
+      headshotTakenMult: 0.95,
+      hasThermalGoggles: false,
+      desc: '+2.5 HP/s continuous passive combat regen + +12 Armor!'
+    },
+    {
+      id: 'gpnvg18_nvg',
+      name: 'L3HARRIS GPNVG-18 PANORAMIC NVG + IR MONOCLE',
+      shortName: 'GPNVG-18 NVG [N]',
+      price: 3500,
+      bonusArmor: 20,
+      moveMult: 1.03,
+      passiveRegen: 1.0,
+      headshotTakenMult: 0.88,
+      hasThermalGoggles: true,
+      desc: '+20 Armor, +1 HP/s regen & Press [N] anywhere for Panoramic Green Night/IR Vision!'
     }
   ]
 };

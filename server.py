@@ -136,9 +136,6 @@ class BattleBitRequestHandler(SimpleHTTPRequestHandler):
             log_http_access(f"{self.client_address[0]}:{self.client_address[1]} - {format_str % args}")
 
     STATIC_CACHE_EXTS = (
-        ".js",
-        ".mjs",
-        ".css",
         ".ogg",
         ".mp3",
         ".wav",

@@ -1,5 +1,5 @@
-import { BOT } from '../config.js?v=92';
-import { tmpVec3 } from '../utils/VectorPool.js?v=92';
+import { BOT } from '../config.js?v=105';
+import { tmpVec3 } from '../utils/VectorPool.js?v=105';
 
 /**
  * Multi-Ray "Vision Tube" Sightline Check:

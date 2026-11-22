@@ -6,8 +6,8 @@
 //  3. jurassic_island  — JURASSIC ERA (Prehistoric Jungle Island — Humans vs Dinosaurs)
 // ============================================================================
 
-import { TERRAIN } from '../config.js?v=92';
-import { FRUGIS_RIVER_MAP } from './frugis-river.js?v=92';
+import { TERRAIN } from '../config.js?v=105';
+import { FRUGIS_RIVER_MAP } from './frugis-river.js?v=105';
 
 export const MEDIEVAL_CITADEL_MAP = {
   id: 'medieval_citadel',
@@ -17,59 +17,57 @@ export const MEDIEVAL_CITADEL_MAP = {
   name: 'IRONKEEP CITADEL & CASTLE VALLEY (BETA)',
   subtitle: 'BETA PREVIEW • STONE CASTLES, TREBUCHETS & CAVALRY • NO MODERN AIRCRAFT',
   dimensions: {
-    width: 4800,
-    depth: 3200,
-    segmentsX: 360,
-    segmentsZ: 240,
+    width: 7600,
+    depth: 5200,
+    segmentsX: 560,
+    segmentsZ: 380,
     riverWidth: 52,
-    riverLength: 3200,
+    riverLength: 5200,
     riverWaterY: -0.85
   },
 
   bridges: [
-    { z: -220, widthX: 42, spanZ: 17.0, isCentralPlaza: false, parapetHalfSpanZ: 7.2 },
+    { z: -400, widthX: 42, spanZ: 17.0, isCentralPlaza: false, parapetHalfSpanZ: 7.2 },
     { z: 0, widthX: 42, spanZ: 36.0, isCentralPlaza: true, parapetHalfSpanZ: 17.2 },
-    { z: 220, widthX: 42, spanZ: 17.0, isCentralPlaza: false, parapetHalfSpanZ: 7.2 }
+    { z: 400, widthX: 42, spanZ: 17.0, isCentralPlaza: false, parapetHalfSpanZ: 7.2 }
   ],
 
   // Only medieval castle plateaus & siege camp pads (NO modern airfields, B-2 lanes, or bike warehouses)
   gradedPads: [
-    { x: -380, z: -140, rx: 66, rz: 56, h: 2.5 },   // Obj A: West Barony Stone Keep
-    { x: -185, z: 165, rx: 62, rz: 54, h: 1.25 },   // Obj B: Royal Siege Camp & Warhorse Lists
+    { x: -660, z: -280, rx: 66, rz: 56, h: 2.5 },   // Obj A: West Barony Stone Keep
+    { x: -320, z: 320, rx: 62, rz: 54, h: 1.25 },   // Obj B: Royal Siege Camp & Warhorse Lists
     { x: 0, z: 0, rx: 68, rz: 58, h: 1.25 },        // Obj C: King's Stone Bridge Citadel
-    { x: 195, z: -165, rx: 66, rz: 56, h: 6.25 },   // Obj D: Highland Crown Fortress
-    { x: 380, z: 140, rx: 66, rz: 56, h: 2.5 },     // Obj E: East Citadel Garrison
-    { x: -360, z: 130, rx: 45, rz: 38, h: 2.5 },    // North-West Feudal Watch Hamlet
-    { x: 360, z: -130, rx: 45, rz: 38, h: 2.5 },    // South-East Feudal Watch Hamlet
-    { x: -660, z: 0, rx: 50, rz: 42, h: 1.25 },     // West Vanguard Castle Gatehouse
-    { x: 660, z: 0, rx: 50, rz: 42, h: 1.25 },      // East Vanguard Castle Gatehouse
-    { x: -950, z: 0, rx: 82, rz: 68, h: 1.25 },     // West Kingdom Grand Castle HQ
-    { x: 950, z: 0, rx: 82, rz: 68, h: 1.25 }       // East Empire Grand Castle HQ
+    { x: 330, z: -320, rx: 66, rz: 56, h: 6.25 },   // Obj D: Highland Crown Fortress
+    { x: 660, z: 280, rx: 66, rz: 56, h: 2.5 },     // Obj E: East Citadel Garrison
+    { x: -640, z: 270, rx: 45, rz: 38, h: 2.5 },    // North-West Feudal Watch Hamlet
+    { x: 640, z: -270, rx: 45, rz: 38, h: 2.5 },    // South-East Feudal Watch Hamlet
+    { x: -1060, z: 0, rx: 50, rz: 42, h: 1.25 },     // West Vanguard Castle Gatehouse
+    { x: 1060, z: 0, rx: 50, rz: 42, h: 1.25 },      // East Vanguard Castle Gatehouse
+    { x: -1520, z: 0, rx: 82, rz: 68, h: 1.25 },     // West Kingdom Grand Castle HQ
+    { x: 1520, z: 0, rx: 82, rz: 68, h: 1.25 }       // East Empire Grand Castle HQ
   ],
 
   spawns: {
-    US_BASE: { x: -950, z: 0 },
-    RU_BASE: { x: 950, z: 0 }
+    US_BASE: { x: -1520, z: 0 },
+    RU_BASE: { x: 1520, z: 0 }
   },
 
   flags: [
     {
       id: 'A',
       name: 'OBJ ALPHA — WEST BARONY KEEP',
-      x: -380,
-      z: -140,
-      owner: 'US',
-      captureProgress: 100,
+      x: -660, z: -280,
+      owner: 'NEUTRAL',
+      captureProgress: 0,
       radius: TERRAIN.FLAG_RADIUS_DEFAULT,
       useGroundHeight: false
     },
     {
       id: 'B',
       name: 'OBJ BRAVO — ROYAL SIEGE ENCAMPMENT',
-      x: -185,
-      z: 165,
-      owner: 'US',
-      captureProgress: 80,
+      x: -320, z: 320,
+      owner: 'NEUTRAL',
+      captureProgress: 0,
       radius: TERRAIN.FLAG_RADIUS_DEFAULT,
       useGroundHeight: false
     },
@@ -86,20 +84,18 @@ export const MEDIEVAL_CITADEL_MAP = {
     {
       id: 'D',
       name: 'OBJ DELTA — HIGHLAND CROWN FORTRESS',
-      x: 195,
-      z: -165,
-      owner: 'RU',
-      captureProgress: -80,
+      x: 330, z: -320,
+      owner: 'NEUTRAL',
+      captureProgress: 0,
       radius: TERRAIN.FLAG_RADIUS_DEFAULT,
       useGroundHeight: false
     },
     {
       id: 'E',
       name: 'OBJ ECHO — EAST IRON CITADEL',
-      x: 380,
-      z: 140,
-      owner: 'RU',
-      captureProgress: -100,
+      x: 660, z: 280,
+      owner: 'NEUTRAL',
+      captureProgress: 0,
       radius: TERRAIN.FLAG_RADIUS_DEFAULT,
       useGroundHeight: false
     }
@@ -154,56 +150,54 @@ export const JURASSIC_ISLAND_MAP = {
   name: 'ISLA CARNIVORA — HUMANS VS DINOSAURS (BETA)',
   subtitle: 'BETA PREVIEW • EXPEDITION HUMANS (US) VS PREHISTORIC DINOSAUR PACK (RU)',
   dimensions: {
-    width: 4800,
-    depth: 3200,
-    segmentsX: 360,
-    segmentsZ: 240,
+    width: 7600,
+    depth: 5200,
+    segmentsX: 560,
+    segmentsZ: 380,
     riverWidth: 52,
-    riverLength: 3200,
+    riverLength: 5200,
     riverWaterY: -0.85
   },
 
   bridges: [
-    { z: -220, widthX: 42, spanZ: 17.0, isCentralPlaza: false, parapetHalfSpanZ: 7.2 },
+    { z: -400, widthX: 42, spanZ: 17.0, isCentralPlaza: false, parapetHalfSpanZ: 7.2 },
     { z: 0, widthX: 42, spanZ: 36.0, isCentralPlaza: true, parapetHalfSpanZ: 17.2 },
-    { z: 220, widthX: 42, spanZ: 17.0, isCentralPlaza: false, parapetHalfSpanZ: 7.2 }
+    { z: 400, widthX: 42, spanZ: 17.0, isCentralPlaza: false, parapetHalfSpanZ: 7.2 }
   ],
 
   gradedPads: [
-    { x: -380, z: -140, rx: 64, rz: 54, h: 2.5 },   // Obj A: Raptor Paddock West
-    { x: -185, z: 165, rx: 60, rz: 52, h: 1.25 },   // Obj B: Amber Lagoon Research Outpost
+    { x: -660, z: -280, rx: 64, rz: 54, h: 2.5 },   // Obj A: Raptor Paddock West
+    { x: -320, z: 320, rx: 60, rz: 52, h: 1.25 },   // Obj B: Amber Lagoon Research Outpost
     { x: 0, z: 0, rx: 66, rz: 56, h: 1.25 },        // Obj C: Jungle Gorge Crossing
-    { x: 195, z: -165, rx: 64, rz: 54, h: 6.25 },   // Obj D: T-Rex Highland Ridge
-    { x: 380, z: 140, rx: 64, rz: 54, h: 2.5 },     // Obj E: Volcanic Nesting Grounds
-    { x: -660, z: 0, rx: 48, rz: 40, h: 1.25 },     // Human Ranger Checkpoint
-    { x: 660, z: 0, rx: 48, rz: 40, h: 1.25 },      // Dino Territory Bone Canyon
-    { x: -950, z: 0, rx: 78, rz: 64, h: 1.25 },     // Human Expedition Base Camp
-    { x: 950, z: 0, rx: 78, rz: 64, h: 1.25 }       // Dinosaur Alpha Lair
+    { x: 330, z: -320, rx: 64, rz: 54, h: 6.25 },   // Obj D: T-Rex Highland Ridge
+    { x: 660, z: 280, rx: 64, rz: 54, h: 2.5 },     // Obj E: Volcanic Nesting Grounds
+    { x: -1060, z: 0, rx: 48, rz: 40, h: 1.25 },     // Human Ranger Checkpoint
+    { x: 1060, z: 0, rx: 48, rz: 40, h: 1.25 },      // Dino Territory Bone Canyon
+    { x: -1520, z: 0, rx: 78, rz: 64, h: 1.25 },     // Human Expedition Base Camp
+    { x: 1520, z: 0, rx: 78, rz: 64, h: 1.25 }       // Dinosaur Alpha Lair
   ],
 
   spawns: {
-    US_BASE: { x: -950, z: 0 },
-    RU_BASE: { x: 950, z: 0 }
+    US_BASE: { x: -1520, z: 0 },
+    RU_BASE: { x: 1520, z: 0 }
   },
 
   flags: [
     {
       id: 'A',
       name: 'OBJ ALPHA — RAPTOR PADDOCK SECTOR',
-      x: -380,
-      z: -140,
-      owner: 'US',
-      captureProgress: 100,
+      x: -660, z: -280,
+      owner: 'NEUTRAL',
+      captureProgress: 0,
       radius: TERRAIN.FLAG_RADIUS_DEFAULT,
       useGroundHeight: false
     },
     {
       id: 'B',
       name: 'OBJ BRAVO — AMBER LAGOON LABS',
-      x: -185,
-      z: 165,
-      owner: 'US',
-      captureProgress: 80,
+      x: -320, z: 320,
+      owner: 'NEUTRAL',
+      captureProgress: 0,
       radius: TERRAIN.FLAG_RADIUS_DEFAULT,
       useGroundHeight: false
     },
@@ -220,20 +214,18 @@ export const JURASSIC_ISLAND_MAP = {
     {
       id: 'D',
       name: 'OBJ DELTA — T-REX HIGHLAND RIDGE',
-      x: 195,
-      z: -165,
-      owner: 'RU',
-      captureProgress: -80,
+      x: 330, z: -320,
+      owner: 'NEUTRAL',
+      captureProgress: 0,
       radius: TERRAIN.FLAG_RADIUS_DEFAULT,
       useGroundHeight: false
     },
     {
       id: 'E',
       name: 'OBJ ECHO — VOLCANIC DINO NESTS',
-      x: 380,
-      z: 140,
-      owner: 'RU',
-      captureProgress: -100,
+      x: 660, z: 280,
+      owner: 'NEUTRAL',
+      captureProgress: 0,
       radius: TERRAIN.FLAG_RADIUS_DEFAULT,
       useGroundHeight: false
     }

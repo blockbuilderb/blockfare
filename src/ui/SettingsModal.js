@@ -1,4 +1,4 @@
-import { sound } from '../audio.js?v=92';
+import { sound } from '../audio.js?v=105';
 
 export const SettingsModal = {
   bindSettingsEvents() {
@@ -46,6 +46,19 @@ export const SettingsModal = {
     }
     this.updateBuildingDestructionUI();
     this.updateFriendlyFireUI();
+    this.updateSquadDoctrineUI();
+  },
+
+  updateSquadDoctrineUI() {
+    const enabled = this.player ? this.player.squadDoctrineEnabled !== false : true;
+    const docBtn = this.el('deploy-doctrine-toggle-btn');
+    if (docBtn) {
+      docBtn.textContent = enabled ? '🎖️ Doctrine: ON' : '🔓 Doctrine: OFF';
+      docBtn.classList.toggle('active', enabled);
+      docBtn.style.borderColor = enabled ? '#2ecc71' : '#f39c12';
+      docBtn.style.color = enabled ? '#7bed9f' : '#ffeaa7';
+      docBtn.style.background = enabled ? 'rgba(46, 204, 113, 0.18)' : 'rgba(243, 156, 18, 0.2)';
+    }
   },
 
   updateFriendlyFireUI() {
@@ -144,6 +157,7 @@ export const SettingsModal = {
     const bldDestructEnabled = this.world ? this.world.buildingDestructionEnabled !== false : true;
     const bhopEnabled = this.player ? this.player.bhopEnabled !== false : true;
     const airAvoidEnabled = this.player ? this.player.aircraftCollisionAvoidance !== false : true;
+    const squadDoctrineEnabled = this.player ? this.player.squadDoctrineEnabled !== false : true;
     const ffEnabled = Boolean(this.player && this.player.friendlyFireEnabled);
     const ffKills = (this.player && this.player.friendlyFireKills) || 0;
     const ffPenalty = (this.player && this.player.friendlyFirePenaltyTotal) || 0;
@@ -383,6 +397,50 @@ export const SettingsModal = {
         </div>
       </div>
 
+      <!-- CATEGORY 9: SQUAD SPECIALIZED ROLES, VEHICLE LICENSES & FOB GUNSMITH DOCTRINE (DEFAULT: ON) -->
+      <div style="background:rgba(16,26,36,0.88);border:1px solid rgba(46,204,113,0.5);border-left:4px solid #2ecc71;border-radius:6px;padding:10px 14px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+          <div>
+            <span style="font-size:13px;font-weight:900;color:#7bed9f;">9. SQUAD ROLE LICENSES, ENGINEER BUILDING &amp; BASE/FOB GUNSMITH (DEFAULT: ON)</span>
+            <div style="font-size:10px;color:#bdc3c7;">When <b>ON</b> (default, <i>Squad</i>-style), only <b>Combat Pilots</b> fly/order Planes, only <b>Armor Crewmen</b> operate/request Tanks &amp; IFVs, only <b>Engineers</b> build walls/emplacements, and <b>[L] Gunsmith</b> operates at Main Base, Friendly FOBs &amp; Stashes. Toggle <b>OFF</b> for unrestricted sandbox access!</div>
+          </div>
+          <button
+            type="button"
+            id="settings-doctrine-btn"
+            style="background:${
+              squadDoctrineEnabled ? 'rgba(46,204,113,0.25)' : 'rgba(243,156,18,0.28)'
+            };border:1px solid ${squadDoctrineEnabled ? '#2ecc71' : '#f39c12'};color:${
+              squadDoctrineEnabled ? '#7bed9f' : '#ffeaa7'
+            };border-radius:4px;padding:6px 12px;font-size:11.5px;font-weight:900;cursor:pointer;white-space:nowrap;"
+          >
+            ${squadDoctrineEnabled ? '🎖️ DOCTRINE: ON (REALISTIC)' : '🔓 DOCTRINE: OFF (OPEN)'}
+          </button>
+        </div>
+      </div>
+
+      <!-- CATEGORY 10: AI ARMY SCALE (100 - 400 TOTAL AI SOLDIERS) -->
+      <div style="background:rgba(16,26,36,0.88);border:1px solid rgba(241,196,15,0.45);border-left:4px solid #f1c40f;border-radius:6px;padding:10px 14px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
+          <div>
+            <span style="font-size:13px;font-weight:900;color:#f1c40f;">10. AI ARMY SIZE PER SIDE (DEFAULT: 125 VS 125 = 250 TOTAL • UP TO 200 VS 200 = 400 TOTAL)</span>
+            <div style="font-size:10px;color:#bdc3c7;">Scale battlefield soldier density across the 7,600m theater in real time (equal US &amp; RU headcount).</div>
+          </div>
+          <div style="display:flex;gap:5px;">
+            ${[75, 125, 160, 200]
+              .map((cnt) => {
+                const curCnt = this.botManager?.currentBotsPerTeam || 125;
+                const active = curCnt === cnt;
+                return `<button type="button" class="settings-bot-count-btn" data-bots="${cnt}" style="background:${
+                  active ? 'rgba(241,196,15,0.28)' : 'rgba(255,255,255,0.08)'
+                };border:1px solid ${active ? '#f1c40f' : 'rgba(255,255,255,0.24)'};color:${
+                  active ? '#ffeaa7' : '#dfe6e9'
+                };border-radius:4px;padding:4px 9px;font-size:11px;font-weight:900;cursor:pointer;">${cnt * 2} AI (${cnt}v${cnt})</button>`;
+              })
+              .join('')}
+          </div>
+        </div>
+      </div>
+
       <!-- FOOTER ACTIONS -->
       <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,0.12);padding-top:12px;">
         <button type="button" id="settings-reset-btn" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.28);color:#dfe6e9;border-radius:4px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer;">↺ Reset to Defaults</button>
@@ -546,6 +604,38 @@ export const SettingsModal = {
       });
     }
 
+    const doctrineBtn = modal.querySelector('#settings-doctrine-btn');
+    if (doctrineBtn && this.player && typeof this.player.toggleSquadDoctrineEnabled === 'function') {
+      doctrineBtn.addEventListener('click', () => {
+        const docOn = this.player.toggleSquadDoctrineEnabled();
+        this.renderSettingsModalContent(modal);
+        this.updateSquadDoctrineUI();
+        sound.playRadioBeep(true);
+        this.addXpNotification?.(
+          0,
+          docOn
+            ? '🎖️ SQUAD DOCTRINE: ON (PILOT/ARMOR LICENSES, ENGINEER FORTIFICATIONS & BASE/FOB GUNSMITH ACTIVE)'
+            : '🔓 SQUAD DOCTRINE: OFF (ALL CLASSES CAN FLY PLANES, DRIVE TANKS, BUILD WALLS & OPEN GUNSMITH ANYWHERE)'
+        );
+      });
+    }
+
+    modal.querySelectorAll('.settings-bot-count-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const cnt = Number(btn.dataset.bots || 125);
+        if (this.botManager && typeof this.botManager.setBotCountPerSide === 'function') {
+          this.botManager.setBotCountPerSide(cnt);
+          const netLbl = this.el('net-label');
+          if (netLbl && (!this.network || !this.network.connected)) {
+            netLbl.textContent = `SINGLEPLAYER (OFFLINE) • ${cnt * 2} AI BOTS`;
+          }
+          this.renderSettingsModalContent(modal);
+          sound.playRadioBeep(true);
+          this.addXpNotification?.(0, `🪖 AI ARMY SCALED TO ${cnt * 2} SOLDIERS (${cnt} US VS ${cnt} RU)!`);
+        }
+      });
+    });
+
     const resetBtn = modal.querySelector('#settings-reset-btn');
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {
@@ -553,6 +643,9 @@ export const SettingsModal = {
         if (this.world) this.world.setBuildingDestruction(true);
         if (this.player && typeof this.player.toggleAircraftCollisionAvoidance === 'function') {
           this.player.toggleAircraftCollisionAvoidance(true);
+        }
+        if (this.player && typeof this.player.setSquadDoctrineEnabled === 'function') {
+          this.player.setSquadDoctrineEnabled(true);
         }
         this.renderSettingsModalContent(modal);
         this.updateAudioSettingsHud();

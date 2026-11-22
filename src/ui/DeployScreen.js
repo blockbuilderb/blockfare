@@ -1,11 +1,11 @@
-import { SQUAD_DEFS } from '../bots.js?v=92';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=92';
-import { events } from '../events.js?v=92';
+import { SQUAD_DEFS } from '../bots.js?v=105';
+import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=105';
+import { events } from '../events.js?v=105';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=92';
+} from '../core/StateMachines.js?v=105';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -15,6 +15,20 @@ export const DeployScreen = {
         classBtns.forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         this.selectedClass = btn.dataset.class;
+        if ((this.world?.era || 'modern') === 'modern' && this.player?.squadDoctrineEnabled !== false) {
+          const autoSquad =
+            this.selectedClass === 'pilot'
+              ? 'FALCON'
+              : this.selectedClass === 'armor'
+              ? 'BRAVO'
+              : null;
+          if (autoSquad) {
+            this.selectedSquad = autoSquad;
+            document.querySelectorAll('.squad-btn').forEach((sb) => {
+              sb.classList.toggle('active', sb.dataset.squad === autoSquad);
+            });
+          }
+        }
         this.updateDeployClassTraitsCard?.();
         this.renderDeployB2CustomizerBar?.();
       });
@@ -131,8 +145,8 @@ export const DeployScreen = {
       const rect = this.deployMapCanvas.getBoundingClientRect();
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
-      const wx = (cx / this.deployMapCanvas.width - 0.5) * 2160;
-      const wz = (cy / this.deployMapCanvas.height - 0.5) * 1280;
+      const wx = (cx / this.deployMapCanvas.width - 0.5) * 3480;
+      const wz = (cy / this.deployMapCanvas.height - 0.5) * 2120;
 
       let bestKey = 'BASE';
       const basePos =
@@ -274,6 +288,20 @@ export const DeployScreen = {
     }
 
     const destrToggleBtn = this.el('deploy-destruction-toggle-btn');
+    const doctrineToggleBtn = this.el('deploy-doctrine-toggle-btn');
+    if (doctrineToggleBtn && this.player && typeof this.player.toggleSquadDoctrineEnabled === 'function') {
+      this.updateSquadDoctrineUI?.();
+      doctrineToggleBtn.addEventListener('click', () => {
+        const nextVal = this.player.toggleSquadDoctrineEnabled();
+        this.updateSquadDoctrineUI?.();
+        this.addXpNotification(
+          0,
+          nextVal
+            ? '🎖️ SQUAD DOCTRINE: ON (PILOT/ARMOR LICENSES, ENGINEER WALLS & BASE/FOB GUNSMITH)'
+            : '🔓 SQUAD DOCTRINE: OFF (ALL CLASSES CAN FLY PLANES, DRIVE TANKS, BUILD & USE GUNSMITH ANYWHERE)'
+        );
+      });
+    }
     if (destrToggleBtn && this.world) {
       this.updateBuildingDestructionUI();
       destrToggleBtn.addEventListener('click', () => {
@@ -408,7 +436,13 @@ export const DeployScreen = {
     if (hudLaunchPlaneBtn) {
       hudLaunchPlaneBtn.addEventListener('click', (ev) => {
         if (!this.player) return;
-        if (ev.shiftKey && typeof this.player.cycleAircraftRole === 'function') {
+        if (this.player.role === 'armor' && !(this.player.activeVehicle && this.player.activeVehicle.isAircraft)) {
+          if (ev.shiftKey && typeof this.player.cycleArmorOrderType === 'function') {
+            this.player.cycleArmorOrderType();
+          } else if (typeof this.player.requestArmorDelivery === 'function') {
+            this.player.requestArmorDelivery();
+          }
+        } else if (ev.shiftKey && typeof this.player.cycleAircraftRole === 'function') {
           this.player.cycleAircraftRole();
         } else if (typeof this.player.launchAircraftSortie === 'function') {
           this.player.launchAircraftSortie();
@@ -417,10 +451,13 @@ export const DeployScreen = {
       });
       hudLaunchPlaneBtn.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
-        if (this.player && typeof this.player.cycleAircraftRole === 'function') {
+        if (!this.player) return;
+        if (this.player.role === 'armor' && !(this.player.activeVehicle && this.player.activeVehicle.isAircraft)) {
+          this.player.cycleArmorOrderType?.();
+        } else if (typeof this.player.cycleAircraftRole === 'function') {
           this.player.cycleAircraftRole();
-          this.updateCommandOrderHud?.();
         }
+        this.updateCommandOrderHud?.();
       });
     }
     topFlagBadges.forEach((badge) => {
@@ -668,10 +705,11 @@ export const DeployScreen = {
         e.preventDefault();
         this.setCommandScope(this.player.commandScope === 'ALL' ? 'SQUAD' : 'ALL');
         const perTeam = (this.botManager && this.botManager.currentBotsPerTeam) || 125;
-        const perSquad = Math.round(perTeam / 5);
+        const sqTotal = SQUAD_DEFS.length || 6;
+        const perSquad = Math.round(perTeam / sqTotal);
         const nextScopeLabel =
           this.player.commandScope === 'ALL'
-            ? `★ ALL 5 SQUADS (${perTeam} NPCs)`
+            ? `★ ALL ${sqTotal} SQUADS (${perTeam} NPCs)`
             : `▲ ${this.player.squad || 'ALPHA'} SQUAD (${perSquad} NPCs)`;
         this.addXpNotification(0, `COMMAND SCOPE: ${nextScopeLabel}`);
         return;
@@ -1346,15 +1384,22 @@ export const DeployScreen = {
       const curKills = this.vehicleManager?.getTeamKills
         ? this.vehicleManager.getTeamKills(this.selectedTeam)
         : 0;
-      if (eraNow === 'modern' && this.selectedClass !== 'pilot') {
+      if (eraNow === 'modern' && this.selectedClass !== 'pilot' && this.player?.squadDoctrineEnabled === false) {
         this.selectedClass = 'pilot';
         document.querySelectorAll('.class-btn').forEach((b) => {
           b.classList.toggle('active', b.dataset.class === 'pilot');
         });
+      } else if (eraNow === 'modern' && this.selectedClass !== 'pilot') {
+        setTimeout(() => {
+          this.addXpNotification?.(
+            0,
+            '🔒 B-2 SPIRIT REQUIRES [COMBAT PILOT] LICENSE — PRESS [L] AT HQ HANGAR TO SWITCH TO PILOT OR TOGGLE DOCTRINE OFF!'
+          );
+        }, 420);
       }
       if (!b2Unlocked) {
         const isRu = this.selectedTeam === 'RU';
-        spawnVec.set(isRu ? 922 : -922, 0, isRu ? 60 : -60);
+        spawnVec.set(isRu ? 1492 : -1492, 0, isRu ? 60 : -60);
         spawnSource = 'MAIN_BASE';
         setTimeout(() => {
           this.addXpNotification?.(
@@ -1364,13 +1409,13 @@ export const DeployScreen = {
         }, 350);
       } else {
         const isRu = this.selectedTeam === 'RU';
-        spawnVec.set(isRu ? 925 : -925, 0, isRu ? 90 : -90);
+        spawnVec.set(isRu ? 1528 : -1528, 0, isRu ? 124 : -124);
         spawnSource = 'HQ_B2_SPIRIT_LANE';
       }
     } else if (this.selectedSpawn === 'WRIGHT_CAVE') {
-      // Secret Cliffside Rock Cave at the Very Back of the HQ Base (US: [-1024, -34], RU: [1024, 34])
+      // Secret Cliffside Rock Cave at the Very Back of the HQ Base (US: [-1594, -34], RU: [1594, 34])
       const isRu = this.selectedTeam === 'RU';
-      spawnVec.set(isRu ? 1024 : -1024, 0, isRu ? 32 : -32);
+      spawnVec.set(isRu ? 1594 : -1594, 0, isRu ? 32 : -32);
       spawnSource = 'SECRET_HQ_WRIGHT_CAVE';
     } else if (this.selectedSpawn !== 'BASE') {
       let flag = this.world.flags.find(
@@ -1408,9 +1453,11 @@ export const DeployScreen = {
         }
         spawnSource = `FORWARD_FLAG_${flag.id}`;
       } else {
-        const motorPoolX = this.selectedTeam === 'US' ? -922 : 922;
+        const baseOriginX = this.selectedTeam === 'US'
+          ? (this.world?.spawns?.US_BASE?.x ?? -1520) + 28
+          : (this.world?.spawns?.RU_BASE?.x ?? 1520) - 28;
         spawnVec.set(
-          motorPoolX + (Math.random() - 0.5) * 10,
+          baseOriginX + (Math.random() - 0.5) * 10,
           0,
           (Math.random() - 0.5) * 16
         );
@@ -1432,12 +1479,24 @@ export const DeployScreen = {
         spawnVec.set((Math.random() - 0.5) * 18, 0, -330 + (Math.random() - 0.5) * 18);
         spawnSource = 'NORTH_VOLCANIC_CALDERA';
       } else {
-        const motorPoolX = isJurassicRussianCoalition || this.selectedTeam === 'RU' ? 920 : -920;
-        spawnVec.set(
-          motorPoolX + (Math.random() - 0.5) * 4,
-          0,
-          (Math.random() - 0.5) * 8
-        );
+        const isRuSide = isJurassicRussianCoalition || this.selectedTeam === 'RU';
+        const baseX = isRuSide
+          ? (this.world?.spawns?.RU_BASE?.x ?? 1520) - 28
+          : (this.world?.spawns?.US_BASE?.x ?? -1520) + 28;
+        if (eraNow === 'modern' && this.selectedClass === 'pilot') {
+          // Spawn Combat Pilots right at the HQ Airfield Flight-Line Gate facing the 4-bay Aircraft Apron!
+          spawnVec.set(
+            (isRuSide ? 1495 : -1495) + (Math.random() - 0.5) * 6,
+            0,
+            isRuSide ? 62 : -62
+          );
+        } else {
+          spawnVec.set(
+            baseX + (Math.random() - 0.5) * 6,
+            0,
+            (Math.random() - 0.5) * 10
+          );
+        }
         spawnSource = isJurassicRussianCoalition ? 'RU_COALITION_EAST_BASE' : 'MAIN_BASE';
       }
     }
@@ -1506,7 +1565,7 @@ export const DeployScreen = {
       if (mate) {
         const greetMsg =
           this.player.commandRank === 'COMMANDER'
-            ? `Force Commander on the ground! All 5 Squads (${this.player.team} ALPHA–ECHO) standing by on Command Net — click [A]–[E] or press [K]!`
+            ? `Force Commander on the ground! All 6 Squads (${this.player.team} ALPHA–FALCON) standing by on Command Net — click [A]–[E] or press [K]!`
             : this.player.commandRank === 'SQUAD_LEADER'
             ? `${this.player.squad} Squad formed up on you, Squad Lead! Click [A]–[E], [K], or hold [Y] to issue squad orders!`
             : `Welcome to ${this.player.squad} Squad! Follow Squad Leader ${mate.name} or take command anytime on the HUD!`;
@@ -1568,8 +1627,8 @@ export const DeployScreen = {
         btn.classList.toggle('locked-spawn', !hasPeer);
         btn.textContent = hasPeer ? `🟢 JOIN: ${peers[0].name}` : '🟢 CO-OP PEER';
         if (!hasPeer && this.selectedSpawn === 'FRIEND') {
-          this.selectedSpawn = 'A';
-          spawnBtns.forEach((b) => b.classList.toggle('active', b.dataset.spawn === 'A'));
+          this.selectedSpawn = 'BASE';
+          spawnBtns.forEach((b) => b.classList.toggle('active', b.dataset.spawn === 'BASE'));
         }
       } else if (sp === 'RALLY') {
         // Rally Point: available only if player has placed one
@@ -1646,18 +1705,18 @@ export const DeployScreen = {
     ctx.fillStyle = '#1b281c';
     ctx.fillRect(0, 0, w, h);
 
-    const toMapX = (wx) => (wx / 2160 + 0.5) * w;
-    const toMapY = (wz) => (wz / 1280 + 0.5) * h;
+    const toMapX = (wx) => (wx / 3480 + 0.5) * w;
+    const toMapY = (wz) => (wz / 2120 + 0.5) * h;
 
     // North-South River
     ctx.fillStyle = '#1f536e';
-    ctx.fillRect(toMapX(-20), 0, 14, h);
+    ctx.fillRect(toMapX(-24), 0, 12, h);
 
     // 3 Grand Bridges & Main Road Network
     ctx.fillStyle = '#2f363d';
-    ctx.fillRect(0, toMapY(-8), w, 7);
-    ctx.fillRect(toMapX(-24), toMapY(-226), 24, 6);
-    ctx.fillRect(toMapX(-24), toMapY(214), 24, 6);
+    ctx.fillRect(0, toMapY(-8), w, 6);
+    ctx.fillRect(toMapX(-28), toMapY(-406), 22, 5);
+    ctx.fillRect(toMapX(-28), toMapY(394), 22, 5);
 
     // Base HQs (In Jurassic Era, both US HQ West and RU HQ East belong to the Allied Human Coalition!)
     const isJur = this.world && this.world.era === 'jurassic';

@@ -7,11 +7,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=92';
-import { sound } from '../audio.js?v=92';
-import { PLAYER, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=92';
-import { events } from '../events.js?v=92';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=92';
+} from '../weapons.js?v=105';
+import { sound } from '../audio.js?v=105';
+import { PLAYER, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=105';
+import { events } from '../events.js?v=105';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=105';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',
@@ -38,6 +38,41 @@ const DEFAULT_CLASS_SELECTIONS = {
 };
 
 export const VEHICLE_UPGRADE_CATALOG = {
+  armorSensor: [
+    {
+      id: 'std_tank_day',
+      name: 'STANDARD DAYLIGHT PERISCOPE & FCS OPTICS (STOCK)',
+      shortName: 'DAY OPTICS',
+      icon: '🔭',
+      price: 0,
+      hasNvg: false,
+      hasFlir: false,
+      zoomFov: 44,
+      desc: 'Factory daylight optical sight for Tank, IFV, SPAAG & MRAP turrets.'
+    },
+    {
+      id: 'vvs2_tank_nvg',
+      name: 'AN/VVS-2 GEN-3 CREW NIGHT VISION INTENSIFIER [KEY N]',
+      shortName: 'CREW NVG [N]',
+      icon: '🥽',
+      price: 400,
+      hasNvg: true,
+      hasFlir: false,
+      zoomFov: 38,
+      desc: 'Adds Green-Phosphor Night Vision [N] to all ground vehicles + slightly deeper gunner zoom!'
+    },
+    {
+      id: 'citv_flir_pod',
+      name: '3RD-GEN CITV COMMANDER FLIR THERMAL + NVG SUITE [KEY N]',
+      shortName: 'CITV FLIR IR [N]',
+      icon: '🌡️',
+      price: 800,
+      hasNvg: true,
+      hasFlir: true,
+      zoomFov: 30,
+      desc: 'Full Multi-Spectrum [N] Cycling (DAY ➔ NVG GREEN ➔ WHITE-HOT IR ➔ BLACK-HOT IR) + High-Contrast Thermal Target Highlighting & 2.5× Gunner Zoom!'
+    }
+  ],
   armorDefense: [
     {
       id: 'smoke_disp',
@@ -146,6 +181,44 @@ export const VEHICLE_UPGRADE_CATALOG = {
       desc: 'Mounts a 3D Steel Dozer Blade on the front hull: +250 Max Hull HP & rams through barricades!'
     }
   ],
+  airSensor: [
+    {
+      id: 'std_air_hud',
+      name: 'FACTORY DAYLIGHT HUD OPTICS (AC-130 & B-2 KEEP BUILT-IN EO/IR)',
+      shortName: 'DAY HUD',
+      icon: '🔭',
+      price: 0,
+      hasNvg: false,
+      hasFlir: false,
+      zoomFov: 46,
+      lockRangeMult: 1.0,
+      desc: 'Standard optical HUD on Fighters & CAS jets. (AC-130J Ghostrider & B-2A Spirit include built-in NVG + White-Hot / Black-Hot FLIR standard!)'
+    },
+    {
+      id: 'avs9_nvg_pod',
+      name: 'AN/AVS-9 AVIATOR GEN-3 NIGHT VISION + LASER SPOTTER [KEY N]',
+      shortName: 'AVS-9 NVG [N]',
+      icon: '🥽',
+      price: 450,
+      hasNvg: true,
+      hasFlir: false,
+      zoomFov: 38,
+      lockRangeMult: 1.15,
+      desc: 'Equips Green-Phosphor Aviator Night Vision [N] on EVERY plane (F-15EX, A-10C, Su-57, Su-25) + +15% A2A Radar Lock Range!'
+    },
+    {
+      id: 'aaq33_flir_pod',
+      name: 'AN/AAQ-33 SNIPER XR EO/IR TARGETING POD (NVG + WHOT/BHOT IR) [KEY N]',
+      shortName: 'SNIPER FLIR IR [N]',
+      icon: '🌡️',
+      price: 850,
+      hasNvg: true,
+      hasFlir: true,
+      zoomFov: 24,
+      lockRangeMult: 1.3,
+      desc: 'Unlocks Full Multi-Spectrum [N] Cycling (DAY ➔ NVG GREEN ➔ WHITE-HOT FLIR ➔ BLACK-HOT FLIR) on ALL aircraft + Thermal Target Highlighting, High-Mag RMB Sensor Zoom & +30% AMRAAM Lock Range!'
+    }
+  ],
   airCountermeasure: [
     {
       id: 'std_flares',
@@ -247,16 +320,148 @@ export const VEHICLE_UPGRADE_CATALOG = {
       turnMult: 1.25,
       desc: '+25% Bank/Turn Agility, +18% Afterburner Top Speed & +200 Airframe HP!'
     }
+  ],
+  ac130Generation: [
+    {
+      id: 'ac130a_1968',
+      name: '1968 AC-130A "PROJECT GUNSHIP II" (VIETNAM STOCK)',
+      shortName: '1968 AC-130A',
+      eraTag: '1968 VIETNAM',
+      icon: '🕰️',
+      unlockKills: 0,
+      price: 0,
+      bonusHp: 0,
+      maxMountArcRad: 0.16, // ±9° rigid floor mount trim — aimed by flying & banking left!
+      allowBellySensorCam: false,
+      hasNvg: false,
+      hasFlir: false,
+      reloadMult: 1.0,
+      damageMult: 1.0,
+      desc: 'Original 1968 Vietnam gunship: guns bolted nearly rigid (±9°) to the cargo floor. Aimed through the Pilot Left-Window HUD by banking steeper/shallower in a manual left turn!'
+    },
+    {
+      id: 'ac130h_1973',
+      name: '1973 AC-130H "SPECTRE" (105MM M102 + LOW-LIGHT NVG)',
+      shortName: '1973 AC-130H',
+      eraTag: '1973 SPECTRE',
+      icon: '🦅',
+      unlockKills: 2,
+      price: 650,
+      bonusHp: 300,
+      maxMountArcRad: 0.28, // ±16° early damped mount
+      allowBellySensorCam: false,
+      hasNvg: true,
+      hasFlir: false,
+      reloadMult: 0.92,
+      damageMult: 1.12,
+      desc: 'UNLOCK AT 2 AIR KILLS: Adds heavy 105mm M102 Howitzer (+12% DMG), ±16° gun mount travel, Gen-2 Night Vision [N] & +300 Airframe HP!'
+    },
+    {
+      id: 'ac130u_1995',
+      name: '1995 AC-130U "SPOOKY II" (HYDRAULIC TRAINABLE MOUNTS)',
+      shortName: '1995 AC-130U',
+      eraTag: '1995 SPOOKY II',
+      icon: '⚙️',
+      unlockKills: 5,
+      price: 1200,
+      bonusHp: 550,
+      maxMountArcRad: 0.62, // ±35° motorized hydraulic Trainable Gun Mounts!
+      allowBellySensorCam: true,
+      hasNvg: true,
+      hasFlir: true,
+      reloadMult: 0.85,
+      damageMult: 1.2,
+      desc: 'UNLOCK AT 5 AIR KILLS: Motorized Hydraulic Trainable Gun Mounts (±35° servo swing!), Belly FLIR/TV Sensor Pod Camera [C], White-Hot/Black-Hot IR [N] & +550 HP!'
+    },
+    {
+      id: 'ac130j_2024',
+      name: '2024 AC-130J "GHOSTRIDER" (MODERN AFSOC PRECISION)',
+      shortName: '2024 AC-130J',
+      eraTag: '2024 GHOSTRIDER',
+      icon: '🛸',
+      unlockKills: 10,
+      price: 1950,
+      bonusHp: 900,
+      maxMountArcRad: 1.12, // ±64° wide-angle digital servo mounts!
+      allowBellySensorCam: true,
+      hasNvg: true,
+      hasFlir: true,
+      reloadMult: 0.74,
+      damageMult: 1.32,
+      desc: 'UNLOCK AT 10 AIR KILLS: Peak modern AFSOC Ghostrider! Wide ±64° digital servo gun mounts, AN/AAQ-39 HD WHOT/BHOT FLIR, +32% weapon lethality, -26% reload & +900 HP!'
+    }
+  ],
+  ac130Sight: [
+    {
+      id: 'sight_1968_hud',
+      name: 'FAMOUS SIDEWAYS LEFT-WINDOW ANALOG PYLON HUD (STOCK)',
+      shortName: 'SIDEWAYS HUD',
+      icon: '🪟',
+      unlockKills: 0,
+      price: 0,
+      isEotech: false,
+      desc: 'Classic sideways-mounted green collimated glass reflector HUD inside the pilot left window with roll scale & Pylon Steering Pipper.'
+    },
+    {
+      id: 'sight_afsoc_eotech',
+      name: 'REAL AFSOC LEFT-WINDOW EOTECH EXPS3 HOLOGRAPHIC SIGHT',
+      shortName: 'EOTECH EXPS3',
+      icon: '🎯',
+      unlockKills: 3,
+      price: 750,
+      isEotech: true,
+      desc: 'FIRST UNLOCK (3 AIR KILLS), THEN PURCHASE: Real US Air Force Special Ops rail-mounted EOTech EXPS3 Holographic Sight (68 MOA crimson ring + 1 MOA dot + HMD Target Cue) bolted inside the left cockpit window!'
+    }
+  ],
+  ac130Avionics: [
+    {
+      id: 'avio_manual_1968',
+      name: '1960s MANUAL PILOT LEFT-BANK PYLON FLYING (STOCK)',
+      shortName: 'MANUAL PYLON',
+      icon: '🕹️',
+      unlockKills: 0,
+      price: 0,
+      hasFlirRepeater: false,
+      hasCoupledAutopilot: false,
+      desc: 'Press [R] to toggle Forward Transit Flight ⇄ Left-Window Orbit Mode. Pilot manually banks left [A/D] to hold the circle around the target.'
+    },
+    {
+      id: 'avio_flir_repeater',
+      name: 'COCKPIT DASHBOARD FLIR VIDEO REPEATER MFD',
+      shortName: 'FLIR MFD SCREEN',
+      icon: '📺',
+      unlockKills: 2,
+      price: 600,
+      hasFlirRepeater: true,
+      hasCoupledAutopilot: false,
+      desc: 'UNLOCK AT 2 AIR KILLS: Installs a live Cockpit Multifunction Display (MFD) repeating White-Hot FLIR thermal video of ground targets off your left wing!'
+    },
+    {
+      id: 'avio_coupled_autopilot',
+      name: 'COUPLED GPS PYLON AUTOPILOT + COCKPIT FLIR REPEATER MFD',
+      shortName: 'COUPLED AUTOPILOT',
+      icon: '🔄',
+      unlockKills: 6,
+      price: 1450,
+      hasFlirRepeater: true,
+      hasCoupledAutopilot: true,
+      desc: 'FIRST UNLOCK (6 AIR KILLS), THEN PURCHASE: Includes Cockpit FLIR Video Repeater MFD + Coupled GPS Pylon Autopilot! Press [R] or [F] to lock hands-free circular autopilot around any FOB while aiming freely!'
+    }
   ]
 };
 
 const DEFAULT_VEHICLE_UPGRADES = {
+  armorSensor: 'std_tank_day',
   armorDefense: 'smoke_disp',
   armorWeaponMod: 'std_autoloader',
   armorChassis: 'std_turbine',
+  airSensor: 'std_air_hud',
   airCountermeasure: 'std_flares',
   airOrdnance: 'std_pylons',
-  airFrame: 'std_airframe'
+  airFrame: 'std_airframe',
+  ac130Generation: 'ac130a_1968',
+  ac130Sight: 'sight_1968_hud',
+  ac130Avionics: 'avio_manual_1968'
 };
 
 export const FIELD_REQUISITIONS = [
@@ -390,21 +595,25 @@ export const GunsmithMethods = {
         'std_grip',
         'fmj',
         'std_vest',
-        'no_pack'
+        'no_pack',
+        'std_helmet'
       ]);
     } else {
       this.ownedUpgrades.add('fmj');
       this.ownedUpgrades.add('no_pack');
+      this.ownedUpgrades.add('std_helmet');
     }
     if (!this.equippedUpgrades || typeof this.equippedUpgrades !== 'object') {
       this.equippedUpgrades = {
         ...DEFAULT_WEAPON_ATTACHMENTS,
         vest: 'std_vest',
-        backpack: 'no_pack'
+        backpack: 'no_pack',
+        tacticalGear: 'std_helmet'
       };
     } else {
       if (!this.equippedUpgrades.ammoType) this.equippedUpgrades.ammoType = 'fmj';
       if (!this.equippedUpgrades.backpack) this.equippedUpgrades.backpack = 'no_pack';
+      if (!this.equippedUpgrades.tacticalGear) this.equippedUpgrades.tacticalGear = 'std_helmet';
     }
     if (!(this.ownedSkins instanceof Set)) {
       this.ownedSkins = new Set();
@@ -498,6 +707,59 @@ export const GunsmithMethods = {
     if (!this.equippedUpgrades.backpack) {
       this.equippedUpgrades.backpack = 'no_pack';
     }
+    if (!this.equippedUpgrades.tacticalGear) {
+      this.equippedUpgrades.tacticalGear = 'std_helmet';
+    }
+  },
+
+  /**
+   * Checks whether the player is currently allowed to access the Gunsmith / Armory Workbench ([L]):
+   * - Allowed on the Deploy Screen (`#deploy-screen` visible) or while `this.dead`
+   * - Allowed anywhere when Sandbox Mode (`this.squadDoctrineEnabled === false`) is active
+   * - Allowed within 145m of Friendly Main Base HQ (`US_BASE` / `RU_BASE`)
+   * - Allowed within `(flag.radius || 24) + 14` meters of any Captured Friendly FOB (`flag.owner === this.team`)
+   * - Allowed within 5.5m of any Support Ammo & Kit Stash (`this.world.ammoCrates`)
+   */
+  canAccessGunsmithWorkbench() {
+    const deployEl =
+      typeof document !== 'undefined' ? document.getElementById('deploy-screen') : null;
+    if ((deployEl && !deployEl.classList.contains('hidden')) || this.dead) {
+      return { allowed: true, locationLabel: 'PRE-DEPLOYMENT ARMORY' };
+    }
+    if (this.squadDoctrineEnabled === false) {
+      return { allowed: true, locationLabel: 'SANDBOX MODE' };
+    }
+    if (this.pos) {
+      const baseKey = this.team === 'RU' ? 'RU_BASE' : 'US_BASE';
+      const basePos =
+        this.world?.spawns?.[baseKey] ||
+        (this.team === 'RU' ? this.world?.ruBase : this.world?.usBase);
+      if (basePos && Math.hypot(this.pos.x - basePos.x, this.pos.z - basePos.z) <= 225) {
+        return { allowed: true, locationLabel: 'MAIN BASE HQ ARMORY' };
+      }
+      if (this.world && Array.isArray(this.world.flags)) {
+        for (const flag of this.world.flags) {
+          if (flag && flag.owner === this.team && flag.pos) {
+            const maxR = (flag.radius || 24) + 14;
+            if (Math.hypot(this.pos.x - flag.pos.x, this.pos.z - flag.pos.z) <= maxR) {
+              return { allowed: true, locationLabel: `FOB OBJECTIVE ${flag.id} ARMORY` };
+            }
+          }
+        }
+      }
+      if (this.world && Array.isArray(this.world.ammoCrates)) {
+        for (const crate of this.world.ammoCrates) {
+          if (
+            crate &&
+            crate.pos &&
+            Math.hypot(this.pos.x - crate.pos.x, this.pos.z - crate.pos.z) <= 5.5
+          ) {
+            return { allowed: true, locationLabel: 'FIELD AMMO & KIT STASH' };
+          }
+        }
+      }
+    }
+    return { allowed: false, locationLabel: 'IN FIELD (NO ARMORY)' };
   },
 
   loadGunsmithState() {
@@ -562,7 +824,16 @@ export const GunsmithMethods = {
           }
         }
         if (parsed.equipped && typeof parsed.equipped === 'object') {
-          for (const k of ['muzzle', 'magazine', 'optic', 'grip', 'ammoType', 'vest', 'backpack']) {
+          for (const k of [
+            'muzzle',
+            'magazine',
+            'optic',
+            'grip',
+            'ammoType',
+            'vest',
+            'backpack',
+            'tacticalGear'
+          ]) {
             if (parsed.equipped[k]) {
               this.equippedUpgrades[k] = k === 'optic' && !isV3OrNewer ? 'factory' : parsed.equipped[k];
             }
@@ -608,6 +879,9 @@ export const GunsmithMethods = {
         }
         if (Array.isArray(parsed.ownedVehicleUpgrades)) {
           parsed.ownedVehicleUpgrades.forEach((id) => this.ownedVehicleUpgrades.add(id));
+        }
+        if (typeof parsed.airCombatUnlockKills === 'number' && Number.isFinite(parsed.airCombatUnlockKills)) {
+          this.airCombatUnlockKills = Math.max(0, Math.floor(parsed.airCombatUnlockKills));
         }
         if (parsed.equippedVehicleUpgrades && typeof parsed.equippedVehicleUpgrades === 'object') {
           this.equippedVehicleUpgrades = {
@@ -677,6 +951,7 @@ export const GunsmithMethods = {
         caseKeys: this.caseKeys,
         ownedVehicleUpgrades: Array.from(this.ownedVehicleUpgrades || []),
         equippedVehicleUpgrades: this.equippedVehicleUpgrades,
+        airCombatUnlockKills: this.airCombatUnlockKills || 0,
         b2SpiritColor: this.b2SpiritColor || '#14181f',
         b2SpiritAccentColor: this.b2SpiritAccentColor || '#00d2d3',
         b2SpiritPresetId: this.b2SpiritPresetId || 'midnight_ram',
@@ -783,7 +1058,7 @@ export const GunsmithMethods = {
     this.ensureWarehouseStructures();
     const list = ATTACHMENT_CATALOG[category] || [];
     let targetId = this.equippedUpgrades[category];
-    if (category !== 'vest' && category !== 'backpack') {
+    if (category !== 'vest' && category !== 'backpack' && category !== 'tacticalGear') {
       const attMap = this.getWeaponAttachmentMap(
         weaponId || this.getSelectedWeaponIdForClass(this.role, 'primary')
       );
@@ -802,7 +1077,8 @@ export const GunsmithMethods = {
       grip: this.getEquippedItem('grip', weaponId),
       ammoType: this.getEquippedItem('ammoType', weaponId),
       vest: this.getEquippedItem('vest'),
-      backpack: this.getEquippedItem('backpack')
+      backpack: this.getEquippedItem('backpack'),
+      tacticalGear: this.getEquippedItem('tacticalGear')
     };
   },
 
@@ -816,13 +1092,57 @@ export const GunsmithMethods = {
   getVehicleUpgradeMods() {
     this.ensureWarehouseStructures();
     return {
+      armorSensor: this.getEquippedVehicleUpgrade('armorSensor'),
       armorDefense: this.getEquippedVehicleUpgrade('armorDefense'),
       armorWeaponMod: this.getEquippedVehicleUpgrade('armorWeaponMod'),
       armorChassis: this.getEquippedVehicleUpgrade('armorChassis'),
+      airSensor: this.getEquippedVehicleUpgrade('airSensor'),
       airCountermeasure: this.getEquippedVehicleUpgrade('airCountermeasure'),
       airOrdnance: this.getEquippedVehicleUpgrade('airOrdnance'),
-      airFrame: this.getEquippedVehicleUpgrade('airFrame')
+      airFrame: this.getEquippedVehicleUpgrade('airFrame'),
+      ac130Generation: this.getEquippedVehicleUpgrade('ac130Generation'),
+      ac130Sight: this.getEquippedVehicleUpgrade('ac130Sight'),
+      ac130Avionics: this.getEquippedVehicleUpgrade('ac130Avionics')
     };
+  },
+
+  getAirCombatUnlockKills() {
+    return Math.max(0, Math.floor(this.airCombatUnlockKills || 0));
+  },
+
+  isVehicleUpgradeUnlocked(item) {
+    if (!item) return false;
+    const req = item.unlockKills || 0;
+    if (req <= 0) return true;
+    if (this.ownedVehicleUpgrades && this.ownedVehicleUpgrades.has(item.id)) return true;
+    return this.getAirCombatUnlockKills() >= req;
+  },
+
+  recordAirCombatKill(weight = 1) {
+    this.ensureWarehouseStructures();
+    const prev = this.getAirCombatUnlockKills();
+    const next = prev + Math.max(1, Math.round(weight));
+    this.airCombatUnlockKills = next;
+
+    const newlyUnlocked = [];
+    for (const slotKey of ['ac130Generation', 'ac130Sight', 'ac130Avionics']) {
+      const list = VEHICLE_UPGRADE_CATALOG[slotKey] || [];
+      for (const it of list) {
+        const req = it.unlockKills || 0;
+        if (req > 0 && prev < req && next >= req && !this.ownedVehicleUpgrades.has(it.id)) {
+          newlyUnlocked.push(it);
+        }
+      }
+    }
+    this.saveGunsmithState();
+    if (newlyUnlocked.length > 0 && this.onAwardXp) {
+      const names = newlyUnlocked.map((u) => u.shortName || u.name).join(' & ');
+      this.onAwardXp(
+        75,
+        `🔓 AC-130 UPGRADE UNLOCKED FOR PURCHASE IN [L] HANGAR: ${names}!`
+      );
+    }
+    return next;
   },
 
   buyOrEquipVehicleUpgrade(slotKey, upgradeId, paySource = 'auto') {
@@ -834,6 +1154,15 @@ export const GunsmithMethods = {
     const item = list.find((it) => it.id === upgradeId);
     if (!item) {
       return { ok: false, reason: 'INVALID_UPGRADE' };
+    }
+    if (!this.isVehicleUpgradeUnlocked(item)) {
+      return {
+        ok: false,
+        reason: 'LOCKED_PROGRESSION',
+        reqKills: item.unlockKills || 0,
+        curKills: this.getAirCombatUnlockKills(),
+        item
+      };
     }
     const alreadyOwned = this.ownedVehicleUpgrades.has(item.id) || (item.price || 0) <= 0;
     let bought = false;
@@ -852,7 +1181,7 @@ export const GunsmithMethods = {
     if (this.activeVehicle) {
       this.applyPlayerRideCustomizations(this.activeVehicle);
     }
-    return { ok: true, bought, item };
+    return { ok: true, bought, action: bought ? 'BOUGHT' : 'EQUIPPED', item };
   },
 
   /**
@@ -877,12 +1206,22 @@ export const GunsmithMethods = {
     const hpRatio = oldMaxHp > 0 ? Math.min(1, (v.hp || oldMaxHp) / oldMaxHp) : 1;
 
     if (v.isAircraft) {
+      const sen = mods.airSensor || {};
       const cm = mods.airCountermeasure || {};
       const ord = mods.airOrdnance || {};
       const frame = mods.airFrame || {};
+      const acGen = mods.ac130Generation || {};
+      const acSight = mods.ac130Sight || {};
+      const acAvio = mods.ac130Avionics || {};
       const isPilotRole = this.role === 'pilot';
+      const isGunship = v.aircraftRole === 'gunship';
+      const isB2 = v.aircraftRole === 'b2_spirit';
 
-      const bonusHp = (cm.bonusHp || 0) + (frame.bonusHp || 0) + (isPilotRole ? 350 : 0);
+      const bonusHp =
+        (cm.bonusHp || 0) +
+        (frame.bonusHp || 0) +
+        (isGunship ? acGen.bonusHp || 0 : 0) +
+        (isPilotRole ? 350 : 0);
       const speedMult = (frame.speedMult || 1.0) * (isPilotRole ? 1.15 : 1.0);
       const turnMult = (frame.turnMult || 1.0) * (isPilotRole ? 1.22 : 1.0);
 
@@ -891,18 +1230,70 @@ export const GunsmithMethods = {
       v.speed = Number((v._baseSpeed * speedMult).toFixed(1));
       v.maxSpeed = Number((v._baseMaxSpeed * speedMult).toFixed(1));
       v.turnRate = Number((v._baseTurnRate * turnMult).toFixed(2));
-      v.customDamageMult = (ord.damageMult || 1.0) * (isPilotRole ? 1.12 : 1.0);
-      v.customCooldownMult = (ord.cooldownMult || 1.0) * (isPilotRole ? 0.82 : 1.0);
+      v.customDamageMult =
+        (ord.damageMult || 1.0) *
+        (isGunship ? acGen.damageMult || 1.0 : 1.0) *
+        (isPilotRole ? 1.12 : 1.0);
+      v.customCooldownMult =
+        (ord.cooldownMult || 1.0) *
+        (isGunship ? acGen.reloadMult || 1.0 : 1.0) *
+        (isPilotRole ? 0.82 : 1.0);
       v.customFlareCdMult = (cm.flareCdMult || 1.0) * (isPilotRole ? 0.72 : 1.0);
+
+      if (isGunship) {
+        v.ac130GenId = acGen.id || 'ac130a_1968';
+        v.ac130EraLabel = acGen.shortName || '1968 AC-130A';
+        v.ac130MaxMountArc = acGen.maxMountArcRad || 0.16;
+        v.ac130AllowBellyCam = Boolean(acGen.allowBellySensorCam);
+        v.ac130HasEotechSight = Boolean(acSight.isEotech);
+        v.ac130HasFlirRepeater = Boolean(acAvio.hasFlirRepeater || acAvio.hasCoupledAutopilot);
+        v.ac130HasCoupledAutopilot = Boolean(acAvio.hasCoupledAutopilot);
+        v.hasNightVision = Boolean(acGen.hasNvg || sen.hasNvg);
+        v.hasThermalFlir = Boolean(acGen.hasFlir || sen.hasFlir);
+        if (v.team !== 'RU') {
+          v.name =
+            acGen.id === 'ac130j_2024'
+              ? 'AC-130J GHOSTRIDER (2024 AFSOC)'
+              : acGen.id === 'ac130u_1995'
+              ? 'AC-130U SPOOKY II (1995 TGM)'
+              : acGen.id === 'ac130h_1973'
+              ? 'AC-130H SPECTRE (1973 105MM)'
+              : 'AC-130A GUNSHIP II (1968 VIETNAM)';
+        }
+        if (!v.ac130AllowBellyCam && this.activeVehicle === v && this.vehicleCameraMode === 'OPTIC_NOSE') {
+          this.vehicleCameraMode = 'COCKPIT_1P';
+          this.thirdPersonVehicle = false;
+        }
+      } else {
+        v.hasNightVision = Boolean(isB2 || sen.hasNvg);
+        v.hasThermalFlir = Boolean(isB2 || sen.hasFlir);
+      }
+
+      v.sensorZoomFov = v.hasThermalFlir
+        ? isGunship
+          ? 22
+          : 26
+        : isGunship
+        ? 34
+        : sen.zoomFov || 46;
+      v.lockRangeMult = sen.lockRangeMult || 1.0;
       v.hasAutoDircm = Boolean(
-        cm.hasAutoDircm || isPilotRole || v.aircraftRole === 'gunship' || v.aircraftRole === 'b2_spirit'
+        cm.hasAutoDircm || isPilotRole || (isGunship && acGen.id === 'ac130j_2024') || isB2
       );
-      v.passiveRegenPerSec = isPilotRole ? 25 : v.aircraftRole === 'b2_spirit' ? 18 : 8;
-      if (v.aircraftRole === 'b2_spirit' && v.mesh) {
+      v.passiveRegenPerSec = isPilotRole ? 25 : isB2 ? 18 : 8;
+      if (isB2 && v.mesh) {
         applyB2SpiritColorToMesh(v.mesh, this.b2SpiritColor, this.b2SpiritAccentColor);
       }
-      v.customLoadoutLabel = `${cm.shortName || 'STD FLARES'} • ${ord.shortName || 'STOCK PYLONS'} • ${frame.shortName || 'STOCK FRAME'}${isPilotRole ? ' • ✈️ PILOT ACE (+25 HP/S)' : ''}`;
+      const senBadge = v.hasThermalFlir
+        ? 'FLIR+NVG [N]'
+        : v.hasNightVision
+        ? 'NVG [N]'
+        : 'DAY HUD';
+      v.customLoadoutLabel = isGunship
+        ? `${v.ac130EraLabel} • ${v.ac130HasEotechSight ? 'EOTECH EXPS3' : 'SIDEWAYS HUD'} • ${v.ac130HasCoupledAutopilot ? 'COUPLED AP' : v.ac130HasFlirRepeater ? 'FLIR MFD' : 'MANUAL PYLON'}`
+        : `${senBadge} • ${cm.shortName || 'STD FLARES'} • ${ord.shortName || 'STOCK PYLONS'} • ${frame.shortName || 'STOCK FRAME'}${isPilotRole ? ' • ✈️ PILOT ACE' : ''}`;
     } else {
+      const sen = mods.armorSensor || {};
       const def = mods.armorDefense || {};
       const wep = mods.armorWeaponMod || {};
       const chas = mods.armorChassis || {};
@@ -922,10 +1313,18 @@ export const GunsmithMethods = {
       v.rpm = Math.round(v._baseRpm * rpmMult);
       v.customDamageMult = (wep.damageMult || 1.0) * (isArmorRole ? 1.12 : 1.0);
       v.customCoaxHeatMult = (wep.coaxHeatMult || 1.0) * (isArmorRole ? 0.65 : 1.0);
+      v.hasNightVision = Boolean(sen.hasNvg);
+      v.hasThermalFlir = Boolean(sen.hasFlir);
+      v.sensorZoomFov = sen.zoomFov || 44;
       v.hasTrophyAps = Boolean(def.hasTrophyAps || isArmorRole);
       v.hasDozerBlade = Boolean(chas.hasDozerBlade);
       v.passiveRegenPerSec = isArmorRole ? 22 : 6;
-      v.customLoadoutLabel = `${def.shortName || 'IR SMOKE'} • ${wep.shortName || 'STOCK GUN'} • ${chas.shortName || 'STOCK CHASSIS'}${isArmorRole ? ' • 🛡️ ARMOR CREW (+22 HP/S)' : ''}`;
+      const senBadge = v.hasThermalFlir
+        ? 'CITV FLIR [N]'
+        : v.hasNightVision
+        ? 'CREW NVG [N]'
+        : 'DAY OPTICS';
+      v.customLoadoutLabel = `${senBadge} • ${def.shortName || 'IR SMOKE'} • ${wep.shortName || 'STOCK GUN'} • ${chas.shortName || 'STOCK CHASSIS'}${isArmorRole ? ' • 🛡️ ARMOR CREW' : ''}`;
     }
   },
 
@@ -1088,7 +1487,7 @@ export const GunsmithMethods = {
     }
 
     const targetWeaponId = weaponId || this.getSelectedWeaponIdForClass(this.role, 'primary');
-    if (category === 'vest' || category === 'backpack') {
+    if (category === 'vest' || category === 'backpack' || category === 'tacticalGear') {
       this.equippedUpgrades[category] = item.id;
     } else {
       const attMap = this.getWeaponAttachmentMap(targetWeaponId);
@@ -1473,7 +1872,9 @@ export const GunsmithMethods = {
       (this.kills || 0) * 45 +
       (this.revives || 0) * 75 +
       (this.captures || 0) * 100 +
-      (this.vehiclesDestroyed || 0) * 120;
+      (this.planesDestroyed || 0) * 260 +
+      (this.tanksDestroyed || 0) * 180 +
+      (this.carsDestroyed || 0) * 95;
     const isVictory = winnerTeam === this.team;
     const mult = isVictory ? 1.5 : 1.15;
     const baseTotal = matchCashLeft + perfBonus;
@@ -1935,7 +2336,9 @@ export const GunsmithMethods = {
     const armorPenMult =
       (baseDef.armorPenMult || 1.0) * (ammo && ammo.armorPenMult ? ammo.armorPenMult : 1.0);
     const voxelMult = ammo && ammo.voxelMult ? ammo.voxelMult : 1.0;
-    const velMult = ammo && ammo.velocityMult ? ammo.velocityMult : 1.0;
+    const velMult =
+      (ammo && ammo.velocityMult ? ammo.velocityMult : 1.0) *
+      (muzzle && muzzle.velocityMult ? muzzle.velocityMult : 1.0);
     const baseVel = baseDef.muzzleVelocity || 780;
     const finalMuzzleVel =
       ammo && ammo.subsonicCap
@@ -1947,9 +2350,18 @@ export const GunsmithMethods = {
       (grip ? grip.recoilMult : 1.0) *
       (ammo && ammo.recoilMult ? ammo.recoilMult : 1.0) *
       classRecoilMult;
+    const muzzleSpreadMult = muzzle && muzzle.spreadMult ? muzzle.spreadMult : 1.0;
+    const gripSpreadMult = grip ? grip.spreadMult : 1.0;
     const spreadMult =
-      (grip ? grip.spreadMult : 1.0) * (ammo && ammo.spreadMult ? ammo.spreadMult : 1.0);
+      gripSpreadMult *
+      (ammo && ammo.spreadMult ? ammo.spreadMult : 1.0) *
+      muzzleSpreadMult;
     const rpmMult = grip ? grip.rpmMult : 1.0;
+
+    // Tarkov AP-20 Precision Solid Slug conversion for multi-pellet 12G shotguns!
+    const isShotgunSlug = Boolean(
+      ammo && ammo.isSlugAmmo && baseDef.pellets && baseDef.pellets > 1
+    );
 
     // All firearms default to bare iron sights (opticType: null, adsFov: 56); use mounted optic only when equipped
     const useCustomOptic = Boolean(optic && optic.id !== 'factory' && optic.opticType);
@@ -1957,6 +2369,12 @@ export const GunsmithMethods = {
     const finalAdsFov = useCustomOptic && optic.adsFov ? optic.adsFov : baseDef.adsFov || 56;
     const finalHasCanted = Boolean(
       baseDef.hasCantedSight || (useCustomOptic && optic.grantCanted)
+    );
+    const finalIsScoped = Boolean(
+      finalOpticType === 'sniper8x' ||
+        finalOpticType === 'sniper12x' ||
+        finalOpticType === 'lpvo36' ||
+        finalOpticType === 'flir'
     );
 
     const tags = [];
@@ -1999,8 +2417,15 @@ export const GunsmithMethods = {
           : activeSkinFinish === 'pure_blue'
           ? 0x00d2d3
           : baseDef.accentColor,
-      damage: Math.max(1, Math.round(baseDef.damage * dmgMult)),
-      muzzleVelocity: finalMuzzleVel,
+      pellets: isShotgunSlug ? 1 : baseDef.pellets,
+      damage: isShotgunSlug
+        ? Math.round(baseDef.damage * 4.8 * dmgMult)
+        : Math.max(1, Math.round(baseDef.damage * dmgMult)),
+      headshotMult: isShotgunSlug ? 2.1 : baseDef.headshotMult,
+      damageFalloffStart: isShotgunSlug ? 35 : baseDef.damageFalloffStart,
+      damageFalloffEnd: isShotgunSlug ? 110 : baseDef.damageFalloffEnd,
+      maxEffectiveRange: isShotgunSlug ? 160 : baseDef.maxEffectiveRange,
+      muzzleVelocity: isShotgunSlug ? 510 : finalMuzzleVel,
       bulletGravity: baseDef.bulletGravity ?? 9.81,
       voxelDamage: Math.max(1, Math.round((baseDef.voxelDamage || 20) * voxelMult)),
       armorPenMult: Number(armorPenMult.toFixed(2)),
@@ -2012,14 +2437,24 @@ export const GunsmithMethods = {
       reloadTime: Number((baseDef.reloadTime * (mag ? mag.reloadMult : 1.0) * vestSwapMult * classReloadMult).toFixed(2)),
       recoilPitch: Number((baseDef.recoilPitch * recoilMult).toFixed(4)),
       recoilYaw: Number((baseDef.recoilYaw * recoilMult).toFixed(4)),
-      spreadHip: Number((baseDef.spreadHip * spreadMult).toFixed(4)),
-      spreadAds: Number(((baseDef.spreadAds || 0.0001) * spreadMult).toFixed(4)),
+      spreadHip: isShotgunSlug
+        ? Number((0.028 * gripSpreadMult * muzzleSpreadMult).toFixed(4))
+        : Number((baseDef.spreadHip * spreadMult).toFixed(4)),
+      spreadAds: isShotgunSlug
+        ? Number((0.0004 * gripSpreadMult * muzzleSpreadMult).toFixed(4))
+        : Number(((baseDef.spreadAds || 0.0001) * spreadMult).toFixed(4)),
       rpm: Math.round(baseDef.rpm * rpmMult),
+      opticId: useCustomOptic ? optic.id : 'factory',
+      opticName: useCustomOptic ? optic.name : 'IRON SIGHTS',
       opticType: finalOpticType,
       adsFov: finalAdsFov,
+      zoomLevels: useCustomOptic && Array.isArray(optic.zoomLevels) ? optic.zoomLevels : null,
+      zoomFovs: useCustomOptic && Array.isArray(optic.zoomFovs) ? optic.zoomFovs : null,
+      isThermal: Boolean(useCustomOptic && optic.isThermal),
+      isSlugAmmo: Boolean(ammo && ammo.isSlugAmmo),
+      isIncendiaryAmmo: Boolean(ammo && ammo.isIncendiaryAmmo),
       hasCantedSight: finalHasCanted,
-      isScoped:
-        finalOpticType === 'sniper8x' || Boolean(baseDef.isScoped && finalOpticType === 'sniper8x'),
+      isScoped: finalIsScoped,
       flashMult: finalFlashMult,
       silenced: isIntegralSuppressed || Boolean(muzzle && muzzle.silenced),
       hideTracers: Boolean(baseDef.hideTracers || (muzzle && muzzle.hideTracers)),
@@ -2039,12 +2474,23 @@ export const GunsmithMethods = {
 
     const vestDef = this.getEquippedItem('vest');
     const backpackDef = this.getEquippedItem('backpack');
+    const tacGearDef = this.getEquippedItem('tacticalGear');
     const classTrait = CLASS_TRAITS[this.role] || {};
     const baseVestArmor = vestDef ? vestDef.maxArmor : PLAYER.MAX_ARMOR;
     const vestDelta = baseVestArmor - PLAYER.MAX_ARMOR;
-    this.maxArmor = Math.max(15, (classTrait.maxArmor ?? PLAYER.MAX_ARMOR) + vestDelta);
+    const tacBonusArmor = tacGearDef && tacGearDef.bonusArmor ? tacGearDef.bonusArmor : 0;
+    const tacMoveMult = tacGearDef && tacGearDef.moveMult ? tacGearDef.moveMult : 1.0;
+
+    this.maxArmor = Math.max(15, (classTrait.maxArmor ?? PLAYER.MAX_ARMOR) + vestDelta + tacBonusArmor);
     this.armorAbsorbRatio = classTrait.armorAbsorbRatio ?? (vestDef ? vestDef.absorbRatio : PLAYER.ARMOR_ABSORB_RATIO);
-    this.classMoveSpeedMult = classTrait.moveSpeedMult || 1.0;
+    this.classMoveSpeedMult = Number(((classTrait.moveSpeedMult || 1.0) * tacMoveMult).toFixed(3));
+    this.passiveRegenBonus = tacGearDef && tacGearDef.passiveRegen ? tacGearDef.passiveRegen : 0;
+    this.headshotTakenMult =
+      tacGearDef && typeof tacGearDef.headshotTakenMult === 'number'
+        ? tacGearDef.headshotTakenMult
+        : 1.0;
+    this.hasThermalGoggles = Boolean(tacGearDef && tacGearDef.hasThermalGoggles);
+    this.equippedTacticalGear = tacGearDef || null;
     this.canFlyAircraft = Boolean(classTrait.canFlyAircraft);
     const baseDressings =
       this.role === 'medic' ? PLAYER.FIELD_DRESSINGS_MEDIC || 9 : PLAYER.FIELD_DRESSINGS_OTHER || 2;

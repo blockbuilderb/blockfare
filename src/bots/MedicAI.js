@@ -1,11 +1,11 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT } from '../config.js?v=92';
-import { tmpVec3 } from '../utils/VectorPool.js?v=92';
-import { events } from '../events.js?v=92';
+import { BOT } from '../config.js?v=105';
+import { tmpVec3 } from '../utils/VectorPool.js?v=105';
+import { events } from '../events.js?v=105';
 import {
   MEDIC_RESCUE_EVENTS,
   createMedicRescueFSM
-} from '../core/StateMachines.js?v=92';
+} from '../core/StateMachines.js?v=105';
 
 const REVIVE_PARTICLE_COLOR = new THREE.Color(0x2ecc71);
 const SHARED_SMOKE_PUFF_GEO = new THREE.BoxGeometry(1.5, 1.3, 1.5);
@@ -404,20 +404,22 @@ export function findExistingWallCoverWithinRadius(
  * directs `safeSpot` behind the existing wall to prevent battlefield clutter!
  */
 export function buildRescueCoverWall(bot, safeSpot, threatPos = null, searchOrigin = null) {
-  if (!this.world || typeof this.world.addVoxel !== 'function' || !safeSpot) return false;
+  if (!this.world || !safeSpot) return false;
 
-  // Check if there is already a wall within a 10m radius around the casualty or safeSpot
+  // Medics & infantry NEVER spawn permanent sandbag chest walls in open fields (prevents map clutter!).
+  // Instead, search up to 14m for existing building walls/rocks/fortifications to drag the casualty behind,
+  // and deploy tactical concealment smoke (`spawnRescueSmoke`) when under fire!
   const checkOrigin = searchOrigin || (bot ? bot.pos : safeSpot);
   const existingWall =
-    this.findExistingWallCoverWithinRadius(checkOrigin, 10.0, threatPos, bot) ||
+    this.findExistingWallCoverWithinRadius(checkOrigin, 14.0, threatPos, bot) ||
     (checkOrigin !== safeSpot
-      ? this.findExistingWallCoverWithinRadius(safeSpot, 10.0, threatPos, bot)
+      ? this.findExistingWallCoverWithinRadius(safeSpot, 14.0, threatPos, bot)
       : null);
 
   if (existingWall && existingWall.coverPos) {
     safeSpot.copy(existingWall.coverPos);
     if (bot) {
-      bot.builtRescueWall = false;
+      bot.builtRescueWall = true;
       bot.reusedExistingWall = true;
       if (!bot.rescueWallPos) bot.rescueWallPos = new THREE.Vector3();
       if (existingWall.wallGrid) bot.rescueWallPos.copy(existingWall.wallGrid);
@@ -425,64 +427,14 @@ export function buildRescueCoverWall(bot, safeSpot, threatPos = null, searchOrig
     return false;
   }
 
-  let threatDirX = bot && bot.subFaction === 'RU' ? -1 : bot && bot.team === 'US' ? 1 : -1;
-  let threatDirZ = 0;
-  if (threatPos) {
-    const dx = threatPos.x - safeSpot.x;
-    const dz = threatPos.z - safeSpot.z;
-    const len = Math.hypot(dx, dz) || 1;
-    threatDirX = dx / len;
-    threatDirZ = dz / len;
-  } else {
-    // Angle the wall slightly with random tactical orientation so walls aren't all identical
-    const randAng = (Math.random() - 0.5) * 0.7;
-    const baseAng = threatDirX > 0 ? 0 : Math.PI;
-    threatDirX = Math.cos(baseAng + randAng);
-    threatDirZ = Math.sin(baseAng + randAng);
-  }
-
-  const wallCenterX = safeSpot.x + threatDirX * 1.85;
-  const wallCenterZ = safeSpot.z + threatDirZ * 1.85;
-  const wallGroundY = this.world.getGroundHeightAt(wallCenterX, wallCenterZ);
-  const centerGrid = this.world.worldToGrid(wallCenterX, wallGroundY + 0.2, wallCenterZ);
-
-  // Tangent axis perpendicular to threat direction for a 3-voxel-wide breastwork
-  const perpX = -threatDirZ;
-  const perpZ = threatDirX;
-  let blocksPlaced = 0;
-
-  for (let w = -1; w <= 1; w++) {
-    const bx = wallCenterX + perpX * w * 1.05;
-    const bz = wallCenterZ + perpZ * w * 1.05;
-    const by = this.world.getGroundHeightAt(bx, by_fallback(wallGroundY, bz));
-    const g = this.world.worldToGrid(bx, by + 0.2, bz);
-    for (let h = 0; h < 2; h++) {
-      const k = this.world.key(g.gx, g.gy + h, g.gz);
-      if (!this.world.voxels.has(k)) {
-        this.world.addVoxel(g.gx, g.gy + h, g.gz, 'sandbag', false, true);
-        blocksPlaced++;
-      }
-    }
-  }
-
-  // Place the drag goal directly behind the protective cover wall (1.35m on the safe side)
-  const behindX = wallCenterX - threatDirX * 1.35;
-  const behindZ = wallCenterZ - threatDirZ * 1.35;
-  if (!this.isPointBlocked(behindX, wallGroundY, behindZ)) {
-    safeSpot.set(behindX, this.world.getGroundHeightAt(behindX, behindZ), behindZ);
-  }
-
   if (bot) {
     bot.builtRescueWall = true;
     bot.reusedExistingWall = false;
-    if (!bot.rescueWallPos) bot.rescueWallPos = new THREE.Vector3();
-    bot.rescueWallPos.set(
-      centerGrid.gx,
-      centerGrid.gy,
-      centerGrid.gz
-    );
+    if (threatPos && typeof this.spawnRescueSmoke === 'function') {
+      this.spawnRescueSmoke(safeSpot);
+    }
   }
-  return blocksPlaced > 0;
+  return false;
 }
 
 function by_fallback(_y, z) {
@@ -909,7 +861,12 @@ export function updateMedicRescue(bot, dt, player, onKillFn) {
           player.downedTimer = Math.max(player.downedTimer, 8.0);
         } else {
           bot.rescueTarget.pos.set(dragTrailX, dragTrailY + 0.22, dragTrailZ);
+          bot.rescueTarget.mesh.rotation.x = -Math.PI / 2;
           bot.rescueTarget.mesh.rotation.y = Math.atan2(toSafe.x, toSafe.z);
+          if (bot.mesh.visible) {
+            bot.rescueTarget.mesh.visible = true;
+            bot.rescueTarget.mesh._culledOffFrustum = bot.mesh._culledOffFrustum;
+          }
         }
       } else {
         // Reached a wall/cover block — immediately start reviving right in front of it without pushing casualty into the wall!

@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SQUAD_DEFS } from '../bots.js?v=92';
+import { SQUAD_DEFS } from '../bots.js?v=105';
 
 export const CommandPanel = {
   setCommandScope(scope) {
@@ -66,9 +66,10 @@ export const CommandPanel = {
       if (ordObj) ordObj.isAiPausedHold = true;
     }
 
+    const sqTotal = SQUAD_DEFS.length || 6;
     const scopeLabel =
       res.scope === 'ALL'
-        ? `ALL 5 SQUADS (${res.unitsOrdered} NPCs)`
+        ? `ALL ${sqTotal} SQUADS (${res.unitsOrdered} NPCs)`
         : `${targetSquad} SQUAD (${res.unitsOrdered} NPCs)`;
     const orderSummary = toggledAiOff
       ? `🤖 ${scopeLabel} -> AUTONOMOUS AI: OFF (HOLDING POSITION FOR MANUAL COMMANDER ORDERS)!`
@@ -85,27 +86,28 @@ export const CommandPanel = {
       : res.action === 'GARRISON'
       ? res.garrisonEnabled
         ? `🏰 GARRISON DOCTRINE: ON — 1 SQUAD PER CAPTURED FORWARD BASE (${res.garrisonSummary || 'ACTIVE'})!`
-        : `⚔️ GARRISON DOCTRINE: OFF — ALL 5 SQUADS RELEASED FOR FRONTLINE ASSAULT!`
+        : `⚔️ GARRISON DOCTRINE: OFF — ALL ${sqTotal} SQUADS RELEASED FOR FRONTLINE ASSAULT!`
       : `🤖 ${scopeLabel} -> AUTONOMOUS AI: ON (AI SQUAD LEADERS ACTIVE)`;
 
     this.addXpNotification(res.action === 'AUTO' || toggledAiOff ? 0 : 25, orderSummary);
+    const allTag = `ALL ${sqTotal} SQUADS`;
     const bannerText = toggledAiOff
-      ? `★ AUTONOMOUS AI [${res.scope === 'ALL' ? 'ALL 5 SQUADS' : targetSquad}]: 🤖 AI OFF — HOLDING FOR MANUAL ORDERS!`
+      ? `★ AUTONOMOUS AI [${res.scope === 'ALL' ? allTag : targetSquad}]: 🤖 AI OFF — HOLDING FOR MANUAL ORDERS!`
       : res.action === 'AUTO'
-      ? `★ AUTONOMOUS AI [${res.scope === 'ALL' ? 'ALL 5 SQUADS' : targetSquad}]: 🤖 AI ON — SQUAD LEADERS AUTONOMOUS!`
+      ? `★ AUTONOMOUS AI [${res.scope === 'ALL' ? allTag : targetSquad}]: 🤖 AI ON — SQUAD LEADERS AUTONOMOUS!`
       : res.action === 'CHARGE' || res.action === 'ATTACK'
-      ? `★ ORDER [${res.scope === 'ALL' ? 'ALL 5 SQUADS' : targetSquad}]: ⚔️ ALL-OUT CHARGE (${res.flagId || 'ENEMY LINE'})!`
+      ? `★ ORDER [${res.scope === 'ALL' ? allTag : targetSquad}]: ⚔️ ALL-OUT CHARGE (${res.flagId || 'ENEMY LINE'})!`
       : res.action === 'RETREAT'
-      ? `★ ORDER [${res.scope === 'ALL' ? 'ALL 5 SQUADS' : targetSquad}]: 🏳️ RETREAT TO ${res.flagId || 'KEEP'}!`
+      ? `★ ORDER [${res.scope === 'ALL' ? allTag : targetSquad}]: 🏳️ RETREAT TO ${res.flagId || 'KEEP'}!`
       : res.action === 'OBJECTIVE'
-      ? `★ ORDER [${res.scope === 'ALL' ? 'ALL 5 SQUADS' : targetSquad}]: ⚔️ ATTACK OBJ ${res.flagId}!`
+      ? `★ ORDER [${res.scope === 'ALL' ? allTag : targetSquad}]: ⚔️ ATTACK OBJ ${res.flagId}!`
       : res.action === 'FOLLOW'
-      ? `★ ORDER [${res.scope === 'ALL' ? 'ALL 5 SQUADS' : targetSquad}]: 🏃 FOLLOW ME!`
+      ? `★ ORDER [${res.scope === 'ALL' ? allTag : targetSquad}]: 🏃 FOLLOW ME!`
       : res.action === 'GARRISON'
       ? res.garrisonEnabled
         ? `★ GARRISON DOCTRINE: ON (1 SQUAD DEFENDS EACH CAPTURED BASE)!`
         : `★ GARRISON DOCTRINE: OFF (ALL SQUADS PUSH FRONTLINE)!`
-      : `★ ORDER [${res.scope === 'ALL' ? 'ALL 5 SQUADS' : targetSquad}]: 🛡️ DEFEND / SHIELD WALL!`;
+      : `★ ORDER [${res.scope === 'ALL' ? allTag : targetSquad}]: 🛡️ DEFEND / SHIELD WALL!`;
     this.showKillStreakAnnouncement(bannerText);
     this.addTacticalCommsMessage(
       this.network && this.network.callsign ? this.network.callsign : 'YOU',
@@ -204,7 +206,7 @@ export const CommandPanel = {
     }
 
     if (allBtn) {
-      allBtn.textContent = `★ ALL 5 SQUADS (${aliveTeamBots})`;
+      allBtn.textContent = `★ ALL 6 SQUADS (${aliveTeamBots})`;
       allBtn.classList.toggle('active', this.player.commandScope === 'ALL');
     }
     if (sqBtn) {
@@ -409,14 +411,15 @@ export const CommandPanel = {
     if (hudAirstrikeBtn) {
       hudAirstrikeBtn.style.display = isModernEra ? '' : 'none';
       if (isModernEra) {
+        const pat = this.player.airstrikePattern || 'A10_CAS';
         if (this.player.airstrikeTarget) {
           hudAirstrikeBtn.textContent = `💥 INBOUND (${this.player.airstrikeTarget.timer.toFixed(1)}s)`;
           hudAirstrikeBtn.classList.add('active');
         } else if (this.player.airstrikeCooldown > 0) {
-          hudAirstrikeBtn.textContent = `💥 STRIKE (${Math.ceil(this.player.airstrikeCooldown)}s)`;
+          hudAirstrikeBtn.textContent = `💥 CAS (${Math.ceil(this.player.airstrikeCooldown)}s)`;
           hudAirstrikeBtn.classList.remove('active');
         } else {
-          hudAirstrikeBtn.textContent = '💥 STRIKE [J]';
+          hudAirstrikeBtn.textContent = pat === 'A10_CAS' ? '🐗 CAS [J]' : '💥 STRIKE [J]';
           hudAirstrikeBtn.classList.remove('active');
         }
       }
@@ -425,9 +428,11 @@ export const CommandPanel = {
     if (hudStrikePatternBtn) {
       hudStrikePatternBtn.style.display = isModernEra ? '' : 'none';
       if (isModernEra) {
-        const pat = this.player.airstrikePattern || 'CARPET';
+        const pat = this.player.airstrikePattern || 'A10_CAS';
         hudStrikePatternBtn.textContent =
-          pat === 'BUNKER_BUSTER'
+          pat === 'A10_CAS'
+            ? '🐗 A-10 CAS'
+            : pat === 'BUNKER_BUSTER'
             ? '🎯 GBU'
             : pat === 'ARTILLERY'
             ? '🌧️ ARTY'
@@ -438,15 +443,34 @@ export const CommandPanel = {
     if (hudLaunchPlaneBtn) {
       hudLaunchPlaneBtn.style.display = isModernEra ? '' : 'none';
       if (isModernEra) {
-        const role = this.player.preferredAircraftRole || 'cas';
-        const roleTag =
-          role === 'gunship' ? 'AC-130' : role === 'fighter' ? 'FIGHTER/BOMB' : 'A-10 CAS';
-        if (this.player.activeVehicle && this.player.activeVehicle.isAircraft) {
-          hudLaunchPlaneBtn.textContent = `✈️ FLYING (${roleTag})`;
-          hudLaunchPlaneBtn.classList.add('active');
-        } else {
-          hudLaunchPlaneBtn.textContent = `✈️ ${roleTag} [9]`;
+        if (this.player.role === 'armor' && !(this.player.activeVehicle && this.player.activeVehicle.isAircraft)) {
+          const aType = this.player.preferredArmorOrderType || 'tank';
+          const armorTag = aType === 'apc' ? 'IFV $650' : aType === 'aa' ? 'AA $750' : 'TANK $1.1K';
+          hudLaunchPlaneBtn.textContent = `🛡️ ${armorTag} [9]`;
           hudLaunchPlaneBtn.classList.remove('active');
+        } else {
+          const activeAirRole =
+            this.player.activeVehicle && this.player.activeVehicle.isAircraft
+              ? this.player.activeVehicle.aircraftRole
+              : null;
+          const role = activeAirRole || this.player.preferredAircraftRole || 'cas';
+          const roleTag =
+            role === 'wright_flyer'
+              ? 'WRIGHT FLYER'
+              : role === 'b2_spirit'
+              ? 'B-2 SPIRIT'
+              : role === 'gunship'
+              ? 'AC-130'
+              : role === 'fighter'
+              ? 'FIGHTER'
+              : 'A-10 CAS';
+          if (this.player.activeVehicle && this.player.activeVehicle.isAircraft) {
+            hudLaunchPlaneBtn.textContent = `✈️ FLYING (${roleTag})`;
+            hudLaunchPlaneBtn.classList.add('active');
+          } else {
+            hudLaunchPlaneBtn.textContent = `✈️ ${roleTag} [9]`;
+            hudLaunchPlaneBtn.classList.remove('active');
+          }
         }
       }
     }
@@ -610,8 +634,9 @@ export const CommandPanel = {
     if (!isModernEra && this.mapClickMode === 'AIRSTRIKE') {
       this.mapClickMode = 'ORDER';
     }
-    const curPattern = this.player.airstrikePattern || 'CARPET';
+    const curPattern = this.player.airstrikePattern || 'A10_CAS';
     const isStrikeClickMode = isModernEra && this.mapClickMode === 'AIRSTRIKE';
+    const teamFunds = this.vehicleManager?.getTeamFunds ? this.vehicleManager.getTeamFunds(team) : 5000;
     const uavStatusLabel = this.player.uavActive
       ? `📡 UAV ACTIVE (${Math.ceil(this.player.uavTimer)}s • ${
           this.player.uavRevealedBots.filter((b) => !b.dead).length
@@ -705,7 +730,7 @@ export const CommandPanel = {
 
       <div style="display:grid;grid-template-columns:1.45fr 1fr;gap:10px;margin-bottom:10px;">
         <div>
-          <div style="font-size:11px;font-weight:900;color:#2ecc71;margin-bottom:4px;letter-spacing:0.6px;">▲ INDIVIDUAL SQUAD ORDERS (ALPHA – ECHO):</div>
+          <div style="font-size:11px;font-weight:900;color:#2ecc71;margin-bottom:4px;letter-spacing:0.6px;">▲ INDIVIDUAL SQUAD ORDERS (ALPHA – FALCON):</div>
           ${squadRowsHtml}
         </div>
         <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(46,204,113,0.35);border-radius:5px;padding:7px 9px;">
@@ -716,9 +741,12 @@ export const CommandPanel = {
 
       <div style="display:${isModernEra ? '' : 'none'};background:rgba(192,57,43,0.12);border:1px solid rgba(231,76,60,0.45);border-radius:5px;padding:8px 10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
-          <span style="font-size:12px;font-weight:900;color:#ff7675;">✈️ COMMANDER FIRE SUPPORT &amp; RECON DATALINK:</span>
-          <div style="display:flex;gap:4px;align-items:center;">
-            <span style="font-size:10.5px;color:#bdc3c7;font-weight:800;">STRIKE PATTERN [Shift+J]:</span>
+          <span style="font-size:12px;font-weight:900;color:#ff7675;">✈️ INFANTRY SQUAD CAS REQUEST &amp; COMMANDER FIRE SUPPORT:</span>
+          <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+            <span style="font-size:10.5px;color:#bdc3c7;font-weight:800;">CAS / STRIKE [Shift+J]:</span>
+            <button class="modal-strike-pat-btn" data-pattern="A10_CAS" style="background:${
+              curPattern === 'A10_CAS' ? '#e67e22' : 'rgba(255,255,255,0.12)'
+            };color:#fff;border:1px solid #f39c12;border-radius:3px;padding:2px 7px;font-size:10px;font-weight:900;cursor:pointer;">🐗 A-10 30MM BRRRT CAS</button>
             <button class="modal-strike-pat-btn" data-pattern="CARPET" style="background:${
               curPattern === 'CARPET' ? '#e67e22' : 'rgba(255,255,255,0.12)'
             };color:#fff;border:1px solid #f39c12;border-radius:3px;padding:2px 7px;font-size:10px;font-weight:900;cursor:pointer;">✈️ CARPET RUN (9x JDAM)</button>
@@ -727,7 +755,7 @@ export const CommandPanel = {
             };color:#fff;border:1px solid #f39c12;border-radius:3px;padding:2px 7px;font-size:10px;font-weight:900;cursor:pointer;">🎯 GBU-28 BUNKER BUSTER</button>
             <button class="modal-strike-pat-btn" data-pattern="ARTILLERY" style="background:${
               curPattern === 'ARTILLERY' ? '#e67e22' : 'rgba(255,255,255,0.12)'
-            };color:#fff;border:1px solid #f39c12;border-radius:3px;padding:2px 7px;font-size:10px;font-weight:900;cursor:pointer;">🌧️ 155MM ARTILLERY (12x HE)</button>
+            };color:#fff;border:1px solid #f39c12;border-radius:3px;padding:2px 7px;font-size:10px;font-weight:900;cursor:pointer;">🌧️ 155MM ARTILLERY</button>
           </div>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
@@ -737,7 +765,7 @@ export const CommandPanel = {
             <button id="cmd-asset-rally" style="background:#27ae60;color:#fff;border:none;border-radius:4px;padding:5px 10px;font-size:11px;font-weight:900;cursor:pointer;">🟢 RALLY [5]</button>
           </div>
           <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
-            <span style="font-size:10px;color:#fab1a0;font-weight:900;">1-CLICK STRIKE OBJ:</span>
+            <span style="font-size:10px;color:#fab1a0;font-weight:900;">1-CLICK CAS OBJ:</span>
             ${['A', 'B', 'C', 'D', 'E']
               .map(
                 (fid) =>
@@ -748,16 +776,21 @@ export const CommandPanel = {
         </div>
       </div>
 
-      <!-- SQUAD BASE-BUILDING EMPLACEMENTS & AIRCRAFT SORTIE LAUNCHER -->
+      <!-- PILOT AIRCRAFT ORDERING, ARMOR CREW TANK REQUISITION & ENGINEER EMPLACEMENTS -->
       <div style="background:rgba(22,38,52,0.92);border:1.5px solid rgba(72,219,251,0.5);border-radius:5px;padding:8px 10px;margin-top:8px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
-          <span style="font-size:11.5px;font-weight:900;color:#48dbfb;">🏰 SQUAD FORTIFICATIONS [B / T / 8]${isModernEra ? ' &amp; AIR ASSETS [9]' : ''}:</span>
-          <div style="display:${isModernEra ? 'flex' : 'none'};gap:4px;flex-wrap:wrap;">
-            <button type="button" class="modal-air-sortie-btn" data-role="cas" style="background:#2980b9;color:#fff;border:1px solid #48dbfb;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;">✈️ A-10 CAS [9]</button>
-            <button type="button" class="modal-air-sortie-btn" data-role="fighter" style="background:#8e44ad;color:#fff;border:1px solid #d6a2e8;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;">🎯💣 FIGHTER + BOMBER [9]</button>
-            <button type="button" class="modal-air-sortie-btn" data-role="gunship" style="background:#d35400;color:#fff;border:1px solid #f1c40f;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;">🛸 AC-130J GUNSHIP [9]</button>
+        <div style="display:${isModernEra ? 'flex' : 'none'};justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
+          <span style="font-size:11.5px;font-weight:900;color:#48dbfb;">✈️ PILOT PLANE ORDER &amp; 🛡️ ARMOR CREW REQUISITION (💰 ${team} FUNDS: $${teamFunds.toLocaleString()}):</span>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            <button type="button" class="modal-air-sortie-btn" data-role="cas" style="background:#2980b9;color:#fff;border:1px solid #48dbfb;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;" title="Combat Pilot: Order A-10C / Su-25 CAS ($800)">✈️ ORDER A-10 CAS ($800)</button>
+            <button type="button" class="modal-air-sortie-btn" data-role="fighter" style="background:#8e44ad;color:#fff;border:1px solid #d6a2e8;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;" title="Combat Pilot: Order F-15EX / Su-57 Fighter ($900)">🎯 ORDER FIGHTER ($900)</button>
+            <button type="button" class="modal-air-sortie-btn" data-role="gunship" style="background:#d35400;color:#fff;border:1px solid #f1c40f;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;" title="Combat Pilot: Order AC-130J Gunship ($1,200)">🛸 ORDER AC-130J ($1.2K)</button>
+            <button type="button" class="modal-air-sortie-btn" data-role="b2_spirit" style="background:#0a3d62;color:#00d2d3;border:1px solid #00d2d3;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;" title="Combat Pilot: Order B-2A Spirit Bomber ($2,000 • 25 Kills)">🦇 B-2 ($2K)</button>
+            <button type="button" class="modal-armor-req-btn" data-armor="tank" style="background:#b7791f;color:#fff;border:1px solid #f1c40f;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;" title="Armor Crewman: Deliver MBT 10m Ahead ($1,100)">🛡️ REQ TANK ($1.1K)</button>
+            <button type="button" class="modal-armor-req-btn" data-armor="apc" style="background:#16a085;color:#fff;border:1px solid #1abc9c;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;" title="Armor Crewman: Deliver 8x8 IFV 10m Ahead ($650)">🛡️ REQ IFV ($650)</button>
+            <button type="button" class="modal-armor-req-btn" data-armor="aa" style="background:#c0392b;color:#fff;border:1px solid #ff7675;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;" title="Armor Crewman: Deliver SPAAG AA 10m Ahead ($750)">📡 REQ AA ($750)</button>
           </div>
         </div>
+        <div style="font-size:10.5px;font-weight:900;color:#7bed9f;margin-bottom:4px;">🛠️ ENGINEER FORTIFICATIONS &amp; EMPLACEMENTS [B / T / 8] (-25% COST FOR ENGINEERS):</div>
         <div style="display:flex;gap:5px;flex-wrap:wrap;">
           <button type="button" class="modal-build-emplace-btn" data-kind="COVERED_BUNKER" style="flex:1;background:rgba(39,174,96,0.28);color:#7bed9f;border:1px solid #2ecc71;border-radius:4px;padding:5px 6px;font-size:10px;font-weight:900;cursor:pointer;">🛡️ COVERED BUNKER ($350)</button>
           <button type="button" class="modal-build-emplace-btn" data-kind="HMG_NEST" style="flex:1;background:rgba(243,156,18,0.25);color:#f1c40f;border:1px solid #f39c12;border-radius:4px;padding:5px 6px;font-size:10px;font-weight:900;cursor:pointer;">🔫 .50 CAL HMG ($450)</button>
@@ -838,8 +871,8 @@ export const CommandPanel = {
         const rect = mapCanvas.getBoundingClientRect();
         const cx = ((e.clientX - rect.left) / rect.width) * mapCanvas.width;
         const cy = ((e.clientY - rect.top) / rect.height) * mapCanvas.height;
-        const wx = (cx / mapCanvas.width - 0.5) * 2160;
-        const wz = (cy / mapCanvas.height - 0.5) * 1280;
+        const wx = (cx / mapCanvas.width - 0.5) * 3480;
+        const wz = (cy / mapCanvas.height - 0.5) * 2120;
         this.player.callAirstrike(new THREE.Vector3(wx, 0, wz));
         this.updateCommandOrderHud();
         this.renderCommandModalContent(modal);
@@ -856,8 +889,8 @@ export const CommandPanel = {
         const rect = mapCanvas.getBoundingClientRect();
         const cx = ((e.clientX - rect.left) / rect.width) * mapCanvas.width;
         const cy = ((e.clientY - rect.top) / rect.height) * mapCanvas.height;
-        const wx = (cx / mapCanvas.width - 0.5) * 2160;
-        const wz = (cy / mapCanvas.height - 0.5) * 1280;
+        const wx = (cx / mapCanvas.width - 0.5) * 3480;
+        const wz = (cy / mapCanvas.height - 0.5) * 2120;
 
         let nearestFlag = null;
         let bestDist = Infinity;
@@ -926,6 +959,16 @@ export const CommandPanel = {
         const role = btn.dataset.role || 'cas';
         if (this.player && typeof this.player.launchAircraftSortie === 'function') {
           this.player.launchAircraftSortie(role);
+          this.updateCommandOrderHud?.();
+          this._destroyCommandModal(modal);
+        }
+      });
+    });
+    modal.querySelectorAll('.modal-armor-req-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const armorType = btn.dataset.armor || 'tank';
+        if (this.player && typeof this.player.requestArmorDelivery === 'function') {
+          this.player.requestArmorDelivery(armorType);
           this.updateCommandOrderHud?.();
           this._destroyCommandModal(modal);
         }

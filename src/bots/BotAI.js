@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=92';
-import { BOT } from '../config.js?v=92';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=92';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=92';
-import { events } from '../events.js?v=92';
+import { sound } from '../audio.js?v=105';
+import { BOT } from '../config.js?v=105';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=105';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=105';
+import { events } from '../events.js?v=105';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -97,12 +97,12 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
   // 0. Rebuild 2D spatial grids & team lists once at the start of frame for O(1) queries
   this._frameRaycasts = 0;
   if (!this.spatialGrid) {
-    this.spatialGrid = new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 300);
+    this.spatialGrid = new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 450);
   }
   if (!this.teamGrid) {
     this.teamGrid = {
-      US: new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 160),
-      RU: new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 160)
+      US: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 240),
+      RU: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 240)
     };
   }
   this.spatialGrid.clear();
@@ -242,7 +242,16 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
                 bot.pos
               );
             } else {
-              player.takeDamage(8, bot.name, bot.team, bb.weaponName, onKillFn, bot.pos);
+              const isBotHeadshot = Math.random() < 0.14;
+              player.takeDamage(
+                isBotHeadshot ? 13 : 8,
+                bot.name,
+                bot.team,
+                bb.weaponName,
+                onKillFn,
+                bot.pos,
+                isBotHeadshot
+              );
             }
             if (
               wasAlive &&
@@ -333,26 +342,42 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     }
   }
 
-  // Precompute camera forward XZ once per frame for off-camera scene-graph & limb culling
+  // Precompute true 3D camera origin, forward vector & optical zoom once per frame
+  // so AC-130 / Aircraft / Sniper-zoomed views NEVER prematurely cull infantry or rescuing medics!
   let camX = player ? player.pos.x : 0;
+  let camY = player ? player.pos.y + 1.6 : 0;
   let camZ = player ? player.pos.z : 0;
   let camFwdX = player ? -Math.sin(player.yaw || 0) : 0;
+  let camFwdY = 0;
   let camFwdZ = player ? -Math.cos(player.yaw || 0) : -1;
-  let hasHorizCam = Boolean(player);
+  let hasCam3D = Boolean(player);
   if (player?.camera?.matrixWorld?.elements) {
     const me = player.camera.matrixWorld.elements;
     camX = me[12];
+    camY = me[13];
     camZ = me[14];
     const rfx = -me[8];
+    const rfy = -me[9];
     const rfz = -me[10];
-    const hLen = Math.hypot(rfx, rfz);
-    if (hLen >= 0.15) {
-      camFwdX = rfx / hLen;
-      camFwdZ = rfz / hLen;
+    const len3 = Math.hypot(rfx, rfy, rfz);
+    if (len3 >= 0.001) {
+      camFwdX = rfx / len3;
+      camFwdY = rfy / len3;
+      camFwdZ = rfz / len3;
     } else {
-      hasHorizCam = false;
+      hasCam3D = false;
     }
   }
+  const activeCamFov = player?.camera?.fov || 75;
+  const opticZoomMag = THREE.MathUtils.clamp(75 / Math.max(8, activeCamFov), 1.0, 9.5);
+  const playerInAircraft = Boolean(player?.activeVehicle && player.activeVehicle.isAircraft);
+  const maxRenderDist = playerInAircraft
+    ? 3400
+    : Math.min(3000, Math.round(440 * opticZoomMag));
+  const maxRenderDistSq = maxRenderDist * maxRenderDist;
+  const fullGaitDist = Math.min(2600, (playerInAircraft ? 280 : 125) * opticZoomMag);
+  const fullGaitDistSq = fullGaitDist * fullGaitDist;
+  const halfRateGaitDistSq = Math.min(900, 48 * opticZoomMag) ** 2;
 
   for (let bIdx = 0; bIdx < this.bots.length; bIdx++) {
     const bot = this.bots[bIdx];
@@ -476,15 +501,24 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     }
 
     const dxCam = bot.pos.x - camX;
+    const dyCam = bot.pos.y + 0.9 - camY;
     const dzCam = bot.pos.z - camZ;
-    const distSqCam = dxCam * dxCam + dzCam * dzCam;
-    const dotUnnorm = dxCam * camFwdX + dzCam * camFwdZ;
-    // Behind camera (dot < -0.25) and >16m away -> cull scene-graph matrix updates & limb math
+    const distSqCam = dxCam * dxCam + dyCam * dyCam + dzCam * dzCam;
+    const dot3DUnnorm = dxCam * camFwdX + dyCam * camFwdY + dzCam * camFwdZ;
+    // True 3D behind-camera check (dot3D < -0.35 and >22m away) — safe at steep -85° AC-130 downward angles!
     const offFrustum =
-      hasHorizCam &&
-      distSqCam > 16 * 16 &&
-      dotUnnorm < 0 &&
-      dotUnnorm * dotUnnorm > 0.0625 * distSqCam;
+      hasCam3D &&
+      distSqCam > 22 * 22 &&
+      dot3DUnnorm < 0 &&
+      dot3DUnnorm * dot3DUnnorm > 0.1225 * distSqCam;
+    const within3DRender = distSqCam <= maxRenderDistSq;
+
+    // Apply 3D visibility & frustum matrix flag BEFORE early-return states (`downed`, `updateMedicRescue`, `trebuchet`)
+    // so downed casualties & rescuing/healing Medics NEVER stay invisible after entering range or zooming in!
+    if (bot.mesh.visible !== within3DRender) {
+      bot.mesh.visible = within3DRender;
+    }
+    bot.mesh._culledOffFrustum = !within3DRender || offFrustum;
 
     // Mid-Air Ejected Pilot Parachute Descent
     if (bot.parachuting) {
@@ -559,10 +593,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       if (parts.muzzleFlash && parts.muzzleFlash.visible) {
         parts.muzzleFlash.visible = false;
       }
-      if (offFrustum) {
-        bot.mesh._culledOffFrustum = true;
-      } else {
-        if (bot.mesh._culledOffFrustum) bot.mesh._culledOffFrustum = false;
+      if (!bot.mesh._culledOffFrustum && distSqCam <= fullGaitDistSq) {
         bot.animPhase += dt * 2.5;
         parts.pelvisGroup.rotation.y = 0;
         parts.upperBody.position.y = 0.78;
@@ -585,10 +616,6 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         events.emit('bot:killed', { bot, stage: 'bleedout' });
       }
       continue;
-    }
-
-    if (!offFrustum && bot.mesh._culledOffFrustum) {
-      bot.mesh._culledOffFrustum = false;
     }
 
     // =======================================================================
@@ -818,6 +845,9 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         : vehicleManager.vehicles;
       if (boardableList && boardableList.length > 0) {
         const isBravoArmorCrew = bot.squad === 'BRAVO';
+        const strictDoctrine =
+          (!player || player.squadDoctrineEnabled !== false) &&
+          (this.world?.era || 'modern') === 'modern';
         const seekRangeSq = isBravoArmorCrew
           ? BOT.VEHICLE_SEEK_RANGE_BRAVO * BOT.VEHICLE_SEEK_RANGE_BRAVO
           : BOT.VEHICLE_SEEK_RANGE_OTHER * BOT.VEHICLE_SEEK_RANGE_OTHER;
@@ -831,8 +861,15 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
             veh.isWarehouseBike ||
             veh.driver ||
             veh.npcDriver ||
-            veh.team !== bot.team
+            veh.team !== bot.team ||
+            (veh.claimedByPlayer && (veh.claimedByPlayerTimer || 0) > 0)
           ) {
+            continue;
+          }
+          // When Squad Role & Rank Doctrine is ON, only BRAVO Armor Squad bots can crew Tanks, IFVs & Mobile AA!
+          const isHeavyArmorVeh =
+            veh.type === 'tank' || veh.type === 'apc' || veh.type === 'aa';
+          if (strictDoctrine && isHeavyArmorVeh && !isBravoArmorCrew) {
             continue;
           }
           const dSq = bot.pos.distanceToSquared(veh.pos);
@@ -1048,7 +1085,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
             nearestEnemy = setBotEnemyRef(bot, pVeh.pos, false, true, pVeh);
           }
         } else if (
-          dSq < nearestDistSq &&
+          dSq < nearestDistSq * (player.isUavStealthMasked ? 0.36 : 1.0) &&
           this.canBotSeeTarget(bot, 'PLAYER', player.pos, true)
         ) {
           nearestDistSq = dSq;
@@ -1256,9 +1293,9 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       }
     }
 
-    // Route across the nearest of the 3 grand river bridges (-220, 0, +220) when crossing the river
-    if (!seekingVehicle && Math.sign(bot.pos.x) !== Math.sign(goal.x) && Math.abs(bot.pos.x) < 28) {
-      const nearestBridgeZ = Math.abs(bot.pos.z) < 95 ? 0 : bot.pos.z > 0 ? 220 : -220;
+    // Route across the nearest of the 3 grand 92m-wide river bridges (-400, 0, +400) when crossing the river
+    if (!seekingVehicle && Math.sign(bot.pos.x) !== Math.sign(goal.x) && Math.abs(bot.pos.x) < 34) {
+      const nearestBridgeZ = Math.abs(bot.pos.z) < 200 ? 0 : bot.pos.z > 0 ? 400 : -400;
       goal.x = Math.sign(goal.x) * 4;
       goal.z = nearestBridgeZ;
     }
@@ -1556,7 +1593,8 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.isCrouching = false;
         bot.leanDir = 0;
         desiredDir.copy(toGoal);
-        desiredSpeed = BOT.SPEED_PATROL;
+        // Double-time march sprint when >135m out of combat from objective across the 7,600m valley!
+        desiredSpeed = distToGoal > 135 ? BOT.SPEED_SPRINT * 1.18 : BOT.SPEED_PATROL;
       } else {
         // Hold cohesive Squad overwatch formation using active spacing mode (STAY_CLOSE vs FAN_OUT)!
         // Garrison defenders crouch behind prepared forward-base cover while scanning the enemy approach!
@@ -2052,28 +2090,16 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       parts.muzzleFlash.visible = false;
     }
 
-    // Distance-based 3D Render Culling, Off-Camera Frustum Culling & Animation LOD for 250-Bot Scale:
-    // Soldiers beyond 340m (or 620m when scoped in) are hidden from WebGL draw calls while 100% active in AI simulation & Map!
-    // Soldiers >16m behind camera skip `updateMatrixWorld` scene-graph traversal AND sub-limb Euler updates!
-    // Soldiers beyond 110m skip sub-limb Euler updates while keeping 3D position & yaw active!
-    // Soldiers between 42m and 110m update sub-limb gait on alternating frames (30Hz LOD) to keep 60 FPS at crowded FOB C!
-    const distSqToPlayer = bot.pos.distanceToSquared(player.pos);
-    const maxRenderDist = player.ads && (player.currentFov || 75) < 48 ? 620 : 340;
-    const within3DRender = distSqToPlayer <= maxRenderDist * maxRenderDist;
-    if (bot.mesh.visible !== within3DRender) {
-      bot.mesh.visible = within3DRender;
-    }
+    // Distance-based Animation LOD (3D visibility & frustum flag already synced at top of loop for all states):
+    // Scales smoothly with optical zoom (`opticZoomMag`) and aircraft altitude so zoomed AC-130 / Sniper views
+    // render full running, kneeling, and dragging limb animations up to 2,600m!
     if (!within3DRender || offFrustum) {
-      bot.mesh._culledOffFrustum = true;
       continue;
     }
-    if (bot.mesh._culledOffFrustum) {
-      bot.mesh._culledOffFrustum = false;
-    }
-    if (distSqToPlayer > 110 * 110) {
+    if (distSqCam > fullGaitDistSq) {
       continue;
     }
-    if (distSqToPlayer > 42 * 42 && ((bIdx + (this._frameRaycasts || 0)) & 1) === 1) {
+    if (distSqCam > halfRateGaitDistSq && ((bIdx + (this._frameRaycasts || 0)) & 1) === 1) {
       continue;
     }
 

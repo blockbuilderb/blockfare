@@ -1,333 +1,1757 @@
 // ============================================================================
-// MAP DEFINITION: FRUGIS RIVER VALLEY (2,400m x 1,500m Squad-Scale Conquest)
-// Edit this file to patch terrain plateaus, HQ bases, Conquest objectives (A-E),
-// bridges, multi-story buildings, fortifications, ammo crates, and tree cover.
+// MAP DEFINITION: FRUGIS RIVER VALLEY (7,600m x 5,200m Grand Combined-Arms Theater)
+// All 5 Forward Operating Bases (A-E) start NEUTRAL (0%) for fair Conquest starts.
 // ============================================================================
 
-import { TERRAIN } from '../config.js?v=92';
+import { TERRAIN } from '../config.js?v=105';
 
 export const FRUGIS_RIVER_MAP = {
-  id: 'frugis_river',
-  era: 'modern',
-  eraLabel: 'MODERN ERA (21ST CENTURY)',
-  name: 'FRUGIS RIVER VALLEY',
-  subtitle: 'COMBINED ARMS & AIR COMBAT • 4,800M × 3,200M THEATER',
-  dimensions: {
-    width: 4800,
-    depth: 3200,
-    segmentsX: 360,
-    segmentsZ: 240,
-    riverWidth: 52,
-    riverLength: 3200,
-    riverWaterY: -0.85
+  "id": "frugis_river",
+  "era": "modern",
+  "eraLabel": "MODERN ERA (21ST CENTURY)",
+  "name": "FRUGIS RIVER VALLEY",
+  "subtitle": "COMBINED ARMS & AIR COMBAT • 7,600M × 5,200M GRAND THEATER",
+  "dimensions": {
+    "width": 7600,
+    "depth": 5200,
+    "segmentsX": 560,
+    "segmentsZ": 380,
+    "riverWidth": 52,
+    "riverLength": 5200,
+    "riverWaterY": -0.85
   },
-
-  // Three fortified stone/concrete bridges spanning the central river gorge
-  bridges: [
-    { z: -220, widthX: 42, spanZ: 17.0, isCentralPlaza: false, parapetHalfSpanZ: 7.2 },
-    { z: 0, widthX: 42, spanZ: 36.0, isCentralPlaza: true, parapetHalfSpanZ: 17.2 },
-    { z: 220, widthX: 42, spanZ: 17.0, isCentralPlaza: false, parapetHalfSpanZ: 7.2 }
-  ],
-
-  // Flattened/graded urban & base terrain pads aligned to VOXEL_SIZE (1.25m) multiples
-  gradedPads: [
-    { x: -380, z: -140, rx: 64, rz: 54, h: 2.5 },   // Obj A: West Frugis Town District
-    { x: -185, z: 165, rx: 60, rz: 52, h: 1.25 },   // Obj B: North Container & Logistics Yard
-    { x: 0, z: 0, rx: 66, rz: 56, h: 1.25 },        // Obj C: Central River City & Bridges
-    { x: 195, z: -165, rx: 64, rz: 54, h: 6.25 },   // Obj D: Radar Hill & Trench Complex (High Ground)
-    { x: 380, z: 140, rx: 64, rz: 54, h: 2.5 },     // Obj E: East Industrial District
-    { x: -360, z: 130, rx: 45, rz: 38, h: 2.5 },    // North-West Hamlet Outpost
-    { x: 360, z: -130, rx: 45, rz: 38, h: 2.5 },    // South-East Hamlet Outpost
-    { x: -660, z: 0, rx: 48, rz: 40, h: 1.25 },     // US Forward Highway Transit Depot
-    { x: 660, z: 0, rx: 48, rz: 40, h: 1.25 },      // RU Forward Highway Transit Depot
-    { x: -950, z: 0, rx: 78, rz: 64, h: 1.25 },     // US Main Base & Motor Pool (587m from Obj A)
-    { x: 950, z: 0, rx: 78, rz: 64, h: 1.25 },      // RU Main Base & Motor Pool (587m from Obj E)
-    { x: -865, z: -76, rx: 205, rz: 48, h: 1.25 },  // US West 360m Extended Airfield Runway Lane 1 & Side Flight-Line Parking Apron
-    { x: 865, z: 76, rx: 205, rz: 48, h: 1.25 },    // RU East 360m Extended Airfield Runway Lane 1 & Side Flight-Line Parking Apron
-    { x: -865, z: -112, rx: 205, rz: 42, h: 1.25 }, // US West 360m Dedicated Northrop B-2 Spirit Stealth Runway Lane 2
-    { x: 865, z: 112, rx: 205, rz: 42, h: 1.25 },   // RU East 360m Dedicated Northrop B-2 Spirit Stealth Runway Lane 2
-    { x: -1035, z: -38, rx: 58, rz: 36, h: 1.25 },  // US West Secret Cliffside Cave at Very Back of HQ Base (1903 Wright Flyer I)
-    { x: 1035, z: 38, rx: 58, rz: 36, h: 1.25 },    // RU East Secret Cliffside Cave at Very Back of HQ Base (1903 Wright Flyer I)
-    { x: -926, z: 74, rx: 92, rz: 44, h: 1.25 },    // US HQ Right-Side Motorcycle, 2-Stroke, E-Moto, Scooter & ATV Warehouse
-    { x: 926, z: -74, rx: 92, rz: 44, h: 1.25 }     // RU HQ Right-Side Motorcycle, 2-Stroke, E-Moto, Scooter & ATV Warehouse
-  ],
-
-  // Main Faction HQ Spawn Coordinates (>580m from nearest capture flags)
-  spawns: {
-    US_BASE: { x: -950, z: 0 },
-    RU_BASE: { x: 950, z: 0 }
-  },
-
-  // Conquest Capture Objectives (A-E)
-  flags: [
+  "bridges": [
     {
-      id: 'A',
-      name: 'OBJ ALPHA — WEST FRUGIS TOWN',
-      x: -380,
-      z: -140,
-      owner: 'US',
-      captureProgress: 100,
-      radius: TERRAIN.FLAG_RADIUS_DEFAULT,
-      useGroundHeight: false
+      "z": -400,
+      "widthX": 92,
+      "spanZ": 17,
+      "isCentralPlaza": false,
+      "parapetHalfSpanZ": 7.2
     },
     {
-      id: 'B',
-      name: 'OBJ BRAVO — LOGISTICS CONTAINER YARD',
-      x: -185,
-      z: 165,
-      owner: 'US',
-      captureProgress: 80,
-      radius: TERRAIN.FLAG_RADIUS_DEFAULT,
-      useGroundHeight: false
+      "z": 0,
+      "widthX": 92,
+      "spanZ": 36,
+      "isCentralPlaza": true,
+      "parapetHalfSpanZ": 17.2
     },
     {
-      id: 'C',
-      name: 'OBJ CHARLIE — RIVER CITY BRIDGE PLAZA',
-      x: 0,
-      z: 0,
-      owner: 'NEUTRAL',
-      captureProgress: 0,
-      radius: TERRAIN.FLAG_RADIUS_CHARLIE,
-      useGroundHeight: true
-    },
-    {
-      id: 'D',
-      name: 'OBJ DELTA — RADAR HILL GARRISON',
-      x: 195,
-      z: -165,
-      owner: 'RU',
-      captureProgress: -80,
-      radius: TERRAIN.FLAG_RADIUS_DEFAULT,
-      useGroundHeight: false
-    },
-    {
-      id: 'E',
-      name: 'OBJ ECHO — EAST INDUSTRIAL SECTOR',
-      x: 380,
-      z: 140,
-      owner: 'RU',
-      captureProgress: -100,
-      radius: TERRAIN.FLAG_RADIUS_DEFAULT,
-      useGroundHeight: false
+      "z": 400,
+      "widthX": 92,
+      "spanZ": 17,
+      "isCentralPlaza": false,
+      "parapetHalfSpanZ": 7.2
     }
   ],
-
-  // Multi-story destructible voxel buildings: [startGx, startGz, width, depth, floors, wallMat]
-  buildings: [
-    // US & RU Main HQ Bases
-    [-768, -14, 9, 7, 2, 'darkConcrete'],
-    [-768, 8, 8, 6, 2, 'concrete'],
-    [-782, -12, 8, 6, 2, 'concrete'],
-    [-782, 6, 8, 6, 2, 'darkConcrete'],
-    [758, 6, 9, 7, 2, 'darkConcrete'],
-    [758, -16, 8, 6, 2, 'concrete'],
-    [772, 6, 8, 6, 2, 'concrete'],
-    [772, -14, 8, 6, 2, 'darkConcrete'],
-
-    // US & RU Highway Transit Depots
-    [-534, -14, 8, 6, 2, 'concrete'],
-    [-546, -14, 8, 6, 2, 'brick'],
-    [-546, 10, 8, 6, 2, 'darkConcrete'],
-    [526, 8, 8, 6, 2, 'concrete'],
-    [538, 8, 8, 6, 2, 'brick'],
-    [538, -16, 8, 6, 2, 'darkConcrete'],
-
-    // Sector A: West Frugis Town District (Forward Base Alpha — Expanded Urban Complex)
-    [-320, -124, 10, 7, 3, 'brick'],
-    [-304, -126, 9, 7, 4, 'concrete'],
-    [-290, -120, 8, 7, 3, 'brick'],
-    [-316, -106, 9, 6, 3, 'concrete'],
-    [-300, -104, 8, 6, 2, 'brick'],
-    [-290, -108, 7, 6, 2, 'darkConcrete'],
-    [-332, -120, 8, 6, 3, 'concrete'],
-    [-332, -106, 8, 6, 2, 'brick'],
-    [-318, -94, 8, 6, 2, 'darkConcrete'],
-    [-302, -92, 8, 6, 3, 'brick'],
-    [-278, -122, 8, 6, 2, 'concrete'],
-    [-278, -108, 8, 6, 3, 'brick'],
-
-    // Sector B: North Logistics & Container Yard (Forward Base Bravo — Expanded Compound)
-    [-162, 130, 10, 7, 3, 'darkConcrete'],
-    [-140, 136, 9, 6, 2, 'concrete'],
-    [-154, 142, 8, 6, 2, 'brick'],
-    [-146, 116, 8, 6, 2, 'darkConcrete'],
-    [-174, 128, 8, 6, 3, 'concrete'],
-    [-174, 140, 8, 6, 2, 'brick'],
-    [-166, 114, 8, 6, 2, 'concrete'],
-    [-128, 134, 8, 6, 3, 'darkConcrete'],
-    [-128, 120, 8, 6, 2, 'brick'],
-    [-140, 148, 8, 6, 2, 'darkConcrete'],
-
-    // Sector C: Central River City & Bridge Plaza (Forward Base Charlie — Expanded City Center)
-    [-8, -13, 7, 6, 2, 'darkConcrete'],
-    [1, 7, 7, 6, 2, 'concrete'],
-    [-28, -22, 10, 7, 4, 'darkConcrete'],
-    [18, -22, 10, 7, 4, 'concrete'],
-    [-26, 12, 9, 7, 3, 'brick'],
-    [17, 12, 9, 7, 3, 'brick'],
-    [-32, -5, 8, 6, 2, 'concrete'],
-    [24, -5, 8, 6, 2, 'darkConcrete'],
-    [-40, -34, 8, 6, 3, 'brick'],
-    [-40, 26, 8, 6, 3, 'concrete'],
-    [30, -34, 8, 6, 3, 'brick'],
-    [30, 26, 8, 6, 3, 'concrete'],
-    [-28, 26, 8, 6, 2, 'darkConcrete'],
-    [18, 26, 8, 6, 2, 'darkConcrete'],
-    [-28, -34, 8, 6, 2, 'concrete'],
-    [18, -34, 8, 6, 2, 'concrete'],
-
-    // Sector D: Radar Hill & Trench Garrison (Forward Base Delta — Expanded Hilltop Fortress)
-    [144, -138, 10, 7, 3, 'darkConcrete'],
-    [160, -130, 9, 7, 3, 'concrete'],
-    [148, -120, 8, 6, 2, 'darkConcrete'],
-    [154, -144, 8, 6, 2, 'brick'],
-    [160, -118, 8, 6, 2, 'concrete'],
-    [132, -136, 8, 6, 3, 'concrete'],
-    [134, -120, 8, 6, 2, 'brick'],
-    [172, -132, 8, 6, 3, 'darkConcrete'],
-    [172, -118, 8, 6, 2, 'brick'],
-    [142, -150, 8, 6, 2, 'concrete'],
-    [168, -146, 8, 6, 2, 'darkConcrete'],
-
-    // Sector E: East Industrial District (Forward Base Echo — Expanded Factory Sector)
-    [292, 104, 10, 7, 4, 'brick'],
-    [308, 108, 9, 7, 3, 'concrete'],
-    [296, 120, 9, 6, 3, 'brick'],
-    [312, 122, 8, 6, 3, 'darkConcrete'],
-    [284, 114, 8, 6, 2, 'concrete'],
-    [306, 98, 8, 6, 2, 'darkConcrete'],
-    [272, 104, 8, 6, 3, 'concrete'],
-    [272, 118, 8, 6, 2, 'brick'],
-    [324, 108, 8, 6, 3, 'brick'],
-    [324, 122, 8, 6, 2, 'concrete'],
-    [292, 92, 8, 6, 2, 'brick'],
-    [318, 96, 8, 6, 2, 'concrete'],
-
-    // Inter-Sector Villages, Roadside Outposts & Bridge Checkpoints
-    [-294, 100, 9, 7, 3, 'brick'],
-    [-280, 106, 8, 6, 2, 'concrete'],
-    [-308, 102, 8, 6, 2, 'darkConcrete'],
-    [282, -108, 9, 7, 3, 'brick'],
-    [294, -102, 8, 6, 2, 'concrete'],
-    [268, -106, 8, 6, 2, 'darkConcrete'],
-    [-24, 172, 8, 6, 2, 'brick'],
-    [16, 172, 8, 6, 2, 'concrete'],
-    [-24, -180, 8, 6, 2, 'concrete'],
-    [16, -180, 8, 6, 2, 'brick'],
-    [-410, -18, 8, 6, 2, 'brick'],
-    [402, 12, 8, 6, 2, 'brick'],
-    [-190, -78, 8, 6, 2, 'concrete'],
-    [182, 72, 8, 6, 2, 'concrete']
+  "gradedPads": [
+    {
+      "x": -660,
+      "z": -280,
+      "rx": 64,
+      "rz": 54,
+      "h": 2.5
+    },
+    {
+      "x": -320,
+      "z": 320,
+      "rx": 60,
+      "rz": 52,
+      "h": 1.25
+    },
+    {
+      "x": 0,
+      "z": 0,
+      "rx": 66,
+      "rz": 56,
+      "h": 1.25
+    },
+    {
+      "x": 330,
+      "z": -320,
+      "rx": 64,
+      "rz": 54,
+      "h": 6.25
+    },
+    {
+      "x": 660,
+      "z": 280,
+      "rx": 64,
+      "rz": 54,
+      "h": 2.5
+    },
+    {
+      "x": -640,
+      "z": 270,
+      "rx": 45,
+      "rz": 38,
+      "h": 2.5
+    },
+    {
+      "x": 640,
+      "z": -270,
+      "rx": 45,
+      "rz": 38,
+      "h": 2.5
+    },
+    {
+      "x": -1060,
+      "z": 0,
+      "rx": 48,
+      "rz": 40,
+      "h": 1.25
+    },
+    {
+      "x": 1060,
+      "z": 0,
+      "rx": 48,
+      "rz": 40,
+      "h": 1.25
+    },
+    {
+      "x": -1520,
+      "z": 0,
+      "rx": 78,
+      "rz": 64,
+      "h": 1.25
+    },
+    {
+      "x": 1520,
+      "z": 0,
+      "rx": 78,
+      "rz": 64,
+      "h": 1.25
+    },
+    {
+      "x": -1435,
+      "z": -86,
+      "rx": 225,
+      "rz": 58,
+      "h": 1.25
+    },
+    {
+      "x": 1435,
+      "z": 86,
+      "rx": 225,
+      "rz": 58,
+      "h": 1.25
+    },
+    {
+      "x": -1485,
+      "z": -140,
+      "rx": 145,
+      "rz": 38,
+      "h": 1.25
+    },
+    {
+      "x": 1485,
+      "z": 140,
+      "rx": 145,
+      "rz": 38,
+      "h": 1.25
+    },
+    {
+      "x": -1605,
+      "z": -38,
+      "rx": 58,
+      "rz": 36,
+      "h": 1.25
+    },
+    {
+      "x": 1605,
+      "z": 38,
+      "rx": 58,
+      "rz": 36,
+      "h": 1.25
+    },
+    {
+      "x": -1496,
+      "z": 74,
+      "rx": 92,
+      "rz": 44,
+      "h": 1.25
+    },
+    {
+      "x": 1496,
+      "z": -74,
+      "rx": 92,
+      "rz": 44,
+      "h": 1.25
+    },
+    {
+      "x": -68,
+      "z": 0,
+      "rx": 48,
+      "rz": 64,
+      "h": 1.25
+    },
+    {
+      "x": 68,
+      "z": 0,
+      "rx": 48,
+      "rz": 64,
+      "h": 1.25
+    },
+    {
+      "x": -60,
+      "z": -400,
+      "rx": 36,
+      "rz": 28,
+      "h": 1.25
+    },
+    {
+      "x": 60,
+      "z": -400,
+      "rx": 36,
+      "rz": 28,
+      "h": 1.25
+    },
+    {
+      "x": -60,
+      "z": 400,
+      "rx": 36,
+      "rz": 28,
+      "h": 1.25
+    },
+    {
+      "x": 60,
+      "z": 400,
+      "rx": 36,
+      "rz": 28,
+      "h": 1.25
+    }
   ],
-
-  // Wooden Watchtowers: [startGx, startGz]
-  watchtowers: [
-    [-750, 14],
-    [-750, -16],
-    [748, -16],
-    [748, 14],
-    [-522, 10],
-    [520, -12],
-    [-286, -104],
-    [-132, 120],
-    [-18, 26],
-    [16, -30],
-    [284, 102]
+  "spawns": {
+    "US_BASE": {
+      "x": -1520,
+      "z": 0
+    },
+    "RU_BASE": {
+      "x": 1520,
+      "z": 0
+    }
+  },
+  "flags": [
+    {
+      "id": "A",
+      "name": "OBJ ALPHA — WEST FRUGIS TOWN",
+      "x": -660,
+      "z": -280,
+      "owner": "NEUTRAL",
+      "captureProgress": 0,
+      "radius": TERRAIN.FLAG_RADIUS_DEFAULT,
+      "useGroundHeight": false
+    },
+    {
+      "id": "B",
+      "name": "OBJ BRAVO — LOGISTICS CONTAINER YARD",
+      "x": -320,
+      "z": 320,
+      "owner": "NEUTRAL",
+      "captureProgress": 0,
+      "radius": TERRAIN.FLAG_RADIUS_DEFAULT,
+      "useGroundHeight": false
+    },
+    {
+      "id": "C",
+      "name": "OBJ CHARLIE — RIVER CITY BRIDGE PLAZA",
+      "x": 0,
+      "z": 0,
+      "owner": "NEUTRAL",
+      "captureProgress": 0,
+      "radius": TERRAIN.FLAG_RADIUS_CHARLIE,
+      "useGroundHeight": true
+    },
+    {
+      "id": "D",
+      "name": "OBJ DELTA — RADAR HILL GARRISON",
+      "x": 330,
+      "z": -320,
+      "owner": "NEUTRAL",
+      "captureProgress": 0,
+      "radius": TERRAIN.FLAG_RADIUS_DEFAULT,
+      "useGroundHeight": false
+    },
+    {
+      "id": "E",
+      "name": "OBJ ECHO — EAST INDUSTRIAL SECTOR",
+      "x": 660,
+      "z": 280,
+      "owner": "NEUTRAL",
+      "captureProgress": 0,
+      "radius": TERRAIN.FLAG_RADIUS_DEFAULT,
+      "useGroundHeight": false
+    }
   ],
-
-  // HESCO Bastion Walls: [startGx, startGz, length, alongX]
-  hescoBastions: [
-    [-740, -14, 24, false],
-    [740, -10, 24, false],
-    [-526, -6, 12, true],
-    [522, 6, 12, true],
-    [-308, -112, 10, true],
-    [-150, 114, 12, true],
-    [138, -128, 12, false],
-    [150, -114, 14, true],
-    [300, 100, 12, true],
-    [-220, -8, 12, false],
-    [220, -8, 12, false]
+  "buildings": [
+    [
+      -1224,
+      -14,
+      9,
+      7,
+      2,
+      "darkConcrete"
+    ],
+    [
+      -1224,
+      8,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      -1238,
+      -12,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      -1238,
+      6,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      1214,
+      6,
+      9,
+      7,
+      2,
+      "darkConcrete"
+    ],
+    [
+      1214,
+      -16,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      1228,
+      6,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      1228,
+      -14,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      -854,
+      -14,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      -866,
+      -14,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      -866,
+      10,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      846,
+      8,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      858,
+      8,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      858,
+      -16,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      -544,
+      -236,
+      10,
+      7,
+      3,
+      "brick"
+    ],
+    [
+      -528,
+      -238,
+      9,
+      7,
+      4,
+      "concrete"
+    ],
+    [
+      -514,
+      -232,
+      8,
+      7,
+      3,
+      "brick"
+    ],
+    [
+      -540,
+      -218,
+      9,
+      6,
+      3,
+      "concrete"
+    ],
+    [
+      -524,
+      -216,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      -514,
+      -220,
+      7,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      -556,
+      -232,
+      8,
+      6,
+      3,
+      "concrete"
+    ],
+    [
+      -556,
+      -218,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      -542,
+      -206,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      -526,
+      -204,
+      8,
+      6,
+      3,
+      "brick"
+    ],
+    [
+      -502,
+      -234,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      -502,
+      -220,
+      8,
+      6,
+      3,
+      "brick"
+    ],
+    [
+      -270,
+      254,
+      10,
+      7,
+      3,
+      "darkConcrete"
+    ],
+    [
+      -248,
+      260,
+      9,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      -262,
+      266,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      -254,
+      240,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      -282,
+      252,
+      8,
+      6,
+      3,
+      "concrete"
+    ],
+    [
+      -282,
+      264,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      -274,
+      238,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      -236,
+      258,
+      8,
+      6,
+      3,
+      "darkConcrete"
+    ],
+    [
+      -236,
+      244,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      -248,
+      272,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      -46,
+      -13,
+      7,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      39,
+      7,
+      7,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      -49,
+      -22,
+      10,
+      7,
+      4,
+      "darkConcrete"
+    ],
+    [
+      39,
+      -22,
+      10,
+      7,
+      4,
+      "concrete"
+    ],
+    [
+      -48,
+      12,
+      9,
+      7,
+      3,
+      "brick"
+    ],
+    [
+      39,
+      12,
+      9,
+      7,
+      3,
+      "brick"
+    ],
+    [
+      -47,
+      -5,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      39,
+      -5,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      -47,
+      -34,
+      8,
+      6,
+      3,
+      "brick"
+    ],
+    [
+      -47,
+      26,
+      8,
+      6,
+      3,
+      "concrete"
+    ],
+    [
+      39,
+      -34,
+      8,
+      6,
+      3,
+      "brick"
+    ],
+    [
+      39,
+      26,
+      8,
+      6,
+      3,
+      "concrete"
+    ],
+    [
+      -47,
+      26,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      39,
+      26,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      -47,
+      -34,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      39,
+      -34,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      252,
+      -262,
+      10,
+      7,
+      3,
+      "darkConcrete"
+    ],
+    [
+      268,
+      -254,
+      9,
+      7,
+      3,
+      "concrete"
+    ],
+    [
+      256,
+      -244,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      262,
+      -268,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      268,
+      -242,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      240,
+      -260,
+      8,
+      6,
+      3,
+      "concrete"
+    ],
+    [
+      242,
+      -244,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      280,
+      -256,
+      8,
+      6,
+      3,
+      "darkConcrete"
+    ],
+    [
+      280,
+      -242,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      250,
+      -274,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      276,
+      -270,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      516,
+      216,
+      10,
+      7,
+      4,
+      "brick"
+    ],
+    [
+      532,
+      220,
+      9,
+      7,
+      3,
+      "concrete"
+    ],
+    [
+      520,
+      232,
+      9,
+      6,
+      3,
+      "brick"
+    ],
+    [
+      536,
+      234,
+      8,
+      6,
+      3,
+      "darkConcrete"
+    ],
+    [
+      508,
+      226,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      530,
+      210,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      496,
+      216,
+      8,
+      6,
+      3,
+      "concrete"
+    ],
+    [
+      496,
+      230,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      548,
+      220,
+      8,
+      6,
+      3,
+      "brick"
+    ],
+    [
+      548,
+      234,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      516,
+      204,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      542,
+      208,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      -518,
+      212,
+      9,
+      7,
+      3,
+      "brick"
+    ],
+    [
+      -504,
+      218,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      -532,
+      214,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      506,
+      -220,
+      9,
+      7,
+      3,
+      "brick"
+    ],
+    [
+      518,
+      -214,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      492,
+      -218,
+      8,
+      6,
+      2,
+      "darkConcrete"
+    ],
+    [
+      -47,
+      316,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      39,
+      316,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      -47,
+      -324,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      39,
+      -324,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      -634,
+      -18,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      626,
+      12,
+      8,
+      6,
+      2,
+      "brick"
+    ],
+    [
+      -294,
+      -121,
+      8,
+      6,
+      2,
+      "concrete"
+    ],
+    [
+      282,
+      112,
+      8,
+      6,
+      2,
+      "concrete"
+    ]
   ],
-
-  // Sandbag Bunkers: [centerGx, centerGz]
-  sandbagBunkers: [
-    [-303, -112],
-    [-147, 132],
-    [-15, 0],
-    [15, 0],
-    [156, -132],
-    [304, 114],
-    [-286, 96],
-    [286, -96],
-    [-14, 176],
-    [14, 176],
-    [-14, -176],
-    [14, -176],
-    [-115, 0],
-    [115, 0]
+  "watchtowers": [
+    [
+      -1206,
+      14
+    ],
+    [
+      -1206,
+      -16
+    ],
+    [
+      1204,
+      -16
+    ],
+    [
+      1204,
+      14
+    ],
+    [
+      -842,
+      10
+    ],
+    [
+      840,
+      -12
+    ],
+    [
+      -510,
+      -216
+    ],
+    [
+      -240,
+      244
+    ],
+    [
+      -42,
+      26
+    ],
+    [
+      40,
+      -30
+    ],
+    [
+      508,
+      214
+    ]
   ],
-
-  // Shipping Containers: [startGx, startGz, alongX, matType, offsetGy]
-  shippingContainers: [
-    [-756, 10, true, 'containerBlue', 0],
-    [-756, -12, true, 'containerOlive', 0],
-    [750, -12, true, 'containerRed', 0],
-    [750, 10, true, 'containerOlive', 0],
-    [-530, 8, true, 'containerBlue', 0],
-    [526, -10, true, 'containerRed', 0],
-    [-154, 120, true, 'containerRed', 0],
-    [-154, 120, true, 'containerBlue', 3],
-    [-144, 122, false, 'containerOlive', 0],
-    [-136, 126, true, 'containerRed', 0],
-    [-136, 126, true, 'containerOlive', 3],
-    [166, -142, true, 'containerOlive', 0],
-    [-214, 6, true, 'containerOlive', 0],
-    [210, -8, true, 'containerRed', 0]
+  "hescoBastions": [
+    [
+      -1196,
+      -14,
+      24,
+      false
+    ],
+    [
+      1196,
+      -10,
+      24,
+      false
+    ],
+    [
+      -846,
+      -6,
+      12,
+      true
+    ],
+    [
+      842,
+      6,
+      12,
+      true
+    ],
+    [
+      -532,
+      -224,
+      10,
+      true
+    ],
+    [
+      -258,
+      238,
+      12,
+      true
+    ],
+    [
+      246,
+      -252,
+      12,
+      false
+    ],
+    [
+      258,
+      -238,
+      14,
+      true
+    ],
+    [
+      524,
+      212,
+      12,
+      true
+    ],
+    [
+      -444,
+      -8,
+      12,
+      false
+    ],
+    [
+      444,
+      -8,
+      12,
+      false
+    ]
   ],
-
-  // Radar Towers: [wx, wz]
-  radarTowers: [
-    [204, -172],
-    [182, -178]
+  "sandbagBunkers": [
+    [
+      -527,
+      -224
+    ],
+    [
+      -255,
+      256
+    ],
+    [
+      -15,
+      0
+    ],
+    [
+      15,
+      0
+    ],
+    [
+      264,
+      -256
+    ],
+    [
+      528,
+      226
+    ],
+    [
+      -510,
+      208
+    ],
+    [
+      510,
+      -208
+    ],
+    [
+      -41,
+      320
+    ],
+    [
+      41,
+      320
+    ],
+    [
+      -41,
+      -320
+    ],
+    [
+      41,
+      -320
+    ],
+    [
+      -178,
+      0
+    ],
+    [
+      178,
+      0
+    ]
   ],
-
-  // Pre-placed Base & Objective Ammo Crates: [wx, wz]
-  ammoCrates: [
-    [-940, -4],
-    [-920, 8],
-    [940, 4],
-    [920, -8],
-    [-655, -4],
-    [655, 4],
-    [-376, -136],
-    [-182, 162],
-    [-4, 3],
-    [6, -3],
-    [192, -162],
-    [376, 136],
-    [-356, 126],
-    [356, -126]
+  "shippingContainers": [
+    [
+      -1212,
+      10,
+      true,
+      "containerBlue",
+      0
+    ],
+    [
+      -1212,
+      -12,
+      true,
+      "containerOlive",
+      0
+    ],
+    [
+      1206,
+      -12,
+      true,
+      "containerRed",
+      0
+    ],
+    [
+      1206,
+      10,
+      true,
+      "containerOlive",
+      0
+    ],
+    [
+      -850,
+      8,
+      true,
+      "containerBlue",
+      0
+    ],
+    [
+      846,
+      -10,
+      true,
+      "containerRed",
+      0
+    ],
+    [
+      -262,
+      244,
+      true,
+      "containerRed",
+      0
+    ],
+    [
+      -262,
+      244,
+      true,
+      "containerBlue",
+      3
+    ],
+    [
+      -252,
+      246,
+      false,
+      "containerOlive",
+      0
+    ],
+    [
+      -244,
+      250,
+      true,
+      "containerRed",
+      0
+    ],
+    [
+      -244,
+      250,
+      true,
+      "containerOlive",
+      3
+    ],
+    [
+      274,
+      -266,
+      true,
+      "containerOlive",
+      0
+    ],
+    [
+      -332,
+      9,
+      true,
+      "containerOlive",
+      0
+    ],
+    [
+      326,
+      -12,
+      true,
+      "containerRed",
+      0
+    ]
   ],
-
-  // Low-poly Pine Trees & Boulders: [wx, wz]
-  treeCoords: [
-    [-860, -85], [-820, 95], [-760, -140], [-710, 125], [-640, -90],
-    [-580, 110], [-520, -110], [-460, 85], [-430, -65], [-340, 45],
-    [-285, -195], [-265, 188], [-250, -235], [-235, 230], [-220, -55],
-    [-215, 215], [-195, -240], [-170, 235], [-160, -220], [-145, -38],
-    [-140, 48], [-130, 230], [-125, -210], [-110, 82], [-95, -235],
-    [-85, -85], [-70, 245], [-55, -225], [-48, 92], [-42, -95],
-    [-32, 235], [-28, -240], [28, 240], [32, -235], [42, 95],
-    [48, -92], [55, 225], [70, -245], [85, 85], [95, 235],
-    [110, -82], [125, 210], [130, -230], [140, -48], [145, 38],
-    [160, 220], [170, -235], [195, 240], [215, -215], [220, 55],
-    [235, -230], [250, 235], [265, -188], [285, 195],
-    [340, -45], [430, 65], [460, -85], [520, 110], [580, -110],
-    [640, 90], [710, -125], [760, 140], [820, -95], [860, 85],
-    [-480, -220], [-480, 220], [480, -220], [480, 220],
-    [-310, 25], [310, -25], [-90, -45], [90, 45],
-    [-270, -165], [270, 165], [-110, 185], [110, -185],
-    [-550, -55], [550, 55], [-550, 45], [550, -45]
+  "radarTowers": [
+    [
+      339,
+      -327
+    ],
+    [
+      317,
+      -333
+    ]
+  ],
+  "ammoCrates": [
+    [
+      -1510,
+      -4
+    ],
+    [
+      -1490,
+      8
+    ],
+    [
+      1510,
+      4
+    ],
+    [
+      1490,
+      -8
+    ],
+    [
+      -1055,
+      -4
+    ],
+    [
+      1055,
+      4
+    ],
+    [
+      -656,
+      -276
+    ],
+    [
+      -317,
+      317
+    ],
+    [
+      -4,
+      3
+    ],
+    [
+      6,
+      -3
+    ],
+    [
+      327,
+      -317
+    ],
+    [
+      656,
+      276
+    ],
+    [
+      -636,
+      266
+    ],
+    [
+      636,
+      -266
+    ]
+  ],
+  "treeCoords": [
+    [
+      -1359,
+      143
+    ],
+    [
+      -1296,
+      154
+    ],
+    [
+      -1201,
+      -305
+    ],
+    [
+      -1122,
+      203
+    ],
+    [
+      -1011,
+      -146
+    ],
+    [
+      -916,
+      178
+    ],
+    [
+      -822,
+      -178
+    ],
+    [
+      -727,
+      138
+    ],
+    [
+      -679,
+      -105
+    ],
+    [
+      -537,
+      73
+    ],
+    [
+      -450,
+      -316
+    ],
+    [
+      -419,
+      305
+    ],
+    [
+      -395,
+      -381
+    ],
+    [
+      -371,
+      373
+    ],
+    [
+      -348,
+      -89
+    ],
+    [
+      -340,
+      348
+    ],
+    [
+      -308,
+      -389
+    ],
+    [
+      -269,
+      381
+    ],
+    [
+      -253,
+      -356
+    ],
+    [
+      -229,
+      -62
+    ],
+    [
+      -221,
+      78
+    ],
+    [
+      -205,
+      373
+    ],
+    [
+      -197,
+      -340
+    ],
+    [
+      -174,
+      133
+    ],
+    [
+      -150,
+      -381
+    ],
+    [
+      -134,
+      -138
+    ],
+    [
+      -111,
+      397
+    ],
+    [
+      -87,
+      -364
+    ],
+    [
+      -76,
+      149
+    ],
+    [
+      -66,
+      -154
+    ],
+    [
+      -51,
+      381
+    ],
+    [
+      -44,
+      -389
+    ],
+    [
+      44,
+      389
+    ],
+    [
+      51,
+      -381
+    ],
+    [
+      66,
+      154
+    ],
+    [
+      76,
+      -149
+    ],
+    [
+      87,
+      365
+    ],
+    [
+      111,
+      -397
+    ],
+    [
+      134,
+      138
+    ],
+    [
+      150,
+      381
+    ],
+    [
+      174,
+      -133
+    ],
+    [
+      198,
+      340
+    ],
+    [
+      205,
+      -373
+    ],
+    [
+      221,
+      -78
+    ],
+    [
+      229,
+      62
+    ],
+    [
+      253,
+      356
+    ],
+    [
+      269,
+      -381
+    ],
+    [
+      308,
+      389
+    ],
+    [
+      340,
+      -348
+    ],
+    [
+      348,
+      89
+    ],
+    [
+      371,
+      -373
+    ],
+    [
+      395,
+      381
+    ],
+    [
+      419,
+      -305
+    ],
+    [
+      450,
+      316
+    ],
+    [
+      537,
+      -73
+    ],
+    [
+      679,
+      105
+    ],
+    [
+      727,
+      -138
+    ],
+    [
+      822,
+      178
+    ],
+    [
+      916,
+      -178
+    ],
+    [
+      1011,
+      146
+    ],
+    [
+      1122,
+      -202
+    ],
+    [
+      1201,
+      227
+    ],
+    [
+      1296,
+      -154
+    ],
+    [
+      1359,
+      138
+    ],
+    [
+      -758,
+      -356
+    ],
+    [
+      -758,
+      356
+    ],
+    [
+      758,
+      -356
+    ],
+    [
+      758,
+      356
+    ],
+    [
+      -490,
+      41
+    ],
+    [
+      490,
+      -40
+    ],
+    [
+      -142,
+      -73
+    ],
+    [
+      142,
+      73
+    ],
+    [
+      -427,
+      -267
+    ],
+    [
+      427,
+      267
+    ],
+    [
+      -174,
+      300
+    ],
+    [
+      174,
+      -300
+    ],
+    [
+      -869,
+      -89
+    ],
+    [
+      869,
+      89
+    ],
+    [
+      -869,
+      73
+    ],
+    [
+      869,
+      -73
+    ],
+    [
+      -1320,
+      180
+    ],
+    [
+      -1260,
+      -220
+    ],
+    [
+      -1180,
+      260
+    ],
+    [
+      -1120,
+      -290
+    ],
+    [
+      -980,
+      210
+    ],
+    [
+      -920,
+      -240
+    ],
+    [
+      -840,
+      340
+    ],
+    [
+      -780,
+      -360
+    ],
+    [
+      -540,
+      380
+    ],
+    [
+      -490,
+      -390
+    ],
+    [
+      -210,
+      440
+    ],
+    [
+      -180,
+      -450
+    ],
+    [
+      180,
+      450
+    ],
+    [
+      210,
+      -440
+    ],
+    [
+      490,
+      390
+    ],
+    [
+      540,
+      -380
+    ],
+    [
+      780,
+      360
+    ],
+    [
+      840,
+      -340
+    ],
+    [
+      920,
+      240
+    ],
+    [
+      980,
+      -210
+    ],
+    [
+      1120,
+      290
+    ],
+    [
+      1180,
+      -260
+    ],
+    [
+      1260,
+      220
+    ],
+    [
+      1320,
+      -180
+    ]
   ]
 };

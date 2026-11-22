@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=92';
-import { VEHICLE_STATS, PROJECTILES } from './config.js?v=92';
+import { sound } from './audio.js?v=105';
+import { VEHICLE_STATS, PROJECTILES } from './config.js?v=105';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=92';
-import { createVehicleMesh } from './models/vehicle-model.js?v=92';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=92';
-import { events, makeEventBridge } from './events.js?v=92';
+} from './assets/vehicle-defs.js?v=105';
+import { createVehicleMesh } from './models/vehicle-model.js?v=105';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=105';
+import { events, makeEventBridge } from './events.js?v=105';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=92';
+} from './core/StateMachines.js?v=105';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -108,7 +108,13 @@ export class VehicleManager {
       if (v.isAircraft) {
         this.activeAircraftByTeam[team].push(v);
       } else {
-        if (!v.isEmplacement && !v.isWarehouseBike && !v.driver && !v.npcDriver) {
+        if (
+          !v.isEmplacement &&
+          !v.isWarehouseBike &&
+          !v.driver &&
+          !v.npcDriver &&
+          !(v.claimedByPlayer && (v.claimedByPlayerTimer || 0) > 0)
+        ) {
           this.boardableGroundByTeam[team].push(v);
         }
         const isOccupied = Boolean(v.driver || v.npcDriver);
@@ -208,29 +214,47 @@ export class VehicleManager {
         : def.type === 'apc'
         ? 3.35
         : 2.65;
+      let safeYaw = def.spawnYaw || 0;
       const safeSpawn = isPlane
-        ? new THREE.Vector3(sx, this.world.getGroundHeightAt(sx, sz) + (sy || 0), sz)
-        : isBikeOrAtv
-        ? (() => {
-            const pushedBike =
-              this.world.pushOutOfBuildingFootprint && (def.type === 'bike' || def.type === 'atv')
-                ? this.world.pushOutOfBuildingFootprint(sx, sz, 2.4)
-                : { x: sx, z: sz };
-            return new THREE.Vector3(
-              pushedBike.x,
-              this.world.getGroundHeightAt(pushedBike.x, pushedBike.z) + (sy || 0),
-              pushedBike.z
-            );
-          })()
+        ? this.world.findSafeVehicleSpawnPoint
+          ? (() => {
+              const airSafe = this.world.findSafeVehicleSpawnPoint(
+                sx,
+                sz,
+                safeYaw,
+                7.2,
+                6.2,
+                this.vehicles,
+                true
+              );
+              airSafe.y += sy || 0;
+              return airSafe;
+            })()
+          : new THREE.Vector3(sx, this.world.getGroundHeightAt(sx, sz) + (sy || 0), sz)
         : this.world.findSafeVehicleSpawnPoint
-        ? this.world.findSafeVehicleSpawnPoint(sx, sz, def.spawnYaw || 0, halfW, halfL)
-        : new THREE.Vector3(sx, this.world.getGroundHeightAt(sx, sz), sz);
+        ? (() => {
+            const gndSafe = this.world.findSafeVehicleSpawnPoint(
+              sx,
+              sz,
+              safeYaw,
+              halfW,
+              halfL,
+              this.vehicles,
+              Boolean(def.isEmplacement || def.type === 'trebuchet')
+            );
+            if (typeof gndSafe.safeYaw === 'number') {
+              safeYaw = gndSafe.safeYaw;
+            }
+            gndSafe.y += sy || 0;
+            return gndSafe;
+          })()
+        : new THREE.Vector3(sx, this.world.getGroundHeightAt(sx, sz) + (sy || 0), sz);
       const safePatrolPoints = def.patrolPoints.map((p) => {
         if (isPlane) {
           return new THREE.Vector3(p[0], p[1] || 135, p[2]);
         }
         const pushed = this.world.pushOutOfBuildingFootprint
-          ? this.world.pushOutOfBuildingFootprint(p[0], p[2], halfL + 4.5)
+          ? this.world.pushOutOfBuildingFootprint(p[0], p[2], halfL + 5.5)
           : { x: p[0], z: p[2] };
         return new THREE.Vector3(pushed.x, this.world.getGroundHeightAt(pushed.x, pushed.z), pushed.z);
       });
@@ -238,6 +262,7 @@ export class VehicleManager {
         ...def,
         isAircraft: isPlane,
         spawnPos: safeSpawn,
+        spawnYaw: safeYaw,
         patrolPoints: safePatrolPoints
       };
       this.spawnVehicle(cfg);
@@ -262,21 +287,43 @@ export class VehicleManager {
       group.visible = false;
     }
 
+    const isLightBikeOrMount = Boolean(
+      cfg.isWarehouseBike ||
+        cfg.type === 'bike' ||
+        cfg.type === 'atv' ||
+        cfg.type === 'warhorse' ||
+        cfg.type === 'raptor_mount'
+    );
+    const isHeavyArmorType = Boolean(
+      !isPlane && (cfg.type === 'tank' || cfg.type === 'apc' || cfg.type === 'aa' || cfg.type === 'trex_mount')
+    );
     const ticketCost = isPlane
       ? cfg.aircraftRole === 'b2_spirit'
-        ? VEHICLE_STATS.TICKET_COST_B2_SPIRIT || 25
-        : VEHICLE_STATS.TICKET_COST_PLANE || 12
-      : cfg.type === 'tank'
-      ? 15
-      : cfg.type === 'apc'
-      ? 10
-      : 5;
+        ? VEHICLE_STATS.TICKET_COST_B2_SPIRIT || 45
+        : cfg.aircraftRole === 'gunship'
+        ? VEHICLE_STATS.TICKET_COST_GUNSHIP || 34
+        : VEHICLE_STATS.TICKET_COST_PLANE || 30
+      : cfg.type === 'tank' || cfg.type === 'trex_mount'
+      ? VEHICLE_STATS.TICKET_COST_TANK || 24
+      : cfg.type === 'apc' || cfg.type === 'aa'
+      ? VEHICLE_STATS.TICKET_COST_APC || 16
+      : isLightBikeOrMount
+      ? 4
+      : VEHICLE_STATS.TICKET_COST_HUMVEE || 8;
     const factionMoneyCost = isPlane
       ? cfg.aircraftRole === 'b2_spirit'
-        ? VEHICLE_STATS.FACTION_COST_B2_SPIRIT || 2000
-        : VEHICLE_STATS.FACTION_COST_PLANE || 800
+        ? VEHICLE_STATS.FACTION_COST_B2_SPIRIT || 2500
+        : VEHICLE_STATS.FACTION_COST_PLANE || 1500
+      : cfg.type === 'tank'
+      ? VEHICLE_STATS.FACTION_COST_TANK || 1300
+      : cfg.type === 'apc'
+      ? VEHICLE_STATS.FACTION_COST_APC || 800
+      : cfg.type === 'aa'
+      ? VEHICLE_STATS.FACTION_COST_AA || 850
+      : cfg.type === 'humvee'
+      ? VEHICLE_STATS.FACTION_COST_CAR || 350
       : 0;
-    const ticketCategory = isPlane ? 'ARMOR' : cfg.type === 'humvee' ? 'CAR' : 'ARMOR';
+    const ticketCategory = isPlane ? 'PLANE' : isHeavyArmorType ? 'TANK' : 'CAR';
     const statBlock = isPlane
       ? cfg.aircraftRole === 'wright_flyer'
         ? VEHICLE_STATS.PLANE_WRIGHT_FLYER
@@ -383,6 +430,7 @@ export class VehicleManager {
       dead: isInitialReinforcement || b2Locked,
       respawnTimer: b2Locked ? 999999 : initialDelay,
       replacementTicketPaid: false,
+      _killCredited: false,
       pos: group.position,
       yaw: cfg.spawnYaw,
       pitch: 0,
@@ -846,10 +894,10 @@ export class VehicleManager {
     const headingYaw = team === 'US' ? -Math.PI / 2 : Math.PI / 2;
     const startX = THREE.MathUtils.clamp(
       player.pos.x + (team === 'US' ? -entryBackDist : entryBackDist),
-      -1350,
-      1350
+      -2450,
+      2450
     );
-    const startZ = THREE.MathUtils.clamp(player.pos.z, -650, 650);
+    const startZ = THREE.MathUtils.clamp(player.pos.z, -1650, 1650);
     const alt =
       plane.aircraftRole === 'wright_flyer'
         ? 62
@@ -892,6 +940,530 @@ export class VehicleManager {
   }
 
   /**
+   * Pilot Air Wing Requisition (`orderPlayerAircraft`):
+   * Spends Faction Command Funds (`cas: $800`, `fighter: $900`, `gunship: $1200`, `b2_spirit: $2000`, `wright_flyer: $0`)
+   * to either launch an immediate airborne sortie (`launchAirborne = true`) or park a fresh 100% HP aircraft
+   * on the friendly HQ Side Flight-Line Parking Apron (`z = ∓86`, `launchAirborne = false`).
+   */
+  orderPlayerAircraft(player, aircraftRole = 'cas', launchAirborne = true) {
+    if (!player) return { ok: false, reason: 'NO_PLAYER' };
+    const era = this.world?.era || 'modern';
+    if (era !== 'modern') {
+      return { ok: false, reason: 'ERA_LOCKED' };
+    }
+    if (player.squadDoctrineEnabled !== false && player.role !== 'pilot') {
+      return { ok: false, reason: 'REQUIRES_PILOT_LICENSE' };
+    }
+    const team = player.team || 'US';
+    const normRole = aircraftRole === 'bomber' ? 'b2_spirit' : aircraftRole || 'cas';
+
+    if (normRole === 'b2_spirit' && !this.isB2UnlockedForTeam(team)) {
+      return {
+        ok: false,
+        reason: 'B2_LOCKED',
+        kills: this.getTeamKills(team),
+        reqKills: VEHICLE_STATS.B2_UNLOCK_KILLS || 25
+      };
+    }
+
+    const costMap = {
+      cas: VEHICLE_STATS.FACTION_COST_CAS || 800,
+      fighter: VEHICLE_STATS.FACTION_COST_FIGHTER || 900,
+      gunship: VEHICLE_STATS.FACTION_COST_GUNSHIP || 1200,
+      b2_spirit: VEHICLE_STATS.FACTION_COST_B2_SPIRIT || 2000,
+      wright_flyer: 0
+    };
+    const cost = costMap[normRole] ?? 800;
+    const funds = this.getTeamFunds(team);
+    if (cost > 0 && funds < cost) {
+      return { ok: false, reason: 'INSUFFICIENT_FUNDS', cost, funds };
+    }
+    if (cost > 0) {
+      this.addTeamFunds(team, -cost);
+    }
+
+    let plane = this.vehicles.find(
+      (v) =>
+        v &&
+        v.isAircraft &&
+        v.team === team &&
+        v.aircraftRole === normRole &&
+        !v.driver &&
+        !String(v.id || '').startsWith('secret_')
+    );
+
+    if (!plane) {
+      const isRU = team === 'RU';
+      const apronZ = isRU ? 138 : -138;
+      const apronX =
+        normRole === 'gunship'
+          ? isRU
+            ? 1576
+            : -1576
+          : normRole === 'b2_spirit'
+          ? isRU
+            ? 1528
+            : -1528
+          : normRole === 'cas'
+          ? isRU
+            ? 1480
+            : -1480
+          : isRU
+          ? 1436
+          : -1436;
+      const gH = this.world ? this.world.getGroundHeightAt(apronX, apronZ) : 0;
+      const nameByRole = {
+        cas: isRU
+          ? 'SU-25SM FROGFOOT (30MM + S-8 ROCKETS)'
+          : 'A-10C WARTHOG (30MM GAU-8 + ROCKETS)',
+        fighter: isRU
+          ? 'SU-34 / SU-57 STRIKE FIGHTER (R-73 A2A + KAB-500 BOMBS)'
+          : 'F-15EX / F-22A STRIKE FIGHTER (AIM-9X A2A + JDAM BOMBS)',
+        gunship: isRU
+          ? 'TU-95MS HEAVY GUNSHIP (25MM + 40MM + 105MM)'
+          : 'AC-130J GHOSTRIDER GUNSHIP (25MM + 40MM BOFORS + 105MM)',
+        b2_spirit: isRU
+          ? 'PAK DA STEALTH CARPET BOMBER'
+          : 'NORTHROP B-2A SPIRIT STEALTH BOMBER',
+        wright_flyer: '1903 WRIGHT FLYER I'
+      };
+      const statByRole = {
+        cas: VEHICLE_STATS.PLANE_CAS,
+        fighter: VEHICLE_STATS.PLANE_FIGHTER,
+        gunship: VEHICLE_STATS.PLANE_GUNSHIP,
+        b2_spirit: VEHICLE_STATS.PLANE_B2_SPIRIT,
+        wright_flyer: VEHICLE_STATS.PLANE_WRIGHT_FLYER
+      };
+      const sb = statByRole[normRole] || VEHICLE_STATS.PLANE_CAS;
+      plane = this.spawnVehicle({
+        id: `req_${normRole}_${team.toLowerCase()}_${Date.now()}`,
+        name: nameByRole[normRole] || nameByRole.cas,
+        type: 'plane',
+        isAircraft: true,
+        aircraftRole: normRole,
+        isStealthAircraft: normRole === 'b2_spirit' || normRole === 'wright_flyer',
+        stealthFactor: normRole === 'b2_spirit' ? 0.12 : normRole === 'wright_flyer' ? 0.25 : 1.0,
+        team,
+        spawnPos: new THREE.Vector3(apronX, gH, apronZ),
+        spawnYaw: isRU ? Math.PI / 2 - 0.32 : -Math.PI / 2 - 0.32,
+        maxHp: sb.maxHp || 1550,
+        speed: sb.speed || 62,
+        minSpeed: sb.minSpeed || 32,
+        maxSpeed: sb.maxSpeed || 95,
+        weaponType:
+          normRole === 'b2_spirit'
+            ? 'b2_carpet_bomb'
+            : normRole === 'wright_flyer'
+            ? 'wright_gatling'
+            : `plane_${normRole}`,
+        secondaryWeaponType:
+          normRole === 'b2_spirit'
+            ? 'b2_precision_jdam'
+            : normRole === 'wright_flyer'
+            ? 'wright_dynamite'
+            : undefined,
+        rpm:
+          normRole === 'gunship'
+            ? VEHICLE_STATS.RPM_AC130_25MM
+            : normRole === 'fighter'
+            ? VEHICLE_STATS.RPM_FIGHTER_VULCAN
+            : normRole === 'b2_spirit'
+            ? VEHICLE_STATS.RPM_B2_CARPET
+            : VEHICLE_STATS.RPM_GAU8,
+        coaxRpm: 120,
+        patrolPoints: [
+          new THREE.Vector3(-260, 155, -180),
+          new THREE.Vector3(260, 160, -180),
+          new THREE.Vector3(260, 155, 180),
+          new THREE.Vector3(-260, 160, 180)
+        ]
+      });
+    }
+
+    if (plane.npcDriver) {
+      plane.npcDriver.drivingVehicle = null;
+      plane.npcDriver = null;
+    }
+
+    plane.b2LockedUntilKills = false;
+    plane.dead = false;
+    plane.respawnTimer = 0;
+    plane.replacementTicketPaid = false;
+    plane.replacementFundsPaid = false;
+    plane._killCredited = false;
+    plane.hp = plane.maxHp;
+    plane.hullIntegrityPct = 100;
+    plane.isShotDown = false;
+    plane.isStalling = false;
+    plane.stallSinkVel = 0;
+    plane.coaxHeat = 0;
+    plane.coaxOverheated = false;
+    plane.fireCooldown = 0;
+    plane.coaxCooldown = 0;
+    plane.aiPilotActive = false;
+    plane.mesh.visible = true;
+
+    if (launchAirborne) {
+      const entryBackDist = 140;
+      const headingYaw = team === 'US' ? -Math.PI / 2 : Math.PI / 2;
+      const startX = THREE.MathUtils.clamp(
+        player.pos.x + (team === 'US' ? -entryBackDist : entryBackDist),
+        -2450,
+        2450
+      );
+      const startZ = THREE.MathUtils.clamp(player.pos.z, -1650, 1650);
+      const alt =
+        normRole === 'wright_flyer'
+          ? 62
+          : normRole === 'b2_spirit'
+          ? 185
+          : normRole === 'gunship'
+          ? 165
+          : normRole === 'fighter'
+          ? 155
+          : 120;
+      plane.pos.set(startX, alt, startZ);
+      plane.yaw = headingYaw;
+      plane.pitch = normRole === 'wright_flyer' ? 0.0 : normRole === 'gunship' ? -0.02 : -0.04;
+      plane.roll = 0;
+      plane.gunshipManualFlight = normRole === 'gunship';
+      plane.orbitAssist = false;
+      plane.turretYaw = headingYaw;
+      plane.throttle = normRole === 'wright_flyer' ? 0.14 : 0.58;
+      plane.forwardSpeed =
+        normRole === 'wright_flyer' ? 13.5 : plane.speed || (normRole === 'b2_spirit' ? 125 : 62);
+      plane.mesh.position.copy(plane.pos);
+      plane.mesh.rotation.set(plane.pitch, plane.yaw, plane.roll, 'YXZ');
+      syncAircraftFlightFSM(plane, { onRunway: false });
+    } else {
+      const isRU = team === 'RU';
+      const apronZ = isRU ? 138 : -138;
+      const apronX = plane.spawnPos
+        ? plane.spawnPos.x
+        : normRole === 'gunship'
+        ? isRU
+          ? 1576
+          : -1576
+        : normRole === 'b2_spirit'
+        ? isRU
+          ? 1528
+          : -1528
+        : normRole === 'cas'
+        ? isRU
+          ? 1480
+          : -1480
+        : isRU
+        ? 1436
+        : -1436;
+      const groundY = this.world ? this.world.getGroundHeightAt(apronX, apronZ) : 0;
+      plane.pos.set(apronX, groundY, apronZ);
+      plane.yaw = plane.spawnYaw ?? (isRU ? Math.PI / 2 - 0.32 : -Math.PI / 2 - 0.32);
+      plane.pitch = 0;
+      plane.roll = 0;
+      plane.turretYaw = plane.yaw;
+      plane.throttle = 0;
+      plane.forwardSpeed = 0;
+      plane.claimedByPlayer = true;
+      plane.claimedByPlayerTimer = 45.0;
+      plane.mesh.position.copy(plane.pos);
+      plane.mesh.rotation.set(0, plane.yaw, 0, 'YXZ');
+      if (plane.flightFSM) {
+        plane.flightFSM.send(AIRCRAFT_FLIGHT_EVENTS.RESPAWN_RUNWAY);
+      }
+      if (this.world?.spawnDebris) {
+        this.world.spawnDebris(tmpVec3(apronX, groundY + 2.2, apronZ), COLOR_B2_CYAN, 10);
+      }
+    }
+
+    this.refreshTeamVehicleLists();
+    return {
+      ok: true,
+      vehicle: plane,
+      cost,
+      fundsRemaining: this.getTeamFunds(team),
+      launchAirborne
+    };
+  }
+
+  /**
+   * Any-Class Light Recon Motorcycle / 4x4 Tactical Quad ATV Delivery (`requestPlayerLightBike`):
+   * Spends $150 (from Personal Cash or Faction Funds) to deliver a 100% HP Recon Enduro Bike or
+   * Polaris MV850 4x4 Quad ATV 5.5m ahead on safe clear ground!
+   */
+  requestPlayerLightBike(player, subKind = 'bike') {
+    if (!player) return { ok: false, reason: 'NO_PLAYER' };
+    const era = this.world?.era || 'modern';
+    if (era !== 'modern') {
+      return { ok: false, reason: 'ERA_LOCKED' };
+    }
+    const isAtv = subKind === 'atv';
+    const cost = 150;
+    const team = player.team || 'US';
+    let paidSource = 'PERSONAL';
+    if (typeof player.spendCash === 'function' && player.spendCash(cost)) {
+      paidSource = 'PERSONAL';
+    } else if (this.getTeamFunds(team) >= cost) {
+      this.addTeamFunds(team, -cost);
+      paidSource = 'FACTION';
+    } else {
+      return { ok: false, reason: 'INSUFFICIENT_FUNDS', cost, funds: this.getTeamFunds(team) };
+    }
+
+    const fwdX = -Math.sin(player.yaw || 0);
+    const fwdZ = -Math.cos(player.yaw || 0);
+    const rawX = THREE.MathUtils.clamp(player.pos.x + fwdX * 5.8, -2450, 2450);
+    const rawZ = THREE.MathUtils.clamp(player.pos.z + fwdZ * 5.8, -1650, 1650);
+    const halfW = isAtv ? 0.88 : 0.55;
+    const halfL = isAtv ? 1.28 : 1.08;
+    const dropPos = this.world?.findSafeVehicleSpawnPoint
+      ? this.world.findSafeVehicleSpawnPoint(rawX, rawZ, player.yaw || 0, halfW, halfL, this.vehicles)
+      : new THREE.Vector3(
+          rawX,
+          this.world ? this.world.getGroundHeightAt(rawX, rawZ) : player.pos.y,
+          rawZ
+        );
+    const safeYaw = typeof dropPos.safeYaw === 'number' ? dropPos.safeYaw : player.yaw || 0;
+    const stats = isAtv ? VEHICLE_STATS.ATV_QUAD : VEHICLE_STATS.BIKE_500CC_2T;
+
+    const veh = this.spawnVehicle({
+      id: `req_${isAtv ? 'atv' : 'bike'}_${team.toLowerCase()}_${Date.now()}`,
+      name: isAtv
+        ? 'POLARIS MV850 TACTICAL 4×4 QUAD ATV'
+        : 'M1030M1 MILITARY RECON ENDURO MOTORCYCLE',
+      shortBayLabel: isAtv ? 'MV850 4×4 ATV' : 'M1030M1 RECON',
+      type: isAtv ? 'atv' : 'bike',
+      bikeSubType: isAtv ? 'atv_quad' : 'twostroke_500cc',
+      isBike: !isAtv,
+      isAtv,
+      isWarehouseBike: true,
+      cc: isAtv ? 850 : 450,
+      colorHex: 0x4b5320,
+      accentHex: 0x1e2418,
+      team,
+      spawnPos: dropPos.clone(),
+      spawnYaw: safeYaw,
+      maxHp: stats.maxHp,
+      speed: stats.speed,
+      accelRate: stats.accelRate,
+      brakeRate: stats.brakeRate,
+      turnRate: stats.turnRate,
+      weaponType: 'hmg',
+      rpm: 850,
+      patrolPoints: [dropPos.clone()]
+    });
+    veh.claimedByBot = null;
+    veh.claimedByPlayer = true;
+    veh.claimedByPlayerTimer = 45.0;
+    veh.mesh.visible = true;
+    this.refreshTeamVehicleLists();
+    if (this.world?.spawnDebris) {
+      this.world.spawnDebris(tmpVec3(dropPos.x, dropPos.y + 1.4, dropPos.z), COLOR_B2_CYAN, 8);
+    }
+    return { ok: true, vehicle: veh, cost, paidSource };
+  }
+
+  /**
+   * Armor Crew Heavy Vehicle Requisition (`requestPlayerArmorVehicle`):
+   * Spends Faction Command Funds (`tank: $1,100`, `apc: $650`, `aa: $750`) to deliver a 100% HP
+   * Main Battle Tank, 8x8 IFV, or Mobile SPAAG AA `10.5m` ahead of the player with 30s anti-bot claim protection!
+   */
+  requestPlayerArmorVehicle(player, armorType = 'tank') {
+    if (!player) return { ok: false, reason: 'NO_PLAYER' };
+    const era = this.world?.era || 'modern';
+    if (era !== 'modern') {
+      return { ok: false, reason: 'ERA_LOCKED' };
+    }
+    if (player.squadDoctrineEnabled !== false && player.role !== 'armor') {
+      return { ok: false, reason: 'REQUIRES_ARMOR_LICENSE' };
+    }
+    const team = player.team || 'US';
+    const isRU = team === 'RU';
+    const normType = armorType === 'apc' ? 'apc' : armorType === 'aa' ? 'aa' : 'tank';
+    const costMap = {
+      tank: VEHICLE_STATS.FACTION_COST_TANK || 1100,
+      apc: VEHICLE_STATS.FACTION_COST_APC || 650,
+      aa: VEHICLE_STATS.FACTION_COST_AA || 750
+    };
+    const cost = costMap[normType] || 1100;
+    const funds = this.getTeamFunds(team);
+    if (funds < cost) {
+      return { ok: false, reason: 'INSUFFICIENT_FUNDS', cost, funds };
+    }
+    this.addTeamFunds(team, -cost);
+
+    const fwdX = -Math.sin(player.yaw || 0);
+    const fwdZ = -Math.cos(player.yaw || 0);
+    const rawX = THREE.MathUtils.clamp(player.pos.x + fwdX * 10.5, -2450, 2450);
+    const rawZ = THREE.MathUtils.clamp(player.pos.z + fwdZ * 10.5, -1650, 1650);
+    const halfW = normType === 'tank' ? 1.95 : 1.65;
+    const halfL = normType === 'tank' ? 3.55 : 3.35;
+    const pushed = this.world?.pushOutOfBuildingFootprint
+      ? this.world.pushOutOfBuildingFootprint(rawX, rawZ, halfL + 1.8)
+      : { x: rawX, z: rawZ };
+    const dropPos = this.world?.findSafeVehicleSpawnPoint
+      ? this.world.findSafeVehicleSpawnPoint(
+          pushed.x,
+          pushed.z,
+          player.yaw || 0,
+          halfW,
+          halfL,
+          this.vehicles
+        )
+      : new THREE.Vector3(
+          pushed.x,
+          this.world ? this.world.getGroundHeightAt(pushed.x, pushed.z) : player.pos.y,
+          pushed.z
+        );
+
+    // Revive a destroyed friendly fleet slot of that armor type if one is waiting on cooldown; else spawn fresh!
+    let veh = this.vehicles.find(
+      (v) =>
+        v &&
+        v.dead &&
+        !v.isAircraft &&
+        !v.isEmplacement &&
+        v.team === team &&
+        v.type === normType &&
+        !v.driver &&
+        !v.npcDriver
+    );
+
+    if (veh) {
+      veh.dead = false;
+      veh.respawnTimer = 0;
+      veh.replacementTicketPaid = false;
+      veh.replacementFundsPaid = false;
+      veh._killCredited = false;
+      veh.hp = veh.maxHp;
+      veh.hullIntegrityPct = 100;
+      veh.armorZones = { front: 100, left: 100, right: 100, rear: 100 };
+      veh.eraBlocksIntact = veh.maxEraBlocks || 0;
+      veh.subsystems = { tracks: 'OK', turret: 'OK', engine: 'OK', optics: 'OK' };
+      veh.driver = null;
+      veh.npcDriver = null;
+      veh.forwardSpeed = 0;
+      veh.coaxHeat = 0;
+      veh.coaxOverheated = false;
+      veh.fireCooldown = 0;
+      veh.coaxCooldown = 0;
+      veh.pos.copy(dropPos);
+      veh.yaw = player.yaw || 0;
+      veh.pitch = 0;
+      veh.roll = 0;
+      veh.turretYaw = player.yaw || 0;
+      veh.mesh.position.copy(dropPos);
+      veh.mesh.rotation.set(0, veh.yaw, 0, 'YXZ');
+      veh.mesh.visible = true;
+      if (veh.occupancyFSM) {
+        veh.occupancyFSM.send(GROUND_VEHICLE_EVENTS.RESPAWN_READY);
+      }
+      veh.cmFSM?.send(VEHICLE_CM_EVENTS.RESET);
+      veh.thermalFSM?.send(VEHICLE_THERMAL_EVENTS.RESET);
+    } else {
+      const nameMap = {
+        tank: isRU
+          ? 'T-90M PRORYV MBT (125MM + COAX)'
+          : 'M1A2 SEP v3 ABRAMS MBT (120MM + COAX)',
+        apc: isRU ? 'BTR-82A 8x8 IFV (30MM HE)' : 'LAV-25A2 8x8 IFV (30MM HE)',
+        aa: isRU
+          ? '2K22 TUNGUSKA-M1 SPAAG (TWIN 30MM + 9M311 SAM)'
+          : 'M163 PIVADS / LAV-AD SPAAG (25MM + STINGER SAM)'
+      };
+      const statBlock =
+        normType === 'tank'
+          ? VEHICLE_STATS.TANK
+          : normType === 'apc'
+          ? VEHICLE_STATS.APC
+          : VEHICLE_STATS.AA_VEHICLE;
+      veh = this.spawnVehicle({
+        id: `req_${normType}_${team.toLowerCase()}_${Date.now()}`,
+        name: nameMap[normType],
+        type: normType,
+        team,
+        spawnPos: dropPos.clone(),
+        spawnYaw: player.yaw || 0,
+        maxHp: statBlock.maxHp,
+        speed: statBlock.speed,
+        weaponType:
+          normType === 'tank'
+            ? 'tank_cannon'
+            : normType === 'apc'
+            ? 'autocannon'
+            : 'aa_autocannon',
+        rpm:
+          normType === 'tank'
+            ? isRU
+              ? VEHICLE_STATS.RPM_TANK_RU
+              : VEHICLE_STATS.RPM_TANK_US
+            : normType === 'apc'
+            ? VEHICLE_STATS.RPM_APC
+            : VEHICLE_STATS.RPM_AA_AUTOCANNON,
+        coaxRpm: normType === 'aa' ? 45 : VEHICLE_STATS.RPM_COAX,
+        patrolPoints: [
+          dropPos.clone(),
+          new THREE.Vector3(0, this.world ? this.world.getGroundHeightAt(0, 0) : 0, 0)
+        ]
+      });
+    }
+
+    veh.claimedByBot = null;
+    veh.claimedByPlayer = true;
+    veh.claimedByPlayerTimer = 30.0;
+    this.refreshTeamVehicleLists();
+
+    if (this.world?.spawnDebris) {
+      this.world.spawnDebris(
+        tmpVec3(dropPos.x, dropPos.y + 1.8, dropPos.z),
+        COLOR_FLARE_GOLD,
+        14
+      );
+    }
+    sound.playRadioBeep?.(false);
+    const shortName = veh.name.split(' (')[0];
+    if (player.onAwardXp) {
+      player.onAwardXp(
+        35,
+        `🛡️ HEAVY ARMOR DELIVERED (-$${cost.toLocaleString()} FACTION FUNDS): ${shortName} READY TO BOARD [E]!`
+      );
+    }
+    if (window.game?.botManager?.emitBotComms) {
+      const bravoSl =
+        window.game.botManager.bots.find(
+          (b) => !b.dead && b.team === team && b.squad === 'BRAVO' && b.isSquadLeader
+        ) || window.game.botManager.bots.find((b) => !b.dead && b.team === team);
+      if (bravoSl) {
+        window.game.botManager.emitBotComms(
+          bravoSl,
+          player,
+          `Armor Logistics: ${shortName} dropped 10m ahead of your grid (-$${cost.toLocaleString()} Faction Funds, $${this.getTeamFunds(team).toLocaleString()} left) — locked to you for 30s!`,
+          'COMMAND',
+          true,
+          'CMD NET'
+        );
+      }
+    }
+    events.emit('telemetry:event', {
+      type: 'PLAYER_ARMOR_REQUISITIONED',
+      payload: {
+        team,
+        armorType: normType,
+        vehicleName: veh.name,
+        cost,
+        fundsRemaining: this.getTeamFunds(team),
+        x: Math.round(dropPos.x),
+        z: Math.round(dropPos.z)
+      }
+    });
+
+    return {
+      ok: true,
+      vehicle: veh,
+      cost,
+      fundsRemaining: this.getTeamFunds(team)
+    };
+  }
+
+  /**
    * Returns realistic physical turret gun depression/elevation limits (in radians):
    * - Main Battle Tank (M1A2 / T-90M): -10° depression (-0.18 rad) to +20° max elevation (+0.35 rad)
    * - Wheeled IFV / APC (LAV-25 / BTR-82A): -10° (-0.18 rad) to +30° (+0.52 rad)
@@ -915,6 +1487,33 @@ export class VehicleManager {
     return PITCH_LIMITS_CAR;
   }
 
+  classifyVehicleKillCategory(vehicle) {
+    if (!vehicle) return 'CAR';
+    if (vehicle.isAircraft || vehicle.type === 'plane') return 'PLANE';
+    if (
+      vehicle.type === 'tank' ||
+      vehicle.type === 'apc' ||
+      vehicle.type === 'aa' ||
+      vehicle.type === 'trex_mount'
+    ) {
+      return 'TANK';
+    }
+    return 'CAR';
+  }
+
+  creditAttackerVehicleKill(vehicle, attackerName, attackerTeam, weaponName = '') {
+    if (!vehicle || vehicle._killCredited) return;
+    vehicle._killCredited = true;
+    const category = this.classifyVehicleKillCategory(vehicle);
+    events.emit('vehicle:credit-kill', {
+      vehicle,
+      category,
+      attackerName,
+      attackerTeam,
+      weaponName
+    });
+  }
+
   /**
    * Finalizes ground impact explosion for an aircraft that was shot down (`isShotDown = true`)
    * and spiraled into the terrain. If the pilot did NOT press [E] to eject before ground impact,
@@ -929,6 +1528,8 @@ export class VehicleManager {
     const onKillFn = att.onKillFn || this.onKill || null;
     const onAwardXp = att.onAwardXp || null;
 
+    this.creditAttackerVehicleKill(vehicle, attackerName, attackerTeam, weaponName);
+
     vehicle.isShotDown = false;
     vehicle.isStalling = false;
     vehicle.stallSinkVel = 0;
@@ -936,8 +1537,8 @@ export class VehicleManager {
     vehicle.dead = true;
     vehicle.respawnTimer =
       vehicle.aircraftRole === 'b2_spirit'
-        ? VEHICLE_STATS.RESPAWN_DELAY_B2_SPIRIT || 90.0
-        : VEHICLE_STATS.RESPAWN_DELAY_PLANE || 35.0;
+        ? VEHICLE_STATS.RESPAWN_DELAY_B2_SPIRIT || 95.0
+        : VEHICLE_STATS.RESPAWN_DELAY_PLANE || 42.0;
     vehicle.replacementTicketPaid = false;
     vehicle.replacementFundsPaid = false;
     vehicle.mesh.visible = false;
@@ -948,24 +1549,35 @@ export class VehicleManager {
       }
     }
 
-    const respawnCost = vehicle.ticketCost || VEHICLE_STATS.TICKET_COST_PLANE || 12;
-    const respawnCategory = vehicle.ticketCategory || 'ARMOR';
+    const respawnCost =
+      vehicle.ticketCost ||
+      (vehicle.aircraftRole === 'b2_spirit'
+        ? VEHICLE_STATS.TICKET_COST_B2_SPIRIT || 45
+        : VEHICLE_STATS.TICKET_COST_PLANE || 30);
+    const moneyCost =
+      vehicle.factionMoneyCost ??
+      (vehicle.aircraftRole === 'b2_spirit'
+        ? VEHICLE_STATS.FACTION_COST_B2_SPIRIT || 2500
+        : VEHICLE_STATS.FACTION_COST_PLANE || 1500);
+    const respawnCategory = 'PLANE';
     events.emit('vehicle:destroyed', {
       vehicle,
       attackerName,
       attackerTeam,
       weaponName,
       cost: respawnCost,
+      moneyCost,
       category: respawnCategory
     });
     events.emit('vehicle:respawn', {
       vehicle,
       cost: respawnCost,
+      moneyCost,
       category: respawnCategory,
       stage: 'VEHICLE_DESTROYED'
     });
     if (this.onVehicleRespawn && !this.onVehicleRespawn._isEventsBridge) {
-      this.onVehicleRespawn(vehicle, respawnCost, respawnCategory, 'VEHICLE_DESTROYED');
+      this.onVehicleRespawn(vehicle, respawnCost, respawnCategory, 'VEHICLE_DESTROYED', moneyCost);
     }
     vehicle.replacementTicketPaid = true;
 
@@ -1011,9 +1623,12 @@ export class VehicleManager {
       onKillFn(attackerName, attackerTeam, vehicle.name, vehicle.team, weaponName, false);
     }
 
-    if (onAwardXp) {
-      const xpPts = VEHICLE_STATS.DESTROY_XP_PLANE || 350;
-      const xpReason = `✈️ AIR-TO-AIR SPLASH KILL! (${vehicle.name})`;
+    if (onAwardXp && !att._xpAlreadyAwarded) {
+      const xpPts =
+        vehicle.aircraftRole === 'b2_spirit'
+          ? VEHICLE_STATS.DESTROY_XP_B2 || 900
+          : VEHICLE_STATS.DESTROY_XP_PLANE || 650;
+      const xpReason = `✈️ AIRCRAFT SHOT DOWN! (${vehicle.name} • -${respawnCost} ENEMY 🎟️)`;
       events.emit('xp:awarded', { amount: xpPts, reason: xpReason });
       if (!onAwardXp._isEventsBridge) {
         onAwardXp(xpPts, xpReason);
@@ -1171,12 +1786,37 @@ export class VehicleManager {
         vehicle.aiPilotActive = false;
         vehicle.shotDownTimer = 14.0;
         vehicle.shotDownSpinDir = Math.random() < 0.5 ? -1 : 1;
+        this.creditAttackerVehicleKill(
+          vehicle,
+          attackerName || 'ANTI-AIR SAM',
+          attackerTeam || (vehicle.team === 'US' ? 'RU' : 'US'),
+          weaponName || 'ANTI-AIR SAM'
+        );
+        let shotDownXpAwarded = false;
+        if (onAwardXp) {
+          shotDownXpAwarded = true;
+          const xpPts =
+            vehicle.aircraftRole === 'b2_spirit'
+              ? VEHICLE_STATS.DESTROY_XP_B2 || 900
+              : VEHICLE_STATS.DESTROY_XP_PLANE || 650;
+          const tLoss =
+            vehicle.ticketCost ||
+            (vehicle.aircraftRole === 'b2_spirit'
+              ? VEHICLE_STATS.TICKET_COST_B2_SPIRIT || 45
+              : VEHICLE_STATS.TICKET_COST_PLANE || 30);
+          const xpReason = `✈️ SPLASH ONE! AIRCRAFT SHOT DOWN (${vehicle.name} • -${tLoss} ENEMY 🎟️)`;
+          events.emit('xp:awarded', { amount: xpPts, reason: xpReason });
+          if (!onAwardXp._isEventsBridge) {
+            onAwardXp(xpPts, xpReason);
+          }
+        }
         vehicle.shotDownAttacker = {
           attackerName: attackerName || 'ANTI-AIR SAM',
           attackerTeam: attackerTeam || (vehicle.team === 'US' ? 'RU' : 'US'),
           weaponName: weaponName || 'ANTI-AIR SAM',
           onKillFn,
           onAwardXp,
+          _xpAlreadyAwarded: shotDownXpAwarded,
           attackerPos
         };
 
@@ -1245,32 +1885,48 @@ export class VehicleManager {
         vehicle.occupancyFSM.send(GROUND_VEHICLE_EVENTS.DESTROY);
       }
 
-      const respawnCost =
-        vehicle.ticketCost ||
-        (vehicle.isAircraft
-          ? VEHICLE_STATS.TICKET_COST_PLANE || 12
-          : vehicle.type === 'tank'
-          ? VEHICLE_STATS.TICKET_COST_TANK
-          : vehicle.type === 'apc'
-          ? VEHICLE_STATS.TICKET_COST_APC
-          : VEHICLE_STATS.TICKET_COST_HUMVEE);
-      const respawnCategory = vehicle.ticketCategory || (vehicle.type === 'humvee' ? 'CAR' : 'ARMOR');
+      this.creditAttackerVehicleKill(
+        vehicle,
+        attackerName,
+        attackerTeam,
+        weaponName || 'RPG-7 HEAT'
+      );
+      const respawnCategory = this.classifyVehicleKillCategory(vehicle);
+      const isUncrewedNeutralBike =
+        Boolean(vehicle.isWarehouseBike || vehicle.type === 'bike' || vehicle.type === 'atv') &&
+        !vehicle.driver &&
+        !vehicle.npcDriver;
+      const respawnCost = isUncrewedNeutralBike
+        ? 0
+        : vehicle.ticketCost ||
+          (respawnCategory === 'PLANE'
+            ? VEHICLE_STATS.TICKET_COST_PLANE || 30
+            : vehicle.type === 'tank'
+            ? VEHICLE_STATS.TICKET_COST_TANK || 24
+            : respawnCategory === 'TANK'
+            ? VEHICLE_STATS.TICKET_COST_APC || 16
+            : VEHICLE_STATS.TICKET_COST_HUMVEE || 8);
+      const moneyCost = isUncrewedNeutralBike ? 0 : vehicle.factionMoneyCost || 0;
       events.emit('vehicle:destroyed', {
         vehicle,
         attackerName,
         attackerTeam,
         weaponName: weaponName || 'RPG-7 HEAT',
         cost: respawnCost,
+        moneyCost,
         category: respawnCategory
       });
-      events.emit('vehicle:respawn', {
-        vehicle,
-        cost: respawnCost,
-        category: respawnCategory,
-        stage: 'VEHICLE_DESTROYED'
-      });
-      if (this.onVehicleRespawn && !this.onVehicleRespawn._isEventsBridge) {
-        this.onVehicleRespawn(vehicle, respawnCost, respawnCategory, 'VEHICLE_DESTROYED');
+      if (respawnCost > 0) {
+        events.emit('vehicle:respawn', {
+          vehicle,
+          cost: respawnCost,
+          moneyCost,
+          category: respawnCategory,
+          stage: 'VEHICLE_DESTROYED'
+        });
+        if (this.onVehicleRespawn && !this.onVehicleRespawn._isEventsBridge) {
+          this.onVehicleRespawn(vehicle, respawnCost, respawnCategory, 'VEHICLE_DESTROYED', moneyCost);
+        }
       }
       vehicle.replacementTicketPaid = true;
 
@@ -1296,6 +1952,11 @@ export class VehicleManager {
 
       if (vehicle.driver) {
         const driver = vehicle.driver;
+        if (Array.isArray(vehicle.mesh?.userData?.cockpitCanopyParts)) {
+          for (const p of vehicle.mesh.userData.cockpitCanopyParts) {
+            if (p) p.visible = true;
+          }
+        }
         vehicle.driver = null;
         driver.activeVehicle = null;
         if (driver.viewModelGroup) driver.viewModelGroup.visible = true;
@@ -1407,14 +2068,22 @@ export class VehicleManager {
       }
 
       if (onAwardXp) {
-        const xpPts = vehicle.isAircraft
-          ? VEHICLE_STATS.DESTROY_XP_PLANE || 350
-          : vehicle.type === 'tank'
-          ? VEHICLE_STATS.DESTROY_XP_TANK
-          : VEHICLE_STATS.DESTROY_XP_OTHER;
-        const xpReason = vehicle.isAircraft
-          ? `✈️ AIR-TO-AIR SPLASH KILL! (${vehicle.name})`
-          : `ARMOR DESTROYED (${vehicle.name})`;
+        const xpPts =
+          respawnCategory === 'PLANE'
+            ? vehicle.aircraftRole === 'b2_spirit'
+              ? VEHICLE_STATS.DESTROY_XP_B2 || 900
+              : VEHICLE_STATS.DESTROY_XP_PLANE || 650
+            : vehicle.type === 'tank'
+            ? VEHICLE_STATS.DESTROY_XP_TANK || 500
+            : respawnCategory === 'TANK'
+            ? VEHICLE_STATS.DESTROY_XP_APC || 380
+            : VEHICLE_STATS.DESTROY_XP_CAR || 250;
+        const xpReason =
+          respawnCategory === 'PLANE'
+            ? `✈️ AIRCRAFT DESTROYED! (${vehicle.name} • -${respawnCost} ENEMY 🎟️)`
+            : respawnCategory === 'TANK'
+            ? `🛡️ HEAVY ARMOR & CREW DESTROYED! (${vehicle.name} • -${respawnCost} ENEMY 🎟️)`
+            : `🚙 TACTICAL VEHICLE DESTROYED! (${vehicle.name}${respawnCost > 0 ? ` • -${respawnCost} ENEMY 🎟️` : ''})`;
         events.emit('xp:awarded', { amount: xpPts, reason: xpReason });
         if (!onAwardXp._isEventsBridge) {
           onAwardXp(xpPts, xpReason);
@@ -1442,27 +2111,39 @@ export class VehicleManager {
         }
         v.respawnTimer -= dt;
         if (v.respawnTimer <= 0) {
-          // Check if faction can afford the vehicle respawn ticket cost & aircraft money cost
-          const cost = v.ticketCost || (v.isAircraft ? 12 : v.type === 'tank' ? 15 : v.type === 'apc' ? 10 : 5);
-          const moneyCost = v.isAircraft
-            ? v.factionMoneyCost ??
-              (v.aircraftRole === 'b2_spirit'
-                ? VEHICLE_STATS.FACTION_COST_B2_SPIRIT || 2000
-                : VEHICLE_STATS.FACTION_COST_PLANE || 800)
-            : 0;
-          const category = v.ticketCategory || (v.type === 'humvee' ? 'CAR' : 'ARMOR');
+          // Check if faction can afford the vehicle replacement ticket cost & equipment/crew treasury cost
+          const category = this.classifyVehicleKillCategory(v);
+          const cost =
+            v.ticketCost ||
+            (category === 'PLANE' ? 30 : v.type === 'tank' ? 24 : category === 'TANK' ? 16 : 8);
+          const moneyCost =
+            v.factionMoneyCost ??
+            (category === 'PLANE'
+              ? v.aircraftRole === 'b2_spirit'
+                ? VEHICLE_STATS.FACTION_COST_B2_SPIRIT || 2500
+                : VEHICLE_STATS.FACTION_COST_PLANE || 1500
+              : v.type === 'tank'
+              ? VEHICLE_STATS.FACTION_COST_TANK || 1300
+              : category === 'TANK'
+              ? VEHICLE_STATS.FACTION_COST_APC || 800
+              : v.type === 'humvee'
+              ? VEHICLE_STATS.FACTION_COST_CAR || 350
+              : 0);
           if (!v.replacementTicketPaid && this.canTeamAffordRespawn && !this.canTeamAffordRespawn(v.team, cost)) {
             v.respawnTimer = 2.0;
             continue;
           }
-          if (v.isAircraft && moneyCost > 0 && !v.replacementFundsPaid) {
+          if (moneyCost > 0 && !v.replacementFundsPaid) {
             if (this.getTeamFunds(v.team) < moneyCost) {
-              v.respawnTimer = 4.0;
+              // Allow slow emergency war-chest trickle so depleted teams wait much longer (+12s) for expensive replacements
+              this.addTeamFunds(v.team, 140);
+              v.respawnTimer = 6.0;
               continue;
             }
             this.addTeamFunds(v.team, -moneyCost);
             v.replacementFundsPaid = true;
           }
+          v._killCredited = false;
           if (!v.replacementTicketPaid) {
             events.emit('vehicle:respawn', {
               vehicle: v,
@@ -1475,19 +2156,21 @@ export class VehicleManager {
               this.onVehicleRespawn(v, cost, category, 'VEHICLE_RESPAWN', moneyCost);
             }
           }
-          // Respawn UNOCCUPIED at its faction's Main Base Motor Pool, Motorcycle Warehouse, or Airfield Runway!
-          const safeRespawn =
-            v.isAircraft || v.isWarehouseBike || v.type === 'bike' || v.type === 'atv'
-              ? v.spawnPos.clone()
-              : this.world.findSafeVehicleSpawnPoint
-              ? this.world.findSafeVehicleSpawnPoint(
-                  v.spawnPos.x,
-                  v.spawnPos.z,
-                  v.spawnYaw,
-                  v.hullHalfWidth || 1.95,
-                  v.hullHalfLength || 3.55
-                )
-              : v.spawnPos;
+          // Respawn UNOCCUPIED at its faction's Main Base Motor Pool, FOB Bike Pool, or Airfield Outer Apron!
+          const safeRespawn = v.isAircraft
+            ? v.spawnPos.clone()
+            : this.world.findSafeVehicleSpawnPoint
+            ? this.world.findSafeVehicleSpawnPoint(
+                v.spawnPos.x,
+                v.spawnPos.z,
+                v.spawnYaw,
+                v.hullHalfWidth || (v.type === 'bike' ? 0.5 : v.type === 'atv' ? 0.85 : 1.95),
+                v.hullHalfLength || (v.type === 'bike' ? 1.05 : v.type === 'atv' ? 1.25 : 3.55),
+                this.vehicles
+              )
+            : v.spawnPos;
+          const respawnYaw =
+            typeof safeRespawn.safeYaw === 'number' ? safeRespawn.safeYaw : v.spawnYaw;
           v.dead = false;
           v.isShotDown = false;
           v.isStalling = false;
@@ -1513,14 +2196,14 @@ export class VehicleManager {
           v.coaxOverheated = false;
           v.patrolIndex = 0;
           v.pos.copy(safeRespawn);
-          v.yaw = v.spawnYaw;
+          v.yaw = respawnYaw;
           v.pitch = 0;
           v.roll = 0;
-          v.turretYaw = v.spawnYaw;
+          v.turretYaw = respawnYaw;
           v.forwardSpeed = 0;
           v.barrelRecoil = 0;
           v.mesh.position.copy(safeRespawn);
-          v.mesh.rotation.set(0, v.spawnYaw, 0, 'YXZ');
+          v.mesh.rotation.set(0, respawnYaw, 0, 'YXZ');
           v.mesh.visible = true;
           if (v.flightFSM) {
             v.flightFSM.send(AIRCRAFT_FLIGHT_EVENTS.RESPAWN_RUNWAY);
@@ -1538,6 +2221,12 @@ export class VehicleManager {
       if (v.coaxCooldown > 0) v.coaxCooldown = Math.max(0, v.coaxCooldown - dt);
       if (v.flareCooldown > 0) v.flareCooldown = Math.max(0, v.flareCooldown - dt);
       if (v.flareActiveTimer > 0) v.flareActiveTimer = Math.max(0, v.flareActiveTimer - dt);
+      if ((v.claimedByPlayerTimer || 0) > 0) {
+        v.claimedByPlayerTimer = Math.max(0, v.claimedByPlayerTimer - dt);
+        if (v.claimedByPlayerTimer <= 0) {
+          v.claimedByPlayer = false;
+        }
+      }
       if (v.coaxHeat > 0) {
         v.coaxHeat = Math.max(0, v.coaxHeat - dt * (v.coaxOverheated ? 0.34 : 0.42));
         if (v.coaxOverheated && v.coaxHeat <= 0.15) {
@@ -1565,8 +2254,99 @@ export class VehicleManager {
 
       // Dedicated 3D Flight & AI Dogfight / CAS Loop for Combat Aircraft
       if (v.isAircraft) {
+        const prevX = v.pos.x;
+        const prevY = v.pos.y;
+        const prevZ = v.pos.z;
+        const prevYaw = v.yaw || 0;
+        if (Array.isArray(v.mesh?.userData?.cockpitCanopyParts)) {
+          const hide1P = Boolean(
+            player &&
+              player.activeVehicle === v &&
+              !player.dead &&
+              (player.vehicleCameraMode === 'COCKPIT_1P' ||
+                (!player.vehicleCameraMode && !player.thirdPersonVehicle))
+          );
+          const wantVis = !hide1P;
+          for (let ci = 0; ci < v.mesh.userData.cockpitCanopyParts.length; ci++) {
+            const part = v.mesh.userData.cockpitCanopyParts[ci];
+            if (part && part.visible !== wantVis) {
+              part.visible = wantVis;
+            }
+          }
+        }
         this.updateAircraftAiAndPhysics(v, dt, player, botManager, onDeployMenu);
+        // Track true 3D Doppler World Velocity + Curvilinear Turn-Rate / Acceleration (CTRA Kalman State)
+        // so the Fire-Control Lead Computer accurately leads circling B-2s, orbiting AC-130s & banked turns!
+        if (dt > 0.001) {
+          const instVx = (v.pos.x - prevX) / dt;
+          const instVy = (v.pos.y - prevY) / dt;
+          const instVz = (v.pos.z - prevZ) / dt;
+          const instSpdTotal = Math.hypot(instVx, instVy, instVz);
+          let dYaw = (v.yaw || 0) - prevYaw;
+          while (dYaw > Math.PI) dYaw -= Math.PI * 2;
+          while (dYaw < -Math.PI) dYaw += Math.PI * 2;
+          if (instSpdTotal < 420) {
+            const instYawRate = THREE.MathUtils.clamp(dYaw / dt, -2.6, 2.6);
+            v.trackedYawRate = THREE.MathUtils.lerp(
+              v.trackedYawRate || 0,
+              instYawRate,
+              Math.min(1, dt * 9)
+            );
+            const curInstSpdH = Math.hypot(instVx, instVz);
+            const instTangAccel = THREE.MathUtils.clamp(
+              (curInstSpdH - (v._prevInstSpdH ?? curInstSpdH)) / dt,
+              -24,
+              24
+            );
+            const instVertAccel = THREE.MathUtils.clamp(
+              (instVy - (v._prevInstVy ?? instVy)) / dt,
+              -28,
+              28
+            );
+            v._prevInstSpdH = curInstSpdH;
+            v._prevInstVy = instVy;
+            if (!v.trackedWorldVel) {
+              v.trackedWorldVel = new THREE.Vector3(instVx, instVy, instVz);
+              v.trackedTangentialAccel = 0;
+              v.trackedVertAccel = 0;
+            } else {
+              const alpha = Math.min(1, dt * 14);
+              v.trackedWorldVel.x += (instVx - v.trackedWorldVel.x) * alpha;
+              v.trackedWorldVel.y += (instVy - v.trackedWorldVel.y) * alpha;
+              v.trackedWorldVel.z += (instVz - v.trackedWorldVel.z) * alpha;
+              const accAlpha = Math.min(1, dt * 6);
+              v.trackedTangentialAccel = THREE.MathUtils.lerp(
+                v.trackedTangentialAccel || 0,
+                instTangAccel,
+                accAlpha
+              );
+              v.trackedVertAccel = THREE.MathUtils.lerp(
+                v.trackedVertAccel || 0,
+                instVertAccel,
+                accAlpha
+              );
+            }
+          }
+        }
         continue;
+      }
+
+      // Sync unoccupied FOB Motorpool Bikes/ATVs & FOB Emplacements to the FOB's current faction owner!
+      if (!v.driver && !v.npcDriver && !v.isAircraft && this.world?.flags) {
+        if (v.fobFlagId) {
+          const fobFlag = this.world.flags.find((fl) => fl.id === v.fobFlagId);
+          if (fobFlag) v.team = fobFlag.owner || 'NEUTRAL';
+        } else if (v.isEmplacement || v.isWarehouseBike || v.type === 'bike' || v.type === 'atv') {
+          for (let fi = 0; fi < this.world.flags.length; fi++) {
+            const fl = this.world.flags[fi];
+            const dxF = v.pos.x - fl.pos.x;
+            const dzF = v.pos.z - fl.pos.z;
+            if (dxF * dxF + dzF * dzF <= 58 * 58) {
+              v.team = fl.owner || 'NEUTRAL';
+              break;
+            }
+          }
+        }
       }
 
       // Distance-based 3D Render Culling for unoccupied Motorcycle Warehouse bikes (>220m away)
@@ -1709,9 +2489,9 @@ export class VehicleManager {
         // Route across the nearest bridge if crossing the central river
         let targetX = wp.x;
         let targetZ = wp.z;
-        if (Math.sign(v.pos.x) !== Math.sign(targetX) && Math.abs(v.pos.x) < 28) {
+        if (Math.sign(v.pos.x) !== Math.sign(targetX) && Math.abs(v.pos.x) < 34) {
           targetX = Math.sign(targetX) * 4;
-          targetZ = Math.abs(v.pos.z) < 95 ? 0 : v.pos.z > 0 ? 220 : -220;
+          targetZ = Math.abs(v.pos.z) < 200 ? 0 : v.pos.z > 0 ? 400 : -400;
         }
         const dx = targetX - v.pos.x;
         const dz = targetZ - v.pos.z;
@@ -1742,8 +2522,24 @@ export class VehicleManager {
             v.patrolIndex = (v.patrolIndex + 1) % v.patrolPoints.length;
           }
         } else {
-          // Vehicle forward vector is (-sin(yaw), -cos(yaw))
-          const desiredYaw = Math.atan2(-dx, -dz);
+          // Vehicle forward vector is (-sin(yaw), -cos(yaw)); steer smoothly around buildings & static walls!
+          let desiredYaw = Math.atan2(-dx, -dz);
+          if (this.world?.isVehicleBoxBlocked) {
+            const lookDist = (v.hullHalfLength || 3.2) + 7.5;
+            const testX = v.pos.x - Math.sin(desiredYaw) * lookDist;
+            const testZ = v.pos.z - Math.cos(desiredYaw) * lookDist;
+            if (this.world.isVehicleBoxBlocked(testX, testZ, desiredYaw, v.hullHalfWidth || 1.75, 2.2, 1.1)) {
+              for (const steerOff of [0.58, -0.58, 1.08, -1.08, 1.55, -1.55]) {
+                const altYaw = desiredYaw + steerOff;
+                const ax = v.pos.x - Math.sin(altYaw) * lookDist;
+                const az = v.pos.z - Math.cos(altYaw) * lookDist;
+                if (!this.world.isVehicleBoxBlocked(ax, az, altYaw, v.hullHalfWidth || 1.75, 2.2, 0.9)) {
+                  desiredYaw = altYaw;
+                  break;
+                }
+              }
+            }
+          }
           let yawDiff = desiredYaw - v.yaw;
           while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
           while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
@@ -2266,6 +3062,9 @@ export class VehicleManager {
             const [longOff, latOff] = bumperOffsets[i];
             const checkX = candX + fwdX * longOff + rightX * latOff;
             const checkZ = candZ + fwdZ * longOff + rightZ * latOff;
+            if (this.world.isInsideStaticStructure && this.world.isInsideStaticStructure(checkX, checkZ, 0.35)) {
+              return { blocked: true, climbY: 0 };
+            }
             const ptGroundY = this.world.getGroundHeightAt(checkX, checkZ);
             const g = this.world.worldToGrid(checkX, ptGroundY + 0.65, checkZ);
             const v0 = this.world.voxels.get(this.world.key(g.gx, g.gy, g.gz));
@@ -2342,8 +3141,8 @@ export class VehicleManager {
         }
 
         if (!stepRes.blocked) {
-          v.pos.x = Math.max(-2150, Math.min(2150, finalX));
-          v.pos.z = Math.max(-1450, Math.min(1450, finalZ));
+          v.pos.x = Math.max(-2800, Math.min(2800, finalX));
+          v.pos.z = Math.max(-1800, Math.min(1800, finalZ));
           const baseGroundY = this.world.getGroundHeightAt(v.pos.x, v.pos.z);
           const targetClimbY = stepRes.climbY || 0;
           const climbLerpRate = targetClimbY > (v.climbOffsetY || 0) ? 10.5 : 7.5;
@@ -2855,8 +3654,33 @@ export class VehicleManager {
     }
 
     const playerTeam = (player && player.team) || 'US';
-    // Friendly aircraft & Secret Cave 1903 Wright Flyers NEVER auto-sortie or disappear from their hangar/cave!
-    const shouldAutoSortie = v.team !== playerTeam && !v.isSecretAircraft;
+    // Check active FALCON Air Wing Squad Order (or Team Commander Order) for this aircraft's faction!
+    const falconOrder =
+      (botManager?.squadOrders?.[v.team]?.FALCON &&
+      botManager.squadOrders[v.team].FALCON.timer > 0
+        ? botManager.squadOrders[v.team].FALCON
+        : null) ||
+      (botManager?.commanderOrders?.[v.team] && botManager.commanderOrders[v.team].timer > 0
+        ? botManager.commanderOrders[v.team]
+        : null);
+    const hasActiveFalconOrder = Boolean(
+      falconOrder && falconOrder.timer > 0 && falconOrder.action !== 'AUTO'
+    );
+    const playerNearRunwayPlane = Boolean(
+      player &&
+        !player.dead &&
+        v.team === playerTeam &&
+        !v.aiPilotActive &&
+        player.pos.distanceToSquared(v.pos) <= 36 * 36
+    );
+    // Enemy aircraft auto-sortie; Friendly FALCON Air Wing jets/gunships ALSO scramble when ordered via FALCON / ALL Command!
+    const shouldAutoSortie =
+      !v.isSecretAircraft &&
+      (v.team !== playerTeam ||
+        (hasActiveFalconOrder &&
+          v.aircraftRole !== 'b2_spirit' &&
+          !(v.claimedByPlayer && (v.claimedByPlayerTimer || 0) > 0) &&
+          !playerNearRunwayPlane));
 
     if (!shouldAutoSortie && v.aiPilotActive) {
       // If player switched teams, ensure all friendly planes are parked on the friendly runway ready for walk-up boarding
@@ -2931,9 +3755,32 @@ export class VehicleManager {
       let targetX = curWp.x;
       let targetY = curWp.y || 145;
       let targetZ = curWp.z;
+      let falconAnchorPos = null;
+
+      if (hasActiveFalconOrder && !inTakeoffRoll) {
+        const act = falconOrder.action;
+        if (
+          (act === 'OBJECTIVE' || act === 'CHARGE' || act === 'ATTACK' || act === 'RETREAT') &&
+          falconOrder.flagIndex >= 0 &&
+          this.world.flags[falconOrder.flagIndex]
+        ) {
+          falconAnchorPos = this.world.flags[falconOrder.flagIndex].pos;
+        } else if (act === 'FOLLOW' && player && !player.dead && v.team === player.team) {
+          falconAnchorPos = player.pos;
+        } else if (falconOrder.pos) {
+          falconAnchorPos = falconOrder.pos;
+        }
+      }
 
       const rawWpDist = Math.hypot(curWp.x - v.pos.x, curWp.z - v.pos.z);
-      if (rawWpDist < 165 && !dogfightTarget) {
+      if (falconAnchorPos && !dogfightTarget) {
+        // FALCON Air Wing Squad Order: Orbit & strike the ordered objective / sector!
+        v._falconOrbitAngle = (v._falconOrbitAngle ?? (v.fleetIndex || 0) * 1.6) + dt * (v.aircraftRole === 'gunship' ? 0.34 : 0.48);
+        const orbitR = v.aircraftRole === 'gunship' ? 145 : 195;
+        targetX = THREE.MathUtils.clamp(falconAnchorPos.x + Math.cos(v._falconOrbitAngle) * orbitR, -1950, 1950);
+        targetZ = THREE.MathUtils.clamp(falconAnchorPos.z + Math.sin(v._falconOrbitAngle) * orbitR, -1350, 1350);
+        targetY = v.aircraftRole === 'gunship' ? 162 : v.aircraftRole === 'fighter' ? 152 : 118;
+      } else if (rawWpDist < 165 && !dogfightTarget) {
         // Blend smoothly toward the next waypoint before switching so the aircraft flies wide, sweeping curves
         const blend = THREE.MathUtils.clamp(1.0 - (rawWpDist - 85) / 80, 0, 1);
         targetX = THREE.MathUtils.lerp(curWp.x, nextWp.x, blend);
@@ -3057,7 +3904,7 @@ export class VehicleManager {
       }
       v.pos.y = clampedY;
 
-      // AI Air-to-Air Dogfight & CAS Tracer Bursts
+      // AI Air-to-Air Dogfight & FALCON Air Wing Ground CAS / Gunship Orbit Strikes
       v.aiFireTimer -= dt;
       if (v.aiFireTimer <= 0 && dogfightTarget && bestAirDist < 460 && Math.abs(yawDiff) < 0.35) {
         v.aiFireTimer = 0.95 + Math.random() * 0.95;
@@ -3076,6 +3923,47 @@ export class VehicleManager {
           null,
           v.pos
         );
+      } else if (v.aiFireTimer <= 0 && falconAnchorPos && botManager && !inTakeoffRoll) {
+        const enemyTeam = v.team === 'US' ? 'RU' : 'US';
+        let strikeBot = null;
+        let bestGroundSq = 185 * 185;
+        const enemyGrid = botManager.teamGrid?.[enemyTeam];
+        if (enemyGrid) {
+          enemyGrid.forEachInRadius(falconAnchorPos.x, falconAnchorPos.z, 185, (eb, dSq) => {
+            if (!eb || eb.dead || eb.downed || eb.drivingVehicle || eb.team === v.team) return;
+            if (dSq < bestGroundSq) {
+              bestGroundSq = dSq;
+              strikeBot = eb;
+            }
+          });
+        }
+        if (strikeBot && v.pos.distanceToSquared(strikeBot.pos) < 520 * 520) {
+          v.aiFireTimer = v.aircraftRole === 'gunship' ? 0.85 : 1.15;
+          if (typeof botManager.spawnTracer === 'function') {
+            botManager.spawnTracer(
+              v.pos.clone(),
+              strikeBot.pos.clone().add(new THREE.Vector3(0, 1.0, 0)),
+              v.team === 'US' ? 0x00d2d3 : 0xff9f1a
+            );
+          }
+          if (this.world?.spawnDebris) {
+            this.world.spawnDebris(
+              tmpVec3(strikeBot.pos.x, strikeBot.pos.y + 0.8, strikeBot.pos.z),
+              COLOR_FIRE_ORANGE,
+              3
+            );
+          }
+          botManager.damageBot(
+            strikeBot,
+            v.aircraftRole === 'gunship' ? 42 : 34,
+            `FALCON WING [${v.name.split(' (')[0]}]`,
+            v.team,
+            v.aircraftRole === 'gunship' ? 'AC-130 ORBITAL CANNON' : 'FALCON CAS STRAFE',
+            false,
+            player ? player.onKillEvent : null,
+            null
+          );
+        }
       }
     } else {
       // Parked on the Airfield Runway

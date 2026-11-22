@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { events } from '../events.js?v=92';
+import { events } from '../events.js?v=105';
 
 function markShared(asset) {
   if (asset) {
@@ -74,6 +74,39 @@ export const ConquestSystem = {
     if (team === 'US') return 0x3498db;
     if (team === 'RU') return 0xe74c3c;
     return 0x95a5a6;
+  },
+
+  /**
+   * Clears all Forward Operating Base (FOB A–E) occupation statuses back to 100% fair NEUTRAL (0%)
+   * between rounds so neither faction starts the next round holding leftover territory!
+   */
+  resetFlagsForNewRound() {
+    if (!Array.isArray(this.flags)) return;
+    for (let i = 0; i < this.flags.length; i++) {
+      const flag = this.flags[i];
+      flag.owner = 'NEUTRAL';
+      flag.lastTeamOwner = 'NEUTRAL';
+      flag.captureProgress = 0;
+      flag.contested = false;
+      flag.zoneClashing = false;
+      flag.defenseStage = 0;
+      flag.usPresent = 0;
+      flag.ruPresent = 0;
+      flag.usWeight = 0;
+      flag.ruWeight = 0;
+      flag.usDownedPresent = 0;
+      flag.ruDownedPresent = 0;
+      flag._lastColorHex = 0x95a5a6;
+      if (flag.bannerMesh) {
+        flag.bannerMesh.position.y = 2.4;
+        if (flag.bannerMesh.material?.color) {
+          flag.bannerMesh.material.color.copy(_colNeutral);
+        }
+      }
+      if (flag.zoneMesh?.material?.color) {
+        flag.zoneMesh.material.color.copy(_colNeutral);
+      }
+    }
   },
 
   updateFlags(dt, units, onFlagCaptured = null) {

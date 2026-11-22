@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=92';
-import { sound } from '../audio.js?v=92';
-import { DISTANCES } from '../config.js?v=92';
-import { events } from '../events.js?v=92';
+import { VOXEL_SIZE } from '../world.js?v=105';
+import { sound } from '../audio.js?v=105';
+import { DISTANCES } from '../config.js?v=105';
+import { events } from '../events.js?v=105';
 
 export const FortificationMethods = {
   getBlueprintName() {
@@ -42,13 +42,46 @@ export const FortificationMethods = {
       }
     }
 
-    const upperVar = String(resolvedVariant).toUpperCase();
+    let upperVar = String(resolvedVariant).toUpperCase();
+    if (upperVar === 'AA_EMPLACE') upperVar = 'AA_EMPLACEMENT';
     const isSquadEmplace =
       upperVar === 'COVERED_BUNKER' ||
       upperVar === 'HMG_NEST' ||
       upperVar === 'MORTAR_PIT' ||
       upperVar === 'AA_EMPLACEMENT';
-    const cost =
+    if (
+      isSquadEmplace &&
+      this.squadDoctrineEnabled !== false &&
+      (this.world?.era || 'modern') === 'modern' &&
+      this.role !== 'engineer'
+    ) {
+      sound.playEmptyClick?.();
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          '🛠️ SQUAD EMPLACEMENTS & FORTIFICATIONS REQUIRE [COMBAT ENGINEER] KIT! (OR TOGGLE DOCTRINE OFF IN ⚙️)'
+        );
+      }
+      return { ok: false, reason: 'REQUIRES_ENGINEER_KIT' };
+    }
+    if (
+      !isSquadEmplace &&
+      this.squadDoctrineEnabled !== false &&
+      (this.world?.era || 'modern') === 'modern' &&
+      this.commandRank !== 'COMMANDER' &&
+      this.commandRank !== 'SQUAD_LEADER' &&
+      this.role !== 'engineer'
+    ) {
+      sound.playEmptyClick?.();
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          '🔒 COMMAND BUNKERS & TACTICAL HOUSES [8] REQUIRE [SQUAD LEADER], [COMMANDER], OR [ENGINEER]! (OR TOGGLE DOCTRINE OFF IN ⚙️)'
+        );
+      }
+      return { ok: false, reason: 'REQUIRES_SL_RANK' };
+    }
+    const baseCost =
       upperVar === 'COVERED_BUNKER'
         ? 350
         : upperVar === 'HMG_NEST'
@@ -58,6 +91,9 @@ export const FortificationMethods = {
         : upperVar === 'AA_EMPLACEMENT'
         ? 650
         : 1000;
+    // Combat Engineer Specialty: -25% cost discount on all Squad Gun Emplacements!
+    const cost =
+      isSquadEmplace && this.role === 'engineer' ? Math.round(baseCost * 0.75) : baseCost;
     const isHouse = upperVar.includes('HOUSE');
     const structLabel =
       upperVar === 'COVERED_BUNKER'
@@ -204,7 +240,8 @@ export const FortificationMethods = {
     const found = this.world.findNearestDamagedBuilding(this.pos, maxDist);
     if (!found || !found.building) return false;
 
-    const res = this.world.repairBuilding(found.building, 90, this.pos, this.onBroadcast);
+    const repairAmt = this.role === 'engineer' ? 225 : 90;
+    const res = this.world.repairBuilding(found.building, repairAmt, this.pos, this.onBroadcast);
     if (res && (res.restoredCount > 0 || res.healedCount > 0)) {
       this.recoilKickZ = 0.13;
       sound.playBuildHammer();
@@ -223,6 +260,17 @@ export const FortificationMethods = {
   },
 
   tryBuildPointDefenses() {
+    const isModern = (this.world?.era || 'modern') === 'modern';
+    if (isModern && this.squadDoctrineEnabled !== false && this.role !== 'engineer') {
+      sound.playEmptyClick?.();
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          '🛠️ ONLY [COMBAT ENGINEER] CARRIES FORTIFICATION TOOLS TO BUILD CHEST WALLS & DEFENSES!'
+        );
+      }
+      return false;
+    }
     // Priority 1: If standing near a damaged/collapsed building (such as around a Forward Base),
     // pressing [F] repairs its walls, upper floors, and roof cover!
     const repairedBuilding = this.tryRepairNearbyBuilding(14.0);
@@ -282,8 +330,12 @@ export const FortificationMethods = {
         }
       }
       if (bestVeh) {
-        const isSpecialist = this.role === 'armor' || this.role === 'pilot' || this.role === 'engineer';
-        const repairAmt = isSpecialist ? 420 : 180;
+        const repairAmt =
+          this.role === 'engineer'
+            ? 450
+            : this.role === 'armor' || this.role === 'pilot'
+            ? 360
+            : 180;
         bestVeh.hp = Math.min(bestVeh.maxHp, bestVeh.hp + repairAmt);
         sound.playReload?.();
         this.score = (this.score || 0) + 50;
@@ -312,6 +364,18 @@ export const FortificationMethods = {
     if (isBreak) {
       if (hit && hit.voxel) {
         this.world.damageVoxel(hit.voxel.gx, hit.voxel.gy, hit.voxel.gz, 100, this.onBroadcast);
+      }
+      return 0;
+    }
+
+    const isModern = (this.world?.era || 'modern') === 'modern';
+    if (isModern && this.squadDoctrineEnabled !== false && this.role !== 'engineer') {
+      sound.playEmptyClick?.();
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          '🛠️ ONLY [COMBAT ENGINEER] CAN BUILD CHEST WALLS & SANDBAG FORTIFICATIONS! (RMB BREACHES COVER)'
+        );
       }
       return 0;
     }

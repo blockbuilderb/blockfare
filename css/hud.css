@@ -1132,17 +1132,82 @@
   border: 1.5px solid rgba(0, 210, 211, 0.55);
   border-top: 3px solid #00d2d3;
   border-radius: 10px 10px 6px 6px;
-  padding: 8px 10px;
-  width: 468px;
-  max-width: calc(100vw - 32px);
+  padding: 7px 9px;
+  width: auto;
+  max-width: min(650px, calc(100vw - 24px));
   box-shadow:
     0 12px 32px rgba(0, 0, 0, 0.88),
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
     0 0 18px rgba(0, 210, 211, 0.16);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   pointer-events: auto;
+}
+
+#aircraft-cockpit-hud #air-asi-svg,
+#aircraft-cockpit-hud #air-tc-svg {
+  width: 108px;
+  height: 108px;
+}
+
+#aircraft-cockpit-hud #air-adi-svg,
+#aircraft-cockpit-hud #air-bvv-svg {
+  width: 96px;
+  height: 108px;
+}
+
+#aircraft-cockpit-hud .air-throttle-col,
+#aircraft-cockpit-hud .air-alt-col {
+  height: 108px;
+  width: 22px;
+}
+
+/* AC-130 Cockpit Dashboard FLIR Video Repeater MFD */
+#ac130-flir-mfd-card {
+  background: rgba(3, 10, 14, 0.95);
+  border: 1.5px solid rgba(46, 213, 115, 0.6);
+  border-radius: 6px;
+  padding: 4px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#ac130-flir-mfd-card .mfd-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'Consolas', monospace;
+  font-size: 9px;
+  font-weight: 900;
+  color: #2ed573;
+}
+
+#ac130-flir-mfd-card .mfd-body-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#ac130-mfd-canvas {
+  width: 152px;
+  height: 86px;
+  border: 1px solid #2ed573;
+  border-radius: 3px;
+  background: #061012;
+  flex-shrink: 0;
+}
+
+#ac130-flir-mfd-card .mfd-telemetry-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-family: 'Consolas', monospace;
+  font-size: 9px;
+  font-weight: 900;
+  color: #dfe6e9;
+  line-height: 1.25;
 }
 
 .air-cockpit-header {
@@ -1417,4 +1482,233 @@
 
 .air-pylon-bar-fill.cm {
   background: #00d2d3;
+}
+
+/* ==========================================================================
+   1ST-PERSON VEHICLE COCKPIT FRAME & EYE-LEVEL AVIATION ALTIMETER/SPEED TAPES
+   ========================================================================== */
+#vehicle-cockpit-frame {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+#vehicle-cockpit-frame .ckp-top-bow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 38px;
+  background: linear-gradient(180deg, rgba(8, 12, 16, 0.92), rgba(14, 20, 28, 0.25));
+  border-bottom: 2px solid rgba(72, 219, 251, 0.28);
+}
+
+#vehicle-cockpit-frame .ckp-pillar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 62px;
+  background: linear-gradient(90deg, rgba(8, 12, 16, 0.88), transparent);
+}
+#vehicle-cockpit-frame .ckp-pillar.left {
+  left: 0;
+  border-right: 2px solid rgba(255, 255, 255, 0.08);
+}
+#vehicle-cockpit-frame .ckp-pillar.right {
+  right: 0;
+  background: linear-gradient(270deg, rgba(8, 12, 16, 0.88), transparent);
+  border-left: 2px solid rgba(255, 255, 255, 0.08);
+}
+
+#jet-cockpit-canopy-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#vehicle-cockpit-frame.ckp-jet .ckp-top-bow,
+#vehicle-cockpit-frame.ckp-jet .ckp-pillar {
+  display: none;
+}
+
+#ac130-left-window-sight {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+#vehicle-cockpit-frame .ckp-glare-shield {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 58vw;
+  height: 26px;
+  background: linear-gradient(180deg, rgba(14, 22, 30, 0.72), rgba(6, 10, 14, 0.95));
+  border-top: 1.5px solid rgba(0, 210, 211, 0.35);
+  border-radius: 18px 18px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Consolas', monospace;
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  color: #7bed9f;
+}
+
+/* Eye-Level Aviation Speed & Radar Altimeter HUD Tapes beside Center Crosshair */
+#air-center-hud {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 440px;
+  height: 150px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 8;
+}
+
+.air-hud-tape {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 82px;
+  padding: 5px 7px;
+  background: rgba(6, 14, 20, 0.62);
+  border-top: 1.5px solid rgba(0, 210, 211, 0.75);
+  border-bottom: 1.5px solid rgba(0, 210, 211, 0.75);
+  font-family: 'Consolas', monospace;
+  text-shadow: 0 1px 3px #000;
+}
+
+.air-hud-tape.left-spd {
+  left: 0;
+  border-right: 2.5px solid #00d2d3;
+  text-align: right;
+  border-radius: 4px 0 0 4px;
+}
+
+.air-hud-tape.right-alt {
+  right: 0;
+  border-left: 2.5px solid #00d2d3;
+  text-align: left;
+  border-radius: 0 4px 4px 0;
+}
+
+.air-hud-tape .aht-lbl {
+  font-size: 8.5px;
+  font-weight: 900;
+  color: #81ecec;
+  letter-spacing: 0.7px;
+}
+
+.air-hud-tape .aht-val {
+  font-size: 16px;
+  font-weight: 900;
+  color: #7bed9f;
+  line-height: 1.15;
+}
+
+.air-hud-tape .aht-sub {
+  font-size: 9px;
+  font-weight: 900;
+  color: #f1c40f;
+}
+
+#veh-cam-mode-pill {
+  position: absolute;
+  top: calc(50% + 36px);
+  left: 0;
+  transform: none;
+  background: rgba(8, 18, 26, 0.88);
+  border: 1px solid rgba(0, 210, 211, 0.65);
+  color: #81ecec;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-family: 'Consolas', monospace;
+  font-size: 8.8px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+#veh-sensor-mode-pill {
+  position: absolute;
+  top: calc(50% + 36px);
+  right: 0;
+  background: rgba(8, 22, 18, 0.88);
+  border: 1px solid rgba(46, 204, 113, 0.65);
+  color: #7bed9f;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-family: 'Consolas', monospace;
+  font-size: 8.8px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+/* AC-130J Fire-Control Operator (FCO) Sensor Monitor Bezel (Anchors Gunners inside the Gunship Station!) */
+#ac130-fco-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  box-shadow: inset 0 0 0 14px rgba(6, 10, 14, 0.88), inset 0 0 85px rgba(0, 0, 0, 0.72);
+}
+
+#ac130-fco-overlay .fco-corner {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  border-color: rgba(0, 210, 211, 0.72);
+  border-style: solid;
+}
+#ac130-fco-overlay .fco-corner.tl { top: 82px; left: 215px; border-width: 2.5px 0 0 2.5px; }
+#ac130-fco-overlay .fco-corner.tr { top: 82px; right: 215px; border-width: 2.5px 2.5px 0 0; }
+#ac130-fco-overlay .fco-corner.bl { bottom: 235px; left: 215px; border-width: 0 0 2.5px 2.5px; }
+#ac130-fco-overlay .fco-corner.br { bottom: 235px; right: 215px; border-width: 0 2.5px 2.5px 0; }
+
+#ac130-fco-gimbal-bar {
+  position: absolute;
+  top: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 270px;
+  padding: 3px 10px;
+  background: rgba(6, 12, 18, 0.82);
+  border: 1px solid rgba(0, 210, 211, 0.5);
+  border-radius: 4px;
+  font-family: 'Consolas', monospace;
+  text-align: center;
+}
+
+#ac130-fco-gimbal-track {
+  position: relative;
+  height: 5px;
+  margin-top: 3px;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+}
+
+#ac130-fco-gimbal-pip {
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  width: 8px;
+  height: 11px;
+  transform: translateX(-50%);
+  background: #00d2d3;
+  border-radius: 2px;
+  box-shadow: 0 0 6px #00d2d3;
 }

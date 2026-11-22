@@ -1,17 +1,17 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT, FORMATION } from '../config.js?v=92';
-import { sound } from '../audio.js?v=92';
-import { tmpVec3 } from '../utils/VectorPool.js?v=92';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=92';
-import { events, makeEventBridge } from '../events.js?v=92';
-import { createSoldierMesh } from './SoldierMeshFactory.js?v=92';
-import { SightlineMethods } from './SightlineSystem.js?v=92';
-import { MedicAIMethods } from './MedicAI.js?v=92';
-import { BotAIMethods } from './BotAI.js?v=92';
+import { BOT, FORMATION } from '../config.js?v=105';
+import { sound } from '../audio.js?v=105';
+import { tmpVec3 } from '../utils/VectorPool.js?v=105';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=105';
+import { events, makeEventBridge } from '../events.js?v=105';
+import { createSoldierMesh } from './SoldierMeshFactory.js?v=105';
+import { SightlineMethods } from './SightlineSystem.js?v=105';
+import { MedicAIMethods } from './MedicAI.js?v=105';
+import { BotAIMethods } from './BotAI.js?v=105';
 import {
   createBaseProtectionFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=92';
+} from '../core/StateMachines.js?v=105';
 
 const BOT_NAMES_US = [
   'SgtOkiDoki', 'WakistanVet', 'VoxelMedic', 'EagleOne', 'BlockBuster',
@@ -41,11 +41,12 @@ const HELMET_COLOR_US = new THREE.Color(0x2980b9);
 const HELMET_COLOR_RU = new THREE.Color(0xc0392b);
 
 export const SQUAD_DEFS = [
-  { id: 'ALPHA', short: 'ALP', specialty: 'ASSAULT & BREACH', defaultFlag: 2 },
-  { id: 'BRAVO', short: 'BRV', specialty: 'ARMOR SQUAD (TANKS & IFVs)', defaultFlag: 0, isArmorSquad: true },
-  { id: 'CHARLIE', short: 'CHR', specialty: 'ANTI-ARMOR AT', defaultFlag: 1 },
-  { id: 'DELTA', short: 'DLT', specialty: 'TRAUMA MEDICS', defaultFlag: 3 },
-  { id: 'ECHO', short: 'ECH', specialty: 'RECON & FLANK', defaultFlag: 4 }
+  { id: 'ALPHA', short: 'ALP', branch: 'LAND', specialty: 'LAND ASSAULT & BREACH', defaultFlag: 2 },
+  { id: 'BRAVO', short: 'BRV', branch: 'ARMOR', specialty: 'HEAVY ARMOR SQUAD (TANKS & IFVs)', defaultFlag: 0, isArmorSquad: true },
+  { id: 'CHARLIE', short: 'CHR', branch: 'LAND', specialty: 'LAND ANTI-ARMOR & SAPPER', defaultFlag: 1 },
+  { id: 'DELTA', short: 'DLT', branch: 'LAND', specialty: 'LAND MEDICAL & LOGISTICS', defaultFlag: 3 },
+  { id: 'ECHO', short: 'ECH', branch: 'LAND', specialty: 'LAND RECON & PATHFINDER', defaultFlag: 4 },
+  { id: 'FALCON', short: 'FLC', branch: 'AIR', specialty: 'AIR WING SQUAD (JETS & GUNSHIPS)', defaultFlag: 2, isAirSquad: true }
 ];
 
 export class BotManager {
@@ -57,10 +58,10 @@ export class BotManager {
     this.squadLeaders = { US: {}, RU: {} };
     this.downedByTeam = { US: [], RU: [] };
     this.aliveByTeam = { US: [], RU: [] };
-    this.spatialGrid = new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 300);
+    this.spatialGrid = new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 450);
     this.teamGrid = {
-      US: new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 160),
-      RU: new SpatialGrid2D(-2432, 2432, -1632, 1632, 32, 160)
+      US: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 240),
+      RU: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 240)
     };
     this.tracers = [];
     this._tracerPool = [];
@@ -133,7 +134,7 @@ export class BotManager {
   computeBotSpacingOffsets(b, spacingMode = 'FAN_OUT') {
     const isClose = spacingMode === 'STAY_CLOSE';
     const sqOrderIdx = Math.max(0, SQUAD_DEFS.findIndex((s) => s.id === b.squad));
-    const sqSectorAngle = (sqOrderIdx * (Math.PI * 2)) / 5 + 0.35;
+    const sqSectorAngle = (sqOrderIdx * (Math.PI * 2)) / SQUAD_DEFS.length + 0.35;
     const sqStandoffDist = isClose
       ? FORMATION.CLOSE_STANDOFF_BASE + sqOrderIdx * FORMATION.CLOSE_STANDOFF_STEP
       : FORMATION.FAN_STANDOFF_BASE + sqOrderIdx * FORMATION.FAN_STANDOFF_STEP;
@@ -168,8 +169,8 @@ export class BotManager {
         fileRankIdx * lateralStep * (isRanged ? 1.25 : 1.0) +
         (isCav ? (fileRankIdx >= 0 ? 1 : -1) * (isClose ? 5.5 : 8.5) : 0);
 
-      // Squads deploy abreast in 5 distinct battle-line companies across the front (plus echelon depth)
-      const sqLineSlot = [0, -1, 1, -2, 2][sqOrderIdx % 5] || 0;
+      // Squads deploy abreast in 6 distinct battle-line companies across the front (plus echelon depth)
+      const sqLineSlot = [0, -1, 1, -2, 2, -3][sqOrderIdx % SQUAD_DEFS.length] || 0;
       const sqLineLateralZ = sqLineSlot * (isClose ? 13.5 : 22.0);
       const sqEchelonX = -enemyDirX * (Math.abs(sqLineSlot) * (isClose ? 2.5 : 4.5));
 
@@ -302,7 +303,7 @@ export class BotManager {
 
     return {
       scope,
-      targetSquad: scope === 'ALL' ? 'ALL 5 SQUADS' : `${targetSquad} SQUAD`,
+      targetSquad: scope === 'ALL' ? 'ALL 6 SQUADS' : `${targetSquad} SQUAD`,
       spacingMode,
       unitsOrdered: affectedBots.length
     };
@@ -880,7 +881,7 @@ export class BotManager {
   }
 
   setBotCountPerSide(countPerTeam = 125) {
-    const cleanCount = Math.max(0, Math.min(125, Math.floor(countPerTeam)));
+    const cleanCount = Math.max(25, Math.min(200, Math.floor(countPerTeam)));
     if (this.currentBotsPerTeam === cleanCount && this.bots.length === cleanCount * 2) {
       return;
     }
@@ -916,7 +917,9 @@ export class BotManager {
     const isCommander = index === 0;
 
     let role =
-      squadDef.id === 'BRAVO' && squadMemberIndex < 8
+      squadDef.id === 'FALCON'
+        ? 'ENGINEER'
+        : squadDef.id === 'BRAVO' && squadMemberIndex < 8
         ? 'ENGINEER'
         : CLASSES[index % CLASSES.length];
     let botName = name;
@@ -1041,7 +1044,11 @@ export class BotManager {
       squadMemberIndex,
       squad: squadDef.id,
       squadShort: squadDef.short,
+      squadBranch: squadDef.branch || 'LAND',
       squadSpecialty: squadDef.specialty,
+      isPilot: era === 'modern' && squadDef.id === 'FALCON',
+      isPilotCrew: era === 'modern' && squadDef.id === 'FALCON',
+      isArmorCrew: era === 'modern' && squadDef.id === 'BRAVO',
       tactic: TACTICS[index % TACTICS.length],
       pos: mesh.position,
       velX: 0,
@@ -1070,6 +1077,9 @@ export class BotManager {
       medicBagSupply: role === 'MEDIC' ? (BOT.MEDIC_BAG_MAX_SUPPLY || 600) : 0,
       maxMedicBagSupply: role === 'MEDIC' ? (BOT.MEDIC_BAG_MAX_SUPPLY || 600) : 0,
       medicKills: 0,
+      planesDestroyed: 0,
+      tanksDestroyed: 0,
+      carsDestroyed: 0,
       vehiclesDestroyed: 0,
       captures: 0,
       score: 0,
@@ -1370,8 +1380,8 @@ export class BotManager {
       flag.garrisonSquad.RU = null;
     }
 
-    // Preferred infantry garrison squad roster (leaves ALPHA as primary assault spearhead and BRAVO as armor until needed)
-    const garrisonPriority = ['CHARLIE', 'DELTA', 'ECHO', 'ALPHA', 'BRAVO'];
+    // Preferred infantry garrison squad roster (leaves ALPHA as primary assault spearhead, BRAVO as armor, and FALCON as air wing until needed)
+    const garrisonPriority = ['CHARLIE', 'DELTA', 'ECHO', 'ALPHA', 'BRAVO', 'FALCON'];
 
     for (const team of ['US', 'RU']) {
       this.squadGarrisonFlagIndex[team] = {};
@@ -1395,8 +1405,8 @@ export class BotManager {
       // US pushes +X (so higher X is closer to RU HQ); RU pushes -X (so lower X is closer to US HQ)
       ownedFlagItems.sort((a, b) => (team === 'US' ? b.f.pos.x - a.f.pos.x : a.f.pos.x - b.f.pos.x));
 
-      // Keep at least 1 squad free to attack unowned flags when fewer than 5 flags are owned
-      const maxGarrisons = ownedFlagItems.length >= 5 ? 5 : Math.min(ownedFlagItems.length, 4);
+      // Keep at least 4 squads free to assault unowned flags (at most 2 rear garrisons until all 5 flags are captured)
+      const maxGarrisons = ownedFlagItems.length >= 5 ? 4 : Math.min(ownedFlagItems.length, 2);
 
       // Identify available squads (exclude squads with an explicit single-squad human order to do something else)
       const availableSquads = garrisonPriority.filter((sqId) => {
@@ -1540,11 +1550,33 @@ export class BotManager {
     let source;
 
     if (spawnAtMainBase) {
-      // Spawn near the Distant Main Base Motor Pool apron (x ≈ -922 for US West, x ≈ +922 for RU East)
-      const motorPoolX = baseKey === 'US' ? -922 : 922;
-      sx = motorPoolX + (Math.random() - 0.5) * 18;
-      sz = mainBase.z + (Math.random() - 0.5) * 32;
-      source = useRussianEastBase ? 'RU_COALITION_EAST_BASE' : 'MAIN_BASE';
+      // At opening round start (0 flags owned by either side), deploy vanguard foot-infantry squads
+      // (ALPHA, CHARLIE, DELTA, ECHO) along their faction's ±820m Forward Staging Line so both 125-soldier
+      // armies engage over Objectives A-E within 20-30s instead of jogging 1.5km across empty prairie,
+      // while BRAVO Armor Crew & FALCON Air Crew spawn right inside the ±1,520m Main Base Motor Pool / Airfield!
+      const anyFlagCaptured = this.world.flags.some((fl) => fl.owner && fl.owner !== 'NEUTRAL');
+      const isVanguardInfantry =
+        !anyFlagCaptured && squad !== 'BRAVO' && squad !== 'FALCON';
+      if (isVanguardInfantry) {
+        const stagingX = baseKey === 'US' ? -820 : 820;
+        const laneZ =
+          squad === 'ALPHA'
+            ? 0
+            : squad === 'CHARLIE'
+            ? -210
+            : squad === 'DELTA'
+            ? 210
+            : (Math.random() - 0.5) * 320;
+        sx = stagingX + (Math.random() - 0.5) * 36;
+        sz = laneZ + (Math.random() - 0.5) * 44;
+        source = 'FORWARD_STAGING_LINE';
+      } else {
+        // Spawn inside the Main Base Motor Pool apron (US_BASE + 28m / RU_BASE - 28m)
+        const motorPoolX = baseKey === 'US' ? mainBase.x + 28 : mainBase.x - 28;
+        sx = motorPoolX + (Math.random() - 0.5) * 18;
+        sz = mainBase.z + (Math.random() - 0.5) * 32;
+        source = useRussianEastBase ? 'RU_COALITION_EAST_BASE' : 'MAIN_BASE';
+      }
     } else {
       const f = uncontestedFlags[Math.floor(Math.random() * uncontestedFlags.length)];
       const angle = Math.random() * Math.PI * 2;

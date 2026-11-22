@@ -299,8 +299,8 @@ export const MinimapRenderer = {
     ctx.fillStyle = '#162318';
     ctx.fillRect(0, 0, w, h);
 
-    const toMapX = (wx) => (wx / 2160 + 0.5) * w;
-    const toMapY = (wz) => (wz / 1280 + 0.5) * h;
+    const toMapX = (wx) => (wx / 3480 + 0.5) * w;
+    const toMapY = (wz) => (wz / 2120 + 0.5) * h;
 
     // Subtle tactical grid
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
@@ -320,13 +320,13 @@ export const MinimapRenderer = {
 
     // North-South River
     ctx.fillStyle = '#1f536e';
-    ctx.fillRect(toMapX(-20), 0, 14, h);
+    ctx.fillRect(toMapX(-24), 0, 12, h);
 
     // 3 Grand Bridges & Main Road Network
     ctx.fillStyle = '#2f363d';
-    ctx.fillRect(0, toMapY(-8), w, 7);
-    ctx.fillRect(toMapX(-24), toMapY(-226), 24, 6);
-    ctx.fillRect(toMapX(-24), toMapY(214), 24, 6);
+    ctx.fillRect(0, toMapY(-8), w, 6);
+    ctx.fillRect(toMapX(-28), toMapY(-406), 22, 5);
+    ctx.fillRect(toMapX(-28), toMapY(394), 22, 5);
 
     // Base HQs
     const usX = toMapX(this.world.spawns.US_BASE.x);

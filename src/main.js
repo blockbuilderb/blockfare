@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=92';
-import { VehicleManager } from './vehicles.js?v=92';
-import { BotManager } from './bots.js?v=92';
-import { PlayerController } from './player.js?v=92';
-import { NetworkManager } from './network.js?v=92';
-import { UIManager } from './ui.js?v=92';
-import { TelemetryLogger } from './telemetry.js?v=92';
-import { sound } from './audio.js?v=92';
-import { CAMERA, LIGHTING, MATCH, WEATHER, SKY_FOG_COLOR } from './config.js?v=92';
-import { events, makeEventBridge } from './events.js?v=92';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=92';
+import { VoxelWorld } from './world.js?v=105';
+import { VehicleManager } from './vehicles.js?v=105';
+import { BotManager } from './bots.js?v=105';
+import { PlayerController } from './player.js?v=105';
+import { NetworkManager } from './network.js?v=105';
+import { UIManager } from './ui.js?v=105';
+import { TelemetryLogger } from './telemetry.js?v=105';
+import { sound } from './audio.js?v=105';
+import { CAMERA, LIGHTING, MATCH, WEATHER, SKY_FOG_COLOR } from './config.js?v=105';
+import { events, makeEventBridge } from './events.js?v=105';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=105';
 
 class BattleBitGame {
   constructor() {
@@ -42,18 +42,20 @@ class BattleBitGame {
     this.setupLighting();
     this._coreSceneChildren = new Set(this.scene.children);
 
-    // Squad-Aligned AAS / Conquest Ticket Economy:
-    // - 400 Starting Tickets per side, ZERO passive ticket printing (tickets only rise on Flag Captures!)
+    // Squad-Aligned AAS / Conquest Ticket Economy (Crew + Equipment Replacement Costs):
+    // - 800 Starting Tickets per side, ZERO passive ticket printing (tickets only rise on Flag Captures!)
     // - Infantry Give-Up/Respawn: -1 (0 if Revived by Medic/Squadmate)
-    // - Vehicle Losses: Light Car -5, IFV/APC -10, Main Battle Tank -15
+    // - Vehicle & Crew Losses (Counted Separately): Car -8 ($350), IFV/AA -16 ($800), Tank -24 ($1,300), Plane -30 ($1,500), B-2 -45 ($2,500)
     // - Flag Capture Swing: Neutral Flag +20; Enemy Flag +30 to Attacker & -10 to Defender (40-ticket swing!)
     // - Territory Bleed: Enemy holding 3/5 flags = -6/min (-0.10/s); 4/5 flags = -15/min (-0.25/s); 5/5 flags = -60/min (-1.00/s MERCY BLEED!)
     this.ticketEconomy = {
       START_TICKETS: 800,
       SOLDIER_RESPAWN_COST: 1,
-      CAR_RESPAWN_COST: 5,
-      APC_RESPAWN_COST: 10,
-      TANK_RESPAWN_COST: 15,
+      CAR_RESPAWN_COST: 8,
+      APC_RESPAWN_COST: 16,
+      TANK_RESPAWN_COST: 24,
+      PLANE_RESPAWN_COST: 30,
+      B2_RESPAWN_COST: 45,
       NEUTRAL_CAPTURE_GRANT: 20,
       ENEMY_CAPTURE_GRANT: 30,
       FLAG_LOST_PENALTY: 10,
@@ -66,8 +68,8 @@ class BattleBitGame {
     this.ticketsUS = this.ticketEconomy.START_TICKETS;
     this.ticketsRU = this.ticketEconomy.START_TICKETS;
     this.ticketStats = {
-      US: { gainedCapture: 0, gainedPassive: 0, lostFlags: 0, lostBleed: 0, spentSoldiers: 0, spentCars: 0, spentArmor: 0 },
-      RU: { gainedCapture: 0, gainedPassive: 0, lostFlags: 0, lostBleed: 0, spentSoldiers: 0, spentCars: 0, spentArmor: 0 }
+      US: { gainedCapture: 0, gainedPassive: 0, lostFlags: 0, lostBleed: 0, spentSoldiers: 0, spentCars: 0, spentArmor: 0, spentPlanes: 0 },
+      RU: { gainedCapture: 0, gainedPassive: 0, lostFlags: 0, lostBleed: 0, spentSoldiers: 0, spentCars: 0, spentArmor: 0, spentPlanes: 0 }
     };
     this.bleedPopupTimer = MATCH.BLEED_POPUP_INTERVAL;
     this.matchTimeRemaining = MATCH.DURATION;
@@ -680,7 +682,18 @@ class BattleBitGame {
       // Player entered downed state; final death/deploy screen handled on 'player:died'
     });
 
-    events.on('player:died', () => {
+    events.on('player:died', (data) => {
+      events.emit('telemetry:event', {
+        type: 'PLAYER_DIED',
+        payload: {
+          killer: data?.killerName || 'UNKNOWN',
+          weapon: data?.weaponName || 'UNKNOWN',
+          x: Math.round(this.player?.pos?.x || 0),
+          y: Number((this.player?.pos?.y || 0).toFixed(2)),
+          z: Math.round(this.player?.pos?.z || 0),
+          wasInVehicle: this.player?.activeVehicle?.name || null
+        }
+      });
       // Tickets are deducted upon RESPAWN (-1 per soldier respawn), so if a Medic revives a downed soldier,
       // no ticket is lost!
       setTimeout(() => {
@@ -967,29 +980,81 @@ class BattleBitGame {
       }
     });
 
-    events.on('vehicle:destroyed', ({ vehicle, attackerName, weaponName, cost }) => {
+    events.on('vehicle:credit-kill', ({ vehicle, category, attackerName, attackerTeam }) => {
+      if (!vehicle || !attackerTeam || attackerTeam === vehicle.team) return;
+      const cat = category || 'CAR';
+      const applyCredit = (unit, isBot = false) => {
+        if (!unit) return;
+        if (cat === 'PLANE') {
+          unit.planesDestroyed = (unit.planesDestroyed || 0) + 1;
+        } else if (cat === 'TANK') {
+          unit.tanksDestroyed = (unit.tanksDestroyed || 0) + 1;
+        } else {
+          unit.carsDestroyed = (unit.carsDestroyed || 0) + 1;
+        }
+        unit.vehiclesDestroyed =
+          (unit.planesDestroyed || 0) + (unit.tanksDestroyed || 0) + (unit.carsDestroyed || 0);
+        if (isBot) {
+          const pts = cat === 'PLANE' ? 650 : cat === 'TANK' ? 450 : 250;
+          unit.score = (unit.score || 0) + pts;
+        }
+      };
+
+      const cleanAttacker = String(attackerName || '');
+      const playerCallsign = this.network?.callsign || '';
+      if (
+        attackerTeam === this.player.team &&
+        (cleanAttacker === this.player.name ||
+          (playerCallsign && cleanAttacker.includes(playerCallsign)) ||
+          cleanAttacker.startsWith('YOU'))
+      ) {
+        applyCredit(this.player, false);
+        if (this.player.activeVehicle && this.player.activeVehicle.isAircraft) {
+          this.player.recordAirCombatKill?.(cat === 'PLANE' || cat === 'TANK' ? 2 : 1);
+        }
+        return;
+      }
+
+      const botKiller = this.botManager.bots.find(
+        (b) => b.team === attackerTeam && (b.name === cleanAttacker || cleanAttacker.includes(b.name))
+      );
+      if (botKiller) {
+        applyCredit(botKiller, true);
+      } else {
+        // Credit an active AI Pilot / Armor / Engineer on the attacking team when shot down by AI Aircraft/SAM
+        const fallbackBot =
+          this.botManager.bots.find(
+            (b) =>
+              !b.dead &&
+              b.team === attackerTeam &&
+              (cat === 'PLANE' ? b.squad === 'FALCON' || b.role === 'ENGINEER' : b.role === 'ENGINEER' || b.squad === 'BRAVO')
+          ) || this.botManager.bots.find((b) => !b.dead && b.team === attackerTeam);
+        if (fallbackBot) applyCredit(fallbackBot, true);
+      }
+    });
+
+    events.on('vehicle:destroyed', ({ vehicle, attackerName, weaponName, cost, category }) => {
       if (!vehicle) return;
       events.emit('telemetry:event', {
         type: 'VEHICLE_DESTROYED',
         payload: {
           vehicle: vehicle.name,
+          category: category || vehicle.ticketCategory || 'CAR',
           team: vehicle.team,
           attacker: attackerName,
           weapon: weaponName,
-          respawnTicketCost:
-            cost ||
-            vehicle.ticketCost ||
-            (vehicle.type === 'tank' ? 12 : vehicle.type === 'apc' ? 8 : 4)
+          respawnTicketCost: cost || vehicle.ticketCost || 8
         }
       });
     });
 
     events.on('vehicle:respawn', ({ vehicle, cost, moneyCost = 0, category, stage }) => {
-      if (this.matchEnded || !vehicle) return;
+      if (this.matchEnded || !vehicle || cost <= 0) return;
       const shortName = vehicle.name ? vehicle.name.split(' (')[0] : vehicle.type.toUpperCase();
+      const effCost = moneyCost || vehicle.factionMoneyCost || 0;
       const labelWithFunds =
-        vehicle.isAircraft && moneyCost > 0 && stage === 'VEHICLE_RESPAWN'
-          ? `${shortName} (-$${moneyCost} FACTION FUNDS)`
+        effCost > 0
+          ? `${shortName} (CREW+EQUIP • -$${effCost.toLocaleString()})`
           : shortName;
       this.spendRespawnTickets(vehicle.team, category, labelWithFunds, cost);
     });
@@ -1164,6 +1229,9 @@ class BattleBitGame {
                 this.player.registerMedicWarCrime(bot.name, Boolean(res.wasRescuing));
               }
               const killInfo = this.player.registerKill(bot.name);
+              if (this.player.activeVehicle && this.player.activeVehicle.isAircraft) {
+                this.player.recordAirCombatKill?.(1);
+              }
               if (killInfo.announcement) {
                 this.ui.showKillStreakAnnouncement(killInfo.announcement);
               }
@@ -1216,14 +1284,8 @@ class BattleBitGame {
             isPlayerOwner ? this.player.onAwardXp : null,
             shooterPos
           );
-          if (destroyed) {
-            if (isPlayerOwner) {
-              this.player.vehiclesDestroyed = (this.player.vehiclesDestroyed || 0) + 1;
-            } else if (owner && typeof owner.kills === 'number') {
-              owner.kills++;
-              owner.vehiclesDestroyed = (owner.vehiclesDestroyed || 0) + 1;
-              owner.score = (owner.score || 0) + 300;
-            }
+          if (destroyed && !isPlayerOwner && owner && typeof owner.kills === 'number') {
+            owner.kills++;
           }
         }
       }
@@ -1245,21 +1307,26 @@ class BattleBitGame {
 
     const st = this.ticketStats[team];
     if (st) {
-      if (category === 'CAR') st.spentCars += cost;
-      else if (category === 'ARMOR') st.spentArmor += cost;
+      if (category === 'PLANE') st.spentPlanes = (st.spentPlanes || 0) + cost;
+      else if (category === 'CAR') st.spentCars += cost;
+      else if (category === 'TANK' || category === 'ARMOR') st.spentArmor += cost;
       else st.spentSoldiers += cost;
     }
 
     const label =
-      category === 'ARMOR'
-        ? `ARMOR LOST: ${unitName}`
+      category === 'PLANE'
+        ? `✈️ AIRCRAFT & PILOT LOST: ${unitName}`
+        : category === 'TANK' || category === 'ARMOR'
+        ? `🛡️ ARMOR & CREW LOST: ${unitName}`
         : category === 'CAR'
-        ? `VEHICLE LOST: ${unitName}`
+        ? `🚙 VEHICLE & CREW LOST: ${unitName}`
         : `SOLDIER RESPAWN: ${unitName}`;
 
     if (this.ui) {
-      // Always show Car & Armor respawns, Player respawns, and a throttled stream of AI soldier respawns
+      // Always show Plane, Tank/Armor & Car losses, Player respawns, and a throttled stream of AI soldier respawns
       const isVehicleOrSelf =
+        category === 'PLANE' ||
+        category === 'TANK' ||
         category === 'CAR' ||
         category === 'ARMOR' ||
         unitName.includes(this.network.callsign || 'YOU');
@@ -1270,7 +1337,7 @@ class BattleBitGame {
       }
     }
 
-    if (this.telemetry && (category === 'CAR' || category === 'ARMOR')) {
+    if (this.telemetry && (category === 'PLANE' || category === 'TANK' || category === 'CAR' || category === 'ARMOR')) {
       this.telemetry.logEvent('TICKET_SPENT_RESPAWN', {
         team,
         category,
@@ -1417,31 +1484,38 @@ class BattleBitGame {
       }
     }
 
-    this.world.update(
-      dt,
-      allUnits,
-      this.player.onExplosionDamage,
-      (payload) => this.network.send(payload),
-      null,
-      this.vehicleManager.vehicles
-    );
-
     const onDeployMenu =
       this.ui.deployScreenEl && !this.ui.deployScreenEl.classList.contains('hidden');
+    const preRoundWaitingToStart = Boolean(
+      onDeployMenu && this.matchTimeRemaining >= MATCH.DURATION - 0.5
+    );
+
+    if (!preRoundWaitingToStart) {
+      this.world.update(
+        dt,
+        allUnits,
+        this.player.onExplosionDamage,
+        (payload) => this.network.send(payload),
+        null,
+        this.vehicleManager.vehicles
+      );
+    }
 
     this.vehicleManager.update(dt, this.player, this.botManager, onDeployMenu);
 
-    this.botManager.update(
-      dt,
-      this.player,
-      this.player.onKillEvent,
-      (team, amount, category = 'SOLDIER', botName = 'SOLDIER') => {
-        if (onDeployMenu || this.matchEnded) return;
-        this.spendRespawnTickets(team, category, botName, amount);
-      },
-      this.vehicleManager,
-      this.player.onAwardXp
-    );
+    if (!preRoundWaitingToStart) {
+      this.botManager.update(
+        dt,
+        this.player,
+        this.player.onKillEvent,
+        (team, amount, category = 'SOLDIER', botName = 'SOLDIER') => {
+          if (onDeployMenu || this.matchEnded) return;
+          this.spendRespawnTickets(team, category, botName, amount);
+        },
+        this.vehicleManager,
+        this.player.onAwardXp
+      );
+    }
 
     // Squad-Aligned AAS Ticket Economy:
     // 1. ZERO passive ticket generation (tickets never tick upward on their own!)
@@ -1507,7 +1581,239 @@ class BattleBitGame {
     this.ui.update(dt, this.ticketsUS, this.ticketsRU, this.matchTimeRemaining, rawDt);
     if (this.telemetry) this.telemetry.update(dt);
 
+    const flirRestore = this.syncThermalSceneState();
+    let savedDayHazeDensity = null;
+    if (!flirRestore && this.scene.fog && this.player && !this.player.dead) {
+      const inAir = Boolean(this.player.activeVehicle && this.player.activeVehicle.isAircraft);
+      const curFov = this.camera?.fov || 75;
+      if (inAir || curFov < 42) {
+        savedDayHazeDensity = this.scene.fog.density;
+        // Electro-Optical (EO) Day-TV haze-penetration filter so AC-130 / Jet / Sniper zoom sees crisp ground infantry up to 2,500m!
+        this.scene.fog.density = savedDayHazeDensity * (inAir && curFov < 36 ? 0.34 : 0.48);
+      }
+    }
     this.renderer.render(this.scene, this.camera);
+    if (savedDayHazeDensity !== null && this.scene.fog) {
+      this.scene.fog.density = savedDayHazeDensity;
+    }
+    if (flirRestore) this.restorePostRenderThermalAtmosphere(flirRestore);
+  }
+
+  /**
+   * Call of Duty ("Death From Above" / MW2 AC-130) True 3D Scene-Level FLIR Thermal Radiance:
+   * Instead of drawing fake 2D dots over units, switches actual 3D soldier & vehicle materials
+   * to physical LWIR thermal emission (37°C incandescent human limbs/heads contrasting against
+   * tactical vests/rifles, and 220°C hot vehicle treads/tires/exhausts/barrels against warm armor hulls)
+   * while cooling ambient sky, clouds, and terrain to dark FLIR slate!
+   */
+  syncThermalSceneState() {
+    const p = this.player;
+    const onDeployMenu =
+      this.ui?.deployScreenEl && !this.ui.deployScreenEl.classList.contains('hidden');
+    const isSensorFlir = Boolean(
+      p && !p.dead && !onDeployMenu && p.nvgActive && (p.sensorMode === 'WHOT' || p.sensorMode === 'BHOT')
+    );
+    const curWep = p && !p.activeVehicle ? p.currentWeapon?.() : null;
+    const isScopeFlir = Boolean(
+      p && !p.dead && !onDeployMenu && !p.activeVehicle && p.isAds && (p.adsAmount || 0) > 0.45 && curWep?.def?.opticType === 'flir'
+    );
+    const wantFlir = isSensorFlir || isScopeFlir;
+
+    if (!this._flirModifiedMats) this._flirModifiedMats = [];
+    if (!this._flirGen) this._flirGen = 1;
+
+    if (!wantFlir) {
+      if (this._flirSceneActive) {
+        this._flirSceneActive = false;
+        this._flirGen++;
+        for (let i = 0; i < this._flirModifiedMats.length; i++) {
+          const mat = this._flirModifiedMats[i];
+          const orig = mat?.userData?._origFlir;
+          if (!mat || !orig) continue;
+          if (mat.color) mat.color.setHex(orig.colorHex);
+          if ('map' in mat && mat.map !== orig.map) {
+            mat.map = orig.map;
+            mat.needsUpdate = true;
+          }
+          if (orig.hasEmissive && mat.emissive) {
+            mat.emissive.setHex(orig.emissiveHex);
+            mat.emissiveIntensity = orig.emissiveIntensity;
+          }
+        }
+        this._flirModifiedMats.length = 0;
+        if (this.world?.skyCloudGroup) {
+          this.world.skyCloudGroup.traverse((c) => {
+            if (c.isMesh && c.material && c.material.userData?._origCloudHex !== undefined) {
+              c.material.color.setHex(c.material.userData._origCloudHex);
+              delete c.material.userData._origCloudHex;
+            }
+            if (c.isMesh && c.material?.userData?.uSkyBgColor && c.material.userData._origCloudSkyHex !== undefined) {
+              c.material.userData.uSkyBgColor.value.setHex(c.material.userData._origCloudSkyHex);
+              delete c.material.userData._origCloudSkyHex;
+            }
+          });
+        }
+      }
+      return null;
+    }
+
+    this._flirSceneActive = true;
+    const gen = this._flirGen;
+
+    const tagRootThermal = (root, isVehicle = false, isDeadVeh = false) => {
+      if (!root) return;
+      if (
+        root.userData._flirTaggedGen === gen &&
+        root.userData._flirDeadFlag === isDeadVeh
+      ) {
+        return;
+      }
+      root.userData._flirTaggedGen = gen;
+      root.userData._flirDeadFlag = isDeadVeh;
+
+      root.traverse((obj) => {
+        if (!obj.isMesh || !obj.material) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (let mi = 0; mi < mats.length; mi++) {
+          const mat = mats[mi];
+          if (!mat || !mat.color) continue;
+          if (mat.transparent && (mat.opacity ?? 1) < 0.55) continue;
+
+          if (!mat.userData._origFlir) {
+            mat.userData._origFlir = {
+              colorHex: mat.color.getHex(),
+              map: mat.map || null,
+              hasEmissive: Boolean(mat.emissive),
+              emissiveHex: mat.emissive ? mat.emissive.getHex() : 0x000000,
+              emissiveIntensity: mat.emissiveIntensity ?? 1
+            };
+          }
+          if (mat.userData._flirAppliedGen !== gen || isVehicle) {
+            if (mat.userData._flirAppliedGen !== gen) {
+              mat.userData._flirAppliedGen = gen;
+              this._flirModifiedMats.push(mat);
+            }
+            const orig = mat.userData._origFlir;
+            const r = ((orig.colorHex >> 16) & 255) / 255;
+            const g = ((orig.colorHex >> 8) & 255) / 255;
+            const b = (orig.colorHex & 255) / 255;
+            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+
+            if (isVehicle) {
+              if (isDeadVeh) {
+                mat.color.setHex(0x424850);
+                if (mat.emissive) {
+                  mat.emissive.setHex(0x161a1e);
+                  mat.emissiveIntensity = 0.2;
+                }
+              } else if (lum < 0.23) {
+                // Tires, caterpillar treads, exhausts, gun barrels & engine grilles: 220°C white-hot!
+                mat.color.setHex(0xffffff);
+                if (mat.emissive) {
+                  mat.emissive.setHex(0xffffff);
+                  mat.emissiveIntensity = 0.98;
+                }
+              } else {
+                // Main vehicle hull & turret armor plates: warm metallic signature with facet shading!
+                mat.color.setHex(0xdce4ee);
+                if (mat.emissive) {
+                  mat.emissive.setHex(0xa8b4c2);
+                  mat.emissiveIntensity = 0.52;
+                }
+              }
+            } else {
+              // 3D Soldier / Biological Mesh:
+              // Exposed skin & uniform limbs/torso (`orig.map` camo or warm flesh) glow 37°C pure white-hot;
+              // ballistic helmets, plate carriers, boots & rifles stay slightly cooler (`0xc8d1dc`) for crisp 3D limb detail!
+              const isWarmBodyOrUniform = Boolean(orig.map) || (r > 0.62 && g > 0.42);
+              if (isWarmBodyOrUniform) {
+                mat.color.setHex(0xffffff);
+                if ('map' in mat && mat.map !== null) {
+                  mat.map = null;
+                  mat.needsUpdate = true;
+                }
+                if (mat.emissive) {
+                  mat.emissive.setHex(0xffffff);
+                  mat.emissiveIntensity = 0.96;
+                }
+              } else {
+                mat.color.setHex(0xc8d1dc);
+                if ('map' in mat && mat.map !== null) {
+                  mat.map = null;
+                  mat.needsUpdate = true;
+                }
+                if (mat.emissive) {
+                  mat.emissive.setHex(0x8894a2);
+                  mat.emissiveIntensity = 0.4;
+                }
+              }
+            }
+          }
+        }
+      });
+    };
+
+    if (this.botManager?.bots) {
+      for (let i = 0; i < this.botManager.bots.length; i++) {
+        const b = this.botManager.bots[i];
+        if (b?.mesh) tagRootThermal(b.mesh, false, false);
+      }
+    }
+    if (p?.thirdPersonSoldierMesh) {
+      tagRootThermal(p.thirdPersonSoldierMesh, false, false);
+    }
+    if (this.network?.remotePlayers?.size > 0) {
+      for (const rp of this.network.remotePlayers.values()) {
+        if (rp?.mesh) tagRootThermal(rp.mesh, false, false);
+      }
+    }
+    if (this.vehicleManager?.vehicles) {
+      for (let i = 0; i < this.vehicleManager.vehicles.length; i++) {
+        const v = this.vehicleManager.vehicles[i];
+        if (v?.mesh && v !== p?.activeVehicle) {
+          tagRootThermal(v.mesh, true, Boolean(v.dead));
+        }
+      }
+    }
+
+    // Cool high-altitude sky clouds so they read as dark overcast vapor instead of hot white blocks
+    if (this.world?.skyCloudGroup) {
+      this.world.skyCloudGroup.traverse((c) => {
+        if (c.isMesh && c.material && c.material.color) {
+          if (c.material.userData._origCloudHex === undefined) {
+            c.material.userData._origCloudHex = c.material.color.getHex();
+          }
+          c.material.color.setHex(0x2b313a);
+          if (c.material.userData?.uSkyBgColor) {
+            if (c.material.userData._origCloudSkyHex === undefined) {
+              c.material.userData._origCloudSkyHex = c.material.userData.uSkyBgColor.value.getHex();
+            }
+            c.material.userData.uSkyBgColor.value.setHex(0x1b2026);
+          }
+        }
+      });
+    }
+
+    const savedBgHex = this.scene.background ? this.scene.background.getHex() : null;
+    const savedFogHex = this.scene.fog?.color ? this.scene.fog.color.getHex() : null;
+    const savedFogDensity = this.scene.fog ? this.scene.fog.density : 0;
+    if (this.scene.background) this.scene.background.setHex(0x1b2026);
+    if (this.scene.fog) {
+      this.scene.fog.color.setHex(0x1b2026);
+      this.scene.fog.density = savedFogDensity * 0.42; // LWIR thermal cuts cleanly through battlefield haze!
+    }
+    return { savedBgHex, savedFogHex, savedFogDensity };
+  }
+
+  restorePostRenderThermalAtmosphere(saved) {
+    if (!saved) return;
+    if (saved.savedBgHex !== null && this.scene.background) {
+      this.scene.background.setHex(saved.savedBgHex);
+    }
+    if (saved.savedFogHex !== null && this.scene.fog) {
+      this.scene.fog.color.setHex(saved.savedFogHex);
+      this.scene.fog.density = saved.savedFogDensity;
+    }
   }
 
   triggerMatchVictory(winnerTeam) {
@@ -1540,14 +1846,34 @@ class BattleBitGame {
   resetMatch() {
     this.ticketsUS = this.ticketEconomy.START_TICKETS;
     this.ticketsRU = this.ticketEconomy.START_TICKETS;
-    this.ticketStats.US = { gainedCapture: 0, gainedPassive: 0, lostFlags: 0, lostBleed: 0, spentSoldiers: 0, spentCars: 0, spentArmor: 0 };
-    this.ticketStats.RU = { gainedCapture: 0, gainedPassive: 0, lostFlags: 0, lostBleed: 0, spentSoldiers: 0, spentCars: 0, spentArmor: 0 };
+    this.ticketStats.US = { gainedCapture: 0, gainedPassive: 0, lostFlags: 0, lostBleed: 0, spentSoldiers: 0, spentCars: 0, spentArmor: 0, spentPlanes: 0 };
+    this.ticketStats.RU = { gainedCapture: 0, gainedPassive: 0, lostFlags: 0, lostBleed: 0, spentSoldiers: 0, spentCars: 0, spentArmor: 0, spentPlanes: 0 };
     this.matchTimeRemaining = MATCH.DURATION;
     this.matchEnded = false;
+
+    // 1. Clear ALL Forward Operating Base (FOB A–E) occupation statuses back to fair NEUTRAL (0%)!
+    this.world?.resetFlagsForNewRound?.();
+    if (this.botManager?.baseState) {
+      if (this.botManager.baseState.US) {
+        this.botManager.baseState.US.contested = false;
+        this.botManager.baseState.US.enemiesInBase = 0;
+      }
+      if (this.botManager.baseState.RU) {
+        this.botManager.baseState.RU.contested = false;
+        this.botManager.baseState.RU.enemiesInBase = 0;
+      }
+    }
+
+    // 2. Reset player deployables & round stats
+    this.player.rallyPoint = null;
+    this.player.insertionBeacon = null;
     this.player.kills = 0;
     this.player.deaths = 0;
     this.player.revives = 0;
     this.player.medicKills = 0;
+    this.player.planesDestroyed = 0;
+    this.player.tanksDestroyed = 0;
+    this.player.carsDestroyed = 0;
     this.player.vehiclesDestroyed = 0;
     this.player.captures = 0;
     this.player.score = 0;
@@ -1561,14 +1887,78 @@ class BattleBitGame {
     if (this.ui && typeof this.ui.updateCashAndGunsmithHud === 'function') {
       this.ui.updateCashAndGunsmithHud();
     }
+
+    // 3. Return all Vehicles to their clean HQ Motor Pool & Airbase Apron bays at 100% HP
+    if (this.vehicleManager?.vehicles) {
+      for (const v of this.vehicleManager.vehicles) {
+        if (!v) continue;
+        if (v.driver) v.driver = null;
+        if (v.npcDriver) {
+          v.npcDriver.drivingVehicle = null;
+          v.npcDriver = null;
+        }
+        v.hp = v.maxHp || 1200;
+        v.hullIntegrityPct = 100;
+        v.dead = Boolean(v.b2LockedUntilKills);
+        v.isShotDown = false;
+        v.aiPilotActive = false;
+        v.forwardSpeed = 0;
+        v.pitch = 0;
+        v.roll = 0;
+        v.yaw = v.spawnYaw || 0;
+        v.turretYaw = v.spawnYaw || 0;
+        if (Array.isArray(v.spawnPos)) {
+          const sx = v.spawnPos[0];
+          const sz = v.spawnPos[2];
+          const sy = this.world ? this.world.getGroundHeightAt(sx, sz) : 1.25;
+          v.pos.set(sx, sy, sz);
+          if (v.mesh) {
+            v.mesh.position.copy(v.pos);
+            v.mesh.rotation.set(0, v.yaw, 0, 'YXZ');
+            v.mesh.visible = !v.dead;
+          }
+        }
+      }
+    }
+
+    // 4. Return all AI Soldiers to their respective Main Bases (US_BASE / RU_BASE) at full HP
+    const usBase = this.world?.spawns?.US_BASE || { x: -1520, z: 0 };
+    const ruBase = this.world?.spawns?.RU_BASE || { x: 1520, z: 0 };
+    let usIdx = 0;
+    let ruIdx = 0;
     for (const b of this.botManager.bots) {
       b.kills = 0;
       b.deaths = 0;
       b.revives = 0;
       b.medicKills = 0;
+      b.planesDestroyed = 0;
+      b.tanksDestroyed = 0;
+      b.carsDestroyed = 0;
       b.vehiclesDestroyed = 0;
       b.captures = 0;
       b.score = 0;
+      b.drivingVehicle = null;
+      b.downed = false;
+      b.dead = false;
+      b.hp = b.maxHp || 100;
+      b.bleedOutTimer = 0;
+      b.respawnTimer = 0;
+      const idx = b.team === 'US' ? usIdx++ : ruIdx++;
+      const base = b.team === 'US' ? usBase : ruBase;
+      const col = (idx % 10) - 4.5;
+      const row = Math.floor(idx / 10) - 6;
+      const bx = base.x + row * 4.2;
+      const bz = base.z + col * 3.8;
+      const by = this.world ? this.world.getGroundHeightAt(bx, bz) : 1.25;
+      b.pos.set(bx, by, bz);
+      if (b.mesh) {
+        b.mesh.position.copy(b.pos);
+        b.mesh.visible = true;
+      }
+    }
+    if (this.ui) {
+      this.ui.selectedSpawn = 'BASE';
+      this.ui.drawDeployMap?.(true);
     }
     this.ui.hideVictoryScreen();
     this.ui.showDeployScreen();

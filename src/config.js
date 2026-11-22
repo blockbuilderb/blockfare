@@ -45,6 +45,7 @@ export const PLAYER = {
   // Downed state (Squad-calibrated generous 120s bleed-out window so Medics have ample time to rescue)
   DOWNED_TIMER: 120.0,
   REVIVE_HP: 35,            // Field Dressing revive stabilizes soldier at 35 HP; Medic Bag then heals to 100 HP!
+  REVIVE_HP_DOCTRINE: 30,   // Under strict Squad Doctrine, non-medics stabilize casualties at 30 HP
   GIVE_UP_RATE: 0.85,       // seconds to hold space to give up
 
   // Multi-kill timer
@@ -78,10 +79,12 @@ export const PLAYER = {
   FIELD_HEAL_XP: 50,
 
   // Revive
-  REVIVE_DURATION_MEDIC: 1.15,
+  REVIVE_DURATION_MEDIC: 1.8,
   REVIVE_DURATION_OTHER: 1.75,
+  REVIVE_DURATION_OTHER_DOCTRINE: 3.8,
   REVIVE_DRAG_XP: 250,
   REVIVE_XP: 200,
+  ASSAULT_POUCH_COOLDOWN: 18,
 
   // Tarkov-style Slow Reload / Bullet-by-Bullet Mag Packing (time per single round pressed into mag)
   MAG_PACK_BULLET_TIME: 0.22,
@@ -133,8 +136,8 @@ export const CLASS_TRAITS = {
     reloadTimeMult: 0.90,     // +10% faster PDW reloads
     reserveMagMult: 0.75,     // WEAKNESS: Fewer spare magazines in survival rig
     bonusGrenades: -1,        // WEAKNESS: Carries 1 grenade instead of 2
-    strengths: 'ONLY CLASS CERTIFIED TO FLY JETS, CAS, AC-130 & B-2 BOMBER • +28% Turn Rate G-Suit • +25 HP/s Airframe Auto-Repair • Zero-Damage Ejection Seat & Parachute • +12% Sprint Speed',
-    weaknesses: 'Light Flight-Suit Armor (25 Max Armor vs 50) • Compact PDW Primary Only • -25% Reserve Rifle Ammo • Only 1 Frag Grenade'
+    strengths: 'EXCLUSIVE AIRCRAFT / B-2 LICENSE • Order Planes [9 / K] • +28% Turn Rate G-Suit • +25 HP/s Airframe Auto-Repair • Zero-Damage Ejection Seat • +12% Sprint Speed',
+    weaknesses: 'Light Flight-Suit Armor (25 Max Armor) • Cannot Operate Heavy Tanks (Doctrine ON) • Compact PDW Primary Only • Only 1 Frag Grenade'
   },
   armor: {
     id: 'armor',
@@ -147,7 +150,7 @@ export const CLASS_TRAITS = {
     reloadTimeMult: 0.95,
     reserveMagMult: 0.85,     // WEAKNESS: Compact vehicle crew ammo rig
     bonusGrenades: 0,
-    strengths: '+22 HP/s Passive Tank/IFV Hull Auto-Repair • +22% Faster Main Cannon Reload • [X] Trophy APS & 360° Smoke • 0 Vehicle Bailout Damage • 65 Heavy Flak Armor',
+    strengths: 'EXCLUSIVE TANK / IFV / SPAAG LICENSE • Requisition Armor Ahead [9 / K] • +22 HP/s Hull Auto-Repair • +22% Faster Cannon Reload • [X] Trophy APS & 65 Flak Armor',
     weaknesses: 'Cannot Fly Aircraft • -8% Infantry Movement Speed (Heavy Spall Vest) • Short-Range Crew PDW Primary'
   },
   engineer: {
@@ -161,8 +164,8 @@ export const CLASS_TRAITS = {
     reloadTimeMult: 1.0,
     reserveMagMult: 1.0,
     bonusGrenades: 0,
-    strengths: 'Dual RPG-7 HEAT (Anti-Tank) & FIM-92 Stinger SAM (Anti-Air) on [3] • 2× Faster Vehicle & Building Repair • Builds Heavy Emplacements',
-    weaknesses: 'Cannot Fly Aircraft • -6% Movement Speed (Heavy Launcher & Tool Load) • +8% Rifle Recoil'
+    strengths: 'Dual RPG-7 HEAT (AT) & FIM-92 Stinger SAM (AA) on [3] • 2.5× Faster Vehicle & Building Repair • -25% Cost Discount on Squad Gun Emplacements',
+    weaknesses: 'Cannot Fly Planes or Crew Heavy Armor (Doctrine ON) • -6% Move Speed • +8% Rifle Recoil'
   },
   assault: {
     id: 'assault',
@@ -175,8 +178,8 @@ export const CLASS_TRAITS = {
     reloadTimeMult: 0.76,     // STRENGTH: -24% faster magazine reloads
     reserveMagMult: 1.25,     // STRENGTH: +25% extra rifle magazines
     bonusGrenades: 1,         // STRENGTH: +1 Extra Frag Grenade (3 total) + C4 Breach Charges
-    strengths: '-24% Faster Reload Speed • -18% Weapon Recoil • +8% Sprint Speed • +1 Bonus Frag Grenade & C4 Charges • +25% Reserve Ammo',
-    weaknesses: 'Cannot Fly Aircraft • No Long-Range Anti-Air / Anti-Tank Rockets • Standard 2 Field Dressings Only'
+    strengths: '18s Rifleman Ammo Pouch [7] (+Mag & +1 Frag Top-Up) • -24% Faster Reload • -18% Recoil • +8% Sprint Speed • C4 Breach Charges',
+    weaknesses: 'Cannot Fly Planes or Crew Heavy Armor (Doctrine ON) • No Long-Range AT/AA Rockets'
   },
   medic: {
     id: 'medic',
@@ -189,8 +192,8 @@ export const CLASS_TRAITS = {
     reloadTimeMult: 0.90,
     reserveMagMult: 1.0,
     bonusGrenades: -1,        // WEAKNESS: Focuses on medical triage instead of heavy ordnance
-    strengths: '9 Field Dressings + 600 HP Medic Bag • 2× Faster Teammate Revive & Bandaging • Passive Self-Triage Regen (+4 HP/s Out of Combat) • +6% Move Speed',
-    weaknesses: 'Cannot Fly Aircraft • Lighter Trauma Vest (38 Max Armor) • Zero Anti-Armor Explosives (No RPG / C4)'
+    strengths: '1.8s Rapid Revive to 100 HP (vs 3.8s / 30 HP Non-Medic) • 9 Field Dressings + 600 HP Medic Bag • +4 HP/s Self-Triage Regen • +6% Speed',
+    weaknesses: 'Cannot Fly Planes or Crew Heavy Armor (Doctrine ON) • Lighter Trauma Vest (38 Armor) • Zero Anti-Armor Explosives'
   },
   support: {
     id: 'support',
@@ -203,8 +206,8 @@ export const CLASS_TRAITS = {
     reloadTimeMult: 1.15,     // WEAKNESS: +15% slower box-mag reload
     reserveMagMult: 1.50,     // STRENGTH: +50% reserve ammunition
     bonusGrenades: 1,
-    strengths: 'Heavy Ballistic Plate Armor (80 Max Armor) • Deploys Squad Ammo & Kit Stashes [7] (-40% Cooldown) • 100-Rd LMG Suppression • +50% Reserve Ammo',
-    weaknesses: 'Cannot Fly Aircraft • -12% Movement Speed (Heavy Armor & LMG) • +15% Slower Reload Cadence'
+    strengths: '1.75× LMG Enemy Suppression • Heavy Plate Armor (80 Max Armor) • Deploys Squad Ammo & Kit Stashes [7] (12s CD) • +50% Reserve Ammo',
+    weaknesses: 'Cannot Fly Planes or Crew Heavy Armor (Doctrine ON) • -12% Move Speed • +15% Slower Box Reload'
   },
   recon: {
     id: 'recon',
@@ -217,8 +220,8 @@ export const CLASS_TRAITS = {
     reloadTimeMult: 0.92,
     reserveMagMult: 1.0,
     bonusGrenades: -1,        // WEAKNESS: 1 grenade
-    strengths: '+14% Stealth Sprint Speed • 8× Mil-Dot Sniper Precision • Deploys Squad Insertion Spawn Beacon [6] • -35% Scope Sway',
-    weaknesses: 'Cannot Fly Aircraft • Ultra-Light Ghillie Suit (25 Max Armor) • Low Close-Quarters Fire Rate'
+    strengths: 'Crouch/Prone Masks from Enemy UAV • 20s JTAC Laser Target Paint [Q / MMB] • Deploys Spawn Beacon [6] • +14% Sprint Speed',
+    weaknesses: 'Cannot Fly Planes or Crew Heavy Armor (Doctrine ON) • Ultra-Light Ghillie Suit (25 Max Armor)'
   },
   swordsman: {
     id: 'swordsman',
@@ -327,13 +330,13 @@ export const CLASS_TRAITS = {
 // ---------------------------------------------------------------------------
 export const ERA_ROLES = {
   modern: [
-    { id: 'engineer', key: 'F5', icon: '🛠️', label: 'ENGINEER', short: 'ENG', sub: 'RPG/SAM + REPAIR', gadgetId: 'rpg7', gadget: 'RPG-7 HEAT / STINGER AA [3]' },
-    { id: 'assault', key: 'F6', icon: '💥', label: 'ASSAULT', short: 'ASL', sub: 'FAST RELOAD + C4', gadgetId: 'c4', gadget: 'C4 BREACH + EXTRA MAGS' },
-    { id: 'medic', key: 'F7', icon: '➕', label: 'MEDIC', short: 'MED', sub: '2× REVIVE + 9 DRESS', gadgetId: 'medkit', gadget: '600HP MEDIC BAG + 9 DRESSINGS' },
-    { id: 'support', key: 'F8', icon: '📦', label: 'SUPPORT', short: 'SUP', sub: '80 ARMOR + STASH', gadgetId: 'ammocrate', gadget: 'AMMO STASH [7] + 80 ARMOR' },
-    { id: 'recon', key: 'F9', icon: '🎯', label: 'RECON', short: 'RCN', sub: 'BEACON + +14% SPD', gadgetId: 'c4', gadget: 'SPAWN BEACON [6] + 8× SCOPE' },
-    { id: 'armor', key: 'F10', icon: '🛡️', label: 'ARMOR', short: 'ARM', sub: 'TANK APS + REPAIR', gadgetId: 'rpg7', gadget: 'TROPHY APS [X] + +22 HP/S HULL' },
-    { id: 'pilot', key: 'F11', icon: '✈️', label: 'PILOT', short: 'PLT', sub: 'FLY JETS & B-2 ONLY', gadgetId: 'stinger', gadget: 'EXCLUSIVE JET / B-2 PILOT LICENSE' }
+    { id: 'engineer', key: 'F5', icon: '🛠️', label: 'ENGINEER', short: 'ENG', sub: '2.5× REPAIR + -25% EMPL', gadgetId: 'rpg7', gadget: 'RPG-7 HEAT / STINGER AA [3]' },
+    { id: 'assault', key: 'F6', icon: '💥', label: 'ASSAULT', short: 'ASL', sub: '18S POUCH [7] + C4', gadgetId: 'c4', gadget: 'C4 BREACH + AMMO POUCH [7]' },
+    { id: 'medic', key: 'F7', icon: '➕', label: 'MEDIC', short: 'MED', sub: '1.8S 100HP REVIVE', gadgetId: 'medkit', gadget: '600HP MEDIC BAG + 9 DRESSINGS' },
+    { id: 'support', key: 'F8', icon: '📦', label: 'SUPPORT', short: 'SUP', sub: '1.75× SUPP + STASH', gadgetId: 'ammocrate', gadget: 'AMMO STASH [7] + 80 ARMOR' },
+    { id: 'recon', key: 'F9', icon: '🎯', label: 'RECON', short: 'RCN', sub: 'JTAC [Q] + UAV STEALTH', gadgetId: 'c4', gadget: 'BEACON [6] + 20S JTAC PAINT' },
+    { id: 'armor', key: 'F10', icon: '🛡️', label: 'ARMOR', short: 'ARM', sub: 'TANK LICENSE + ORDER [9]', gadgetId: 'rpg7', gadget: 'TANK/IFV LICENSE + ORDER [9]' },
+    { id: 'pilot', key: 'F11', icon: '✈️', label: 'PILOT', short: 'PLT', sub: 'PILOT LICENSE + ORDER [9]', gadgetId: 'stinger', gadget: 'PLANE/B-2 LICENSE + ORDER [9]' }
   ],
   medieval: [
     { id: 'swordsman', key: 'F5', icon: '⚔️', label: 'FOOTMAN (1H)', short: '1H', sub: '1H SWORD + 1H SHIELD', gadgetId: 'pitch_pot', gadget: '1H SWORD & 1H HEATER SHIELD (70% BLOCK)' },
@@ -443,7 +446,7 @@ export const DISTANCES = {
   INTERACT_RANGE: 4.5,
   VEHICLE_ENTER_RANGE: 7.5,
   FLAG_EXTRA_PAD: 18,
-  RAYCAST_MAX: 3600,
+  RAYCAST_MAX: 4800,
   HAMMER_RANGE: 5.2,
 };
 
@@ -481,11 +484,11 @@ export const VEHICLE_STATS = {
   APC: { maxHp: 1050, speed: 23.5, accelRate: 1.95, brakeRate: 2.8, turnRate: 1.25, minPitchRad: -0.18, maxPitchRad: 0.52 },
   AA_VEHICLE: { maxHp: 980, speed: 21.5, accelRate: 1.9, brakeRate: 2.7, turnRate: 1.25, minPitchRad: -0.14, maxPitchRad: 1.48 },
   HUMVEE: { maxHp: 700, speed: 26.5, accelRate: 2.55, brakeRate: 3.4, turnRate: 1.5, minPitchRad: -0.21, maxPitchRad: 0.61 },
-  PLANE_CAS: { maxHp: 1550, speed: 58, minSpeed: 32, maxSpeed: 84, accelRate: 2.6, brakeRate: 2.8, turnRate: 1.35 },
-  PLANE_BOMBER: { maxHp: 1350, speed: 68, minSpeed: 40, maxSpeed: 98, accelRate: 2.8, brakeRate: 2.5, turnRate: 1.18 },
-  PLANE_FIGHTER: { maxHp: 1250, speed: 78, minSpeed: 42, maxSpeed: 115, accelRate: 3.4, brakeRate: 3.0, turnRate: 1.65 },
-  PLANE_GUNSHIP: { maxHp: 3200, speed: 44, minSpeed: 30, maxSpeed: 62, accelRate: 2.0, brakeRate: 2.2, turnRate: 0.95 },
-  PLANE_B2_SPIRIT: { maxHp: 2400, speed: 125, minSpeed: 48, maxSpeed: 185, accelRate: 5.8, brakeRate: 3.8, turnRate: 1.95, stealthFactor: 0.12 },
+  PLANE_CAS: { maxHp: 1550, speed: 62, minSpeed: 31, maxSpeed: 96, accelRate: 2.7, brakeRate: 3.1, turnRate: 1.92, dialMaxKmh: 420 },
+  PLANE_BOMBER: { maxHp: 1400, speed: 84, minSpeed: 42, maxSpeed: 145, accelRate: 3.8, brakeRate: 3.0, turnRate: 1.32, dialMaxKmh: 600 },
+  PLANE_FIGHTER: { maxHp: 1300, speed: 96, minSpeed: 40, maxSpeed: 175, accelRate: 4.8, brakeRate: 3.5, turnRate: 1.68, dialMaxKmh: 720 },
+  PLANE_GUNSHIP: { maxHp: 3200, speed: 48, minSpeed: 30, maxSpeed: 68, accelRate: 2.0, brakeRate: 2.2, turnRate: 0.68, dialMaxKmh: 300 },
+  PLANE_B2_SPIRIT: { maxHp: 2400, speed: 98, minSpeed: 46, maxSpeed: 138, accelRate: 3.6, brakeRate: 3.0, turnRate: 0.78, stealthFactor: 0.12, dialMaxKmh: 600 },
   // 1903 Wright Flyer I ("Kitty Hawk Flyer" — Secret Cave Pioneer Biplane):
   // Real-world stall speed: ~29 km/h (8.0 m/s / 18 mph); starts slow with gradual spool-up acceleration (accelRate: 0.24)
   // before winding up to an incredible 522 km/h (145 m/s) cruise and 846 km/h (235 m/s) top speed!
@@ -527,27 +530,36 @@ export const VEHICLE_STATS = {
   RPM_EMPLACE_AA: 1100,
   RPM_MORTAR: 24,
 
-  // Respawn delays (seconds) & Faction War-Chest Economy
-  RESPAWN_DELAY_TANK: 28.0,
-  RESPAWN_DELAY_APC: 22.0,
-  RESPAWN_DELAY_HUMVEE: 15.0,
-  RESPAWN_DELAY_PLANE: 35.0,
-  RESPAWN_DELAY_B2_SPIRIT: 90.0,
+  // Respawn delays (seconds) & Faction War-Chest Economy (Crew + Equipment Replacement)
+  RESPAWN_DELAY_TANK: 34.0,
+  RESPAWN_DELAY_APC: 26.0,
+  RESPAWN_DELAY_HUMVEE: 18.0,
+  RESPAWN_DELAY_PLANE: 42.0,
+  RESPAWN_DELAY_B2_SPIRIT: 95.0,
 
-  // Faction Treasury / Money costs for aircraft respawns & B-2 Kill-Gate
-  INITIAL_FACTION_FUNDS: 5000,
-  FACTION_KILL_REWARD: 120,
-  FACTION_CAPTURE_REWARD: 450,
-  FACTION_COST_PLANE: 800,
-  FACTION_COST_B2_SPIRIT: 2000,
+  // Faction Treasury / Money costs for aircraft, heavy armor & car replacements + requisitions
+  INITIAL_FACTION_FUNDS: 6000,
+  FACTION_KILL_REWARD: 135,
+  FACTION_CAPTURE_REWARD: 550,
+  FACTION_COST_PLANE: 1500,
+  FACTION_COST_CAS: 800,
+  FACTION_COST_FIGHTER: 900,
+  FACTION_COST_GUNSHIP: 1200,
+  FACTION_COST_B2_SPIRIT: 2500,
+  FACTION_COST_TANK: 1300,
+  FACTION_COST_APC: 800,
+  FACTION_COST_AA: 850,
+  FACTION_COST_CAR: 350,
   B2_UNLOCK_KILLS: 25,
 
-  // Ticket costs
-  TICKET_COST_TANK: 15,
-  TICKET_COST_APC: 10,
-  TICKET_COST_HUMVEE: 5,
-  TICKET_COST_PLANE: 12,
-  TICKET_COST_B2_SPIRIT: 25,
+  // Ticket costs (Trained Crew Personnel + Expensive Military Hardware)
+  TICKET_COST_HUMVEE: 8,
+  TICKET_COST_APC: 16,
+  TICKET_COST_AA: 16,
+  TICKET_COST_TANK: 24,
+  TICKET_COST_PLANE: 30,
+  TICKET_COST_GUNSHIP: 34,
+  TICKET_COST_B2_SPIRIT: 45,
 
   // Standoff radii (STAY_CLOSE vs FAN_OUT)
   STANDOFF_CLOSE_TANK: 42,
@@ -562,20 +574,23 @@ export const VEHICLE_STATS = {
   ENGAGE_RANGE_INFANTRY: 135,
   ENGAGE_RANGE_AIRCRAFT: 650,
 
-  // Combat & XP
-  DESTROY_XP_TANK: 400,
-  DESTROY_XP_PLANE: 350,
+  // Combat & XP (Scaled to Asset Value: Plane > Tank > IFV/AA > Car)
+  DESTROY_XP_B2: 900,
+  DESTROY_XP_PLANE: 650,
+  DESTROY_XP_TANK: 500,
+  DESTROY_XP_APC: 380,
+  DESTROY_XP_CAR: 250,
   DESTROY_XP_OTHER: 250,
   BAILOUT_DAMAGE: 42,
   ROADKILL_XP: 150,
   ROADKILL_DAMAGE_BOT: 160,
   ROADKILL_DAMAGE_PLAYER: 150,
 
-  // Expanded Battlefield Two-Tier Map & High-Altitude Airspace Bounds (4,800m x 3,200m Theater, 3,500m Ceiling)
-  AIRSPACE_MAX_X: 2400,
-  AIRSPACE_MAX_Z: 1650,
-  AIRSPACE_MAX_ALT: 3500,
-  AIRSPACE_DEFAULT_ALT: 150,
+  // Expanded Battlefield Two-Tier Map & High-Altitude Airspace Bounds (7,600m x 5,200m Grand Theater, 6,000m Troposphere Ceiling)
+  AIRSPACE_MAX_X: 3600,
+  AIRSPACE_MAX_Z: 2500,
+  AIRSPACE_MAX_ALT: 6000,
+  AIRSPACE_DEFAULT_ALT: 220,
 };
 export const VEHICLES = VEHICLE_STATS;
 
@@ -585,7 +600,7 @@ export const VEHICLES = VEHICLE_STATS;
 export const CAMERA = {
   FOV: 75,
   NEAR: 0.08,
-  FAR: 9500,
+  FAR: 18000,
   PIXEL_RATIO_CAP: 1.35,
 };
 
@@ -642,7 +657,7 @@ export const WEATHER = {
 // ---------------------------------------------------------------------------
 export const TERRAIN = {
   MAX_SPAN: 3,          // structural integrity cantilever span
-  BRIDGE_DECK_HEIGHT: 1.15,
+  BRIDGE_DECK_HEIGHT: 1.25,
   BUILDING_COLLAPSE_THRESHOLD: 0.45, // ratio: <= 0.45 means >55% destroyed -> collapse
   FLAG_RADIUS_DEFAULT: 34,
   FLAG_RADIUS_CHARLIE: 36,

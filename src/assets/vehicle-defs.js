@@ -4,16 +4,16 @@
 // Positions stored as arrays [x, y, z] — y is computed at runtime via getGroundHeightAt.
 // =========================================================================
 
-import { VEHICLE_STATS } from '../config.js?v=92';
+import { VEHICLE_STATS } from '../config.js?v=105';
 
 export const VEHICLE_DEFS = [
-  // ===================== US FLEET (Parked Right Next to US Main Base Spawn at x = -922..-914, z = -12..+12) =====================
+  // ===================== US FLEET (Open Motor Pool Apron aligned with 28m Main Gate at x = -904..-884, z = -10..+10) =====================
   {
     id: 'us_abrams_hq',
     name: 'M1A2 ABRAMS MBT (120MM + COAX)',
     type: 'tank',
     team: 'US',
-    spawnPos: [-916, 0, -6],
+    spawnPos: [-1456, 0, -5],
     spawnYaw: -Math.PI / 2,
     maxHp: VEHICLE_STATS.TANK.maxHp,
     speed: VEHICLE_STATS.TANK.speed,
@@ -21,7 +21,7 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_TANK_US,
     coaxRpm: VEHICLE_STATS.RPM_COAX,
     patrolPoints: [
-      [-640, 0, -28],
+      [-620, 0, -28],
       [-380, 0, -42],
       [-185, 0, -32],
       [-55, 0, -14],
@@ -33,7 +33,7 @@ export const VEHICLE_DEFS = [
     name: 'M1A2 ABRAMS SEP (120MM + COAX)',
     type: 'tank',
     team: 'US',
-    spawnPos: [-916, 0, 6],
+    spawnPos: [-1456, 0, 5],
     spawnYaw: -Math.PI / 2,
     maxHp: VEHICLE_STATS.TANK.maxHp,
     speed: VEHICLE_STATS.TANK.speed,
@@ -41,7 +41,7 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_TANK_US,
     coaxRpm: VEHICLE_STATS.RPM_COAX,
     patrolPoints: [
-      [-640, 0, -32],
+      [-620, 0, -34],
       [-418, 0, -92],
       [-260, 0, -68],
       [-78, 0, -24]
@@ -52,7 +52,7 @@ export const VEHICLE_DEFS = [
     name: 'M1A2 ABRAMS TUSK (120MM + COAX)',
     type: 'tank',
     team: 'US',
-    spawnPos: [-926, 0, -12],
+    spawnPos: [-1472, 0, -10],
     spawnYaw: -Math.PI / 2,
     maxHp: VEHICLE_STATS.TANK.maxHp,
     speed: VEHICLE_STATS.TANK.speed,
@@ -60,7 +60,7 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_TANK_US,
     coaxRpm: VEHICLE_STATS.RPM_COAX,
     patrolPoints: [
-      [-640, 0, 28],
+      [-620, 0, 28],
       [-370, 0, 36],
       [-185, 0, 92],
       [-55, 0, 16]
@@ -71,7 +71,7 @@ export const VEHICLE_DEFS = [
     name: 'LAV-25 IFV (30MM HE)',
     type: 'apc',
     team: 'US',
-    spawnPos: [-916, 0, 15],
+    spawnPos: [-1456, 0, 11],
     spawnYaw: -Math.PI / 2,
     maxHp: VEHICLE_STATS.APC.maxHp,
     speed: VEHICLE_STATS.APC.speed,
@@ -79,7 +79,7 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_APC,
     coaxRpm: VEHICLE_STATS.RPM_COAX,
     patrolPoints: [
-      [-640, 0, 32],
+      [-620, 0, 34],
       [-365, 0, 42],
       [-180, 0, 96],
       [-54, 0, 28]
@@ -90,7 +90,7 @@ export const VEHICLE_DEFS = [
     name: 'LAV-AD AIR DEFENSE (25MM GAU-12 + STINGER SAM)',
     type: 'aa',
     team: 'US',
-    spawnPos: [-916, 0, -15],
+    spawnPos: [-1456, 0, -11],
     spawnYaw: -Math.PI / 2,
     maxHp: VEHICLE_STATS.AA_VEHICLE.maxHp,
     speed: VEHICLE_STATS.AA_VEHICLE.speed,
@@ -98,9 +98,9 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_AA_AUTOCANNON,
     coaxRpm: 45,
     patrolPoints: [
-      [-640, 0, -12],
-      [-380, 0, -24],
-      [-185, 0, -18],
+      [-618, 0, -32],
+      [-380, 0, -34],
+      [-185, 0, -24],
       [-68, 0, -8]
     ]
   },
@@ -109,14 +109,14 @@ export const VEHICLE_DEFS = [
     name: 'M1151 HUMVEE (.50 CAL)',
     type: 'humvee',
     team: 'US',
-    spawnPos: [-926, 0, 0],
+    spawnPos: [-1472, 0, 0],
     spawnYaw: -Math.PI / 2,
     maxHp: VEHICLE_STATS.HUMVEE.maxHp,
     speed: VEHICLE_STATS.HUMVEE.speed,
     weaponType: 'hmg',
     rpm: VEHICLE_STATS.RPM_HUMVEE,
     patrolPoints: [
-      [-630, 0, 2],
+      [-618, 0, 0],
       [-380, 0, -58],
       [-210, 0, -42],
       [-56, 0, 6]
@@ -127,27 +127,27 @@ export const VEHICLE_DEFS = [
     name: 'M1151 ASSAULT HUMVEE (.50 CAL)',
     type: 'humvee',
     team: 'US',
-    spawnPos: [-926, 0, 12],
+    spawnPos: [-1472, 0, 10],
     spawnYaw: -Math.PI / 2,
     maxHp: VEHICLE_STATS.HUMVEE.maxHp,
     speed: VEHICLE_STATS.HUMVEE.speed,
     weaponType: 'hmg',
     rpm: VEHICLE_STATS.RPM_HUMVEE,
     patrolPoints: [
-      [-640, 0, 26],
+      [-620, 0, 28],
       [-375, 0, 34],
       [-185, 0, 96],
       [-56, 0, 32]
     ]
   },
 
-  // ===================== RU FLEET (Parked Right Next to RU Main Base Spawn at x = +914..+926, z = -12..+12) =====================
+  // ===================== RU FLEET (Open Motor Pool Apron aligned with 28m Main Gate at x = +884..+904, z = -10..+10) =====================
   {
     id: 'ru_t90_hq',
     name: 'T-90M PRORYV MBT (125MM + COAX)',
     type: 'tank',
     team: 'RU',
-    spawnPos: [916, 0, 6],
+    spawnPos: [1456, 0, 5],
     spawnYaw: Math.PI / 2,
     maxHp: VEHICLE_STATS.TANK.maxHp,
     speed: VEHICLE_STATS.TANK.speed,
@@ -155,7 +155,7 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_TANK_RU,
     coaxRpm: VEHICLE_STATS.RPM_COAX,
     patrolPoints: [
-      [640, 0, 28],
+      [620, 0, 28],
       [380, 0, 42],
       [195, 0, 32],
       [55, 0, 14],
@@ -167,7 +167,7 @@ export const VEHICLE_DEFS = [
     name: 'T-90M GUARD MBT (125MM + COAX)',
     type: 'tank',
     team: 'RU',
-    spawnPos: [916, 0, -6],
+    spawnPos: [1456, 0, -5],
     spawnYaw: Math.PI / 2,
     maxHp: VEHICLE_STATS.TANK.maxHp,
     speed: VEHICLE_STATS.TANK.speed,
@@ -175,7 +175,7 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_TANK_RU,
     coaxRpm: VEHICLE_STATS.RPM_COAX,
     patrolPoints: [
-      [640, 0, -28],
+      [620, 0, -28],
       [370, 0, -36],
       [195, 0, -92],
       [55, 0, -16]
@@ -186,7 +186,7 @@ export const VEHICLE_DEFS = [
     name: 'T-90M ASSAULT MBT (125MM + COAX)',
     type: 'tank',
     team: 'RU',
-    spawnPos: [926, 0, 12],
+    spawnPos: [1472, 0, 10],
     spawnYaw: Math.PI / 2,
     maxHp: VEHICLE_STATS.TANK.maxHp,
     speed: VEHICLE_STATS.TANK.speed,
@@ -194,7 +194,7 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_TANK_RU,
     coaxRpm: VEHICLE_STATS.RPM_COAX,
     patrolPoints: [
-      [640, 0, 32],
+      [620, 0, 34],
       [418, 0, 82],
       [260, 0, 68],
       [58, 0, 16]
@@ -205,7 +205,7 @@ export const VEHICLE_DEFS = [
     name: 'BTR-82A APC (30MM HE)',
     type: 'apc',
     team: 'RU',
-    spawnPos: [916, 0, -15],
+    spawnPos: [1456, 0, -11],
     spawnYaw: Math.PI / 2,
     maxHp: VEHICLE_STATS.APC.maxHp,
     speed: VEHICLE_STATS.APC.speed,
@@ -213,7 +213,7 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_APC,
     coaxRpm: VEHICLE_STATS.RPM_COAX,
     patrolPoints: [
-      [640, 0, -32],
+      [620, 0, -34],
       [365, 0, -42],
       [190, 0, -96],
       [54, 0, -28]
@@ -224,7 +224,7 @@ export const VEHICLE_DEFS = [
     name: '2K22 TUNGUSKA-M1 SPAAG (TWIN 30MM + 9M311 SAM)',
     type: 'aa',
     team: 'RU',
-    spawnPos: [916, 0, 15],
+    spawnPos: [1456, 0, 11],
     spawnYaw: Math.PI / 2,
     maxHp: VEHICLE_STATS.AA_VEHICLE.maxHp,
     speed: VEHICLE_STATS.AA_VEHICLE.speed,
@@ -232,9 +232,9 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_AA_AUTOCANNON,
     coaxRpm: 45,
     patrolPoints: [
-      [640, 0, 12],
-      [380, 0, 24],
-      [195, 0, 18],
+      [618, 0, 32],
+      [380, 0, 34],
+      [195, 0, 24],
       [68, 0, 8]
     ]
   },
@@ -243,14 +243,14 @@ export const VEHICLE_DEFS = [
     name: 'GAZ TIGR (.50 CAL)',
     type: 'humvee',
     team: 'RU',
-    spawnPos: [926, 0, 0],
+    spawnPos: [1472, 0, 0],
     spawnYaw: Math.PI / 2,
     maxHp: VEHICLE_STATS.HUMVEE.maxHp,
     speed: VEHICLE_STATS.HUMVEE.speed,
     weaponType: 'hmg',
     rpm: VEHICLE_STATS.RPM_HUMVEE,
     patrolPoints: [
-      [630, 0, -2],
+      [618, 0, 0],
       [380, 0, 58],
       [210, 0, 42],
       [56, 0, -6]
@@ -261,21 +261,21 @@ export const VEHICLE_DEFS = [
     name: 'GAZ TIGR ASSAULT (.50 CAL)',
     type: 'humvee',
     team: 'RU',
-    spawnPos: [926, 0, -12],
+    spawnPos: [1472, 0, -10],
     spawnYaw: Math.PI / 2,
     maxHp: VEHICLE_STATS.HUMVEE.maxHp,
     speed: VEHICLE_STATS.HUMVEE.speed,
     weaponType: 'hmg',
     rpm: VEHICLE_STATS.RPM_HUMVEE,
     patrolPoints: [
-      [640, 0, -26],
+      [620, 0, -28],
       [375, 0, -34],
       [195, 0, -96],
       [56, 0, -32]
     ]
   },
 
-  // ===================== US & RU COMBAT AIRCRAFT WINGS (PARKED ON SIDE APRON BAYS SO MAIN 360M RUNWAY IS 100% EMPTY!) =====================
+  // ===================== US & RU COMBAT AIRCRAFT WINGS (PARKED ON OUTER SIDE APRON z = ∓138: BIGGEST IN BACK -> FASTEST IN FRONT!) =====================
   {
     id: 'us_a10_cas',
     name: 'A-10C WARTHOG (30MM GAU-8 + ROCKETS)',
@@ -283,8 +283,8 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'cas',
     team: 'US',
-    spawnPos: [-965, 0, -86],
-    spawnYaw: -Math.PI / 2 + 0.18,
+    spawnPos: [-1480, 0, -138],
+    spawnYaw: -Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_CAS.maxHp,
     speed: VEHICLE_STATS.PLANE_CAS.speed,
     minSpeed: VEHICLE_STATS.PLANE_CAS.minSpeed,
@@ -293,10 +293,10 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_GAU8,
     coaxRpm: 180,
     patrolPoints: [
-      [-380, 115, -140],
+      [-660, 115, -280],
       [0, 110, 0],
-      [195, 120, -165],
-      [-185, 115, 165]
+      [330, 120, -320],
+      [-320, 115, 320]
     ]
   },
   {
@@ -306,8 +306,8 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'fighter',
     team: 'US',
-    spawnPos: [-925, 0, -86],
-    spawnYaw: -Math.PI / 2 + 0.18,
+    spawnPos: [-1436, 0, -138],
+    spawnYaw: -Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_FIGHTER.maxHp,
     speed: VEHICLE_STATS.PLANE_FIGHTER.speed,
     minSpeed: VEHICLE_STATS.PLANE_FIGHTER.minSpeed,
@@ -329,8 +329,8 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'gunship',
     team: 'US',
-    spawnPos: [-885, 0, -86],
-    spawnYaw: -Math.PI / 2 + 0.18,
+    spawnPos: [-1576, 0, -138],
+    spawnYaw: -Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_GUNSHIP.maxHp,
     speed: VEHICLE_STATS.PLANE_GUNSHIP.speed,
     minSpeed: VEHICLE_STATS.PLANE_GUNSHIP.minSpeed,
@@ -339,9 +339,9 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_AC130_25MM,
     coaxRpm: VEHICLE_STATS.RPM_AC130_40MM,
     patrolPoints: [
-      [-185, 165, 165],
+      [-320, 165, 320],
       [195, 168, 165],
-      [195, 165, -165],
+      [330, 165, -320],
       [-185, 168, -165]
     ]
   },
@@ -352,8 +352,8 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'cas',
     team: 'RU',
-    spawnPos: [965, 0, 86],
-    spawnYaw: Math.PI / 2 + 0.18,
+    spawnPos: [1480, 0, 138],
+    spawnYaw: Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_CAS.maxHp,
     speed: VEHICLE_STATS.PLANE_CAS.speed,
     minSpeed: VEHICLE_STATS.PLANE_CAS.minSpeed,
@@ -362,10 +362,10 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_GAU8,
     coaxRpm: 180,
     patrolPoints: [
-      [380, 115, 140],
+      [660, 115, 280],
       [0, 110, 0],
-      [-185, 120, 165],
-      [195, 115, -165]
+      [-320, 120, 320],
+      [330, 115, -320]
     ]
   },
   {
@@ -375,8 +375,8 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'fighter',
     team: 'RU',
-    spawnPos: [925, 0, 86],
-    spawnYaw: Math.PI / 2 + 0.18,
+    spawnPos: [1436, 0, 138],
+    spawnYaw: Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_FIGHTER.maxHp,
     speed: VEHICLE_STATS.PLANE_FIGHTER.speed,
     minSpeed: VEHICLE_STATS.PLANE_FIGHTER.minSpeed,
@@ -398,8 +398,8 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'gunship',
     team: 'RU',
-    spawnPos: [885, 0, 86],
-    spawnYaw: Math.PI / 2 + 0.18,
+    spawnPos: [1576, 0, 138],
+    spawnYaw: Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_GUNSHIP.maxHp,
     speed: VEHICLE_STATS.PLANE_GUNSHIP.speed,
     minSpeed: VEHICLE_STATS.PLANE_GUNSHIP.minSpeed,
@@ -408,9 +408,9 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_AC130_25MM,
     coaxRpm: VEHICLE_STATS.RPM_AC130_40MM,
     patrolPoints: [
-      [195, 165, -165],
+      [330, 165, -320],
       [-185, 168, -165],
-      [-185, 165, 165],
+      [-320, 165, 320],
       [195, 168, 165]
     ]
   },
@@ -424,8 +424,8 @@ export const VEHICLE_DEFS = [
     stealthFactor: 0.12,
     aircraftRole: 'b2_spirit',
     team: 'US',
-    spawnPos: [-925, 0, -112],
-    spawnYaw: -Math.PI / 2,
+    spawnPos: [-1528, 0, -138],
+    spawnYaw: -Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_B2_SPIRIT.maxHp,
     speed: VEHICLE_STATS.PLANE_B2_SPIRIT.speed,
     minSpeed: VEHICLE_STATS.PLANE_B2_SPIRIT.minSpeed,
@@ -434,10 +434,10 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_B2_CARPET,
     coaxRpm: 60,
     patrolPoints: [
-      [-380, 210, -140],
+      [-660, 210, -280],
       [0, 220, 0],
-      [380, 215, 140],
-      [195, 220, -165]
+      [660, 215, 280],
+      [330, 220, -320]
     ]
   },
   {
@@ -449,8 +449,8 @@ export const VEHICLE_DEFS = [
     stealthFactor: 0.12,
     aircraftRole: 'b2_spirit',
     team: 'RU',
-    spawnPos: [925, 0, 112],
-    spawnYaw: Math.PI / 2,
+    spawnPos: [1528, 0, 138],
+    spawnYaw: Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_B2_SPIRIT.maxHp,
     speed: VEHICLE_STATS.PLANE_B2_SPIRIT.speed,
     minSpeed: VEHICLE_STATS.PLANE_B2_SPIRIT.minSpeed,
@@ -459,10 +459,10 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_B2_CARPET,
     coaxRpm: 60,
     patrolPoints: [
-      [380, 210, 140],
+      [660, 210, 280],
       [0, 220, 0],
-      [-380, 215, -140],
-      [-185, 220, 165]
+      [-660, 215, -280],
+      [-320, 220, 320]
     ]
   }
 ];
@@ -536,7 +536,7 @@ export const OBJECTIVE_MOTORPOOL_BASES = [
   {
     baseId: 'us_hq',
     label: 'US MAIN BASE',
-    cx: -924,
+    cx: -1494,
     cz: 0,
     yaw: -Math.PI / 2,
     team: 'US',
@@ -552,7 +552,7 @@ export const OBJECTIVE_MOTORPOOL_BASES = [
   {
     baseId: 'ru_hq',
     label: 'RU MAIN BASE',
-    cx: 924,
+    cx: 1494,
     cz: 0,
     yaw: Math.PI / 2,
     team: 'RU',
@@ -567,11 +567,12 @@ export const OBJECTIVE_MOTORPOOL_BASES = [
   },
   {
     baseId: 'a',
+    fobFlagId: 'A',
     label: 'FOB ALPHA',
-    cx: -380,
-    cz: -140,
+    cx: -660,
+    cz: -280,
     yaw: -Math.PI / 2,
-    team: 'US',
+    team: 'NEUTRAL',
     // Parked right next to FOB Alpha spawn ring (8m–13m from flag) for immediate walk-up riding!
     spots: [
       [-9, 8, -1.15],
@@ -583,11 +584,12 @@ export const OBJECTIVE_MOTORPOOL_BASES = [
   },
   {
     baseId: 'b',
+    fobFlagId: 'B',
     label: 'FOB BRAVO',
-    cx: -185,
-    cz: 165,
+    cx: -320,
+    cz: 320,
     yaw: -Math.PI / 2,
-    team: 'US',
+    team: 'NEUTRAL',
     // Parked right next to FOB Bravo spawn ring (8m–13m from flag)
     spots: [
       [-9, -8, -1.2],
@@ -599,11 +601,12 @@ export const OBJECTIVE_MOTORPOOL_BASES = [
   },
   {
     baseId: 'c',
+    fobFlagId: 'C',
     label: 'FOB CHARLIE',
     cx: 0,
     cz: 0,
     yaw: 0,
-    team: 'US',
+    team: 'NEUTRAL',
     // Parked right on the West & East dry bank spawn points of FOB Charlie (x = ±22, z = ±8)
     spots: [
       [-23, -7, -Math.PI / 2],
@@ -615,11 +618,12 @@ export const OBJECTIVE_MOTORPOOL_BASES = [
   },
   {
     baseId: 'd',
+    fobFlagId: 'D',
     label: 'FOB DELTA',
-    cx: 195,
-    cz: -165,
+    cx: 330,
+    cz: -320,
     yaw: Math.PI / 2,
-    team: 'RU',
+    team: 'NEUTRAL',
     // Parked right next to FOB Delta spawn ring (8m–13m from flag)
     spots: [
       [-9, 8, 1.2],
@@ -631,11 +635,12 @@ export const OBJECTIVE_MOTORPOOL_BASES = [
   },
   {
     baseId: 'e',
+    fobFlagId: 'E',
     label: 'FOB ECHO',
-    cx: 380,
-    cz: 140,
+    cx: 660,
+    cz: 280,
     yaw: Math.PI / 2,
-    team: 'RU',
+    team: 'NEUTRAL',
     // Parked right next to FOB Echo spawn ring (8m–13m from flag)
     spots: [
       [-9, -8, 1.15],
@@ -659,6 +664,7 @@ for (const base of OBJECTIVE_MOTORPOOL_BASES) {
       id: `base_${base.baseId}_bike_${i + 1}`,
       name: `${item.name} [${base.label}]`,
       shortBayLabel: item.shortBayLabel,
+      fobFlagId: base.fobFlagId || null,
       type: item.type,
       bikeSubType: item.bikeSubType,
       isBike: item.type === 'bike',
@@ -681,9 +687,9 @@ for (const base of OBJECTIVE_MOTORPOOL_BASES) {
       weaponType: 'hmg',
       rpm: 850,
       patrolPoints: [
-        [-185, 0, 165],
+        [-320, 0, 320],
         [0, 0, 0],
-        [195, 0, -165]
+        [330, 0, -320]
       ]
     });
   }
@@ -702,7 +708,7 @@ export const AIRCRAFT_SPEED_RESEARCH = [
     gameMinSpeed: '108 km/h (30 m/s)',
     gameCruiseSpeed: '158 km/h (44 m/s)',
     gameMaxSpeed: '223 km/h (62 m/s)',
-    location: 'HQ Runway Lane 1 (x = ∓895, z = ∓66)'
+    location: 'Outer Side Apron Bay 1 — Back (x = ∓1006, z = ∓138)'
   },
   {
     role: 'cas',
@@ -713,7 +719,7 @@ export const AIRCRAFT_SPEED_RESEARCH = [
     gameMinSpeed: '115 km/h (32 m/s)',
     gameCruiseSpeed: '209 km/h (58 m/s)',
     gameMaxSpeed: '302 km/h (84 m/s)',
-    location: 'HQ Runway Lane 1 (x = ∓955, z = ∓66)'
+    location: 'Outer Side Apron Bay 3 — Mid-Front (x = ∓910, z = ∓138)'
   },
   {
     role: 'fighter',
@@ -724,7 +730,7 @@ export const AIRCRAFT_SPEED_RESEARCH = [
     gameMinSpeed: '151 km/h (42 m/s)',
     gameCruiseSpeed: '281 km/h (78 m/s)',
     gameMaxSpeed: '414 km/h (115 m/s)',
-    location: 'HQ Runway Lane 1 (x = ∓925, z = ∓66)'
+    location: 'Outer Side Apron Bay 4 — Front (x = ∓866, z = ∓138)'
   },
   {
     role: 'b2_spirit',
@@ -735,7 +741,7 @@ export const AIRCRAFT_SPEED_RESEARCH = [
     gameMinSpeed: '173 km/h (48 m/s)',
     gameCruiseSpeed: '450 km/h (125 m/s)',
     gameMaxSpeed: '666 km/h (185 m/s Overdrive)',
-    location: 'HQ Stealth Runway Lane 2 (x = ∓925, z = ∓102)'
+    location: 'Outer Side Stealth Canopy Bay 2 — Back-Mid (x = ∓958, z = ∓138)'
   }
 ];
 
@@ -751,13 +757,13 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'trebuchet',
     isEmplacement: true,
     team: 'US',
-    spawnPos: [-926, 0, 5],
+    spawnPos: [-1496, 0, 5],
     spawnYaw: -Math.PI / 2,
     maxHp: 550,
     speed: 0,
     weaponType: 'trebuchet_boulder',
     rpm: 28,
-    patrolPoints: [[-380, 0, -140]]
+    patrolPoints: [[-660, 0, -280]]
   },
   {
     id: 'us_trebuchet_hq_2',
@@ -765,13 +771,13 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'trebuchet',
     isEmplacement: true,
     team: 'US',
-    spawnPos: [-908, 0, 16],
+    spawnPos: [-1478, 0, 16],
     spawnYaw: -Math.PI / 2,
     maxHp: 550,
     speed: 0,
     weaponType: 'trebuchet_boulder',
     rpm: 28,
-    patrolPoints: [[-185, 0, 165]]
+    patrolPoints: [[-320, 0, 320]]
   },
   {
     id: 'ru_trebuchet_hq_1',
@@ -779,13 +785,13 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'trebuchet',
     isEmplacement: true,
     team: 'RU',
-    spawnPos: [926, 0, -5],
+    spawnPos: [1496, 0, -5],
     spawnYaw: Math.PI / 2,
     maxHp: 550,
     speed: 0,
     weaponType: 'trebuchet_boulder',
     rpm: 28,
-    patrolPoints: [[380, 0, 140]]
+    patrolPoints: [[660, 0, 280]]
   },
   {
     id: 'ru_trebuchet_hq_2',
@@ -793,13 +799,13 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'trebuchet',
     isEmplacement: true,
     team: 'RU',
-    spawnPos: [908, 0, -16],
+    spawnPos: [1478, 0, -16],
     spawnYaw: Math.PI / 2,
     maxHp: 550,
     speed: 0,
     weaponType: 'trebuchet_boulder',
     rpm: 28,
-    patrolPoints: [[195, 0, -165]]
+    patrolPoints: [[330, 0, -320]]
   },
   {
     id: 'us_trebuchet_obj_a',
@@ -807,7 +813,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'trebuchet',
     isEmplacement: true,
     team: 'US',
-    spawnPos: [-344, 0, -138],
+    spawnPos: [-624, 0, -278],
     spawnYaw: -Math.PI / 2,
     maxHp: 550,
     speed: 0,
@@ -821,7 +827,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'trebuchet',
     isEmplacement: true,
     team: 'US',
-    spawnPos: [-152, 0, 162],
+    spawnPos: [-287, 0, 317],
     spawnYaw: -Math.PI / 2,
     maxHp: 550,
     speed: 0,
@@ -841,7 +847,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     speed: 0,
     weaponType: 'trebuchet_boulder',
     rpm: 28,
-    patrolPoints: [[195, 0, -165]]
+    patrolPoints: [[330, 0, -320]]
   },
   {
     id: 'ru_trebuchet_obj_c',
@@ -855,7 +861,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     speed: 0,
     weaponType: 'trebuchet_boulder',
     rpm: 28,
-    patrolPoints: [[-185, 0, 165]]
+    patrolPoints: [[-320, 0, 320]]
   },
   {
     id: 'ru_trebuchet_obj_d',
@@ -863,7 +869,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'trebuchet',
     isEmplacement: true,
     team: 'RU',
-    spawnPos: [160, 0, -162],
+    spawnPos: [295, 0, -317],
     spawnYaw: Math.PI / 2,
     maxHp: 550,
     speed: 0,
@@ -877,7 +883,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'trebuchet',
     isEmplacement: true,
     team: 'RU',
-    spawnPos: [344, 0, 138],
+    spawnPos: [624, 0, 278],
     spawnYaw: Math.PI / 2,
     maxHp: 550,
     speed: 0,
@@ -893,7 +899,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'warhorse',
     isHorseMount: true,
     team: 'US',
-    spawnPos: [-942, 0, 14],
+    spawnPos: [-1512, 0, 14],
     spawnYaw: -Math.PI / 2,
     maxHp: 340,
     speed: 12.5,
@@ -904,7 +910,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     rpm: 95,
     patrolPoints: [
       [-660, 0, 0],
-      [-380, 0, -140],
+      [-660, 0, -280],
       [0, 0, 0]
     ]
   },
@@ -914,7 +920,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'warhorse',
     isHorseMount: true,
     team: 'US',
-    spawnPos: [-932, 0, 14],
+    spawnPos: [-1502, 0, 14],
     spawnYaw: -Math.PI / 2,
     maxHp: 340,
     speed: 12.5,
@@ -925,7 +931,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     rpm: 95,
     patrolPoints: [
       [-660, 0, 0],
-      [-185, 0, 165],
+      [-320, 0, 320],
       [0, 0, 0]
     ]
   },
@@ -935,7 +941,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'warhorse',
     isHorseMount: true,
     team: 'US',
-    spawnPos: [-366, 0, -124],
+    spawnPos: [-646, 0, -264],
     spawnYaw: -Math.PI / 2,
     maxHp: 340,
     speed: 12.5,
@@ -945,7 +951,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
-      [-185, 0, 165],
+      [-320, 0, 320],
       [0, 0, 0]
     ]
   },
@@ -955,7 +961,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'warhorse',
     isHorseMount: true,
     team: 'RU',
-    spawnPos: [942, 0, -14],
+    spawnPos: [1512, 0, -14],
     spawnYaw: Math.PI / 2,
     maxHp: 340,
     speed: 12.5,
@@ -966,7 +972,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     rpm: 95,
     patrolPoints: [
       [660, 0, 0],
-      [380, 0, 140],
+      [660, 0, 280],
       [0, 0, 0]
     ]
   },
@@ -976,7 +982,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'warhorse',
     isHorseMount: true,
     team: 'RU',
-    spawnPos: [932, 0, -14],
+    spawnPos: [1502, 0, -14],
     spawnYaw: Math.PI / 2,
     maxHp: 340,
     speed: 12.5,
@@ -987,7 +993,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     rpm: 95,
     patrolPoints: [
       [660, 0, 0],
-      [195, 0, -165],
+      [330, 0, -320],
       [0, 0, 0]
     ]
   },
@@ -997,7 +1003,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     type: 'warhorse',
     isHorseMount: true,
     team: 'RU',
-    spawnPos: [366, 0, 124],
+    spawnPos: [646, 0, 264],
     spawnYaw: Math.PI / 2,
     maxHp: 340,
     speed: 12.5,
@@ -1007,7 +1013,7 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
-      [195, 0, -165],
+      [330, 0, -320],
       [0, 0, 0]
     ]
   }
@@ -1025,7 +1031,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     isHorseMount: true,
     team: 'US',
     subFaction: 'US',
-    spawnPos: [-912, 0, 12],
+    spawnPos: [-1482, 0, 12],
     spawnYaw: -Math.PI / 2,
     maxHp: 380,
     speed: 12.5,
@@ -1036,7 +1042,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     rpm: 95,
     patrolPoints: [
       [-640, 0, 18],
-      [-380, 0, -140],
+      [-660, 0, -280],
       [0, 0, 0]
     ]
   },
@@ -1047,7 +1053,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     isHorseMount: true,
     team: 'US',
     subFaction: 'US',
-    spawnPos: [-928, 0, -10],
+    spawnPos: [-1498, 0, -10],
     spawnYaw: -Math.PI / 2,
     maxHp: 380,
     speed: 12.5,
@@ -1058,7 +1064,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     rpm: 95,
     patrolPoints: [
       [-660, 0, 0],
-      [-380, 0, -140],
+      [-660, 0, -280],
       [0, 0, 0]
     ]
   },
@@ -1069,7 +1075,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     isHorseMount: true,
     team: 'US',
     subFaction: 'US',
-    spawnPos: [-365, 0, -128],
+    spawnPos: [-645, 0, -268],
     spawnYaw: -Math.PI / 2,
     maxHp: 380,
     speed: 12.5,
@@ -1079,7 +1085,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
-      [-185, 0, 165],
+      [-320, 0, 320],
       [0, 0, 0]
     ]
   },
@@ -1091,7 +1097,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     isHorseMount: true,
     team: 'US',
     subFaction: 'RU',
-    spawnPos: [912, 0, 12],
+    spawnPos: [1482, 0, 12],
     spawnYaw: Math.PI / 2,
     maxHp: 380,
     speed: 12.5,
@@ -1102,7 +1108,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     rpm: 95,
     patrolPoints: [
       [640, 0, 18],
-      [380, 0, 140],
+      [660, 0, 280],
       [0, 0, 0]
     ]
   },
@@ -1113,7 +1119,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     isHorseMount: true,
     team: 'US',
     subFaction: 'RU',
-    spawnPos: [928, 0, -10],
+    spawnPos: [1498, 0, -10],
     spawnYaw: Math.PI / 2,
     maxHp: 380,
     speed: 12.5,
@@ -1124,7 +1130,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     rpm: 95,
     patrolPoints: [
       [640, 0, 0],
-      [380, 0, 140],
+      [660, 0, 280],
       [0, 0, 0]
     ]
   },
@@ -1136,7 +1142,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     isHorseMount: true,
     isDinoMount: true,
     team: 'RU',
-    spawnPos: [0, 0, -330],
+    spawnPos: [0, 0, -510],
     spawnYaw: 0,
     maxHp: 1350,
     speed: 20.5,
@@ -1146,9 +1152,9 @@ export const JURASSIC_VEHICLE_DEFS = [
     weaponType: 'trex_roar_bite',
     rpm: 65,
     patrolPoints: [
-      [-185, 0, 165],
+      [-320, 0, 320],
       [0, 0, 0],
-      [195, 0, -165]
+      [330, 0, -320]
     ]
   },
   {
@@ -1158,7 +1164,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     isHorseMount: true,
     isDinoMount: true,
     team: 'RU',
-    spawnPos: [182, 0, -152],
+    spawnPos: [317, 0, -307],
     spawnYaw: Math.PI / 2,
     maxHp: 1350,
     speed: 20.5,
@@ -1169,7 +1175,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     rpm: 65,
     patrolPoints: [
       [0, 0, 0],
-      [-380, 0, -140]
+      [-660, 0, -280]
     ]
   },
   {
@@ -1179,7 +1185,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     isHorseMount: true,
     isDinoMount: true,
     team: 'RU',
-    spawnPos: [-135, 0, 305],
+    spawnPos: [-270, 0, 460],
     spawnYaw: Math.PI,
     maxHp: 620,
     speed: 27.5,
@@ -1190,7 +1196,7 @@ export const JURASSIC_VEHICLE_DEFS = [
     rpm: 135,
     patrolPoints: [
       [0, 0, 0],
-      [-185, 0, 165]
+      [-320, 0, 320]
     ]
   }
 ];

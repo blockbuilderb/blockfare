@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MODERN BLOCKFARE — Multi-Era Voxel Combined Arms FPS</title>
-  <link rel="stylesheet" href="./style.css?v=91" />
+  <link rel="stylesheet" href="./style.css?v=105" />
   <script type="importmap">
     {
       "imports": {
@@ -105,12 +105,13 @@
   <!-- WebGL Canvas Container -->
   <div id="game-container"></div>
 
-  <!-- ADS Optic & Sniper Scope Overlay (Holo / Kobra / Red-Dot / ACOG / 8x Sniper / RPG PGO-7) -->
+  <!-- ADS Optic & Sniper Scope Overlay (16 CoD / Tarkov Optics + Variable LPVO + FLIR White-Hot Thermal) -->
   <div id="scope-overlay" class="hidden">
     <div id="optic-frame" class="optic-holo">
       <div class="optic-lens">
-        <!-- EOTech Holo Ring + Dot -->
-        <div class="reticle ret-holo">
+        <canvas id="flir-thermal-canvas" width="360" height="360"></canvas>
+        <!-- EOTech Holo Ring + Dot & G33 3x Magnifier -->
+        <div class="reticle ret-holo ret-holo3x">
           <div class="holo-ring">
             <span class="holo-tick top"></span>
             <span class="holo-tick bottom"></span>
@@ -118,6 +119,22 @@
             <span class="holo-tick right"></span>
             <span class="holo-dot"></span>
           </div>
+        </div>
+        <!-- Vortex AMG UH-1 Huey Tactical Box/Ring -->
+        <div class="reticle ret-uh1">
+          <div class="uh1-ring">
+            <span class="uh1-tri">▲</span>
+            <span class="holo-dot"></span>
+          </div>
+        </div>
+        <!-- Trijicon RMR Micro Crisp Amber/Red Dot -->
+        <div class="reticle ret-rmr">
+          <div class="rmr-dot"></div>
+        </div>
+        <!-- OKP-7 Russian Green Chevron + Rimless Circle -->
+        <div class="reticle ret-okp7">
+          <div class="okp7-ring"></div>
+          <div class="okp7-chevron"></div>
         </div>
         <!-- Kobra Chevron + Bars -->
         <div class="reticle ret-kobra">
@@ -130,21 +147,44 @@
         <div class="reticle ret-reddot">
           <div class="aimpoint-dot"></div>
         </div>
-        <!-- 3.4x ACOG Ballistic Crosshair -->
-        <div class="reticle ret-acog">
+        <!-- Primary Arms 2.0x Prism Horseshoe ACSS -->
+        <div class="reticle ret-prism2x">
+          <div class="prism-horseshoe"></div>
+          <div class="acog-chevron">^</div>
+          <div class="acog-line-v"></div>
+        </div>
+        <!-- 3.4x ACOG & Elcan SpecterDR 1x/4x Ballistic Crosshair -->
+        <div class="reticle ret-acog ret-elcan4x">
           <div class="acog-line-h"></div>
           <div class="acog-line-v"></div>
           <div class="acog-chevron">^</div>
           <div class="acog-stadia s1">4</div>
           <div class="acog-stadia s2">6</div>
         </div>
-        <!-- 8x Mil-Dot Sniper Scope -->
-        <div class="reticle ret-sniper8x">
+        <!-- Valday PS-320 1x/6x & EOTech Vudu 3x-6x LPVO Illuminated Horseshoe/Cross -->
+        <div class="reticle ret-valday6x ret-lpvo36">
+          <div class="scope-line-h"></div>
+          <div class="scope-line-v"></div>
+          <div class="lpvo-cqb-ring"></div>
+          <div class="scope-mil-dots"></div>
+          <div class="sniper-stadia st1">300m</div>
+          <div class="sniper-stadia st2">500m</div>
+        </div>
+        <!-- FLIR RS-32 2.5x-5.0x White-Hot Thermal Imaging Scope -->
+        <div class="reticle ret-flir">
+          <div class="flir-cross-h"></div>
+          <div class="flir-cross-v"></div>
+          <div class="flir-box"></div>
+          <div class="flir-readout">WHOT • IR</div>
+        </div>
+        <!-- 8x Mil-Dot & Nightforce ATACR 6x-12x Horus Tremor3 Sniper Scope -->
+        <div class="reticle ret-sniper8x ret-sniper12x">
           <div class="scope-line-h"></div>
           <div class="scope-line-v"></div>
           <div class="scope-mil-dots"></div>
           <div class="sniper-stadia st1">200m</div>
           <div class="sniper-stadia st2">400m</div>
+          <div class="sniper-stadia st3">600m</div>
         </div>
         <!-- RPG-7 PGO-7 Optical Range Ladder -->
         <div class="reticle ret-rpgSight">
@@ -166,8 +206,107 @@
     </div>
   </div>
 
-  <!-- Vehicle-Specific Tactical Overlay & Reticle -->
+  <!-- Vehicle-Specific Tactical Overlay, 1P Cockpit Frame & Eye-Level Aviation HUD -->
   <div id="vehicle-overlay" class="hidden">
+    <!-- 1st-Person Interior Cockpit Canopy / Jet Bubble HUD / AC-130 Left-Window Sight / Tank Periscope -->
+    <div id="vehicle-cockpit-frame" class="hidden">
+      <!-- Fighter / CAS / Stealth Jet Curved Bubble Canopy Arch & Angled Green HUD Glass Combiner -->
+      <svg id="jet-cockpit-canopy-svg" class="hidden" viewBox="0 0 1600 900" preserveAspectRatio="none">
+        <!-- Curved Bubble Canopy Bow & Angled Forward Canopy Struts -->
+        <path d="M 0,0 L 1600,0 L 1600,110 Q 800,-28 0,110 Z" fill="rgba(8,12,18,0.88)" />
+        <path d="M 0,90 Q 800,-18 1600,90" fill="none" stroke="rgba(120,160,190,0.35)" stroke-width="4" />
+        <polygon points="0,0 135,0 355,900 285,900" fill="rgba(10,15,22,0.9)" stroke="rgba(148,163,184,0.28)" stroke-width="2" />
+        <polygon points="1600,0 1465,0 1245,900 1315,900" fill="rgba(10,15,22,0.9)" stroke="rgba(148,163,184,0.28)" stroke-width="2" />
+        <!-- Angled Optical HUD Glass Combiner Frame in Center -->
+        <polygon points="635,235 965,235 995,585 605,585" fill="rgba(0,255,170,0.035)" stroke="rgba(46,213,115,0.42)" stroke-width="2.2" />
+        <rect x="590" y="585" width="420" height="16" rx="4" fill="#0b1118" stroke="rgba(72,219,251,0.35)" stroke-width="1.5" />
+        <!-- Low-Profile Fighter Glare-Shield Coaming (Leaves 88% of view completely clear!) -->
+        <path d="M 240,900 L 430,788 L 620,762 L 980,762 L 1170,788 L 1360,900 Z" fill="rgba(7,11,16,0.94)" stroke="rgba(72,219,251,0.35)" stroke-width="2" />
+      </svg>
+
+      <!-- AC-130 Left-Window Sight: 1968 Sideways Analog Pylon HUD OR Unlockable Real AFSOC EOTech EXPS3 Sight! -->
+      <div id="ac130-left-window-sight" class="hidden">
+        <!-- 1968 Sideways Left-Window Collimated Glass HUD -->
+        <svg id="ac130-sideways-hud-svg" viewBox="0 0 420 340" width="380" height="308">
+          <!-- Sideways Window Mounting Bracket on Left Frame -->
+          <rect x="8" y="42" width="22" height="256" rx="4" fill="#141c24" stroke="#4b6584" stroke-width="2" />
+          <line x1="30" y1="88" x2="66" y2="88" stroke="#4b6584" stroke-width="4" />
+          <line x1="30" y1="252" x2="66" y2="252" stroke="#4b6584" stroke-width="4" />
+          <!-- Angled Green Collimated Combiner Glass -->
+          <rect x="64" y="34" width="292" height="272" rx="10" fill="rgba(46,213,115,0.06)" stroke="rgba(46,213,115,0.58)" stroke-width="2.2" />
+          <text x="210" y="54" text-anchor="middle" fill="#2ed573" font-family="Consolas, monospace" font-size="10" font-weight="900" letter-spacing="1.2">SIDEWAYS LEFT-WINDOW PYLON HUD</text>
+          <!-- Bank / Pylon Roll Reference Arc -->
+          <path d="M 122 108 A 98 98 0 0 1 298 108" fill="none" stroke="#2ed573" stroke-width="1.6" stroke-dasharray="5 3" />
+          <line x1="210" y1="76" x2="210" y2="90" stroke="#2ed573" stroke-width="2" />
+          <!-- Pylon Target Steering Pipper -->
+          <circle id="ac130-pylon-pipper" cx="210" cy="170" r="24" fill="none" stroke="#2ed573" stroke-width="1.8" />
+          <line x1="170" y1="170" x2="196" y2="170" stroke="#2ed573" stroke-width="1.8" />
+          <line x1="224" y1="170" x2="250" y2="170" stroke="#2ed573" stroke-width="1.8" />
+          <line x1="210" y1="130" x2="210" y2="156" stroke="#2ed573" stroke-width="1.8" />
+          <line x1="210" y1="184" x2="210" y2="210" stroke="#2ed573" stroke-width="1.8" />
+          <text id="ac130-side-hud-telemetry" x="210" y="292" text-anchor="middle" fill="#7bed9f" font-family="Consolas, monospace" font-size="9.5" font-weight="900">BANK 32° L • [A/D] ADJUST PYLON TURN</text>
+        </svg>
+
+        <!-- Real AFSOC Rail-Mounted EOTech EXPS3 Holographic Sight (Unlocked -> Purchased in [L] Hangar!) -->
+        <svg id="ac130-eotech-sight-svg" class="hidden" viewBox="0 0 420 340" width="380" height="308">
+          <!-- Left Window Picatinny Rail & Quick-Detach Lever Mount -->
+          <rect x="12" y="138" width="64" height="64" rx="4" fill="#181c20" stroke="#57606f" stroke-width="2" />
+          <rect x="64" y="264" width="292" height="34" rx="5" fill="#16191d" stroke="#3d444d" stroke-width="2" />
+          <!-- Ruggedized Anodized Aluminum EOTech Protective Hood -->
+          <path d="M 68,268 L 68,78 Q 68,42 108,42 L 312,42 Q 352,42 352,78 L 352,268 Z" fill="none" stroke="#1e2228" stroke-width="24" stroke-linejoin="round" />
+          <path d="M 68,268 L 68,78 Q 68,42 108,42 L 312,42 Q 352,42 352,78 L 352,268 Z" fill="rgba(12,20,26,0.08)" stroke="#4b5563" stroke-width="2.5" />
+          <text x="210" y="36" text-anchor="middle" fill="#ff6b81" font-family="Consolas, monospace" font-size="9.5" font-weight="900" letter-spacing="1.4">AFSOC EOTECH EXPS3 // HMD PYLON SIGHT</text>
+          <!-- Glowing Laser-Red 68 MOA EOTech Holographic Ring + 12/3/6/9 Stadia Ticks + 1 MOA Dot -->
+          <g filter="drop-shadow(0 0 5px #ff2e43)">
+            <circle cx="210" cy="164" r="54" fill="none" stroke="#ff2e43" stroke-width="2.6" stroke-dasharray="18 4" />
+            <line x1="210" y1="101" x2="210" y2="117" stroke="#ff2e43" stroke-width="2.8" />
+            <line x1="210" y1="211" x2="210" y2="227" stroke="#ff2e43" stroke-width="2.8" />
+            <line x1="147" y1="164" x2="163" y2="164" stroke="#ff2e43" stroke-width="2.8" />
+            <line x1="257" y1="164" x2="273" y2="164" stroke="#ff2e43" stroke-width="2.8" />
+            <circle cx="210" cy="164" r="2.6" fill="#ff4757" />
+            <circle cx="210" cy="182" r="1.8" fill="#ff6b81" />
+          </g>
+          <text id="ac130-eotech-telemetry" x="210" y="285" text-anchor="middle" fill="#ff7675" font-family="Consolas, monospace" font-size="9.5" font-weight="900">EOTECH PYLON LOCK • [R] TRANSIT/ORBIT</text>
+        </svg>
+      </div>
+
+      <div class="ckp-top-bow"></div>
+      <div class="ckp-pillar left"></div>
+      <div class="ckp-pillar right"></div>
+      <div class="ckp-glare-shield">
+        <span id="ckp-mode-tag">🛩️ 1P COCKPIT CANOPY VIEW • [C] SWITCH CAMERA</span>
+      </div>
+    </div>
+
+    <!-- Eye-Level Center Aviation HUD Tapes (Airspeed on Left, Digital Radar Altimeter AGL + VSI on Right!) -->
+    <div id="air-center-hud" class="hidden">
+      <div class="air-hud-tape left-spd">
+        <div class="aht-lbl">SPD</div>
+        <div id="air-center-spd" class="aht-val">260</div>
+        <div id="air-center-mach" class="aht-sub">KM/H</div>
+      </div>
+      <div class="air-hud-tape right-alt">
+        <div class="aht-lbl">ALT (AGL)</div>
+        <div id="air-center-alt" class="aht-val">185M</div>
+        <div id="air-center-vsi" class="aht-sub">VSI +0M/S</div>
+      </div>
+      <button type="button" id="veh-cam-mode-pill" title="Click or press [C] to cycle Chase 3P / Cockpit 1P / Nose-Sensor Cam">🎥 CAM [C]: 3P CHASE</button>
+      <button type="button" id="veh-sensor-mode-pill" title="Click or press [N] to cycle Day TV / Night Vision / White-Hot IR / Black-Hot IR">🌡️ [N]: DAY TV</button>
+    </div>
+
+    <!-- AC-130J Fire-Control Station Monitor Bezel (Shown in Sensor Pod / Port Gunbay View) -->
+    <div id="ac130-fco-overlay" class="hidden">
+      <div class="fco-corner tl"></div>
+      <div class="fco-corner tr"></div>
+      <div class="fco-corner bl"></div>
+      <div class="fco-corner br"></div>
+      <div id="ac130-fco-gimbal-bar">
+        <div id="ac130-fco-gimbal-lbl" style="font-size:9px;font-weight:900;color:#81ecec;letter-spacing:0.6px;">PORT GIMBAL AZIMUTH: 0° CENTER</div>
+        <div id="ac130-fco-gimbal-track">
+          <div id="ac130-fco-gimbal-pip"></div>
+        </div>
+      </div>
+    </div>
     <div id="turret-reticle-box" class="turret-reticle">
       <div class="tr-corner tl"></div>
       <div class="tr-corner tr"></div>
@@ -311,11 +450,12 @@
     <span id="fps-low-val" class="fps-sub">LOW: 58</span>
   </div>
 
-  <!-- Damage / Bleed Vignette & Night-Vision Goggles Overlay -->
+  <!-- Damage / Bleed Vignette, Night-Vision & Full-Screen FLIR Infrared Thermal Suite [N] -->
   <div id="damage-vignette"></div>
+  <canvas id="flir-fullscreen-canvas" width="480" height="270" class="hidden"></canvas>
   <div id="nvg-overlay" class="hidden">
     <div class="nvg-scanlines"></div>
-    <div class="nvg-tag">AN/PVS-14 NIGHT VISION ACTIVE [N]</div>
+    <div id="nvg-mode-tag" class="nvg-tag">AN/PVS-14 NIGHT VISION ACTIVE [N]</div>
   </div>
 
   <!-- In-Game Tactical HUD -->
@@ -423,6 +563,8 @@
         <span>&bull;</span>
         <span><b>[TAB]</b> Stats</span>
         <span>&bull;</span>
+        <span id="hud-manual-btn" style="color:#7bed9f;font-weight:900;cursor:pointer;pointer-events:auto;" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp()" title="Open Field &amp; Flight Controls Manual [F1]">📖 <b>[F1]</b> Manual</span>
+        <span>&bull;</span>
         <span id="hud-settings-btn" style="color:#81ecec;font-weight:800;cursor:pointer;pointer-events:auto;" title="Open Audio &amp; World Settings">⚙️ Settings</span>
       </div>
     </div>
@@ -496,9 +638,9 @@
               <button type="button" id="cmd-panel-map-btn" style="background:rgba(241,196,15,0.2);border:1px solid #f1c40f;color:#f1c40f;border-radius:3px;padding:1px 5px;font-size:8.5px;font-weight:900;cursor:pointer;" title="Press [K] for Full Tactical Map &amp; Per-Squad Orders">[K] MAP</button>
             </div>
           </div>
-          <div class="cmd-scope-row" title="Press [Alt+0] or click to switch between commanding All 5 Squads (125 NPCs) or Your Squad (25 NPCs)">
-            <button type="button" class="cmd-scope-btn active" id="cmd-scope-all" data-scope="ALL">★ ALL 5 SQUADS (125)</button>
-            <button type="button" class="cmd-scope-btn" id="cmd-scope-squad" data-scope="SQUAD">▲ MY SQUAD (25)</button>
+          <div class="cmd-scope-row" title="Press [Alt+0] or click to switch between commanding All 6 Squads (125 NPCs) or Your Squad">
+            <button type="button" class="cmd-scope-btn active" id="cmd-scope-all" data-scope="ALL">★ ALL 6 SQUADS (125)</button>
+            <button type="button" class="cmd-scope-btn" id="cmd-scope-squad" data-scope="SQUAD">▲ MY SQUAD (21)</button>
           </div>
           <div class="cmd-tactical-row">
             <button type="button" class="cmd-order-btn cmd-tac-btn" data-action="CHARGE" title="Mount &amp; Blade All-Out Charge: War horn + synchronized battle cries + full-speed shock assault into enemy lines! [Alt+C]">⚔️ CHARGE <span class="cmd-hk">[Alt+C]</span></button>
@@ -521,10 +663,11 @@
           </div>
           <div class="cmd-support-row">
             <button type="button" id="hud-uav-btn" class="cmd-support-btn uav" title="Launch MQ-9 UAV Recon Datalink (Paints all enemies &amp; enemy armor in 3D + Minimap + AI Datalink + $35 Assist Bonus) [U]">📡 UAV <span class="cmd-hk">[U]</span></button>
-            <button type="button" id="hud-airstrike-btn" class="cmd-support-btn strike" title="Call Airstrike / Artillery at Crosshair (or click anywhere in [K] Tactical Map) [J]">💥 STRIKE <span class="cmd-hk">[J]</span></button>
-            <button type="button" id="hud-strike-pattern-btn" class="cmd-support-btn pattern" title="Cycle Strike Ordnance: Carpet Bombing (9x JDAM) / 2,000lb GBU Bunker-Buster / 155mm Artillery [Shift+J]">✈️ CARPET</button>
+            <button type="button" id="hud-airstrike-btn" class="cmd-support-btn strike" title="Infantry Squad CAS Request / Commander Strike at Crosshair [J]">🐗 CAS <span class="cmd-hk">[J]</span></button>
+            <button type="button" id="hud-strike-pattern-btn" class="cmd-support-btn pattern" title="Cycle CAS / Strike Ordnance: A-10 30mm BRRRT CAS / Carpet Bombing / GBU Bunker-Buster / 155mm Artillery [Shift+J]">🐗 A-10 CAS</button>
             <button type="button" id="hud-build-bunker-btn" class="cmd-support-btn" style="background:rgba(241,196,15,0.22);border:1px solid #f1c40f;color:#f1c40f;" title="Build Selected Blueprint / Squad Emplacement (Covered Bunker $350, HMG $450, Mortar $600, AA $650, Command Bunker / House $1K) [8 / T]">🏰 BUILD <span class="cmd-hk">[B/8]</span></button>
-            <button type="button" id="hud-launch-plane-btn" class="cmd-support-btn" style="background:rgba(52,152,219,0.28);border:1px solid #48dbfb;color:#74b9ff;" title="Launch Combat Aircraft Sortie [9] • Shift+Click or Right-Click cycles: A-10C CAS / F-15EX Fighter+Bomber / AC-130J Gunship">✈️ JET/AC-130 <span class="cmd-hk">[9]</span></button>
+            <button type="button" id="hud-request-bike-btn" class="cmd-support-btn" onclick="window.game && window.game.player && window.game.player.requestReconBikeDelivery(event.shiftKey ? 'atv' : 'bike')" style="background:rgba(46,204,113,0.24);border:1px solid #2ecc71;color:#7bed9f;" title="Deliver Recon Motorcycle 5m ahead ($150, Any Class) [0] • Shift+Click for 4x4 Quad ATV [Shift+0]">🏍️ BIKE <span class="cmd-hk">[0]</span></button>
+            <button type="button" id="hud-launch-plane-btn" class="cmd-support-btn" style="background:rgba(52,152,219,0.28);border:1px solid #48dbfb;color:#74b9ff;" title="Launch Combat Aircraft Sortie or Request Armor [9] • Shift+Click cycles Plane / Tank">✈️ JET/TANK <span class="cmd-hk">[9]</span></button>
           </div>
           <div id="cmd-hud-status-line">ORDER: AI AUTONOMOUS &bull; HOLD [Y] OR PRESS [ALT+1..5 / F / H]</div>
         </div>
@@ -597,6 +740,25 @@
             <span id="air-hud-hp-val" class="air-hull-val">100%</span>
           </div>
           <div id="air-hud-hdg-pill" class="air-hdg-pill">HDG 000° N &bull; 1.0G</div>
+          <button type="button" id="air-hud-tech-btn" onclick="if(window.game&&window.game.ui){window.game.ui._gunsmithActiveTab='vehicles';window.game.ui.toggleGunsmithModal(true);}" style="background:rgba(0,210,211,0.22);border:1px solid #00d2d3;color:#81ecec;border-radius:3px;padding:1px 6px;font-size:9px;font-weight:900;cursor:pointer;" title="Unlock &amp; Buy Plane / AC-130 / Tank Tech Upgrades &amp; Request Vehicles [L / I]">🔧 [L] TECH</button>
+          <button type="button" id="air-hud-help-btn" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp('ac130')" style="background:rgba(46,204,113,0.18);border:1px solid #2ecc71;color:#7bed9f;border-radius:3px;padding:1px 6px;font-size:9px;font-weight:900;cursor:pointer;" title="Open Flight &amp; AC-130 Controls Manual [F1]">📖 [F1] MANUAL</button>
+        </div>
+
+        <!-- AC-130 Cockpit Dashboard FLIR Video Repeater MFD (Unlocks & Equips in [L] Hangar!) -->
+        <div id="ac130-flir-mfd-card" class="hidden">
+          <div class="mfd-hdr">
+            <span id="ac130-mfd-title">📺 COCKPIT FLIR VIDEO REPEATER MFD</span>
+            <span id="ac130-mfd-ap-badge">AP: MANUAL [R]</span>
+          </div>
+          <div class="mfd-body-row">
+            <canvas id="ac130-mfd-canvas" width="160" height="92"></canvas>
+            <div class="mfd-telemetry-col">
+              <div id="ac130-mfd-era">GEN: 1968 AC-130A</div>
+              <div id="ac130-mfd-tgt">ORBIT: SECTOR GRID</div>
+              <div id="ac130-mfd-slew">MOUNT: ±9° RIGID</div>
+              <div id="ac130-mfd-hint" style="color:#81ecec;">[SCROLL] ZOOM &bull; [Q/Z / ↑↓] HEIGHT &bull; [R] ORBIT</div>
+            </div>
+          </div>
         </div>
 
         <!-- Primary Cockpit "Six-Pack" Visual Flight Gauges Row -->
@@ -615,14 +777,14 @@
                   <circle cx="65" cy="65" r="56" fill="#070d12" stroke="rgba(0, 210, 211, 0.35)" stroke-width="1.5" />
 
                   <!-- Color-Coded Airspeed Operating Arcs (240° Sweep from -120° to +120°, r=48) -->
-                  <!-- Red Stall Arc (-120° to -86°) -->
-                  <path d="M 23.4 89.0 A 48 48 0 0 1 17.1 61.6" fill="none" stroke="#ff4757" stroke-width="4.5" stroke-linecap="butt" opacity="0.9" />
-                  <!-- Green Normal Operating Arc (-86° to +48°, 134° sweep -> large-arc-flag=0 so it follows the inner rim) -->
-                  <path d="M 17.1 61.6 A 48 48 0 0 1 100.7 32.9" fill="none" stroke="#2ecc71" stroke-width="4.5" stroke-linecap="butt" opacity="0.88" />
-                  <!-- Yellow Caution High-Speed Arc (+48° to +88°) -->
-                  <path d="M 100.7 32.9 A 48 48 0 0 1 113.0 63.3" fill="none" stroke="#f1c40f" stroke-width="4.5" stroke-linecap="butt" opacity="0.9" />
-                  <!-- Cyan/Orange Afterburner Overdrive Arc (+88° to +120°) -->
-                  <path d="M 113.0 63.3 A 48 48 0 0 1 106.6 89.0" fill="none" stroke="#00d2d3" stroke-width="4.5" stroke-linecap="butt" opacity="0.95" />
+                  <!-- Red Stall Arc -->
+                  <path id="asi-arc-stall" d="M 23.4 89.0 A 48 48 0 0 1 17.1 61.6" fill="none" stroke="#ff4757" stroke-width="4.5" stroke-linecap="butt" opacity="0.9" />
+                  <!-- Green Normal Operating Arc -->
+                  <path id="asi-arc-green" d="M 17.1 61.6 A 48 48 0 0 1 100.7 32.9" fill="none" stroke="#2ecc71" stroke-width="4.5" stroke-linecap="butt" opacity="0.88" />
+                  <!-- Yellow Caution High-Speed Arc -->
+                  <path id="asi-arc-yellow" d="M 100.7 32.9 A 48 48 0 0 1 113.0 63.3" fill="none" stroke="#f1c40f" stroke-width="4.5" stroke-linecap="butt" opacity="0.9" />
+                  <!-- Cyan/Orange Afterburner Overdrive Arc -->
+                  <path id="asi-arc-ab" d="M 113.0 63.3 A 48 48 0 0 1 106.6 89.0" fill="none" stroke="#00d2d3" stroke-width="4.5" stroke-linecap="butt" opacity="0.95" />
 
                   <!-- Radial Speedometer Tick Marks (Every 20° from -120° to +120°) -->
                   <g stroke="#dfe6e9" stroke-width="1.5" opacity="0.85">
@@ -814,6 +976,36 @@
               </div>
             </div>
           </div>
+
+          <!-- 4. BODY VS. VIEWPOINT ORIENTATION DIAL (Tank-Style Airframe Nose vs. Pilot/Gunner View Cone!) -->
+          <div class="air-gauge-card">
+            <div class="air-dial-wrap">
+              <svg id="air-bvv-svg" viewBox="0 0 112 130" width="108" height="124">
+                <rect x="2" y="2" width="108" height="126" rx="14" fill="#0b1116" stroke="#2c3e50" stroke-width="1.8" />
+                <circle cx="56" cy="56" r="45" fill="#070d12" stroke="rgba(0, 210, 211, 0.38)" stroke-width="1.4" />
+                <circle cx="56" cy="56" r="28" fill="none" stroke="rgba(255, 255, 255, 0.1)" stroke-width="1" stroke-dasharray="3 3" />
+
+                <!-- Fixed 12-O'Clock Camera Viewpoint Sight Cone (Always UP = Where You Are Looking!) -->
+                <polygon points="56,56 33,14 79,14" fill="rgba(0, 210, 211, 0.16)" />
+                <line x1="56" y1="56" x2="56" y2="13" stroke="#00d2d3" stroke-width="1.8" stroke-dasharray="3 2" />
+                <polygon points="56,11 52,18 60,18" fill="#00d2d3" />
+
+                <!-- Rotating Aircraft Airframe Body Silhouette (Shows Plane Heading & Port Guns vs. View!) -->
+                <g id="air-bvv-body-group" transform="rotate(0 56 56)">
+                  <!-- Flight Vector Nose Arrow -->
+                  <polygon points="56,18 52,26 60,26" fill="#f1c40f" />
+                  <g id="air-bvv-shape">
+                    <polygon points="56,24 61,44 88,58 88,64 61,58 59,76 68,83 68,87 56,84 44,87 44,83 53,76 51,58 24,64 24,58 51,44" fill="rgba(241, 196, 15, 0.32)" stroke="#f1c40f" stroke-width="1.5" />
+                  </g>
+                </g>
+
+                <circle cx="56" cy="56" r="3" fill="#00d2d3" />
+                <rect x="8" y="106" width="96" height="16" rx="3" fill="#04080c" stroke="rgba(0, 210, 211, 0.35)" stroke-width="1" />
+                <text id="air-bvv-footer" x="56" y="117" text-anchor="middle" fill="#81ecec" font-family="Consolas, monospace" font-size="6.9" font-weight="900">NOSE 0° &bull; LVL</text>
+              </svg>
+              <div class="air-gauge-caption">BODY VS. VIEW</div>
+            </div>
+          </div>
         </div>
 
         <!-- Bottom Visual Weapon Bay Pylon & Countermeasure Strip (Minimal Text, Visual Icons & Bars) -->
@@ -906,8 +1098,8 @@
 
       <!-- Ticket Economy & Quick Controls Reference Strip (Moved from main combat HUD into [TAB]) -->
       <div id="ticket-economy-strip" style="background:rgba(16,26,36,0.9);border:1px solid rgba(241,196,15,0.35);border-radius:4px;padding:6px 12px;margin-bottom:8px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;">
-        <span>🎟️ <b>SQUAD AAS TICKET ECONOMY (400 START • NO PASSIVE PRINT):</b> INFANTRY <b>-1</b> (0 IF REVIVED) &bull; CAR <b>-5</b> &bull; IFV/APC <b>-10</b> &bull; TANK <b>-15</b> &bull; CAP NEUTRAL <b>+20 🎟️</b> / CAP ENEMY <b>+30 🎟️ (-10 DEF)</b> &bull; BLEED: 3F <b>-6/m</b>, 4F <b>-15/m</b>, 5F <b>-60/m MERCY</b></span>
-        <span style="color:#74b9ff;">⌨️ <b>CONTROLS:</b> [WASD] Move &bull; [C/Z] Crouch/Prone &bull; [E] Enter/Exit Vehicle + Drag Ally &bull; [F] Revive/Heal + Pick Up Ammo + Build Chest Wall &bull; [K] Tactical Map &bull; [F2] FPS</span>
+        <span>🎟️ <b>SQUAD ASSET &amp; CREW REPLACEMENT ECONOMY (800 START):</b> INF <b>-1</b> (0 IF REVIVED) &bull; 🚙 CAR <b>-8 ($350)</b> &bull; 🛡️ IFV/AA <b>-16 ($800)</b> &bull; 🛡️ TANK <b>-24 ($1.3K)</b> &bull; ✈️ PLANE <b>-30 ($1.5K)</b> &bull; 🦇 B-2 <b>-45 ($2.5K)</b> &bull; CAP <b>+20/+30 🎟️</b></span>
+        <span style="color:#74b9ff;">⌨️ <b>CONTROLS:</b> [WASD] Move &bull; [C] Cockpit/3P Cam (Veh) / Crouch &bull; [E] Vehicle/Drag &bull; [F] Revive/Build/Orbit &bull; [J] Infantry CAS &bull; [L] Base/FOB Gunsmith &bull; [K] Map</span>
       </div>
 
       <!-- TIER 1: WHICH SIDE IS DOING BETTER (FACTION COMPARISON) -->
@@ -915,18 +1107,18 @@
       <div id="sb-side-comparison" class="sb-side-comparison"></div>
 
       <!-- TIER 2: WHICH SQUAD IS DOING BETTER (TACTICAL SQUAD LEADERBOARD) -->
-      <div class="sb-section-label">2. TACTICAL SQUAD RANKINGS — COMBINED SQUAD SCORE, REVIVES &amp; ANTI-ARMOR (WHICH SQUAD IS DOING BETTER)</div>
+      <div class="sb-section-label">2. TACTICAL SQUAD RANKINGS — COMBINED SQUAD SCORE, REVIVES &amp; PLANES/TANKS/CARS DESTROYED</div>
       <div id="sb-squad-leaderboard" class="sb-squad-grid"></div>
 
       <!-- TIER 3: WHICH INDIVIDUAL SOLDIER IS DOING BETTER -->
-      <div class="sb-section-label">3. INDIVIDUAL SOLDIER LEADERBOARD (RANKED BY PERSONAL COMBAT &amp; SUPPORT SCORE)</div>
+      <div class="sb-section-label">3. INDIVIDUAL SOLDIER LEADERBOARD (PLANE, TANK &amp; CAR KILLS COUNTED SEPARATELY)</div>
       <div class="sb-columns">
         <div class="sb-team-col">
           <h3 class="us-title" id="sb-us-header">US FORCES — INDIVIDUAL RANKINGS</h3>
           <div class="sb-scroll">
             <table>
               <thead>
-                <tr><th>#</th><th>SOLDIER</th><th>SQD</th><th>ROLE</th><th>K</th><th>D</th><th>REV</th><th>VEH</th><th title="War Crimes (Medics Killed)" style="color:#ff7675">CRM</th><th>SCORE</th></tr>
+                <tr><th>#</th><th>SOLDIER</th><th>SQD</th><th>ROLE</th><th>K</th><th>D</th><th>REV</th><th title="Aircraft Shot Down" style="color:#00d2d3">✈️AIR</th><th title="Tanks, IFVs &amp; SPAAGs Destroyed" style="color:#f39c12">🛡️TNK</th><th title="Armored Cars &amp; Light Vehicles Destroyed" style="color:#ffeaa7">🚙CAR</th><th title="War Crimes (Medics Killed)" style="color:#ff7675">CRM</th><th>SCORE</th></tr>
               </thead>
               <tbody id="sb-us-body"></tbody>
             </table>
@@ -937,7 +1129,7 @@
           <div class="sb-scroll">
             <table>
               <thead>
-                <tr><th>#</th><th>SOLDIER</th><th>SQD</th><th>ROLE</th><th>K</th><th>D</th><th>REV</th><th>VEH</th><th title="War Crimes (Medics Killed)" style="color:#ff7675">CRM</th><th>SCORE</th></tr>
+                <tr><th>#</th><th>SOLDIER</th><th>SQD</th><th>ROLE</th><th>K</th><th>D</th><th>REV</th><th title="Aircraft Shot Down" style="color:#00d2d3">✈️AIR</th><th title="Tanks, IFVs &amp; SPAAGs Destroyed" style="color:#f39c12">🛡️TNK</th><th title="Armored Cars &amp; Light Vehicles Destroyed" style="color:#ffeaa7">🚙CAR</th><th title="War Crimes (Medics Killed)" style="color:#ff7675">CRM</th><th>SCORE</th></tr>
               </thead>
               <tbody id="sb-ru-body"></tbody>
             </table>
@@ -1078,7 +1270,8 @@
               <option value="SQUAD_AI">32 (16v16)</option>
             </select>
           </label>
-          <button type="button" id="deploy-gunsmith-btn" class="deploy-tool-btn armory" title="Customize Weapons, Attachments, Body Armor &amp; Armory Cases [L]">🔧 [L] Armory (<span id="deploy-cash-val">$600</span>)</button>
+          <button type="button" id="deploy-doctrine-toggle-btn" class="deploy-tool-btn active" style="border:1px solid #2ecc71;color:#7bed9f;background:rgba(46,204,113,0.18);" title="Toggle Squad Specialized Licenses, Engineer-Only Walls &amp; Base/FOB Gunsmith ON/OFF">🎖️ Doctrine: ON</button>
+          <button type="button" id="deploy-gunsmith-btn" class="deploy-tool-btn armory" title="Customize Weapons, 16 Optics, Attachments, Body Armor &amp; Armory Cases [L]">🔧 [L] Armory (<span id="deploy-cash-val">$600</span>)</button>
           <button type="button" id="deploy-backpack-btn" class="deploy-tool-btn backpack" title="Open Backpack &amp; Extracted Loot Warehouse [I]">🎒 [I] Pack</button>
           <button type="button" id="deploy-settings-btn" class="deploy-tool-btn settings" title="Audio Volume, Building Destruction, Friendly Fire &amp; FPS Settings">⚙️ Settings</button>
           <button id="open-main-menu-btn" type="button" class="deploy-nav-btn" title="Return to Era Selection Menu">← Eras</button>
@@ -1210,11 +1403,12 @@
               <button class="rank-btn" data-rank="MEMBER" title="Follow your AI Squad Leader">● Member</button>
             </div>
             <div class="squad-select-row" id="squad-select-row">
-              <button class="squad-btn active" data-squad="ALPHA">Alpha</button>
-              <button class="squad-btn" data-squad="BRAVO" title="Mechanized &amp; Armor Squad">🛡 Bravo</button>
-              <button class="squad-btn" data-squad="CHARLIE">Charlie</button>
-              <button class="squad-btn" data-squad="DELTA">Delta</button>
-              <button class="squad-btn" data-squad="ECHO">Echo</button>
+              <button class="squad-btn active" data-squad="ALPHA" title="Land Assault Infantry Squad">⚔️ Alpha</button>
+              <button class="squad-btn" data-squad="BRAVO" title="Heavy Armor &amp; IFV Squad">🛡 Bravo</button>
+              <button class="squad-btn" data-squad="CHARLIE" title="Anti-Armor &amp; Sapper Squad">🚀 Charlie</button>
+              <button class="squad-btn" data-squad="DELTA" title="Medical &amp; Logistics Squad">➕ Delta</button>
+              <button class="squad-btn" data-squad="ECHO" title="Recon &amp; JTAC Pathfinder Squad">🎯 Echo</button>
+              <button class="squad-btn" data-squad="FALCON" title="Tactical Air Wing / Plane Squad">✈️ Falcon</button>
             </div>
           </div>
         </div>
@@ -1233,9 +1427,9 @@
             <canvas id="deploy-map-canvas" width="400" height="235"></canvas>
           </div>
           <div class="spawn-buttons" id="spawn-buttons">
-            <button class="spawn-btn" data-spawn="BASE">MAIN BASE (+ARMOR &amp; AIR)</button>
+            <button class="spawn-btn active" data-spawn="BASE">MAIN BASE (+ARMOR &amp; AIR)</button>
             <button class="spawn-btn" data-spawn="SQUAD">SQUADMATE (FRONTLINE)</button>
-            <button class="spawn-btn active" data-spawn="A">OBJ A (WEST TOWN)</button>
+            <button class="spawn-btn" data-spawn="A">OBJ A (WEST TOWN)</button>
             <button class="spawn-btn" data-spawn="B">OBJ B (CONTAINERS)</button>
             <button class="spawn-btn" data-spawn="C">OBJ C (RIVER CITY)</button>
             <button class="spawn-btn" data-spawn="D">OBJ D (RADAR HILL)</button>
@@ -1257,6 +1451,6 @@
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=92"></script>
+  <script type="module" src="./src/main.js?v=105"></script>
 </body>
 </html>

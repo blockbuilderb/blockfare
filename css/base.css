@@ -81,8 +81,48 @@ body, html {
   box-shadow: inset 0 0 28px rgba(0, 0, 0, 0.65), 0 0 24px rgba(0, 0, 0, 0.55);
 }
 
-/* Housing shapes per opticType (with integrated Picatinny rail saddle base so no scope ever floats!) */
-#optic-frame.optic-holo .optic-lens {
+/* Housing shapes per opticType (16 CoD / Tarkov Optics + Variable LPVO + FLIR Thermal) */
+#flir-thermal-canvas {
+  display: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+}
+#optic-frame.optic-flir #flir-thermal-canvas {
+  display: block;
+}
+
+#optic-frame.optic-rmr .optic-lens {
+  width: 228px;
+  height: 168px;
+  border: 9px solid #1c2026;
+  border-bottom-width: 16px;
+  border-radius: 26px 26px 8px 8px;
+}
+
+#optic-frame.optic-okp7 .optic-lens {
+  width: 282px;
+  height: 224px;
+  border: 4px solid rgba(35, 42, 48, 0.72);
+  border-bottom: 16px solid #1d2228;
+  border-radius: 50% 50% 6px 6px;
+  background: rgba(80, 255, 160, 0.04);
+}
+
+#optic-frame.optic-uh1 .optic-lens {
+  width: 312px;
+  height: 228px;
+  border: 15px solid #181c22;
+  border-bottom-width: 20px;
+  border-radius: 12px 12px 6px 6px;
+}
+
+#optic-frame.optic-holo .optic-lens,
+#optic-frame.optic-holo3x .optic-lens {
   width: 300px;
   height: 224px;
   border: 14px solid #1b1f24;
@@ -106,7 +146,17 @@ body, html {
   border-radius: 50% 50% 18% 18%;
 }
 
-#optic-frame.optic-acog .optic-lens {
+#optic-frame.optic-prism2x .optic-lens {
+  width: 318px;
+  height: 312px;
+  border: 14px solid #161a1f;
+  border-bottom-width: 19px;
+  border-radius: 50%;
+  background: rgba(120, 220, 255, 0.04);
+}
+
+#optic-frame.optic-acog .optic-lens,
+#optic-frame.optic-elcan4x .optic-lens {
   width: 356px;
   height: 348px;
   border: 16px solid #14171b;
@@ -115,7 +165,26 @@ body, html {
   background: rgba(120, 220, 255, 0.05);
 }
 
-#optic-frame.optic-sniper8x .optic-lens {
+#optic-frame.optic-valday6x .optic-lens,
+#optic-frame.optic-lpvo36 .optic-lens {
+  width: 48vh;
+  height: 48vh;
+  border: 12px solid #14181d;
+  border-radius: 50%;
+  background: rgba(135, 225, 255, 0.04);
+}
+
+#optic-frame.optic-flir .optic-lens {
+  width: 46vh;
+  height: 42vh;
+  border: 14px solid #151a1e;
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgba(18, 28, 26, 0.55);
+}
+
+#optic-frame.optic-sniper8x .optic-lens,
+#optic-frame.optic-sniper12x .optic-lens {
   width: 56vh;
   height: 56vh;
   border: 6px solid #0e1013;
@@ -162,13 +231,146 @@ body, html {
 }
 
 #optic-frame.optic-holo .ret-holo,
+#optic-frame.optic-holo3x .ret-holo3x,
+#optic-frame.optic-uh1 .ret-uh1,
+#optic-frame.optic-rmr .ret-rmr,
+#optic-frame.optic-okp7 .ret-okp7,
 #optic-frame.optic-kobra .ret-kobra,
 #optic-frame.optic-reddot .ret-reddot,
+#optic-frame.optic-prism2x .ret-prism2x,
 #optic-frame.optic-acog .ret-acog,
+#optic-frame.optic-elcan4x .ret-elcan4x,
+#optic-frame.optic-valday6x .ret-valday6x,
+#optic-frame.optic-lpvo36 .ret-lpvo36,
+#optic-frame.optic-flir .ret-flir,
 #optic-frame.optic-sniper8x .ret-sniper8x,
+#optic-frame.optic-sniper12x .ret-sniper12x,
 #optic-frame.optic-rpgSight .ret-rpgSight,
 #optic-frame.optic-iron .ret-iron {
   display: flex;
+  z-index: 2;
+}
+
+.rmr-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #ff9f1a;
+  box-shadow: 0 0 9px #ff9f1a, 0 0 3px #fff;
+}
+
+.okp7-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 52px;
+  height: 52px;
+  transform: translate(-50%, -50%);
+  border: 1.8px solid rgba(46, 255, 110, 0.88);
+  border-top-color: transparent;
+  border-radius: 50%;
+  box-shadow: 0 0 7px rgba(46, 255, 110, 0.65);
+}
+.okp7-chevron {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  border-top: 2.2px solid #2eff6e;
+  border-left: 2.2px solid #2eff6e;
+  transform-origin: 0 0;
+  transform: rotate(45deg);
+  box-shadow: -1px -1px 6px rgba(46, 255, 110, 0.85);
+}
+
+.uh1-ring {
+  position: relative;
+  width: 66px;
+  height: 66px;
+  border: 2px dashed rgba(255, 45, 45, 0.9);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.uh1-tri {
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  color: #ff3333;
+}
+
+.prism-horseshoe {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+  border: 2.4px solid rgba(255, 42, 42, 0.88);
+  border-bottom-color: transparent;
+  border-radius: 50%;
+}
+
+.lpvo-cqb-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 56px;
+  height: 56px;
+  transform: translate(-50%, -50%);
+  border: 2px solid rgba(255, 40, 40, 0.82);
+  border-bottom-color: transparent;
+  border-radius: 50%;
+}
+
+.sniper-stadia.st3 {
+  top: 76%;
+}
+
+.flir-cross-h {
+  position: absolute;
+  top: 50%;
+  left: 12%;
+  right: 12%;
+  height: 1.5px;
+  transform: translateY(-50%);
+  background: rgba(235, 255, 250, 0.85);
+}
+.flir-cross-v {
+  position: absolute;
+  left: 50%;
+  top: 12%;
+  bottom: 12%;
+  width: 1.5px;
+  transform: translateX(-50%);
+  background: rgba(235, 255, 250, 0.85);
+}
+.flir-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 48px;
+  height: 36px;
+  transform: translate(-50%, -50%);
+  border: 1.5px dashed #00ffcc;
+}
+.flir-readout {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  font-weight: 900;
+  color: #00ffcc;
+  letter-spacing: 1px;
 }
 
 /* 1. EOTech Holographic Ring + 1 MOA Dot */
@@ -815,7 +1017,7 @@ body, html {
   text-align: center;
 }
 
-/* Night-Vision Goggles (AN/PVS-14 Green Phosphor) */
+/* Multi-Spectrum Night-Vision (NVG) + Full-Screen White-Hot / Black-Hot FLIR Infrared Sensor Suite */
 #nvg-overlay {
   position: fixed;
   inset: 0;
@@ -830,6 +1032,40 @@ body, html {
   mix-blend-mode: screen;
 }
 
+#nvg-overlay.sensor-whot,
+#nvg-overlay.sensor-bhot {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0) 52%,
+    rgba(4, 8, 12, 0.42) 82%,
+    rgba(2, 5, 8, 0.86) 100%
+  );
+  mix-blend-mode: normal;
+}
+
+#flir-fullscreen-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 3;
+  pointer-events: none;
+  image-rendering: auto;
+}
+
+body.flir-whot-mode #game-container > canvas,
+body.flir-scope-mode #game-container > canvas {
+  filter: grayscale(100%) contrast(158%) brightness(66%);
+}
+
+body.flir-bhot-mode #game-container > canvas {
+  filter: grayscale(100%) invert(94%) contrast(156%) brightness(106%);
+}
+
+body.nvg-green-mode #game-container > canvas {
+  filter: sepia(100%) hue-rotate(72deg) saturate(275%) contrast(122%) brightness(115%);
+}
+
 .nvg-scanlines {
   position: absolute;
   inset: 0;
@@ -838,6 +1074,17 @@ body, html {
     rgba(0, 0, 0, 0) 0px,
     rgba(0, 0, 0, 0) 2px,
     rgba(0, 30, 10, 0.22) 3px
+  );
+}
+
+#nvg-overlay.sensor-whot .nvg-scanlines,
+#nvg-overlay.sensor-bhot .nvg-scanlines {
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0) 0px,
+    rgba(255, 255, 255, 0) 2px,
+    rgba(0, 0, 0, 0.22) 3px,
+    rgba(255, 255, 255, 0.03) 4px
   );
 }
 
@@ -854,4 +1101,20 @@ body, html {
   border: 1px solid #2ed573;
   padding: 3px 12px;
   border-radius: 3px;
+}
+
+#nvg-overlay.sensor-whot .nvg-tag {
+  color: #f5f7fa;
+  background: rgba(8, 12, 16, 0.88);
+  border-color: rgba(245, 247, 250, 0.75);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.25);
+  font-family: Consolas, monospace;
+}
+
+#nvg-overlay.sensor-bhot .nvg-tag {
+  color: #dfe6e9;
+  background: rgba(10, 12, 16, 0.9);
+  border-color: rgba(223, 230, 233, 0.75);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+  font-family: Consolas, monospace;
 }

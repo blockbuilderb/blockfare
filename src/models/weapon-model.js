@@ -18,7 +18,7 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=92';
+import { TEXTURES } from '../assets/textures.js?v=105';
 
 export function createWeaponViewModel(def, team = 'US', custom = {}) {
   const group = new THREE.Group();
@@ -1118,23 +1118,30 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       def.slot === 'secondary' ||
       wId === 'mp443' ||
       wId === 'm9_beretta' ||
+      wId === 'five_seven' ||
       wId === 'usp45' ||
       wId === 'g18' ||
       wId === 'deagle';
-    const isBullpup = wId === 'p90' || wId === 'aug_a3';
+    const isBullpup = wId === 'p90' || wId === 'aug_a3' || wId === 'ash12';
+    const isAsh12 = wId === 'ash12';
     const isAkFamily = wId === 'ak15';
-    const isScar = wId === 'scar_h';
+    const isScar = wId === 'scar_h' || wId === 'mcx_spear';
+    const isMcx = wId === 'mcx_spear';
+    const isHk416 = wId === 'hk416';
     const isAsVal = wId === 'as_val';
+    const isMp5sd = wId === 'mp5sd';
     const isVector = wId === 'vector';
     const isMp7 = wId === 'mp7';
     const isShotgun = wId === 'm1014';
     const isBoxLmg = wId === 'm249' || wId === 'pkp';
     const isSniper = wId === 'sv98' || wId === 'awm';
-    const isDmr = wId === 'mk14';
+    const isDmr = wId === 'mk14' || wId === 'sr25';
 
     const length = isPistol
       ? wId === 'deagle'
         ? 0.32
+        : wId === 'five_seven'
+        ? 0.275
         : 0.26
       : isSniper
       ? 0.88
@@ -1142,12 +1149,18 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       ? 0.82
       : isBoxLmg
       ? 0.76
+      : isAsh12
+      ? 0.58
       : isBullpup
+      ? 0.54
+      : isMp5sd
       ? 0.54
       : isVector || isMp7
       ? 0.46
       : isShotgun
       ? 0.74
+      : isMcx
+      ? 0.71
       : 0.68;
 
     // 1. Sculpted Ergonomic Pistol Grip + Finger Grooves + Trigger Guard + Curved Trigger Blade (on all firearms!)
@@ -1444,14 +1457,60 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       boltKnob.position.set(0.056, 0.018, -0.14);
       group.add(boltKnob);
     } else if (isDmr) {
-      // MK14 EBR: Exposed underbarrel M14 gas cylinder & operating rod + twin EBR chassis stock rails
-      const m14GasCyl = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.011, 0.011, length * 0.42, 8),
+      // MK14 EBR / KAC SR-25: Exposed underbarrel gas block / precision folding DMR bipod
+      if (wId === 'sr25') {
+        const srBipodL = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.0055, 0.0055, 0.14, 6),
+          darkSteelMat
+        );
+        srBipodL.position.set(-0.038, -0.058, -0.22 - length * 0.56);
+        srBipodL.rotation.set(0.42, 0, -0.24);
+        const srBipodR = srBipodL.clone();
+        srBipodR.position.x = 0.038;
+        srBipodR.rotation.z = 0.24;
+        group.add(srBipodL, srBipodR);
+      } else {
+        const m14GasCyl = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.011, 0.011, length * 0.42, 8),
+          darkSteelMat
+        );
+        m14GasCyl.rotation.x = Math.PI / 2;
+        m14GasCyl.position.set(0, -0.008, -0.22 - length * 0.62);
+        group.add(m14GasCyl);
+      }
+    } else if (isHk416) {
+      // HK416A5 CAG: Stepped piston upper rail + Geissele SMR cross-bolts & slim gas block
+      const hkGasReg = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.011, 0.011, 0.042, 8),
         darkSteelMat
       );
-      m14GasCyl.rotation.x = Math.PI / 2;
-      m14GasCyl.position.set(0, -0.008, -0.22 - length * 0.62);
-      group.add(m14GasCyl);
+      hkGasReg.rotation.x = Math.PI / 2;
+      hkGasReg.position.set(0, 0.028, -0.22 - length * 0.66);
+      group.add(hkGasReg);
+    } else if (isMp5sd) {
+      // HK MP5SD6: Ribbed rubberized integral suppressor shroud + classic hooded HK ring front sight
+      for (let r = 0; r < 6; r++) {
+        const sdRib = new THREE.Mesh(
+          new THREE.TorusGeometry(0.026, 0.0035, 8, 16),
+          darkSteelMat
+        );
+        sdRib.position.set(0, 0.01, -0.34 - r * 0.048);
+        group.add(sdRib);
+      }
+      const hkRingHood = new THREE.Mesh(
+        new THREE.TorusGeometry(0.012, 0.0028, 8, 16),
+        darkSteelMat
+      );
+      hkRingHood.position.set(0, 0.046, -0.52);
+      group.add(hkRingHood);
+    } else if (isAsh12) {
+      // ShAK-12 / ASh-12.7x55mm: Tall raised carry-handle rail bridge & massive twin-chamber CQB brake
+      const ashBridge = new THREE.Mesh(
+        new THREE.BoxGeometry(0.036, 0.022, 0.28),
+        accentMat
+      );
+      ashBridge.position.set(0, 0.052, -0.24);
+      group.add(ashBridge);
     }
 
     // 3. MIL-STD-1913 Picatinny Top Rail + Machined Cross-Slot Recoil Lugs (clearly visible in ADS & Inspect!)
@@ -1609,14 +1668,14 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
         g18Selector.position.set(-slideWidth * 0.55, 0, 0.042);
         g18Selector.rotation.x = -0.35;
         pistolSlide.add(g18Selector);
-      } else if (wId === 'usp45') {
-        // HK USP .45 Tactical: Extended threaded barrel with knurled thread protector collar protruding past the slide
+      } else if (wId === 'usp45' || wId === 'five_seven') {
+        // HK USP .45 Tactical / FN Five-seveN MK2: Extended threaded barrel / scalloped front slide profile
         const threadProtector = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.0105, 0.0105, 0.024, 10),
+          new THREE.CylinderGeometry(wId === 'five_seven' ? 0.0085 : 0.0105, wId === 'five_seven' ? 0.0085 : 0.0105, 0.022, 10),
           darkSteelMat
         );
         threadProtector.rotation.x = Math.PI / 2;
-        threadProtector.position.set(0, 0.014, -0.22 - length * 0.88);
+        threadProtector.position.set(0, 0.014, -0.22 - length * 0.86);
         group.add(threadProtector);
       }
 
@@ -1626,11 +1685,11 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     // 5. Handguard & Cylindrical Free-Float Barrel
     const handguard = new THREE.Mesh(
       new THREE.BoxGeometry(
-        isPistol ? 0.032 : 0.058,
-        isPistol ? 0.024 : 0.074,
+        isPistol ? 0.032 : isMp5sd ? 0.052 : 0.058,
+        isPistol ? 0.024 : isMp5sd ? 0.056 : 0.074,
         length * (isPistol ? 0.42 : isBullpup ? 0.34 : 0.48)
       ),
-      accentMat
+      isMcx ? bodyMat : accentMat
     );
     handguard.position.set(
       0,
@@ -1640,7 +1699,7 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     group.add(handguard);
 
     // Handguard cooling slots / M-LOK vents on rifles & SMGs
-    if (!isPistol && !isAsVal) {
+    if (!isPistol && !isAsVal && !isMp5sd) {
       for (let v = 0; v < 3; v++) {
         const ventSlot = new THREE.Mesh(
           new THREE.BoxGeometry(0.061, 0.014, 0.034),
@@ -1652,13 +1711,16 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     }
 
     // True Cylindrical Gun Barrel (`CylinderGeometry`) instead of a square box!
-    const barrelRadius = isAsVal
-      ? 0.022 // Integral suppressor barrel shroud
-      : isSniper || isShotgun
-      ? 0.013
-      : isPistol
-      ? 0.0085
-      : 0.011;
+    const barrelRadius =
+      isAsVal || isMp5sd
+        ? 0.023 // Integral suppressor barrel shroud
+        : isAsh12
+        ? 0.0155
+        : isSniper || isShotgun
+        ? 0.013
+        : isPistol
+        ? 0.0085
+        : 0.011;
     const barrel = new THREE.Mesh(
       new THREE.CylinderGeometry(barrelRadius, barrelRadius, length * 0.52, 10),
       darkSteelMat
@@ -1667,10 +1729,10 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     barrel.position.set(0, 0.014, -0.22 - length * 0.7);
     group.add(barrel);
 
-    if (isSniper) {
-      // Heavy Multi-Baffle Tank-Style Sniper Muzzle Brake (AWM .338 / SV-98M)
+    if (isSniper || (isAsh12 && (!custom || !custom.muzzle || custom.muzzle === 'stock'))) {
+      // Heavy Multi-Baffle Tank-Style Muzzle Brake (AWM .338 / SV-98M / ASh-12.7mm CQB)
       const brake = new THREE.Mesh(
-        new THREE.BoxGeometry(0.036, 0.028, 0.074),
+        new THREE.BoxGeometry(isAsh12 ? 0.042 : 0.036, isAsh12 ? 0.034 : 0.028, 0.074),
         darkSteelMat
       );
       brake.position.set(0, 0.014, -0.22 - length * 0.96);
@@ -1678,7 +1740,7 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
 
       for (let b = 0; b < 2; b++) {
         const bafflePort = new THREE.Mesh(
-          new THREE.BoxGeometry(0.039, 0.014, 0.014),
+          new THREE.BoxGeometry(isAsh12 ? 0.045 : 0.039, 0.015, 0.014),
           bodyMat
         );
         bafflePort.position.set(0, 0.014, -0.22 - length * 0.94 - b * 0.024);
@@ -1686,46 +1748,125 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       }
     }
 
-    if (!isPistol && !isBullpup && !isSniper) {
-      const peqBox = new THREE.Mesh(
-        new THREE.BoxGeometry(0.03, 0.02, 0.072),
-        darkSteelMat
-      );
-      peqBox.position.set(0.028, 0.03, -0.22 - length * 0.46);
-      group.add(peqBox);
+    const gripId = custom && custom.grip ? custom.grip : 'std_grip';
+    const hasLaserMod = gripId === 'match_laser' || gripId === 'mawl_c1';
 
-      const frontGasBlock = new THREE.Mesh(
-        new THREE.BoxGeometry(0.024, 0.038, 0.03),
-        darkSteelMat
-      );
-      frontGasBlock.position.set(0, 0.03, -0.22 - length * 0.64);
-      group.add(frontGasBlock);
+    if (!isPistol && (!isBullpup || hasLaserMod) && !isSniper) {
+      if (gripId === 'mawl_c1') {
+        // BE Meyers MAWL-C1+ offset side-straddling green/IR laser module
+        const mawlBridge = new THREE.Mesh(
+          new THREE.BoxGeometry(0.052, 0.014, 0.068),
+          accentMat
+        );
+        mawlBridge.position.set(0.016, 0.052, -0.22 - length * 0.48);
+        const mawlPod = new THREE.Mesh(
+          new THREE.BoxGeometry(0.026, 0.028, 0.095),
+          darkSteelMat
+        );
+        mawlPod.position.set(0.038, 0.036, -0.22 - length * 0.49);
+        const mawlLens1 = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.0055, 0.0055, 0.006, 10),
+          new THREE.MeshBasicMaterial({ color: 0x00ff88 })
+        );
+        mawlLens1.rotation.x = Math.PI / 2;
+        mawlLens1.position.set(0.038, 0.041, -0.22 - length * 0.49 - 0.049);
+        const mawlLens2 = mawlLens1.clone();
+        mawlLens2.position.y = 0.03;
+        group.add(mawlBridge, mawlPod, mawlLens1, mawlLens2);
+      } else {
+        const peqBox = new THREE.Mesh(
+          new THREE.BoxGeometry(0.03, 0.02, 0.072),
+          darkSteelMat
+        );
+        peqBox.position.set(0.028, 0.03, -0.22 - length * 0.46);
+        group.add(peqBox);
+        if (gripId === 'match_laser') {
+          const peqEmitter = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.005, 0.005, 0.008, 8),
+            new THREE.MeshBasicMaterial({ color: 0x2ecc71 })
+          );
+          peqEmitter.rotation.x = Math.PI / 2;
+          peqEmitter.position.set(0.028, 0.03, -0.22 - length * 0.46 - 0.038);
+          group.add(peqEmitter);
+        }
+      }
+
+      if (!isMp5sd && !isAsVal && !isBullpup) {
+        const frontGasBlock = new THREE.Mesh(
+          new THREE.BoxGeometry(0.024, 0.038, 0.03),
+          darkSteelMat
+        );
+        frontGasBlock.position.set(0, 0.03, -0.22 - length * 0.64);
+        group.add(frontGasBlock);
+      }
     }
 
-    if (!isPistol && !isSniper && wId !== 'p90' && wId !== 'aug_a3') {
-      const foregrip = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.015, 0.017, 0.088, 8),
-        darkSteelMat
-      );
-      foregrip.position.set(0, -0.066, -0.22 - length * 0.42);
-      group.add(foregrip);
-    } else if (isPistol && custom && custom.grip && custom.grip !== 'std_grip') {
+    // Distinct 3D Underbarrel Foregrips (RK-1 45° Cant, Magpul RVG, Angled AFG, Harris Bipod+Grip)
+    if (!isPistol && wId !== 'p90') {
+      const gripZ = -0.22 - length * 0.42;
+      if (gripId === 'rk1_b25u') {
+        // Zenitco RK-1 on B-25U 45° canted rail mount!
+        const b25Mount = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.022, 0.038), darkSteelMat);
+        b25Mount.position.set(-0.016, -0.038, gripZ);
+        b25Mount.rotation.z = -0.68;
+        const rk1Grip = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.015, 0.016, 0.095, 10),
+          darkSteelMat
+        );
+        rk1Grip.position.set(-0.048, -0.068, gripZ);
+        rk1Grip.rotation.z = -0.72;
+        group.add(b25Mount, rk1Grip);
+      } else if (gripId === 'angled_grip') {
+        // Triangular Magpul AFG Angled Foregrip
+        const afgBase = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.016, 0.105), darkSteelMat);
+        afgBase.position.set(0, -0.042, gripZ);
+        const afgRamp = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.024, 0.078), accentMat);
+        afgRamp.position.set(0, -0.056, gripZ + 0.01);
+        afgRamp.rotation.x = 0.36;
+        group.add(afgBase, afgRamp);
+      } else if (gripId === 'bipod_grip') {
+        // Harris Swivel Bipod + Vertical Foregrip Pod
+        const podGrip = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.016, 0.018, 0.092, 8),
+          darkSteelMat
+        );
+        podGrip.position.set(0, -0.068, gripZ + 0.02);
+        const hLegL = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.0055, 0.0055, 0.135, 6),
+          darkSteelMat
+        );
+        hLegL.position.set(-0.036, -0.065, gripZ - 0.055);
+        hLegL.rotation.set(0.38, 0, -0.28);
+        const hLegR = hLegL.clone();
+        hLegR.position.x = 0.036;
+        hLegR.rotation.z = 0.28;
+        group.add(podGrip, hLegL, hLegR);
+      } else if (gripId === 'vert_foregrip' || (!isSniper && wId !== 'aug_a3')) {
+        const foregrip = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.015, 0.017, gripId === 'vert_foregrip' ? 0.096 : 0.086, 8),
+          gripId === 'vert_foregrip' ? accentMat : darkSteelMat
+        );
+        foregrip.position.set(0, -0.066, gripZ);
+        group.add(foregrip);
+      }
+    } else if (isPistol && gripId !== 'std_grip') {
       const laserBox = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.026, 0.068), darkSteelMat);
       laserBox.position.set(0, -0.016, -0.22 - length * 0.45);
       group.add(laserBox);
-      if (custom.grip === 'match_laser') {
+      if (hasLaserMod) {
         const laserLens = new THREE.Mesh(
           new THREE.BoxGeometry(0.011, 0.011, 0.008),
-          new THREE.MeshBasicMaterial({ color: 0x2ecc71 })
+          new THREE.MeshBasicMaterial({ color: gripId === 'mawl_c1' ? 0x00ff88 : 0x2ecc71 })
         );
         laserLens.position.set(0, -0.016, -0.22 - length * 0.45 - 0.036);
         group.add(laserLens);
       }
     }
 
-    // 6. 3D Muzzle Attachment (Flash Hider, Compensator, or SOCOM Silencer)
+    // 6. 3D Muzzle Attachment (Flash Hider, Warden Blast, Compensator, Lantac Dragon, SOCOM Silencer, KAC QDC Suppressor)
+    const rawMuzzle = custom && custom.muzzle ? custom.muzzle : 'stock';
     const muzzleId =
-      wId === 'as_val' ? 'silencer' : custom && custom.muzzle ? custom.muzzle : 'stock';
+      (wId === 'as_val' || wId === 'mp5sd') && rawMuzzle === 'stock' ? 'integral' : rawMuzzle;
     const barrelTipZ = -0.22 - length * 0.94;
     if (muzzleId === 'flash_hider' || muzzleId === 'compensator') {
       const fhMesh = new THREE.Mesh(
@@ -1741,19 +1882,58 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       fhMesh.position.set(0, 0.014, barrelTipZ - 0.03);
       fhMesh.name = 'muzzleAttachmentMesh';
       group.add(fhMesh);
-    } else if (muzzleId === 'silencer') {
-      const silLen = isPistol ? 0.14 : 0.21;
+    } else if (muzzleId === 'lantac_dragon') {
+      const brakeGroup = new THREE.Group();
+      brakeGroup.name = 'muzzleAttachmentMesh';
+      const dragonBody = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.026, 0.092), darkSteelMat);
+      dragonBody.position.set(0, 0.014, barrelTipZ - 0.038);
+      brakeGroup.add(dragonBody);
+      for (let g = 0; g < 3; g++) {
+        const gill = new THREE.Mesh(new THREE.BoxGeometry(0.031, 0.012, 0.01), bodyMat);
+        gill.position.set(0, 0.014, barrelTipZ - 0.02 - g * 0.022);
+        brakeGroup.add(gill);
+      }
+      group.add(brakeGroup);
+    } else if (muzzleId === 'warden_blast') {
+      const wardenMat = new THREE.MeshStandardMaterial({
+        color: isPureGold ? 0xffd32a : isPureBlue ? 0x00d2d3 : 0x7c6848,
+        roughness: 0.42,
+        metalness: 0.55
+      });
+      const wardenCan = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.026, 0.024, 0.095, 12),
+        wardenMat
+      );
+      wardenCan.rotation.x = Math.PI / 2;
+      wardenCan.position.set(0, 0.014, barrelTipZ - 0.042);
+      wardenCan.name = 'muzzleAttachmentMesh';
+      group.add(wardenCan);
+    } else if (muzzleId === 'silencer' || muzzleId === 'qdc_suppressor') {
+      const isQdc = muzzleId === 'qdc_suppressor';
+      const silLen = isPistol ? (isQdc ? 0.165 : 0.14) : isQdc ? 0.245 : 0.21;
+      const silRad = isQdc ? 0.0275 : 0.025;
+      const silGroup = new THREE.Group();
+      silGroup.name = 'muzzleAttachmentMesh';
       const silMesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.025, 0.025, silLen, 10),
+        new THREE.CylinderGeometry(silRad, silRad, silLen, 12),
         darkSteelMat
       );
       silMesh.rotation.x = Math.PI / 2;
       silMesh.position.set(0, 0.014, barrelTipZ - silLen * 0.45);
-      silMesh.name = 'muzzleAttachmentMesh';
-      group.add(silMesh);
+      silGroup.add(silMesh);
+      if (isQdc) {
+        const qdCollar = new THREE.Mesh(
+          new THREE.CylinderGeometry(silRad * 1.12, silRad * 1.12, 0.038, 12),
+          accentMat
+        );
+        qdCollar.rotation.x = Math.PI / 2;
+        qdCollar.position.set(0, 0.014, barrelTipZ - 0.012);
+        silGroup.add(qdCollar);
+      }
+      group.add(silGroup);
     }
 
-    // 7. Weapon-Specific Magazine Geometry (P90 Top Mag, AUG Bullpup Rear Mag, AK Curved Banana Mag, Vector Front Angle Mag, Box LMG)
+    // 7. Weapon-Specific Magazine Geometry (P90 Top Mag, AUG/ASh-12 Bullpup Rear Mag, AK/MP5SD Curved Mag, Jungle Taped, Quad-60, Drum)
     const magId = custom && custom.magazine ? custom.magazine : 'std_mag';
     const mag = new THREE.Group();
     const brassMat = new THREE.MeshStandardMaterial({
@@ -1772,7 +1952,6 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     let baseMagRotX = -0.18;
 
     if (wId === 'p90') {
-      // FN P90: Translucent Top-Mounted Horizontal 50-Round Magazine + Visible Internal 5.7x28mm Brass Strip & Rotary Turret!
       const p90MagMat = new THREE.MeshStandardMaterial({
         color: isPureGold ? 0xffd32a : isPureBlue ? 0x00d2d3 : 0x3b3228,
         roughness: 0.25,
@@ -1798,29 +1977,35 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
         ? wId === 'g18'
           ? 0.135
           : 0.092
-        : isSniper || isDmr || isScar
-        ? 0.13
+        : isSniper || isDmr || isScar || isAsh12
+        ? 0.14
         : 0.175;
-      const baseMagWidth = isBoxLmg ? 0.115 : isPistol ? 0.026 : 0.038;
-      const magDepth = isPistol ? 0.038 : isSniper || isDmr || isScar ? 0.078 : 0.066;
+      const baseMagWidth = isBoxLmg ? 0.115 : isPistol ? 0.026 : isMp5sd ? 0.028 : 0.038;
+      const magDepth = isPistol ? 0.038 : isSniper || isDmr || isScar || isAsh12 ? 0.078 : isMp5sd ? 0.048 : 0.066;
       const magHeight =
         magId === 'ext_mag'
           ? baseMagHeight * 1.3
+          : magId === 'quad_60'
+          ? baseMagHeight * 1.24
           : magId === 'drum_mag'
           ? baseMagHeight * 1.15
           : baseMagHeight;
-      const magWidth = magId === 'drum_mag' ? Math.max(0.095, baseMagWidth * 1.9) : baseMagWidth;
+      const magWidth =
+        magId === 'drum_mag'
+          ? Math.max(0.095, baseMagWidth * 1.9)
+          : magId === 'quad_60'
+          ? baseMagWidth * 1.48
+          : baseMagWidth;
 
-      if (isAkFamily) {
-        // AK-15: 2-segment curved banana magazine + flared polymer floorplate
+      if (isAkFamily || isMp5sd) {
         const upperMag = new THREE.Mesh(
           new THREE.BoxGeometry(magWidth, magHeight * 0.55, magDepth),
-          accentMat
+          isMp5sd ? darkSteelMat : accentMat
         );
         upperMag.position.set(0, magHeight * 0.22, 0);
         const lowerMag = new THREE.Mesh(
           new THREE.BoxGeometry(magWidth, magHeight * 0.58, magDepth * 0.95),
-          accentMat
+          isMp5sd ? darkSteelMat : accentMat
         );
         lowerMag.position.set(0, -magHeight * 0.24, -0.022);
         lowerMag.rotation.x = -0.28;
@@ -1844,8 +2029,25 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
         mag.add(magBody, magBaseplate);
       }
 
+      if (magId === 'jungle_taped' && !isPistol && !isBoxLmg) {
+        // Second coupled magazine + blue tactical tape bands
+        const tapeMat = new THREE.MeshStandardMaterial({ color: 0x1d6fa5, roughness: 0.65 });
+        const twinMag = new THREE.Mesh(
+          new THREE.BoxGeometry(magWidth * 0.95, magHeight * 0.95, magDepth * 0.95),
+          darkSteelMat
+        );
+        twinMag.position.set(magWidth * 1.18, -0.018, 0.005);
+        const tapeBand1 = new THREE.Mesh(
+          new THREE.BoxGeometry(magWidth * 2.35, 0.018, magDepth * 1.08),
+          tapeMat
+        );
+        tapeBand1.position.set(magWidth * 0.58, -magHeight * 0.12, 0);
+        const tapeBand2 = tapeBand1.clone();
+        tapeBand2.position.y = -magHeight * 0.34;
+        mag.add(twinMag, tapeBand1, tapeBand2);
+      }
+
       if (isBoxLmg) {
-        // Visible brass disintegrating-link ammo belt feeding from LMG box into receiver
         const belt = new THREE.Mesh(new THREE.BoxGeometry(0.042, 0.075, 0.052), brassMat);
         belt.position.set(-0.045, magHeight * 0.45, 0);
         belt.rotation.z = -0.35;
@@ -1864,7 +2066,7 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       baseMagY = (isPistol ? -0.078 : -0.105) - (magHeight - baseMagHeight) * 0.4;
       baseMagZ = isPistol
         ? -0.195
-        : wId === 'aug_a3'
+        : wId === 'aug_a3' || isAsh12
         ? -0.055 // Bullpup rear magazine behind pistol grip!
         : isMp7
         ? -0.155 // MP7 grip-fed magazine!
@@ -1875,7 +2077,7 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
         ? 0.22
         : isVector
         ? 0.26
-        : isScar || isSniper || isDmr
+        : isScar || isSniper || isDmr || isAsh12
         ? 0.0
         : -0.18;
     }
@@ -1903,14 +2105,42 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     bulletGroup.name = 'packingBulletMesh';
     group.add(bulletGroup);
 
-    // 8. 3D BARREL IRON SIGHTS vs. MOUNTED 3D OPTIC HOUSING
-    const activeOptic =
-      custom && custom.optic && custom.optic !== 'factory' ? custom.optic : def.opticType;
+    // 8. 3D BARREL IRON SIGHTS vs. MOUNTED 3D OPTIC HOUSING (16 CoD / Tarkov Optics + 45° Canted Dot!)
+    const OPTIC_ID_MAP = {
+      rmr_mini: 'rmr',
+      rmr: 'rmr',
+      reddot: 'reddot',
+      kobra: 'kobra',
+      okp7: 'okp7',
+      holo: 'holo',
+      vortex_uh1: 'uh1',
+      uh1: 'uh1',
+      prism_2x: 'prism2x',
+      prism2x: 'prism2x',
+      holo_g33: 'holo3x',
+      holo3x: 'holo3x',
+      acog: 'acog',
+      elcan_dr: 'elcan4x',
+      elcan4x: 'elcan4x',
+      valday_1_6x: 'valday6x',
+      valday6x: 'valday6x',
+      vudu_3_6x: 'lpvo36',
+      lpvo36: 'lpvo36',
+      flir_thermal: 'flir',
+      flir: 'flir',
+      sniper8x: 'sniper8x',
+      nightforce_12x: 'sniper12x',
+      sniper12x: 'sniper12x'
+    };
+    const rawOpticKey =
+      def.opticType ||
+      (custom && custom.optic && custom.optic !== 'factory' ? custom.optic : null);
+    const activeOptic = rawOpticKey ? OPTIC_ID_MAP[rawOpticKey] || rawOpticKey : null;
 
     if (!activeOptic) {
       const ironGroup = new THREE.Group();
       ironGroup.name = 'ironSightGroup';
-      const sightY = isPistol ? 0.052 : 0.06;
+      const sightY = isPistol ? 0.052 : isAsh12 ? 0.068 : 0.06;
       const rearZ = isPistol ? -0.145 : -0.14;
       const frontZ = isPistol ? -0.3 : -0.22 - length * 0.64;
 
@@ -1966,64 +2196,309 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       );
       group.add(ironGroup);
     } else {
-      const mountY = isPistol ? 0.044 : 0.048;
+      const isLongScope =
+        activeOptic === 'valday6x' ||
+        activeOptic === 'lpvo36' ||
+        activeOptic === 'sniper8x' ||
+        activeOptic === 'sniper12x';
+      const isMidPrism =
+        activeOptic === 'prism2x' || activeOptic === 'acog' || activeOptic === 'elcan4x';
+      const isHoloFam =
+        activeOptic === 'holo' || activeOptic === 'uh1' || activeOptic === 'holo3x';
+      const isFlir = activeOptic === 'flir';
+
+      const mountY = isPistol ? 0.044 : isAsh12 ? 0.056 : 0.048;
       const mountZ = isPistol ? -0.21 : -0.22;
       const clampW = isPistol ? 0.032 : 0.046;
       const clampH = isPistol ? 0.008 : 0.011;
-      const clampD =
-        activeOptic === 'acog'
-          ? 0.095
-          : activeOptic === 'sniper8x' || def.isScoped
-          ? 0.16
-          : isPistol
-          ? 0.044
-          : 0.068;
+      const clampD = isLongScope || isFlir
+        ? 0.165
+        : activeOptic === 'holo3x'
+        ? 0.135
+        : isMidPrism
+        ? 0.098
+        : isPistol
+        ? 0.042
+        : 0.068;
 
-      const mountBase = new THREE.Mesh(new THREE.BoxGeometry(clampW, clampH, clampD), bodyMat);
+      const mountBase = new THREE.Mesh(new THREE.BoxGeometry(clampW, clampH, clampD), darkSteelMat);
       mountBase.position.set(0, mountY + clampH * 0.5, mountZ);
       mountBase.name = 'opticMountBase';
       group.add(mountBase);
 
       const sightGroup = new THREE.Group();
-      sightGroup.position.set(0, isPistol ? 0.064 : 0.082, mountZ);
+      sightGroup.position.set(0, isPistol ? 0.064 : isAsh12 ? 0.088 : 0.082, mountZ);
       sightGroup.name = 'opticSightGroup';
 
-      const depth =
-        activeOptic === 'acog'
-          ? 0.13
-          : activeOptic === 'sniper8x' || def.isScoped
-          ? 0.26
-          : isPistol
-          ? 0.048
-          : 0.075;
-      const frameW = isPistol ? 0.038 : 0.054;
-      const frameH = isPistol ? 0.032 : 0.046;
-      const wallT = isPistol ? 0.005 : 0.0065;
-
-      const baseBar = new THREE.Mesh(new THREE.BoxGeometry(frameW, wallT, depth), bodyMat);
-      baseBar.position.y = -frameH / 2;
-
-      const topBar = new THREE.Mesh(new THREE.BoxGeometry(frameW, wallT, depth), bodyMat);
-      topBar.position.y = frameH / 2;
-
-      const leftWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, frameH, depth), bodyMat);
-      leftWall.position.x = -frameW / 2;
-
-      const rightWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, frameH, depth), bodyMat);
-      rightWall.position.x = frameW / 2;
-
       const glassMat = new THREE.MeshBasicMaterial({
-        color: 0x55ccff,
+        color: activeOptic === 'okp7' ? 0x2ecc71 : 0x55ccff,
         transparent: true,
-        opacity: 0.12,
+        opacity: activeOptic === 'okp7' ? 0.18 : 0.14,
         depthWrite: false
       });
-      const lens = new THREE.Mesh(
-        new THREE.BoxGeometry(frameW - wallT * 2, frameH - wallT * 2, 0.002),
-        glassMat
-      );
 
-      sightGroup.add(baseBar, topBar, leftWall, rightWall, lens);
+      if (activeOptic === 'rmr' || activeOptic === 'okp7') {
+        // Ultra-compact open-top Trijicon RMR / Tarkov OKP-7 rimless green reflex
+        const basePlate = new THREE.Mesh(
+          new THREE.BoxGeometry(isPistol ? 0.032 : 0.04, 0.007, 0.044),
+          darkSteelMat
+        );
+        basePlate.position.y = -0.016;
+        sightGroup.add(basePlate);
+        if (activeOptic === 'okp7') {
+          // Rimless left-side curved arm + floating green reflector lens
+          const sideArm = new THREE.Mesh(
+            new THREE.BoxGeometry(0.006, 0.028, 0.036),
+            darkSteelMat
+          );
+          sideArm.position.set(-0.018, -0.004, 0);
+          const rimlessGlass = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.018, 0.018, 0.0025, 16),
+            glassMat
+          );
+          rimlessGlass.rotation.x = Math.PI / 2;
+          rimlessGlass.position.set(0, 0.002, -0.012);
+          sightGroup.add(sideArm, rimlessGlass);
+        } else {
+          // RMR sculpted owl-ear open-top wings
+          const wingL = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.024, 0.028), darkSteelMat);
+          wingL.position.set(-0.016, -0.003, -0.006);
+          const wingR = wingL.clone();
+          wingR.position.x = 0.016;
+          const lens = new THREE.Mesh(new THREE.BoxGeometry(0.027, 0.02, 0.002), glassMat);
+          lens.position.set(0, -0.002, -0.014);
+          sightGroup.add(wingL, wingR, lens);
+        }
+      } else if (isHoloFam) {
+        // Boxy EOTech EXPS3 / Vortex AMG UH-1 Gen II armored hood (+ cylindrical G33 flip magnifier for holo3x!)
+        const holoZ = activeOptic === 'holo3x' ? -0.038 : 0;
+        const hoodLen = activeOptic === 'uh1' ? 0.088 : 0.072;
+        const hoodMat = activeOptic === 'uh1' ? accentMat : bodyMat;
+        const frameW = isPistol ? 0.038 : 0.054;
+        const frameH = isPistol ? 0.032 : 0.046;
+        const wallT = 0.006;
+
+        const baseBar = new THREE.Mesh(new THREE.BoxGeometry(frameW, wallT, hoodLen), hoodMat);
+        baseBar.position.set(0, -frameH / 2, holoZ);
+        const topBar = new THREE.Mesh(new THREE.BoxGeometry(frameW, wallT, hoodLen), hoodMat);
+        topBar.position.set(0, frameH / 2, holoZ);
+        const leftW = new THREE.Mesh(new THREE.BoxGeometry(wallT, frameH, hoodLen), hoodMat);
+        leftW.position.set(-frameW / 2, 0, holoZ);
+        const rightW = new THREE.Mesh(new THREE.BoxGeometry(wallT, frameH, hoodLen), hoodMat);
+        rightW.position.set(frameW / 2, 0, holoZ);
+        const lens = new THREE.Mesh(
+          new THREE.BoxGeometry(frameW - wallT * 2, frameH - wallT * 2, 0.002),
+          glassMat
+        );
+        lens.position.z = holoZ;
+        sightGroup.add(baseBar, topBar, leftW, rightW, lens);
+
+        if (activeOptic === 'holo3x') {
+          // Cylindrical G33 3x Flip-to-Side Magnifier behind EOTech hood!
+          const g33Tube = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.02, 0.021, 0.068, 14),
+            darkSteelMat
+          );
+          g33Tube.rotation.x = Math.PI / 2;
+          g33Tube.position.set(0, 0.002, 0.042);
+          const g33Hinge = new THREE.Mesh(
+            new THREE.BoxGeometry(0.018, 0.016, 0.026),
+            accentMat
+          );
+          g33Hinge.position.set(0.022, -0.016, 0.042);
+          sightGroup.add(g33Tube, g33Hinge);
+        }
+      } else if (isMidPrism) {
+        // Prism 2.0x / Trijicon ACOG TA31 (with fiber-optic strip) / Elcan Specter-DR (chunky FDE housing + throw lever)
+        const prismMat =
+          activeOptic === 'elcan4x'
+            ? new THREE.MeshStandardMaterial({
+                color: isPureGold ? 0xffd32a : isPureBlue ? 0x0652dd : 0x6b5d45,
+                roughness: 0.45,
+                metalness: 0.5
+              })
+            : darkSteelMat;
+        const tubeLen = activeOptic === 'prism2x' ? 0.095 : 0.135;
+        const mainCyl = new THREE.Mesh(
+          new THREE.CylinderGeometry(
+            activeOptic === 'elcan4x' ? 0.025 : 0.021,
+            0.02,
+            tubeLen,
+            12
+          ),
+          prismMat
+        );
+        mainCyl.rotation.x = Math.PI / 2;
+        sightGroup.add(mainCyl);
+
+        if (activeOptic === 'acog') {
+          // Iconic Trijicon ACOG glowing red/amber fiber-optic light collector tube on top
+          const fiberStrip = new THREE.Mesh(
+            new THREE.BoxGeometry(0.006, 0.006, 0.072),
+            new THREE.MeshBasicMaterial({ color: 0xff3b30 })
+          );
+          fiberStrip.position.set(0, 0.023, -0.01);
+          sightGroup.add(fiberStrip);
+        } else if (activeOptic === 'elcan4x') {
+          // Elcan Specter-DR armored saddle + side 1x/4x magnification throw lever
+          const saddle = new THREE.Mesh(new THREE.BoxGeometry(0.054, 0.036, 0.088), prismMat);
+          const lever = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.008, 0.012), darkSteelMat);
+          lever.position.set(-0.032, -0.006, 0.01);
+          sightGroup.add(saddle, lever);
+        } else {
+          // Primary Arms GLX 2x top elevation cap
+          const cap = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.009, 0.009, 0.012, 10),
+            accentMat
+          );
+          cap.position.set(0, 0.023, 0);
+          sightGroup.add(cap);
+        }
+      } else if (isFlir) {
+        // Trijicon REAP-IR / FLIR Thermal Imager: ruggedized boxy body + rubber eyecup + glowing gold/amber germanium lens!
+        const flirBody = new THREE.Mesh(
+          new THREE.BoxGeometry(0.056, 0.048, 0.155),
+          darkSteelMat
+        );
+        const eyecup = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.022, 0.019, 0.045, 12),
+          accentMat
+        );
+        eyecup.rotation.x = Math.PI / 2;
+        eyecup.position.set(0, 0, 0.095);
+        const objBezel = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.026, 0.026, 0.028, 14),
+          darkSteelMat
+        );
+        objBezel.rotation.x = Math.PI / 2;
+        objBezel.position.set(0, 0, -0.088);
+        const germaniumLens = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.022, 0.022, 0.005, 14),
+          new THREE.MeshStandardMaterial({
+            color: 0xff9f1a,
+            emissive: 0x994d00,
+            roughness: 0.12,
+            metalness: 0.92
+          })
+        );
+        germaniumLens.rotation.x = Math.PI / 2;
+        germaniumLens.position.set(0, 0, -0.101);
+        sightGroup.add(flirBody, eyecup, objBezel, germaniumLens);
+      } else if (isLongScope) {
+        // Stepped cylindrical LPVO (Valday 1-6x / Vudu 3-6x) & High-Power Sniper Scope (Razor 8x / Nightforce ATACR 6-12x)
+        const isHeavySniper = activeOptic === 'sniper8x' || activeOptic === 'sniper12x';
+        const scopeMat =
+          activeOptic === 'lpvo36' || activeOptic === 'sniper8x'
+            ? new THREE.MeshStandardMaterial({
+                color: isPureGold ? 0xffd32a : isPureBlue ? 0x0652dd : 0x5e493a,
+                roughness: 0.36,
+                metalness: 0.62
+              })
+            : darkSteelMat;
+        const tubeLen = activeOptic === 'sniper12x' ? 0.275 : isHeavySniper ? 0.245 : 0.195;
+        const mainTube = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.016, 0.016, tubeLen, 14),
+          scopeMat
+        );
+        mainTube.rotation.x = Math.PI / 2;
+
+        // Ocular bell + magnification throw lever fin
+        const ocularBell = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.022, 0.021, 0.056, 14),
+          scopeMat
+        );
+        ocularBell.rotation.x = Math.PI / 2;
+        ocularBell.position.z = tubeLen * 0.42;
+
+        const throwLever = new THREE.Mesh(
+          new THREE.BoxGeometry(0.006, 0.024, 0.008),
+          accentMat
+        );
+        throwLever.position.set(-0.02, 0.014, tubeLen * 0.32);
+        throwLever.rotation.z = 0.55;
+
+        // Objective bell (flared 50mm/56mm on sniper8x/12x, sleek 28mm/30mm on LPVOs)
+        const objRad = activeOptic === 'sniper12x' ? 0.029 : isHeavySniper ? 0.026 : 0.019;
+        const objBell = new THREE.Mesh(
+          new THREE.CylinderGeometry(objRad, 0.017, isHeavySniper ? 0.075 : 0.048, 14),
+          scopeMat
+        );
+        objBell.rotation.x = Math.PI / 2;
+        objBell.position.z = -tubeLen * 0.44;
+
+        // Central elevation & windage turrets + dual scope rings
+        const elevTurret = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.011, 0.011, 0.018, 10),
+          darkSteelMat
+        );
+        elevTurret.position.set(0, 0.021, 0);
+        const windTurret = elevTurret.clone();
+        windTurret.rotation.z = Math.PI / 2;
+        windTurret.position.set(0.021, 0, 0);
+
+        const ringRear = new THREE.Mesh(
+          new THREE.BoxGeometry(0.038, 0.036, 0.018),
+          darkSteelMat
+        );
+        ringRear.position.set(0, -0.006, 0.046);
+        const ringFront = ringRear.clone();
+        ringFront.position.z = -0.048;
+
+        sightGroup.add(
+          mainTube,
+          ocularBell,
+          throwLever,
+          objBell,
+          elevTurret,
+          windTurret,
+          ringRear,
+          ringFront
+        );
+      } else {
+        // Aimpoint Micro T-2 (`reddot`) / Kobra EKP-8-18 (`kobra`)
+        const depth = isPistol ? 0.048 : 0.072;
+        const frameW = isPistol ? 0.036 : 0.048;
+        const frameH = isPistol ? 0.032 : 0.042;
+        const wallT = isPistol ? 0.005 : 0.006;
+
+        const baseBar = new THREE.Mesh(new THREE.BoxGeometry(frameW, wallT, depth), bodyMat);
+        baseBar.position.y = -frameH / 2;
+        const leftWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, frameH, depth), bodyMat);
+        leftWall.position.x = -frameW / 2;
+        const rightWall = new THREE.Mesh(new THREE.BoxGeometry(wallT, frameH, depth), bodyMat);
+        rightWall.position.x = frameW / 2;
+        const lens = new THREE.Mesh(
+          new THREE.BoxGeometry(frameW - wallT * 2, frameH - wallT * 2, 0.002),
+          glassMat
+        );
+        sightGroup.add(baseBar, leftWall, rightWall, lens);
+        if (activeOptic !== 'kobra') {
+          const topBar = new THREE.Mesh(new THREE.BoxGeometry(frameW, wallT, depth), bodyMat);
+          topBar.position.y = frameH / 2;
+          sightGroup.add(topBar);
+        }
+      }
+
+      // 45° Canted Micro Red-Dot Housing on the right 45° offset rail when `def.hasCantedSight` is active!
+      if (!isPistol && def.hasCantedSight && (isLongScope || isMidPrism || isFlir)) {
+        const cantedGroup = new THREE.Group();
+        cantedGroup.name = 'cantedMicroSightGroup';
+        cantedGroup.position.set(0.036, -0.012, -0.055);
+        cantedGroup.rotation.z = -Math.PI / 4;
+        const cantArm = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.012, 0.032), darkSteelMat);
+        const cantHoodL = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.018, 0.024), darkSteelMat);
+        cantHoodL.position.set(-0.011, 0.012, 0);
+        const cantHoodR = cantHoodL.clone();
+        cantHoodR.position.x = 0.011;
+        const cantDot = new THREE.Mesh(
+          new THREE.BoxGeometry(0.0035, 0.0035, 0.003),
+          new THREE.MeshBasicMaterial({ color: 0xff3b30 })
+        );
+        cantDot.position.set(0, 0.013, 0);
+        cantedGroup.add(cantArm, cantHoodL, cantHoodR, cantDot);
+        sightGroup.add(cantedGroup);
+      }
+
       group.add(sightGroup);
     }
 
@@ -2051,7 +2526,16 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       depthWrite: false
     });
     const flash = new THREE.Mesh(new THREE.BoxGeometry(0.088, 0.088, 0.088), flashMat);
-    const extraMuzzleLen = muzzleId === 'silencer' ? 0.18 : muzzleId === 'flash_hider' ? 0.05 : 0;
+    const extraMuzzleLen =
+      muzzleId === 'qdc_suppressor'
+        ? 0.22
+        : muzzleId === 'silencer'
+        ? 0.18
+        : muzzleId === 'warden_blast' || muzzleId === 'lantac_dragon'
+        ? 0.08
+        : muzzleId === 'flash_hider' || muzzleId === 'compensator'
+        ? 0.05
+        : 0;
     flash.position.set(0, -0.008, -0.26 - length * 0.88 - extraMuzzleLen);
     flash.name = 'muzzleFlash';
     group.add(flash);

@@ -1,12 +1,12 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=92';
-import { sound } from './audio.js?v=92';
-import { NETWORK } from './config.js?v=92';
-import { events, makeEventBridge } from './events.js?v=92';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=105';
+import { sound } from './audio.js?v=105';
+import { NETWORK } from './config.js?v=105';
+import { events, makeEventBridge } from './events.js?v=105';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=92';
+} from './core/StateMachines.js?v=105';
 
 export class NetworkManager {
   constructor(scene, world, player, botManager) {
@@ -556,6 +556,9 @@ export class NetworkManager {
     rp.deaths = msg.deaths || 0;
     rp.revives = msg.revives || 0;
     rp.medicKills = msg.medicKills || 0;
+    rp.planesDestroyed = msg.planesDestroyed || 0;
+    rp.tanksDestroyed = msg.tanksDestroyed || 0;
+    rp.carsDestroyed = msg.carsDestroyed || 0;
     rp.vehiclesDestroyed = msg.vehiclesDestroyed || 0;
     rp.score = msg.score || 0;
 
@@ -673,6 +676,9 @@ export class NetworkManager {
       deaths: this.player.deaths || 0,
       revives: this.player.revives || 0,
       medicKills: this.player.medicKills || 0,
+      planesDestroyed: this.player.planesDestroyed || 0,
+      tanksDestroyed: this.player.tanksDestroyed || 0,
+      carsDestroyed: this.player.carsDestroyed || 0,
       vehiclesDestroyed: this.player.vehiclesDestroyed || 0,
       score: this.player.score || 0
     };

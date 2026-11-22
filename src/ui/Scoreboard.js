@@ -1,10 +1,13 @@
-import { SQUAD_DEFS } from '../bots.js?v=92';
+import { SQUAD_DEFS } from '../bots.js?v=105';
 
 export const Scoreboard = {
   computeBattleStats() {
     const usUnits = [];
     const ruUnits = [];
 
+    const selfPlanes = this.player.planesDestroyed || 0;
+    const selfTanks = this.player.tanksDestroyed || 0;
+    const selfCars = this.player.carsDestroyed || 0;
     const selfEntry = {
       name: this.player.name,
       team: this.player.team,
@@ -15,7 +18,10 @@ export const Scoreboard = {
       deaths: this.player.deaths || 0,
       revives: this.player.revives || 0,
       medicKills: this.player.medicKills || 0,
-      vehiclesDestroyed: this.player.vehiclesDestroyed || 0,
+      planesDestroyed: selfPlanes,
+      tanksDestroyed: selfTanks,
+      carsDestroyed: selfCars,
+      vehiclesDestroyed: this.player.vehiclesDestroyed || selfPlanes + selfTanks + selfCars,
       captures: this.player.captures || 0,
       score: this.player.score || 0,
       isSelf: true
@@ -25,6 +31,9 @@ export const Scoreboard = {
     else ruUnits.push(selfEntry);
 
     for (const rp of this.network.remotePlayers.values()) {
+      const rpPlanes = rp.planesDestroyed || 0;
+      const rpTanks = rp.tanksDestroyed || 0;
+      const rpCars = rp.carsDestroyed || 0;
       const entry = {
         name: rp.name,
         team: rp.team,
@@ -35,7 +44,10 @@ export const Scoreboard = {
         deaths: rp.deaths || 0,
         revives: rp.revives || 0,
         medicKills: rp.medicKills || 0,
-        vehiclesDestroyed: rp.vehiclesDestroyed || 0,
+        planesDestroyed: rpPlanes,
+        tanksDestroyed: rpTanks,
+        carsDestroyed: rpCars,
+        vehiclesDestroyed: rp.vehiclesDestroyed || rpPlanes + rpTanks + rpCars,
         captures: rp.captures || 0,
         score: rp.score || 0
       };
@@ -44,6 +56,9 @@ export const Scoreboard = {
     }
 
     for (const b of this.botManager.bots) {
+      const bPlanes = b.planesDestroyed || 0;
+      const bTanks = b.tanksDestroyed || 0;
+      const bCars = b.carsDestroyed || 0;
       const entry = {
         name: b.name,
         team: b.team,
@@ -54,7 +69,10 @@ export const Scoreboard = {
         deaths: b.deaths || 0,
         revives: b.revives || 0,
         medicKills: b.medicKills || 0,
-        vehiclesDestroyed: b.vehiclesDestroyed || 0,
+        planesDestroyed: bPlanes,
+        tanksDestroyed: bTanks,
+        carsDestroyed: bCars,
+        vehiclesDestroyed: b.vehiclesDestroyed || bPlanes + bTanks + bCars,
         captures: b.captures || 0,
         score: b.score || 0
       };
@@ -74,6 +92,9 @@ export const Scoreboard = {
       let deaths = 0;
       let revives = 0;
       let medicKills = 0;
+      let planes = 0;
+      let tanks = 0;
+      let cars = 0;
       let vehicles = 0;
       let score = 0;
       for (let i = 0; i < arr.length; i++) {
@@ -82,6 +103,9 @@ export const Scoreboard = {
         deaths += u.deaths;
         revives += u.revives;
         medicKills += u.medicKills || 0;
+        planes += u.planesDestroyed || 0;
+        tanks += u.tanksDestroyed || 0;
+        cars += u.carsDestroyed || 0;
         vehicles += u.vehiclesDestroyed;
         score += u.score;
       }
@@ -93,6 +117,9 @@ export const Scoreboard = {
         deaths,
         revives,
         medicKills,
+        planes,
+        tanks,
+        cars,
         vehicles,
         score
       };
@@ -101,7 +128,7 @@ export const Scoreboard = {
     const usStats = sumTeam(usUnits, 'US');
     const ruStats = sumTeam(ruUnits, 'RU');
 
-    // Compute all 10 Tactical Squads (US ALPHA..ECHO & RU ALPHA..ECHO)
+    // Compute all 12 Tactical Squads (US ALPHA..FALCON & RU ALPHA..FALCON)
     const allUnits = [...usUnits, ...ruUnits];
     const squads = [];
     for (const team of ['US', 'RU']) {
@@ -110,6 +137,9 @@ export const Scoreboard = {
         const sqKills = members.reduce((s, u) => s + u.kills, 0);
         const sqRevives = members.reduce((s, u) => s + u.revives, 0);
         const sqMedicKills = members.reduce((s, u) => s + (u.medicKills || 0), 0);
+        const sqPlanes = members.reduce((s, u) => s + (u.planesDestroyed || 0), 0);
+        const sqTanks = members.reduce((s, u) => s + (u.tanksDestroyed || 0), 0);
+        const sqCars = members.reduce((s, u) => s + (u.carsDestroyed || 0), 0);
         const sqVehicles = members.reduce((s, u) => s + u.vehiclesDestroyed, 0);
         const sqScore = members.reduce((s, u) => s + u.score, 0);
         const hasPlayer = members.some((u) => u.isSelf);
@@ -123,6 +153,9 @@ export const Scoreboard = {
           kills: sqKills,
           revives: sqRevives,
           medicKills: sqMedicKills,
+          planes: sqPlanes,
+          tanks: sqTanks,
+          cars: sqCars,
           vehicles: sqVehicles,
           score: sqScore,
           hasPlayer
@@ -156,7 +189,8 @@ export const Scoreboard = {
       lostBleed: 0,
       spentSoldiers: 0,
       spentCars: 0,
-      spentArmor: 0
+      spentArmor: 0,
+      spentPlanes: 0
     };
     const ruTStat = (this.ticketStats && this.ticketStats.RU) || {
       gainedCapture: 0,
@@ -164,7 +198,8 @@ export const Scoreboard = {
       lostBleed: 0,
       spentSoldiers: 0,
       spentCars: 0,
-      spentArmor: 0
+      spentArmor: 0,
+      spentPlanes: 0
     };
 
     return `
@@ -177,9 +212,11 @@ export const Scoreboard = {
           <span class="side-metric-pill">SCORE: ${usStats.score.toLocaleString()}</span>
           <span class="side-metric-pill">KILLS: ${usStats.kills}</span>
           <span class="side-metric-pill">REVIVES: ${usStats.revives}</span>
-          <span class="side-metric-pill">ARMOR KILLED: ${usStats.vehicles}</span>
-          <span class="side-metric-pill" style="color:#2ecc71;border-color:rgba(46,204,113,0.45)">🎟️ +${usTStat.gainedCapture} CAP / -${usTStat.lostFlags || 0} FLAG LOST • -${usTStat.spentSoldiers} INF / -${usTStat.spentCars} CAR / -${usTStat.spentArmor} ARMOR / -${Math.floor(usTStat.lostBleed || 0)} BLEED</span>
-          <span class="side-metric-pill" style="color:#ff7675;border-color:rgba(231,76,60,0.45)">⚠️ WAR CRIMES (MEDICS KILLED): ${usStats.medicKills}</span>
+          <span class="side-metric-pill" style="color:#00d2d3;border-color:rgba(0,210,211,0.45)">✈️ PLANES DOWNED: ${usStats.planes}</span>
+          <span class="side-metric-pill" style="color:#f39c12;border-color:rgba(243,156,18,0.45)">🛡️ TANKS/IFV KILLED: ${usStats.tanks}</span>
+          <span class="side-metric-pill" style="color:#ffeaa7;border-color:rgba(241,196,15,0.4)">🚙 CARS KILLED: ${usStats.cars}</span>
+          <span class="side-metric-pill" style="color:#2ecc71;border-color:rgba(46,204,113,0.45)">🎟️ +${usTStat.gainedCapture} CAP / -${usTStat.lostFlags || 0} FLG • -${usTStat.spentSoldiers} INF / -${usTStat.spentCars} CAR / -${usTStat.spentArmor} TNK / -${usTStat.spentPlanes || 0} AIR / -${Math.floor(usTStat.lostBleed || 0)} BLD</span>
+          <span class="side-metric-pill" style="color:#ff7675;border-color:rgba(231,76,60,0.45)">⚠️ WAR CRIMES: ${usStats.medicKills}</span>
         </div>
       </div>
 
@@ -200,9 +237,11 @@ export const Scoreboard = {
           <span class="side-metric-pill">SCORE: ${ruStats.score.toLocaleString()}</span>
           <span class="side-metric-pill">KILLS: ${ruStats.kills}</span>
           <span class="side-metric-pill">REVIVES: ${ruStats.revives}</span>
-          <span class="side-metric-pill">ARMOR KILLED: ${ruStats.vehicles}</span>
-          <span class="side-metric-pill" style="color:#2ecc71;border-color:rgba(46,204,113,0.45)">🎟️ +${ruTStat.gainedCapture} CAP / -${ruTStat.lostFlags || 0} FLAG LOST • -${ruTStat.spentSoldiers} INF / -${ruTStat.spentCars} CAR / -${ruTStat.spentArmor} ARMOR / -${Math.floor(ruTStat.lostBleed || 0)} BLEED</span>
-          <span class="side-metric-pill" style="color:#ff7675;border-color:rgba(231,76,60,0.45)">⚠️ WAR CRIMES (MEDICS KILLED): ${ruStats.medicKills}</span>
+          <span class="side-metric-pill" style="color:#00d2d3;border-color:rgba(0,210,211,0.45)">✈️ PLANES DOWNED: ${ruStats.planes}</span>
+          <span class="side-metric-pill" style="color:#f39c12;border-color:rgba(243,156,18,0.45)">🛡️ TANKS/IFV KILLED: ${ruStats.tanks}</span>
+          <span class="side-metric-pill" style="color:#ffeaa7;border-color:rgba(241,196,15,0.4)">🚙 CARS KILLED: ${ruStats.cars}</span>
+          <span class="side-metric-pill" style="color:#2ecc71;border-color:rgba(46,204,113,0.45)">🎟️ +${ruTStat.gainedCapture} CAP / -${ruTStat.lostFlags || 0} FLG • -${ruTStat.spentSoldiers} INF / -${ruTStat.spentCars} CAR / -${ruTStat.spentArmor} TNK / -${ruTStat.spentPlanes || 0} AIR / -${Math.floor(ruTStat.lostBleed || 0)} BLD</span>
+          <span class="side-metric-pill" style="color:#ff7675;border-color:rgba(231,76,60,0.45)">⚠️ WAR CRIMES: ${ruStats.medicKills}</span>
         </div>
       </div>
     `;
@@ -210,7 +249,7 @@ export const Scoreboard = {
 
   buildSquadLeaderboardHtml(squads) {
     return squads
-      .slice(0, 5)
+      .slice(0, 6)
       .map(
         (sq, idx) => `
         <div class="sb-squad-card ${sq.team === 'US' ? 'us-sq' : 'ru-sq'} ${
@@ -224,7 +263,7 @@ export const Scoreboard = {
           </div>
           <div class="sq-spec">${sq.specialty} &bull; LDR: ${sq.leader}</div>
           <div class="sq-stats-line">
-            <span>${sq.kills}K &bull; ${sq.revives}REV &bull; ${sq.vehicles}AT &bull; <span style="color:#ff7675">⚠️${sq.medicKills}CRM</span></span>
+            <span>${sq.kills}K &bull; ${sq.revives}REV &bull; ✈️${sq.planes} 🛡️${sq.tanks} 🚙${sq.cars} &bull; <span style="color:#ff7675">⚠️${sq.medicKills}CRM</span></span>
             <span class="sq-score-val">${sq.score.toLocaleString()} PTS</span>
           </div>
         </div>
@@ -280,7 +319,9 @@ export const Scoreboard = {
               <td>${u.kills}</td>
               <td>${u.deaths}</td>
               <td>${u.revives}</td>
-              <td>${u.vehiclesDestroyed}</td>
+              <td style="color:${(u.planesDestroyed || 0) > 0 ? '#00d2d3' : '#7f8c8d'};font-weight:${(u.planesDestroyed || 0) > 0 ? '800' : '400'}">${u.planesDestroyed || 0}</td>
+              <td style="color:${(u.tanksDestroyed || 0) > 0 ? '#f39c12' : '#7f8c8d'};font-weight:${(u.tanksDestroyed || 0) > 0 ? '800' : '400'}">${u.tanksDestroyed || 0}</td>
+              <td style="color:${(u.carsDestroyed || 0) > 0 ? '#ffeaa7' : '#7f8c8d'};font-weight:${(u.carsDestroyed || 0) > 0 ? '800' : '400'}">${u.carsDestroyed || 0}</td>
               <td style="color:${u.medicKills > 0 ? '#ff6b6b' : '#7f8c8d'};font-weight:${
               u.medicKills > 0 ? '800' : '400'
             }">${u.medicKills || 0}</td>

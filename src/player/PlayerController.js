@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=92';
-import { sound } from '../audio.js?v=92';
-import { PLAYER, DISTANCES, CLASS_TRAITS, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=92';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=92';
-import { events, makeEventBridge } from '../events.js?v=92';
-import { GunsmithMethods } from './GunsmithState.js?v=92';
-import { FortificationMethods } from './FortificationBuilder.js?v=92';
-import { CommanderMethods } from './CommanderAbilities.js?v=92';
-import { VehicleControlMethods } from './VehicleControl.js?v=92';
-import { CombatMethods } from './PlayerCombat.js?v=92';
+import { VOXEL_SIZE } from '../world.js?v=105';
+import { sound } from '../audio.js?v=105';
+import { PLAYER, DISTANCES, CLASS_TRAITS, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=105';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=105';
+import { events, makeEventBridge } from '../events.js?v=105';
+import { GunsmithMethods } from './GunsmithState.js?v=105';
+import { FortificationMethods } from './FortificationBuilder.js?v=105';
+import { CommanderMethods } from './CommanderAbilities.js?v=105';
+import { VehicleControlMethods } from './VehicleControl.js?v=105';
+import { CombatMethods } from './PlayerCombat.js?v=105';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -16,7 +16,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=92';
+} from '../core/StateMachines.js?v=105';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -100,6 +100,9 @@ export class PlayerController {
     this.kills = 0;
     this.deaths = 0;
     this.revives = 0;
+    this.planesDestroyed = 0;
+    this.tanksDestroyed = 0;
+    this.carsDestroyed = 0;
     this.vehiclesDestroyed = 0;
     this.captures = 0;
     this.medicKills = 0; // War Crimes (Geneva Convention: Killing Field Medics)
@@ -107,12 +110,27 @@ export class PlayerController {
     this.squad = 'ALPHA';
     this.squadShort = 'ALP';
     this.commandRank = 'COMMANDER'; // 'COMMANDER' | 'SQUAD_LEADER' | 'MEMBER'
-    this.commandScope = 'ALL';      // 'ALL' (Force Commander: all 5 squads / 40 NPCs) | 'SQUAD' (Squad Leader: 8 NPCs)
+    this.commandScope = 'ALL';      // 'ALL' (Force Commander: all 6 squads) | 'SQUAD' (Squad Leader)
+    this.squadDoctrineEnabled = true;
+    try {
+      const savedDoctrine = localStorage.getItem('bb_squad_doctrine');
+      if (savedDoctrine !== null) {
+        this.squadDoctrineEnabled = savedDoctrine !== 'false' && savedDoctrine !== '0';
+      }
+    } catch (_) {}
+    this.inSquadCohesion = false;
+    this.cohesionAnchorLabel = '';
+    this.isUavStealthMasked = false;
+    this.outOfCombatTimer = 0;
+    if (typeof this.passiveRegenBonus !== 'number') this.passiveRegenBonus = 0;
+    if (typeof this.headshotTakenMult !== 'number') this.headshotTakenMult = 1.0;
+    this.hasThermalGoggles = Boolean(this.hasThermalGoggles);
 
     // Vehicle & Combat Aviation state
     this.activeVehicle = null;
     this.thirdPersonVehicle = false;
     this.preferredAircraftRole = 'cas'; // 'cas' (A-10C / Su-25) | 'bomber' (F-15E / Su-34) | 'fighter' (F-22A / Su-57)
+    this.preferredArmorOrderType = 'tank'; // 'tank' ($1,100) | 'apc' ($650) | 'aa' ($750)
     this.parachuting = false;
     this.parachuteCut = false;
     this.parachuteMesh = null;
@@ -206,6 +224,7 @@ export class PlayerController {
     this.isAds = false;
     this.adsAmount = 0;
     this.useCantedSight = false;
+    this.opticZoomIndex = 0;
     this.fireArrowsActive = false; // [V] toggles Regular Bodkin Arrows vs. Fire Arrows on Bows & Crossbows!
     this.zeroDistance = PLAYER.ZERO_DISTANCE_DEFAULT;
     this.fireTimer = 0;
@@ -236,6 +255,7 @@ export class PlayerController {
     this.buildBlueprintIndex = 0;
     this.activePing = null;
     this.nvgActive = false;
+    this.sensorMode = 'OFF'; // 'OFF' | 'NVG' | 'WHOT' | 'BHOT'
 
     this.slots = [];
     this.currentSlotIndex = 0;
@@ -329,6 +349,27 @@ export class PlayerController {
 
   toggleBhopEnabled() {
     return this.setBhopEnabled(!this.bhopEnabled);
+  }
+
+  setSquadDoctrineEnabled(val) {
+    this.squadDoctrineEnabled = Boolean(val);
+    try {
+      localStorage.setItem('bb_squad_doctrine', this.squadDoctrineEnabled ? 'true' : 'false');
+    } catch (_) {}
+    if (this.squadDoctrineEnabled && this.commandRank !== 'COMMANDER' && this.commandScope === 'ALL') {
+      this.commandScope = 'SQUAD';
+    }
+    if (window.game?.ui) {
+      window.game.ui.updateSquadDoctrineUI?.();
+      window.game.ui.updateCommandOrderHud?.();
+      window.game.ui.renderDeployB2CustomizerBar?.();
+      window.game.ui.drawDeployMap?.(true);
+    }
+    return this.squadDoctrineEnabled;
+  }
+
+  toggleSquadDoctrineEnabled() {
+    return this.setSquadDoctrineEnabled(!this.squadDoctrineEnabled);
   }
 
   startWeaponInspect() {
@@ -589,14 +630,85 @@ export class PlayerController {
             window.game?.ui?.toggleGunsmithModal?.(false);
             return;
           }
+          if (e.code === 'KeyI' && !e.repeat) {
+            e.preventDefault();
+            e._backpackHandled = true;
+            if (window.game?.ui?._gunsmithActiveTab === 'backpack') {
+              window.game.ui.toggleGunsmithModal?.(false);
+            } else if (window.game?.ui) {
+              window.game.ui._gunsmithActiveTab = 'backpack';
+              window.game.ui.toggleGunsmithModal?.(true);
+            }
+            return;
+          }
         }
         return;
       }
 
       if (this.isModalOpen()) return;
 
-      if (e.code === 'KeyN') {
-        this.nvgActive = !this.nvgActive;
+      if (e.code === 'KeyI' && !e.repeat && window.game?.ui) {
+        e.preventDefault();
+        e._backpackHandled = true;
+        window.game.ui._gunsmithActiveTab = this.activeVehicle ? 'vehicles' : 'backpack';
+        window.game.ui.toggleGunsmithModal(true);
+        return;
+      }
+
+      if (e.code === 'KeyN' && !e.repeat) {
+        const av = this.activeVehicle;
+        let allowedModes = ['OFF', 'NVG'];
+        if (av) {
+          const hasFlir = Boolean(av.hasThermalFlir || av.aircraftRole === 'b2_spirit');
+          const hasNvg = Boolean(hasFlir || av.hasNightVision || this.hasThermalGoggles);
+          if (hasFlir) {
+            allowedModes =
+              av.isAircraft && av.aircraftRole === 'gunship'
+                ? ['OFF', 'WHOT', 'BHOT', 'NVG']
+                : ['OFF', 'NVG', 'WHOT', 'BHOT'];
+          } else if (hasNvg) {
+            allowedModes = ['OFF', 'NVG'];
+          } else {
+            allowedModes = ['OFF'];
+          }
+        } else if (this.hasThermalGoggles) {
+          allowedModes = ['OFF', 'NVG', 'WHOT'];
+        }
+        if (allowedModes.length <= 1) {
+          this.sensorMode = 'OFF';
+          this.nvgActive = false;
+          sound.playEmptyClick?.();
+          if (this.onAwardXp) {
+            this.onAwardXp(
+              0,
+              av?.isAircraft
+                ? '🔭 NO NIGHT-VISION / FLIR POD INSTALLED — EQUIP AVS-9 NVG OR SNIPER FLIR POD IN [L] AIRCRAFT HANGAR!'
+                : '🔭 NO THERMAL / NVG SIGHT INSTALLED — EQUIP CREW NVG OR CITV FLIR IN [L] VEHICLE BAY!'
+            );
+          }
+        } else {
+          const curMode = allowedModes.includes(this.sensorMode)
+            ? this.sensorMode
+            : this.nvgActive
+            ? 'NVG'
+            : 'OFF';
+          const nextMode = allowedModes[(allowedModes.indexOf(curMode) + 1) % allowedModes.length];
+          this.sensorMode = nextMode;
+          this.nvgActive = nextMode !== 'OFF';
+          if (av) av._userToggledSensorManually = true;
+          sound.playEmptyClick?.();
+          if (this.onAwardXp) {
+            const modeLabel =
+              nextMode === 'WHOT'
+                ? '🌡️ SENSOR [N]: WHITE-HOT FLIR INFRARED (WHOT IR) ACTIVE'
+                : nextMode === 'BHOT'
+                ? '🌡️ SENSOR [N]: BLACK-HOT FLIR INFRARED (BHOT IR) ACTIVE'
+                : nextMode === 'NVG'
+                ? '🥽 SENSOR [N]: GEN-3 GREEN PHOSPHOR NIGHT VISION (NVG) ACTIVE'
+                : '☀️ SENSOR [N]: DAYLIGHT OPTICAL TV MODE';
+            this.onAwardXp(0, modeLabel);
+          }
+        }
       }
       if (this.downed) return;
 
@@ -605,10 +717,15 @@ export class PlayerController {
         this.handleVehicleAndDragKey();
       }
       // [F] Revive / Heal Ally, Pick Up Ammo from Crate, Quick-Loot (Tap) or Manual Side-by-Side Loot (Hold)
-      if (e.code === 'KeyF' && !e.repeat && !this.activeVehicle) {
-        this.keyFHoldTime = 0;
-        this._justOpenedLootByHold = false;
-        this.handleInteractKey();
+      //     OR in AC-130J Gunship: Lock Pylon Orbit Anchor directly onto FOB / Crosshair!
+      if (e.code === 'KeyF' && !e.repeat) {
+        if (this.activeVehicle && this.activeVehicle.aircraftRole === 'gunship') {
+          this.lockGunshipOrbitAtCrosshair?.();
+        } else if (!this.activeVehicle) {
+          this.keyFHoldTime = 0;
+          this._justOpenedLootByHold = false;
+          this.handleInteractKey();
+        }
       }
       if (e.code === 'KeyG' && !e.repeat) {
         if (this.activeVehicle && this.activeVehicle.isAircraft) {
@@ -644,14 +761,19 @@ export class PlayerController {
           this.switchSlot(1);
         }
       }
-      if (e.code === 'KeyQ' && !e.repeat && this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
-        const maxSlots =
-          this.activeVehicle.isAircraft &&
-          (this.activeVehicle.aircraftRole === 'gunship' || this.activeVehicle.aircraftRole === 'fighter')
-            ? 3
-            : 2;
-        const nextSlot = ((this.activeVehicle.activeWeaponSlot || 0) + 1) % maxSlots;
-        this.switchVehicleWeaponSlot(nextSlot);
+      if (e.code === 'KeyQ' && !e.repeat) {
+        if (this.activeVehicle && this.activeVehicle.isAircraft && this.activeVehicle.aircraftRole === 'gunship') {
+          // In AC-130 Gunship, [Q] = Climb UP & [Z] = Descend DOWN (Weapons use [1], [2], [3])!
+        } else if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
+          const maxSlots =
+            this.activeVehicle.isAircraft && this.activeVehicle.aircraftRole === 'fighter'
+              ? 3
+              : 2;
+          const nextSlot = ((this.activeVehicle.activeWeaponSlot || 0) + 1) % maxSlots;
+          this.switchVehicleWeaponSlot(nextSlot);
+        } else {
+          this._keyQDownAt = performance.now();
+        }
       }
       if (e.code === 'Digit3' && !e.repeat) {
         if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
@@ -671,9 +793,13 @@ export class PlayerController {
         }
       }
       if (e.code === 'Digit4' && !this.activeVehicle) this.switchSlot(3);
-      if (e.code === 'KeyR' && !e.repeat && !this.activeVehicle) {
-        this.keyRHoldTime = 0;
-        this.startReload(false);
+      if (e.code === 'KeyR' && !e.repeat) {
+        if (this.activeVehicle && this.activeVehicle.aircraftRole === 'gunship') {
+          this.toggleGunshipFlightMode?.();
+        } else if (!this.activeVehicle) {
+          this.keyRHoldTime = 0;
+          this.startReload(false);
+        }
       }
       if (e.code === 'KeyP' && !e.repeat && !this.activeVehicle) {
         if (this.slowReloading) {
@@ -700,8 +826,25 @@ export class PlayerController {
         } else if (!this.activeVehicle) {
           if (cur && cur.def && cur.def.type === 'melee_sword') {
             this.toggleSwordSlung?.();
-          } else if (this.isAds && cur && cur.def.hasCantedSight) {
-            this.useCantedSight = !this.useCantedSight;
+          } else if (this.isAds && cur && cur.def) {
+            const zLevels = Array.isArray(cur.def.zoomLevels) ? cur.def.zoomLevels : null;
+            const hasVarZoom = Boolean(zLevels && zLevels.length > 1);
+            const hasCanted = Boolean(cur.def.hasCantedSight);
+            if (hasVarZoom || hasCanted) {
+              if (this.useCantedSight) {
+                this.useCantedSight = false;
+                this.opticZoomIndex = 0;
+              } else if (hasVarZoom && (this.opticZoomIndex || 0) < zLevels.length - 1) {
+                this.opticZoomIndex = (this.opticZoomIndex || 0) + 1;
+              } else if (hasCanted) {
+                this.useCantedSight = true;
+              } else {
+                this.opticZoomIndex = 0;
+              }
+              sound.playEmptyClick?.();
+            } else {
+              this.startWeaponInspect();
+            }
           } else {
             this.startWeaponInspect();
           }
@@ -740,9 +883,19 @@ export class PlayerController {
       if (e.code === 'Digit8' && !e.repeat && !this.activeVehicle) {
         this.buildPaidHouseOrBunker('AUTO');
       }
-      // [9] Launch Combat Aircraft Sortie (A-10 CAS / F-15E Bomber / F-22 Fighter; Shift+9 cycles role)
+      // [0] Request Light Recon Motorcycle ($150) • [Shift+0] Request 4x4 Tactical Quad ATV ($150) — Any Class!
+      if (e.code === 'Digit0' && !e.repeat && !this.activeVehicle) {
+        this.requestReconBikeDelivery?.(e.shiftKey ? 'atv' : 'bike');
+      }
+      // [9] Armor Crew Requisition (Tank/IFV/AA 10m ahead) OR Pilot Aircraft Sortie ([Shift+9] cycles vehicle/role)
       if (e.code === 'Digit9' && !e.repeat) {
-        if (e.shiftKey) {
+        if (this.role === 'armor' && !(this.activeVehicle && this.activeVehicle.isAircraft)) {
+          if (e.shiftKey) {
+            this.cycleArmorOrderType?.();
+          } else {
+            this.requestArmorDelivery?.();
+          }
+        } else if (e.shiftKey) {
           if (typeof this.cycleAircraftRole === 'function') {
             this.cycleAircraftRole();
           }
@@ -750,11 +903,14 @@ export class PlayerController {
           this.launchAircraftSortie();
         }
       }
-      // [L] Open Unified Role Selection, Weapon Selection, Gunsmith Workbench & Visualized Backpack Pop-out!
-      if (e.code === 'KeyL' && !e.shiftKey && !e.repeat && !this.activeVehicle) {
+      // [L] Open Unified Role Selection, Weapon Selection, Gunsmith Workbench & Aircraft/Armor Customization Bay!
+      if (e.code === 'KeyL' && !e.shiftKey && !e.repeat) {
         if (window.game && window.game.ui && typeof window.game.ui.openLoadoutAndGunsmithModal === 'function') {
+          if (this.activeVehicle || this.role === 'pilot' || this.role === 'armor') {
+            window.game.ui._gunsmithActiveTab = 'vehicles';
+          }
           window.game.ui.openLoadoutAndGunsmithModal();
-        } else {
+        } else if (!this.activeVehicle) {
           this.cycleFieldRole();
         }
       }
@@ -814,8 +970,12 @@ export class PlayerController {
       if (e.code === 'KeyC' || e.code === 'ControlLeft') {
         if (this.parachuting && e.code === 'KeyC' && typeof this.cutParachute === 'function') {
           this.cutParachute();
-        } else if (this.activeVehicle && e.code === 'KeyC') {
-          this.thirdPersonVehicle = !this.thirdPersonVehicle;
+        } else if (this.activeVehicle && e.code === 'KeyC' && !e.repeat) {
+          if (typeof this.cycleVehicleCameraMode === 'function') {
+            this.cycleVehicleCameraMode();
+          } else {
+            this.thirdPersonVehicle = !this.thirdPersonVehicle;
+          }
         } else if (!this.activeVehicle) {
           this.crouching = !this.crouching;
           if (this.crouching) this.prone = false;
@@ -860,11 +1020,29 @@ export class PlayerController {
       if (e.code === 'Space') {
         this._spaceJumpConsumed = false;
       }
+      if (
+        e.code === 'KeyQ' &&
+        !this.activeVehicle &&
+        !this.isAds &&
+        !this.dead &&
+        !this.downed &&
+        this._keyQDownAt &&
+        performance.now() - this._keyQDownAt < 210
+      ) {
+        this._keyQDownAt = 0;
+        this.triggerTacticalPing?.();
+      }
     });
 
     window.addEventListener('wheel', (e) => {
       if (this.dead || this.downed || this.isModalOpen(true)) return;
       if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
+        if (this.activeVehicle.isAircraft && this.activeVehicle.aircraftRole === 'gunship') {
+          // Mouse Scroll Wheel in AC-130 = Continuous Optical Camera Zoom (1.1x Wide <-> 8.0x Telephoto FLIR!)
+          // (Aircraft Altitude & Orbit Circle Size are controlled via [Shift / Z], [↑ / ↓], or [+ / -]!)
+          this.adjustGunshipSensorZoom?.(e.deltaY < 0 ? 1 : -1);
+          return;
+        }
         if (this.activeVehicle.type === 'tank' || this.activeVehicle.type === 'apc') {
           const nextSlot = (this.activeVehicle.activeWeaponSlot || 0) === 0 ? 1 : 0;
           this.switchVehicleWeaponSlot(nextSlot);
@@ -872,8 +1050,23 @@ export class PlayerController {
         return;
       }
       const cur = this.currentWeapon();
-      if (this.isAds && cur && cur.def.hasCantedSight) {
-        this.useCantedSight = e.deltaY < 0;
+      if (this.isAds && cur && cur.def) {
+        const zLevels = Array.isArray(cur.def.zoomLevels) ? cur.def.zoomLevels : null;
+        if (zLevels && zLevels.length > 1 && !this.useCantedSight) {
+          const maxIdx = zLevels.length - 1;
+          const curIdx = Math.min(this.opticZoomIndex || 0, maxIdx);
+          const nextIdx = e.deltaY < 0 ? Math.min(maxIdx, curIdx + 1) : Math.max(0, curIdx - 1);
+          if (nextIdx !== curIdx) {
+            this.opticZoomIndex = nextIdx;
+            sound.playEmptyClick?.();
+          }
+        } else if (cur.def.hasCantedSight) {
+          const nextCanted = e.deltaY > 0;
+          if (this.useCantedSight !== nextCanted) {
+            this.useCantedSight = nextCanted;
+            sound.playEmptyClick?.();
+          }
+        }
       }
     });
 
@@ -934,13 +1127,33 @@ export class PlayerController {
         this._lastMouseClientY = e.clientY;
       }
 
-      const sens = this.isAds ? PLAYER.SENSITIVITY_ADS : PLAYER.SENSITIVITY_HIP;
+      const baseSens = this.isAds ? PLAYER.SENSITIVITY_ADS : PLAYER.SENSITIVITY_HIP;
+      const vehOpticZoomScale =
+        this.activeVehicle && this.camera && (this.camera.fov || 75) < 64
+          ? THREE.MathUtils.clamp((this.camera.fov || 75) / 70, 0.18, 1.0)
+          : 1.0;
+      const sens = baseSens * vehOpticZoomScale;
       const dx = rawDx * sens;
       const dy = rawDy * sens;
-      this.yaw -= dx;
-      this.pitch -= dy;
-      const maxPitch = Math.PI / 2 - PLAYER.MAX_PITCH_OFFSET;
-      this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch));
+      const inAerobaticPlane = Boolean(
+        this.activeVehicle &&
+          this.activeVehicle.isAircraft &&
+          this.activeVehicle.aircraftRole !== 'gunship' &&
+          this.activeVehicle.aircraftRole !== 'b2_spirit'
+      );
+      if (inAerobaticPlane) {
+        // Invert horizontal yaw input when upside-down (cos(pitch) < 0) at the top of a 360° backflip loop!
+        const invSign = Math.cos(this.activeVehicle.pitch || 0) < -0.05 ? -1 : 1;
+        this.yaw -= dx * invSign;
+        this.pitch -= dy;
+        while (this.pitch > Math.PI) this.pitch -= Math.PI * 2;
+        while (this.pitch <= -Math.PI) this.pitch += Math.PI * 2;
+      } else {
+        this.yaw -= dx;
+        this.pitch -= dy;
+        const maxPitch = Math.PI / 2 - PLAYER.MAX_PITCH_OFFSET;
+        this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch));
+      }
 
       // Weapon procedural sway + Mount & Blade 4-Directional Melee Guard / Swing Sector tracking from mouse delta
       this.swayX = THREE.MathUtils.clamp(this.swayX - dx * PLAYER.SWAY_MULT, -PLAYER.SWAY_LIMIT, PLAYER.SWAY_LIMIT);
@@ -1268,6 +1481,49 @@ export class PlayerController {
       }
     }
 
+    // Squad Cohesion Buff (Member within 38m of SL or Squad Objective), Recon UAV Stealth Mask & Passive Rig/Medic Regen
+    let cohesionActive = false;
+    let cohesionAnchor = '';
+    if (this.commandRank === 'MEMBER' && this.botManager) {
+      const slBot = this.botManager.squadLeaders?.[this.team]?.[this.squad];
+      if (slBot && !slBot.dead && !slBot.downed && slBot.pos.distanceToSquared(this.pos) <= 38 * 38) {
+        cohesionActive = true;
+        cohesionAnchor = `SL ${slBot.name}`;
+      } else {
+        const sqOrd =
+          this.botManager.squadOrders?.[this.team]?.[this.squad] ||
+          this.botManager.commanderOrders?.[this.team];
+        const fIdx =
+          sqOrd && sqOrd.flagIndex >= 0
+            ? sqOrd.flagIndex
+            : slBot && typeof slBot.targetFlagIndex === 'number'
+            ? slBot.targetFlagIndex
+            : -1;
+        const objFlag = fIdx >= 0 && this.world?.flags ? this.world.flags[fIdx] : null;
+        if (objFlag && Math.hypot(this.pos.x - objFlag.pos.x, this.pos.z - objFlag.pos.z) <= 38) {
+          cohesionActive = true;
+          cohesionAnchor = `OBJ ${objFlag.id}`;
+        }
+      }
+    }
+    this.inSquadCohesion = cohesionActive;
+    this.cohesionAnchorLabel = cohesionAnchor;
+    this.isUavStealthMasked = Boolean(
+      this.role === 'recon' && (this.crouching || this.prone) && !this.activeVehicle
+    );
+
+    this.outOfCombatTimer = (this.outOfCombatTimer || 0) + dt;
+    const rigPassiveRegen =
+      typeof this.passiveRegenBonus === 'number' && this.passiveRegenBonus > 0
+        ? this.passiveRegenBonus
+        : 0;
+    const medicSelfTriage =
+      this.role === 'medic' && this.outOfCombatTimer >= 4.5 ? 4.0 : 0;
+    const totalPassiveRegen = rigPassiveRegen + medicSelfTriage;
+    if (totalPassiveRegen > 0 && !this.bleeding && this.hp < PLAYER.MAX_HP) {
+      this.hp = Math.min(PLAYER.MAX_HP, this.hp + totalPassiveRegen * dt);
+    }
+
     // Real-life & Tactical Shooter Forward Base Defender Advantage (Entrenchment, Triage & Logistics Aura):
     // When the Player is defending inside a Friendly Captured Forward Base (`flag.owner === this.team`),
     // they gain:
@@ -1372,7 +1628,12 @@ export class PlayerController {
       this._fUsedForFriendlyAction = true;
       this._pendingEnemyLootPack = null;
       this.keyFHoldTime = 0;
-      const revDuration = this.role === 'medic' ? PLAYER.REVIVE_DURATION_MEDIC : PLAYER.REVIVE_DURATION_OTHER;
+      const isMedicRole = this.role === 'medic';
+      const revDuration = isMedicRole
+        ? PLAYER.REVIVE_DURATION_MEDIC
+        : this.squadDoctrineEnabled !== false
+        ? PLAYER.REVIVE_DURATION_OTHER_DOCTRINE || 3.8
+        : PLAYER.REVIVE_DURATION_OTHER;
       const rateMult = wantMove ? 0.35 : 1.0;
       this.reviveProgress += (dt / revDuration) * rateMult;
       if (this.reviveProgress >= 1) {
@@ -1383,24 +1644,31 @@ export class PlayerController {
         this.isDraggingAlly = false;
         // Squad rule: Every revive consumes 1 Field Dressing!
         this.bandages = Math.max(0, (this.bandages || 1) - 1);
-        this.botManager.reviveBot(nearDownedBot, false);
-        // If Player is a Medic with Medic Bag supply, also apply Medic Bag to heal revived ally to 100 HP!
-        if (this.role === 'medic' && (this.medicBagSupply ?? 600) > 0) {
-          const needed = Math.max(0, 100 - nearDownedBot.hp);
-          const healAmt = Math.min(needed, this.medicBagSupply ?? 600);
-          nearDownedBot.hp = Math.min(100, nearDownedBot.hp + healAmt);
-          this.medicBagSupply = Math.max(0, (this.medicBagSupply ?? 600) - healAmt);
+        this.botManager.reviveBot(nearDownedBot, isMedicRole);
+        if (isMedicRole) {
+          // Medic Specialty: Revives teammates in 1.8s directly to 100 HP!
+          if ((this.medicBagSupply ?? 600) > 0) {
+            const needed = Math.max(0, 100 - nearDownedBot.hp);
+            const healAmt = Math.min(needed, this.medicBagSupply ?? 600);
+            this.medicBagSupply = Math.max(0, (this.medicBagSupply ?? 600) - healAmt);
+          }
+          nearDownedBot.hp = 100;
+        } else if (this.squadDoctrineEnabled !== false) {
+          // Non-Medic Emergency Stabilization under Squad Doctrine: 3.8s revive to 30 HP!
+          nearDownedBot.hp = PLAYER.REVIVE_HP_DOCTRINE || 30;
         }
         this.revives = (this.revives || 0) + 1;
-        const xpPts = draggedFar ? PLAYER.REVIVE_DRAG_XP : PLAYER.REVIVE_XP;
+        const baseRevXp = draggedFar ? PLAYER.REVIVE_DRAG_XP : PLAYER.REVIVE_XP;
+        const xpPts = this.inSquadCohesion ? Math.round(baseRevXp * 1.25) : baseRevXp;
         this.score += xpPts;
         if (this.onAwardXp) {
-          const maxD = this.maxBandages || (this.role === 'medic' ? 9 : 2);
+          const maxD = this.maxBandages || (isMedicRole ? 9 : 2);
+          const hpRestored = Math.round(nearDownedBot.hp);
           this.onAwardXp(
             xpPts,
             draggedFar
-              ? `🩹 DRAGGED & REVIVED ${nearDownedBot.name} (-1 DRESSING • ${this.bandages}/${maxD} LEFT)`
-              : `🩹 REVIVED ${nearDownedBot.name} (-1 FIELD DRESSING • ${this.bandages}/${maxD} LEFT)`
+              ? `🩹 DRAGGED & REVIVED ${nearDownedBot.name} TO ${hpRestored} HP (-1 DRESSING • ${this.bandages}/${maxD} LEFT)`
+              : `🩹 REVIVED ${nearDownedBot.name} TO ${hpRestored} HP (-1 FIELD DRESSING • ${this.bandages}/${maxD} LEFT)`
           );
         }
         if (this.onKillEvent) {
@@ -1930,8 +2198,17 @@ export class PlayerController {
     const targetAds = this.isAds && !this.reloading ? 1 : 0;
     this.adsAmount += (targetAds - this.adsAmount) * Math.min(1, dt * 15);
 
-    const activeAdsFov =
-      cur && this.useCantedSight && cur.def.hasCantedSight ? 50 : cur ? cur.def.adsFov || 55 : 75;
+    let activeAdsFov = 75;
+    if (cur && cur.def) {
+      if (this.useCantedSight && cur.def.hasCantedSight) {
+        activeAdsFov = 50;
+      } else if (Array.isArray(cur.def.zoomFovs) && cur.def.zoomFovs.length > 0) {
+        const zIdx = Math.max(0, Math.min(this.opticZoomIndex || 0, cur.def.zoomFovs.length - 1));
+        activeAdsFov = cur.def.zoomFovs[zIdx] || cur.def.adsFov || 55;
+      } else {
+        activeAdsFov = cur.def.adsFov || 55;
+      }
+    }
     const targetFov = cur ? THREE.MathUtils.lerp(75, activeAdsFov, this.adsAmount) : 75;
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
       this.camera.fov = targetFov;
@@ -1956,10 +2233,23 @@ export class PlayerController {
           : cur.def.opticType;
       const isBareIronSights = !activeOptic;
       const isCantedActive = Boolean(this.useCantedSight && cur.def.hasCantedSight);
-      const isSniper8x = !isCantedActive && activeOptic === 'sniper8x';
-      const isAcog = !isCantedActive && activeOptic === 'acog';
-      const isHolo = !isCantedActive && activeOptic === 'holo';
-      const isKobra = !isCantedActive && activeOptic === 'kobra';
+      const isSniper8x =
+        !isCantedActive &&
+        (activeOptic === 'sniper8x' ||
+          activeOptic === 'sniper12x' ||
+          activeOptic === 'valday6x' ||
+          activeOptic === 'lpvo36' ||
+          activeOptic === 'flir');
+      const isAcog =
+        !isCantedActive &&
+        (activeOptic === 'acog' ||
+          activeOptic === 'elcan4x' ||
+          activeOptic === 'prism2x' ||
+          activeOptic === 'holo3x');
+      const isHolo = !isCantedActive && (activeOptic === 'holo' || activeOptic === 'uh1');
+      const isKobra =
+        !isCantedActive &&
+        (activeOptic === 'kobra' || activeOptic === 'okp7' || activeOptic === 'rmr');
       // Exact optical sight-over-bore heights so the bottom of every 2D scope/reflex frame
       // sits directly on the 3D Picatinny rail / pistol slide mount (never floating in mid-air
       // and never blocking the reticle window!):
@@ -2839,8 +3129,8 @@ export class PlayerController {
       }
     }
 
-    this.pos.x = Math.max(-1060, Math.min(1060, this.pos.x));
-    this.pos.z = Math.max(-620, Math.min(620, this.pos.z));
+    this.pos.x = Math.max(-2850, Math.min(2850, this.pos.x));
+    this.pos.z = Math.max(-1850, Math.min(1850, this.pos.z));
   }
 
   /**

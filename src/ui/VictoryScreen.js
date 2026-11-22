@@ -222,8 +222,14 @@ export const VictoryScreen = {
     if (this.victoryMvpCardsEl) {
       const mvpOverall = [...allUnits].sort((a, b) => b.score - a.score)[0];
       const topMedic = [...allUnits].sort((a, b) => b.revives - a.revives || b.score - a.score)[0];
+      const topAce = [...allUnits].sort(
+        (a, b) => (b.planesDestroyed || 0) - (a.planesDestroyed || 0) || b.score - a.score
+      )[0];
       const topAt = [...allUnits].sort(
-        (a, b) => b.vehiclesDestroyed - a.vehiclesDestroyed || b.score - a.score
+        (a, b) =>
+          (b.tanksDestroyed || 0) * 2 +
+            (b.carsDestroyed || 0) -
+            ((a.tanksDestroyed || 0) * 2 + (a.carsDestroyed || 0)) || b.score - a.score
       )[0];
       const topKiller = [...allUnits].sort((a, b) => b.kills - a.kills || b.score - a.score)[0];
       const topWarCriminal = [...allUnits].sort(
@@ -244,9 +250,14 @@ export const VictoryScreen = {
           stat: `${topMedic ? topMedic.revives : 0} FALLEN COMRADES SAVED`
         },
         {
-          title: '⚡ TOP ANTI-ARMOR HUNTER',
+          title: '✈️ TOP SKY ACE / ANTI-AIR',
+          unit: topAce,
+          stat: `${topAce ? topAce.planesDestroyed || 0 : 0} AIRCRAFT SHOT DOWN`
+        },
+        {
+          title: '🛡️ TOP ANTI-ARMOR HUNTER',
           unit: topAt,
-          stat: `${topAt ? topAt.vehiclesDestroyed : 0} TANKS & APCs DESTROYED`
+          stat: `${topAt ? topAt.tanksDestroyed || 0 : 0} TANKS/IFV • ${topAt ? topAt.carsDestroyed || 0 : 0} CARS DESTROYED`
         },
         {
           title: '⌖ TOP COMBAT SHARPSHOOTER',

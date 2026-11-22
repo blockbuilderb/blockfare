@@ -1,23 +1,23 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../textures.js?v=92';
-import { TERRAIN } from '../config.js?v=92';
-import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=92';
+import { TEXTURES } from '../textures.js?v=105';
+import { TERRAIN } from '../config.js?v=105';
+import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=105';
 
 const VOXEL_SIZE = 1.25;
 
 // Static baked terrain heightmap grid covering 100% of playable ground & airfields at exact 1.25m voxel step
-const HM_MIN_X = -1500;
-const HM_MAX_X = 1500;
-const HM_MIN_Z = -900;
-const HM_MAX_Z = 900;
+const HM_MIN_X = -2000;
+const HM_MAX_X = 2000;
+const HM_MIN_Z = -1150;
+const HM_MAX_Z = 1150;
 const HM_STEP = 1.25;
 const HM_INV_STEP = 1 / HM_STEP;
-const HM_COLS = 2401; // (1500 - -1500) / 1.25 + 1
-const HM_ROWS = 1441; // (900 - -900) / 1.25 + 1
+const HM_COLS = 3201; // (2000 - -2000) / 1.25 + 1
+const HM_ROWS = 1841; // (1150 - -1150) / 1.25 + 1
 
 const _HQ_BUNKERS = [
-  { cx: -1035, cz: -38, dirX: 1 },
-  { cx: 1035, cz: 38, dirX: -1 }
+  { cx: -1605, cz: -38, dirX: 1 },
+  { cx: 1605, cz: 38, dirX: -1 }
 ];
 
 function markShared(asset) {
@@ -77,7 +77,41 @@ function buildStaticInstancedBatch(geo, mat, flatMatrices, flatColors = null, ca
 
 export const TerrainGenerator = {
   /**
-   * Analytic terrain evaluation used to bake the 1.25m static heightmap and as fallback outside [-1500..1500] x [-900..900].
+   * Natural meandering river centerline X(z), smoothly pinned to x = 0 at all 3 bridges (z = -400, 0, +400)
+   * so every bridge spans squarely across the deep water channel while the river winds organically across the valley!
+   */
+  getRiverCenterX(z) {
+    const d0 = Math.min(1, Math.abs(z) / 56);
+    const dN = Math.min(1, Math.abs(z - 400) / 48);
+    const dS = Math.min(1, Math.abs(z + 400) / 48);
+    const pin = d0 * d0 * dN * dN * dS * dS;
+    return (Math.sin(z * 0.0042) * 34.0 + Math.sin(z * 0.0115) * 9.0) * pin;
+  },
+
+  /**
+   * Returns true if (x, z) lies on the paved Frugis Valley road & bridge highway network.
+   */
+  _isOnValleyRoad(x, z) {
+    // 1. Main East-West Highway (z = 0 across full 3,040m HQ-to-HQ corridor)
+    if (Math.abs(z) < 7.8 && Math.abs(x) <= 1600 && Math.abs(x) > 18) return true;
+    // 2. North Bridge Highway (z = +400, linking Obj B <-> North Bridge <-> Obj E)
+    if (Math.abs(z - 400) < 6.4 && x >= -330 && x <= 668 && Math.abs(x) > 18) return true;
+    // 3. South Bridge Highway (z = -400, linking Obj A <-> South Bridge <-> Obj D)
+    if (Math.abs(z + 400) < 6.4 && x >= -668 && x <= 338 && Math.abs(x) > 18) return true;
+    // 4. North-South Sector Arterials to Objectives A, B, D, E & Airbase Gates
+    if (Math.abs(x + 660) < 6.4 && z >= -404 && z <= 4) return true;    // Obj A <-> Main Hwy & South Bridge
+    if (Math.abs(x + 320) < 6.4 && z >= -4 && z <= 404) return true;    // Obj B <-> Main Hwy & North Bridge
+    if (Math.abs(x - 330) < 6.4 && z >= -404 && z <= 4) return true;    // Obj D <-> Main Hwy & South Bridge
+    if (Math.abs(x - 660) < 6.4 && z >= -4 && z <= 404) return true;    // Obj E <-> Main Hwy & North Bridge
+    if (Math.abs(x + 1495) < 7.0 && z >= -54 && z <= 4) return true;    // US HQ <-> US Airbase Gate
+    if (Math.abs(x - 1495) < 7.0 && z >= -4 && z <= 54) return true;    // RU HQ <-> RU Airbase Gate
+    if (Math.abs(x + 640) < 5.5 && z >= 0 && z <= 272) return true;     // NW Outpost Spur
+    if (Math.abs(x - 640) < 5.5 && z >= -272 && z <= 0) return true;    // SE Outpost Spur
+    return false;
+  },
+
+  /**
+   * Analytic terrain evaluation used to bake the 1.25m static heightmap and as fallback outside [-2000..2000] x [-1150..1150].
    */
   _computeRawTerrainHeight(x, z) {
     // Broad rolling valley hills + secondary tactical ridges
@@ -86,10 +120,20 @@ export const TerrainGenerator = {
       Math.sin(x * 0.028 + z * 0.024) * 2.2 +
       Math.cos(x * 0.006 - z * 0.009) * 3.8;
 
-    // Perimeter Alpine mountain ranges framing the expanded 4,800m x 3,200m Battlefield Air & Ground Theater
-    const edgeX = Math.max(0, (Math.abs(x) - 2050) / 115);
-    const edgeZ = Math.max(0, (Math.abs(z) - 1350) / 95);
-    h += (edgeX * edgeX + edgeZ * edgeZ) * 38.0;
+    // Natural Alpine Mountain Ranges framing the 7,600m x 5,200m Grand Theater (smooth broad ridges, no thin needle spikes!)
+    const rimWaveX = Math.sin(z * 0.0024) * 185 + Math.cos(z * 0.0058) * 85;
+    const rimWaveZ = Math.sin(x * 0.0021) * 165 + Math.cos(x * 0.0052) * 75;
+    const edgeX = Math.max(0, (Math.abs(x) - (3020 + rimWaveX)) / 210);
+    const edgeZ = Math.max(0, (Math.abs(z) - (1960 + rimWaveZ)) / 175);
+    const rimEnv = edgeX * edgeX + edgeZ * edgeZ;
+    if (rimEnv > 0) {
+      const smoothRidges =
+        0.78 +
+        0.26 * Math.sin(x * 0.0038 + z * 0.0031) +
+        0.18 * Math.cos(x * 0.0065 - z * 0.0054);
+      const mountainRise = Math.min(245, Math.pow(rimEnv, 0.78) * 42.0 * smoothRidges);
+      h += mountainRise;
+    }
 
     // Smooth blend toward graded urban plateaus
     const pads = this.gradedPads;
@@ -115,25 +159,49 @@ export const TerrainGenerator = {
       }
     }
 
-    // Main East-West Highway corridor grading (z around 0) & North/South avenues
+    // Main East-West Highway corridor grading (z around 0, smoothly tapering out past |x| = 1,640m so it NEVER cracks the outer mountains!)
+    const absRoadX = Math.abs(x);
     const roadDist = Math.abs(z) / 13.5;
-    if (roadDist < 1.4 && Math.abs(x) > 16) {
-      const rw = (1 - roadDist / 1.4) * 0.88;
+    if (roadDist < 1.4 && absRoadX > 26 && absRoadX < 1940) {
+      const endFade = absRoadX <= 1640 ? 1.0 : 1.0 - (absRoadX - 1640) / 300;
+      const rw = (1 - roadDist / 1.4) * 0.88 * endFade * endFade;
       const roadTargetH = 1.25 + Math.sin(x * 0.008) * 1.1;
       h += (roadTargetH - h) * rw;
     }
 
-    // North-South River Gorge carving through x = 0 (with natural S-bend)
-    const riverCenterX = Math.sin(z * 0.012) * 6.5;
+    // Deep, Unbroken North-South River Gorge across the valley, tapering smoothly past |z| = 2,050m so it doesn't slice outer mountains!
+    const absRiverZ = Math.abs(z);
+    const riverCenterX = this.getRiverCenterX(z);
     const distFromRiver = Math.abs(x - riverCenterX);
-    if (distFromRiver < 20) {
-      const rw = 1 - distFromRiver * 0.05;
-      const gorgeDepth = -2.8 * (rw * rw);
-      h += (gorgeDepth - h) * rw;
+    if (distFromRiver < 42 && absRiverZ < 2450) {
+      const zRiverFade = absRiverZ <= 2050 ? 1.0 : 1.0 - (absRiverZ - 2050) / 400;
+      let targetRiverH = h;
+      if (distFromRiver <= 24) {
+        targetRiverH = -3.75 + (distFromRiver / 24) * 0.95;
+      } else {
+        const bankT = (distFromRiver - 24) / 18;
+        const smoothBank = bankT * bankT * (3 - 2 * bankT);
+        targetRiverH = -2.8 + (h + 2.8) * smoothBank;
+      }
+      h += (targetRiverH - h) * zRiverFade;
     }
 
-    // Subterranean Sunken Bunker-Cave Excavation at the Very Back of HQ Base (MODERN ERA ONLY)
+    // Subterranean Sunken Bunker-Cave Excavation & Exact Flat Rectangular Airbase Grading (MODERN ERA ONLY)
     if ((this.era || (this.mapDef && this.mapDef.era) || 'modern') === 'modern') {
+      // Lock 100% of both 372m Parallel Runways, Outer Flight-Line Aprons & Thresholds flat at y = 1.25m (ZERO floating runway ends!)
+      const absX = Math.abs(x);
+      const teamZ = x < 0 ? -z : z;
+      if (absX >= 1194 && absX <= 1674 && teamZ >= 34 && teamZ <= 204) {
+        const dxOut = absX < 1238 ? (1238 - absX) / 44 : absX > 1630 ? (absX - 1630) / 44 : 0;
+        const dzOut = teamZ < 46 ? (46 - teamZ) / 12 : teamZ > 172 ? (teamZ - 172) / 32 : 0;
+        const dEdge = Math.min(1, Math.hypot(dxOut, dzOut));
+        if (dEdge < 1) {
+          const tFlat = 1 - dEdge;
+          const wFlat = tFlat * tFlat * (3 - 2 * tFlat);
+          h += (1.25 - h) * wFlat;
+        }
+      }
+
       for (let bIdx = 0; bIdx < 2; bIdx++) {
         const bunker = _HQ_BUNKERS[bIdx];
         const localX = (x - bunker.cx) * bunker.dirX;
@@ -225,7 +293,7 @@ export const TerrainGenerator = {
       const hasRoad = roadDist < 1.4;
       const roadWeight = hasRoad ? (1 - roadDist / 1.4) * 0.88 : 0;
 
-      const riverCenterX = Math.sin(z * 0.012) * 6.5;
+      const riverCenterX = this.getRiverCenterX(z);
 
       let activeBunker = null;
       let bunkerZBlend = 0;
@@ -263,15 +331,39 @@ export const TerrainGenerator = {
           }
         }
 
-        if (hasRoad && (x > 16 || x < -16)) {
-          h += (roadTargetX[ix] - h) * roadWeight;
+        if (hasRoad && (x > 26 || x < -26)) {
+          const ax = x < 0 ? -x : x;
+          if (ax < 1940) {
+            const endFade = ax <= 1640 ? 1.0 : 1.0 - (ax - 1640) / 300;
+            h += (roadTargetX[ix] - h) * roadWeight * endFade * endFade;
+          }
         }
 
         const distFromRiver = Math.abs(x - riverCenterX);
-        if (distFromRiver < 20) {
-          const rw = 1 - distFromRiver * 0.05;
-          const gorgeDepth = -2.8 * (rw * rw);
-          h += (gorgeDepth - h) * rw;
+        if (distFromRiver < 42) {
+          if (distFromRiver <= 24) {
+            h = -3.75 + (distFromRiver / 24) * 0.95;
+          } else {
+            const bankT = (distFromRiver - 24) / 18;
+            const smoothBank = bankT * bankT * (3 - 2 * bankT);
+            h = -2.8 + (h + 2.8) * smoothBank;
+          }
+        }
+
+        // Exact Flat Rectangular Airbase Grading across full 372m Runway + Outer Side Apron footprint (prevents floating runway ends!)
+        if (isModern) {
+          const absX = x < 0 ? -x : x;
+          const teamZ = x < 0 ? -z : z;
+          if (absX >= 1194 && absX <= 1674 && teamZ >= 34 && teamZ <= 204) {
+            const dxOut = absX < 1238 ? (1238 - absX) / 44 : absX > 1630 ? (absX - 1630) / 44 : 0;
+            const dzOut = teamZ < 46 ? (46 - teamZ) / 12 : teamZ > 172 ? (teamZ - 172) / 32 : 0;
+            const dEdge = dxOut === 0 && dzOut === 0 ? 0 : Math.min(1, Math.hypot(dxOut, dzOut));
+            if (dEdge < 1) {
+              const tFlat = 1 - dEdge;
+              const wFlat = tFlat * tFlat * (3 - 2 * tFlat);
+              h += (1.25 - h) * wFlat;
+            }
+          }
         }
 
         if (activeBunker) {
@@ -339,11 +431,11 @@ export const TerrainGenerator = {
    * Returns walkable surface height including the 3 grand bridges over the river canyon.
    */
   getGroundHeightAt(x, z) {
-    if (x >= -21.0 && x <= 21.0) {
+    if (x >= -46.0 && x <= 46.0) {
       if (
         (z >= -18.0 && z <= 18.0) ||
-        (z >= -228.5 && z <= -211.5) ||
-        (z >= 211.5 && z <= 228.5)
+        (z >= -408.5 && z <= -391.5) ||
+        (z >= 391.5 && z <= 408.5)
       ) {
         return TERRAIN.BRIDGE_DECK_HEIGHT;
       }
@@ -361,22 +453,27 @@ export const TerrainGenerator = {
   },
 
   buildEnvironment() {
+    this.staticStructureBoxes = [];
     const era = this.era || (this.mapDef && this.mapDef.era) || 'modern';
     const isModern = era === 'modern';
     const isMedieval = era === 'medieval';
     const isJurassic = era === 'jurassic';
 
-    // 1. Expansive Battlefield-Scale 4,800m x 3,200m (15.36 km^2) 3D Terrain & Air Theater with Vertex Colors
-    const groundGeo = new THREE.PlaneGeometry(4800, 3200, 360, 240);
+    // 1. Expansive Battlefield-Scale 7,600m x 5,200m (39.52 km^2) 3D Terrain & Air Theater with Vertex Colors
+    const groundGeo = new THREE.PlaneGeometry(7600, 5200, 560, 380);
     groundGeo.rotateX(-Math.PI / 2);
 
     const posAttr = groundGeo.attributes.position;
     const colors = [];
-    const cGrass = new THREE.Color(isJurassic ? 0x4f8a46 : isMedieval ? 0x7ca05e : 0x88aa72);
-    const cHighGrass = new THREE.Color(isJurassic ? 0x3b6e35 : isMedieval ? 0x678a4c : 0x749660);
-    const cRock = new THREE.Color(isJurassic ? 0x4a4542 : isMedieval ? 0x757b80 : 0x7f8c8d);
-    const cSand = new THREE.Color(isJurassic ? 0xb59b5c : 0xc2b280);
-    const cRoad = new THREE.Color(isJurassic ? 0x69543e : isMedieval ? 0x7c7265 : 0x484e54);
+    const cGrass = new THREE.Color(isJurassic ? 0x4f8a46 : isMedieval ? 0x7ca05e : 0x86a870);
+    const cFieldMeadow = new THREE.Color(isJurassic ? 0x58944d : isMedieval ? 0x86ab64 : 0x93b26f);
+    const cFieldWheat = new THREE.Color(isJurassic ? 0x67944a : isMedieval ? 0x99a663 : 0x9fa96a);
+    const cAirbaseTurf = new THREE.Color(0x6d9160);
+    const cHighGrass = new THREE.Color(isJurassic ? 0x3b6e35 : isMedieval ? 0x678a4c : 0x6f915c);
+    const cRock = new THREE.Color(isJurassic ? 0x4a4542 : isMedieval ? 0x757b80 : 0x76828a);
+    const cSnow = new THREE.Color(0xeef5fc);
+    const cSand = new THREE.Color(isJurassic ? 0xb59b5c : 0xc6b482);
+    const cRoad = new THREE.Color(isJurassic ? 0x69543e : isMedieval ? 0x7c7265 : 0x434950);
 
     for (let i = 0; i < posAttr.count; i++) {
       const vx = posAttr.getX(i);
@@ -384,23 +481,31 @@ export const TerrainGenerator = {
       const vy = this.getTerrainHeight(vx, vz);
       posAttr.setY(i, vy);
 
-      // Determine biome vertex tint from height & proximity to river/highways
+      // Determine biome vertex tint from height, meandering riverbanks, road network & countryside plots
       let col = cGrass;
-      const onMainHighway = Math.abs(vz) < 7.5 && Math.abs(vx) > 18;
-      const onNorthSouthRoad =
-        (Math.abs(vx + 380) < 6.5 ||
-          Math.abs(vx - 380) < 6.5 ||
-          Math.abs(vx + 185) < 6.5 ||
-          Math.abs(vx - 195) < 6.5) &&
-        Math.abs(vz) < 220;
-      if (vy < -0.2) {
+      const rCx = this.getRiverCenterX(vz);
+      const distRiver = Math.abs(vx - rCx);
+      const onValleyRoad = distRiver > 25 && this._isOnValleyRoad(vx, vz);
+      const absVx = Math.abs(vx);
+      const teamVz = vx < 0 ? -vz : vz;
+      const inAirbaseLawn = isModern && absVx >= 1238 && absVx <= 1630 && teamVz >= 46 && teamVz <= 170;
+
+      if (vy < -0.15 || distRiver < 31) {
         col = cSand;
-      } else if (onMainHighway || onNorthSouthRoad) {
+      } else if (onValleyRoad) {
         col = cRoad;
-      } else if (vy > 11.0) {
+      } else if (vy > 48.0 && !isJurassic) {
+        col = cSnow;
+      } else if (vy > 13.5) {
         col = cRock;
-      } else if (vy > 4.5) {
+      } else if (inAirbaseLawn) {
+        col = cAirbaseTurf;
+      } else if (vy > 4.6) {
         col = cHighGrass;
+      } else {
+        const patchVal = Math.sin(vx * 0.0155 + 0.7) * Math.cos(vz * 0.0185 - 0.4);
+        if (patchVal > 0.36) col = cFieldWheat;
+        else if (patchVal < -0.28) col = cFieldMeadow;
       }
       colors.push(col.r, col.g, col.b);
     }
@@ -421,33 +526,40 @@ export const TerrainGenerator = {
     this.scene.add(ground);
     if (this._ownedWorldObjects) this._ownedWorldObjects.push(ground);
 
-    // 2. Water Plane inside the sunken 1,500m River Gorge (with animated ripple shimmer)
+    // 2. Unbroken Meandering Water Ribbon inside the Sunken River Gorge (follows getRiverCenterX(z) cleanly!)
     const waterCanvas = document.createElement('canvas');
     waterCanvas.width = 128;
     waterCanvas.height = 128;
     const wCtx = waterCanvas.getContext('2d');
-    wCtx.fillStyle = '#1f6c94';
+    wCtx.fillStyle = '#1d6f99';
     wCtx.fillRect(0, 0, 128, 128);
     for (let y = 0; y < 128; y += 8) {
-      wCtx.fillStyle = (y / 8) % 2 === 0 ? 'rgba(135, 215, 245, 0.16)' : 'rgba(12, 48, 72, 0.14)';
+      wCtx.fillStyle = (y / 8) % 2 === 0 ? 'rgba(135, 215, 245, 0.18)' : 'rgba(12, 48, 72, 0.15)';
       wCtx.fillRect((y * 7) % 32, y, 76, 3);
       wCtx.fillRect(((y * 13) + 64) % 96, y + 4, 48, 2);
     }
     const riverTex = new THREE.CanvasTexture(waterCanvas);
     riverTex.wrapS = THREE.RepeatWrapping;
     riverTex.wrapT = THREE.RepeatWrapping;
-    riverTex.repeat.set(4, 90);
+    riverTex.repeat.set(4, 145);
     this.riverTex = riverTex;
 
-    const riverGeo = new THREE.PlaneGeometry(52, 3200);
+    const riverGeo = new THREE.PlaneGeometry(48, 5200, 6, 420);
     riverGeo.rotateX(-Math.PI / 2);
+    const rPosAttr = riverGeo.attributes.position;
+    for (let ri = 0; ri < rPosAttr.count; ri++) {
+      const rz = rPosAttr.getZ(ri);
+      rPosAttr.setX(ri, rPosAttr.getX(ri) + this.getRiverCenterX(rz));
+    }
+    riverGeo.computeVertexNormals();
+
     const riverMat = new THREE.MeshStandardMaterial({
-      color: 0x2980b9,
+      color: 0x2684bf,
       map: riverTex,
       roughness: 0.16,
       metalness: 0.48,
       transparent: true,
-      opacity: 0.9
+      opacity: 0.92
     });
     const river = new THREE.Mesh(riverGeo, riverMat);
     river.position.set(0, -0.85, 0);
@@ -532,17 +644,18 @@ export const TerrainGenerator = {
       const rwyEdgeBulbColors = [];
 
       for (const rwy of [
-        { cx: -865, cz: -66, apronZ: -86, team: 'US', takeOffSign: 1 },
-        { cx: 865, cz: 66, apronZ: 86, team: 'RU', takeOffSign: -1 }
+        { cx: -1435, cz: -68, apronZ: -138, team: 'US', takeOffSign: 1 },
+        { cx: 1435, cz: 68, apronZ: 138, team: 'RU', takeOffSign: -1 }
       ]) {
         const rwyGroup = new THREE.Group();
-        const baseH = this.getGroundHeightAt(rwy.cx, rwy.cz);
+        const baseH = 1.25;
 
+        // Deep 2.2m solid concrete foundation embankment sunk into terrain so runway ends NEVER hang in mid-air!
         const shoulderSlab = new THREE.Mesh(
-          new THREE.BoxGeometry(372, 0.16, 33),
+          new THREE.BoxGeometry(374, 2.2, 33),
           runwayShoulderMat
         );
-        shoulderSlab.position.set(rwy.cx, baseH + 0.04, rwy.cz);
+        shoulderSlab.position.set(rwy.cx, baseH - 0.98, rwy.cz);
         shoulderSlab.receiveShadow = true;
         rwyGroup.add(shoulderSlab);
 
@@ -551,38 +664,53 @@ export const TerrainGenerator = {
         slab.receiveShadow = true;
         rwyGroup.add(slab);
 
-        const apronCenterX = rwy.cx - rwy.takeOffSign * 60;
+        // Continuous 4-Bay Outer Side Flight-Line Parking Apron (z = ∓138):
+        // Ordered strictly from BACK (Heaviest / Longest Takeoff Roll) -> FRONT (Fastest Jet):
+        //   Bay 1 (∓1576): AC-130 Gunship  •  Bay 2 (∓1528): B-2 Spirit  •  Bay 3 (∓1480): A-10 CAS  •  Bay 4 (∓1436): F-15 Fighter
+        const apronCenterX = rwy.team === 'US' ? -1490 : 1490;
         const sideApronShoulder = new THREE.Mesh(
-          new THREE.BoxGeometry(138, 0.15, 22),
+          new THREE.BoxGeometry(236, 2.1, 32),
           runwayShoulderMat
         );
-        sideApronShoulder.position.set(apronCenterX, baseH + 0.04, rwy.apronZ);
+        sideApronShoulder.position.set(apronCenterX, baseH - 0.95, rwy.apronZ);
         rwyGroup.add(sideApronShoulder);
 
         const sideApronSlab = new THREE.Mesh(
-          new THREE.BoxGeometry(132, 0.21, 19),
+          new THREE.BoxGeometry(228, 0.21, 26),
           runwayAsphaltMat
         );
         sideApronSlab.position.set(apronCenterX, baseH + 0.08, rwy.apronZ);
         sideApronSlab.receiveShadow = true;
         rwyGroup.add(sideApronSlab);
 
-        for (const bayOffset of [-40, 0, 40]) {
-          const bayX = apronCenterX + bayOffset;
+        const bayXs = rwy.team === 'US' ? [-1576, -1528, -1480, -1436] : [1576, 1528, 1480, 1436];
+        for (const bayX of bayXs) {
+          // Paved connector taxiway & yellow taxi lead from Outer Side Apron across to Runways 2 & 1
+          const connTaxiSlab = new THREE.Mesh(
+            new THREE.BoxGeometry(14.5, 0.19, 72),
+            runwayAsphaltMat
+          );
+          connTaxiSlab.position.set(
+            bayX + rwy.takeOffSign * 8,
+            baseH + 0.06,
+            (rwy.cz + rwy.apronZ) * 0.5
+          );
+          connTaxiSlab.receiveShadow = true;
+          rwyGroup.add(connTaxiSlab);
+
           const taxiLead = new THREE.Mesh(
-            new THREE.BoxGeometry(0.65, 0.24, 20),
+            new THREE.BoxGeometry(0.65, 0.24, 70),
             taxiYellowMat
           );
           taxiLead.position.set(
-            bayX + rwy.takeOffSign * 6,
+            bayX + rwy.takeOffSign * 8,
             baseH + 0.11,
             (rwy.cz + rwy.apronZ) * 0.5
           );
-          taxiLead.rotation.y = rwy.takeOffSign * (rwy.team === 'US' ? -0.35 : 0.35);
           rwyGroup.add(taxiLead);
 
           const bayStopBar = new THREE.Mesh(
-            new THREE.BoxGeometry(10.5, 0.24, 0.55),
+            new THREE.BoxGeometry(12.0, 0.24, 0.55),
             taxiYellowMat
           );
           bayStopBar.position.set(bayX, baseH + 0.11, rwy.apronZ);
@@ -651,6 +779,13 @@ export const TerrainGenerator = {
 
         // Angled Steel Jet Blast Deflector Wall behind departure end
         const jbdX = rwy.cx - rwy.takeOffSign * 182.5;
+        this.registerStaticStructureBox?.(
+          jbdX - 2.6,
+          jbdX + 2.6,
+          rwy.cz - 12.0,
+          rwy.cz + 12.0,
+          'jet_blast_deflector'
+        );
         const jbdPanel = new THREE.Mesh(
           new THREE.BoxGeometry(1.2, 4.2, 22.0),
           deflectorSteelMat
@@ -668,9 +803,16 @@ export const TerrainGenerator = {
           rwyGroup.add(strut);
         }
 
-        // Air Traffic Control (ATC) Tower & Windsock on outer side of runway
-        const atcX = rwy.cx - rwy.takeOffSign * 22;
-        const atcZ = rwy.cz + (rwy.team === 'US' ? -22.5 : 22.5);
+        // Air Traffic Control (ATC) Tower & Windsock positioned cleanly on ONE OUTER SIDE (z = ∓146, x = ∓1390), NEVER between runways!
+        const atcX = rwy.team === 'US' ? -1390 : 1390;
+        const atcZ = rwy.team === 'US' ? -146 : 146;
+        this.registerStaticStructureBox?.(
+          atcX - 4.8,
+          atcX + 8.6,
+          atcZ - 4.8,
+          atcZ + 4.8,
+          'atc_tower'
+        );
         const atcShaft = new THREE.Mesh(
           new THREE.BoxGeometry(4.8, 12.5, 4.8),
           runwayShoulderMat
@@ -740,17 +882,18 @@ export const TerrainGenerator = {
       const b2BeaconColors = [];
 
       for (const b2Lane of [
-        { cx: -865, cz: -112, hangarX: -925, taxiX: -925, taxiZ: -58, team: 'US' },
-        { cx: 865, cz: 112, hangarX: 925, taxiX: 925, taxiZ: 58, team: 'RU' }
+        { cx: -1435, cz: -104, hangarX: -1528, hangarZ: -138, taxiX: -1495, taxiZ: -54, team: 'US' },
+        { cx: 1435, cz: 104, hangarX: 1528, hangarZ: 138, taxiX: 1495, taxiZ: 54, team: 'RU' }
       ]) {
         const laneGroup = new THREE.Group();
-        const baseH = this.getGroundHeightAt(b2Lane.cx, b2Lane.cz);
+        const baseH = 1.25;
 
+        // Deep 2.2m concrete foundation embankment so Stealth Runway 2 never hangs in mid-air at either end!
         const stealthShoulder = new THREE.Mesh(
-          new THREE.BoxGeometry(372, 0.16, 33),
+          new THREE.BoxGeometry(374, 2.2, 34),
           runwayShoulderMat
         );
-        stealthShoulder.position.set(b2Lane.cx, baseH + 0.04, b2Lane.cz);
+        stealthShoulder.position.set(b2Lane.cx, baseH - 0.98, b2Lane.cz);
         laneGroup.add(stealthShoulder);
 
         const stealthSlab = new THREE.Mesh(
@@ -762,7 +905,7 @@ export const TerrainGenerator = {
         laneGroup.add(stealthSlab);
 
         const taxiwaySlab = new THREE.Mesh(
-          new THREE.BoxGeometry(46, 0.2, 98),
+          new THREE.BoxGeometry(38, 0.2, 42),
           runwayAsphaltMat
         );
         taxiwaySlab.position.set(b2Lane.taxiX, baseH + 0.06, b2Lane.taxiZ);
@@ -770,13 +913,13 @@ export const TerrainGenerator = {
         laneGroup.add(taxiwaySlab);
 
         const taxiCenterline = new THREE.Mesh(
-          new THREE.BoxGeometry(0.55, 0.23, 94),
+          new THREE.BoxGeometry(0.55, 0.23, 40),
           taxiYellowMat
         );
         taxiCenterline.position.set(b2Lane.taxiX, baseH + 0.08, b2Lane.taxiZ);
         laneGroup.add(taxiCenterline);
 
-        for (const hsZ of [b2Lane.team === 'US' ? -48 : 48, b2Lane.team === 'US' ? -94 : 94]) {
+        for (const hsZ of [b2Lane.team === 'US' ? -48 : 48, b2Lane.team === 'US' ? -84 : 84]) {
           const holdBar = new THREE.Mesh(
             new THREE.BoxGeometry(14.0, 0.24, 0.75),
             taxiYellowMat
@@ -802,22 +945,32 @@ export const TerrainGenerator = {
           }
         }
 
-        for (const px of [-10, 10]) {
+        // B-2A Spirit Open-Sided Stealth Canopy Shelter parked on the OUTER SIDE APRON (Bay 2: hangarZ = ∓138), leaving Runway 2 100% clear!
+        for (const px of [-11, 11]) {
           for (const pzSide of [-1, 1]) {
-            const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.65, 6.2, 0.65), b2CanopyMat);
-            pillar.position.set(b2Lane.hangarX + px, baseH + 3.1, b2Lane.cz + pzSide * 13.4);
+            const pilX = b2Lane.hangarX + px;
+            const pilZ = b2Lane.hangarZ + pzSide * 13.4;
+            this.registerStaticStructureBox?.(
+              pilX - 0.85,
+              pilX + 0.85,
+              pilZ - 0.85,
+              pilZ + 0.85,
+              'b2_canopy_pillar'
+            );
+            const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.65, 6.4, 0.65), b2CanopyMat);
+            pillar.position.set(pilX, baseH + 3.2, pilZ);
             laneGroup.add(pillar);
           }
         }
-        const canopyRoof = new THREE.Mesh(new THREE.BoxGeometry(24, 0.45, 28.2), b2CanopyMat);
-        canopyRoof.position.set(b2Lane.hangarX, baseH + 6.3, b2Lane.cz);
+        const canopyRoof = new THREE.Mesh(new THREE.BoxGeometry(26, 0.45, 28.2), b2CanopyMat);
+        canopyRoof.position.set(b2Lane.hangarX, baseH + 6.5, b2Lane.hangarZ);
         laneGroup.add(canopyRoof);
 
         const canopyTrim = new THREE.Mesh(
-          new THREE.BoxGeometry(24.4, 0.22, 28.6),
+          new THREE.BoxGeometry(26.4, 0.22, 28.6),
           b2GoldStripeMat
         );
-        canopyTrim.position.set(b2Lane.hangarX, baseH + 6.55, b2Lane.cz);
+        canopyTrim.position.set(b2Lane.hangarX, baseH + 6.75, b2Lane.hangarZ);
         laneGroup.add(canopyTrim);
 
         this.scene.add(laneGroup);
@@ -869,6 +1022,13 @@ export const TerrainGenerator = {
         const dz = z2 - z1;
         const len = Math.hypot(dx, dz);
         if (len < 1) return;
+        this.registerStaticStructureBox?.(
+          Math.min(x1, x2) - 0.95,
+          Math.max(x1, x2) + 0.95,
+          Math.min(z1, z2) - 0.95,
+          Math.max(z1, z2) + 0.95,
+          'perimeter_wall'
+        );
         const mx = (x1 + x2) * 0.5;
         const mz = (z1 + z2) * 0.5;
         const groundY = this.getGroundHeightAt(mx, mz);
@@ -925,8 +1085,8 @@ export const TerrainGenerator = {
       };
 
       for (const hq of [
-        { team: 'US', sign: -1, frontX: -866, backX: -1052, rwyZ: -48, outerRwyZ: -132, oppZ: 52, rwyGateCenter: -925 },
-        { team: 'RU', sign: 1, frontX: 866, backX: 1052, rwyZ: 48, outerRwyZ: 132, oppZ: -52, rwyGateCenter: 925 }
+        { team: 'US', sign: -1, frontX: -1436, backX: -1626, rwyZ: -48, outerRwyZ: -168, oppZ: 52, rwyGateCenter: -1495 },
+        { team: 'RU', sign: 1, frontX: 1436, backX: 1626, rwyZ: 48, outerRwyZ: 168, oppZ: -52, rwyGateCenter: 1495 }
       ]) {
         const secGroup = new THREE.Group();
 
@@ -935,17 +1095,17 @@ export const TerrainGenerator = {
           addWallWithBarbedWire(secGroup, hq.frontX, 16, hq.frontX, hq.oppZ, 3.2);
           addWallWithBarbedWire(secGroup, hq.backX, hq.oppZ, hq.frontX, hq.oppZ, 3.2);
           addWallWithBarbedWire(secGroup, hq.backX, hq.outerRwyZ, hq.backX, hq.oppZ, 3.2);
-          addWallWithBarbedWire(secGroup, hq.backX, hq.rwyZ, -942, hq.rwyZ, 3.2);
-          addWallWithBarbedWire(secGroup, -908, hq.rwyZ, hq.frontX, hq.rwyZ, 3.2);
-          addWallWithBarbedWire(secGroup, hq.backX, hq.outerRwyZ, -680, hq.outerRwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, hq.backX, hq.rwyZ, -1512, hq.rwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, -1478, hq.rwyZ, -1250, hq.rwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, hq.backX, hq.outerRwyZ, -1250, hq.outerRwyZ, 3.2);
         } else {
           addWallWithBarbedWire(secGroup, hq.frontX, hq.oppZ, hq.frontX, -16, 3.2);
           addWallWithBarbedWire(secGroup, hq.frontX, 16, hq.frontX, hq.rwyZ, 3.2);
           addWallWithBarbedWire(secGroup, hq.frontX, hq.oppZ, hq.backX, hq.oppZ, 3.2);
           addWallWithBarbedWire(secGroup, hq.backX, hq.oppZ, hq.backX, hq.outerRwyZ, 3.2);
-          addWallWithBarbedWire(secGroup, hq.frontX, hq.rwyZ, 908, hq.rwyZ, 3.2);
-          addWallWithBarbedWire(secGroup, 942, hq.rwyZ, hq.backX, hq.rwyZ, 3.2);
-          addWallWithBarbedWire(secGroup, 680, hq.outerRwyZ, hq.backX, hq.outerRwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, 1250, hq.rwyZ, 1478, hq.rwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, 1512, hq.rwyZ, hq.backX, hq.rwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, 1250, hq.outerRwyZ, hq.backX, hq.outerRwyZ, 3.2);
         }
 
         // 2. Armored Checkpoint Guardhouses & Instanced Red/White Striped Boom Barriers at Main Road Gate
@@ -953,6 +1113,13 @@ export const TerrainGenerator = {
           const gz = gateSide * 17.5;
           const gx = hq.frontX;
           const gy = this.getGroundHeightAt(gx, gz);
+          this.registerStaticStructureBox?.(
+            gx - 2.4,
+            gx + 2.4,
+            gz - 2.4,
+            gz + 2.4,
+            'guard_booth'
+          );
 
           const booth = new THREE.Mesh(
             new THREE.BoxGeometry(3.6, 5.2, 3.6),
@@ -998,6 +1165,13 @@ export const TerrainGenerator = {
           const rgx = hq.rwyGateCenter + rwyGateSide * 18.5;
           const rgz = hq.rwyZ;
           const rgy = this.getGroundHeightAt(rgx, rgz);
+          this.registerStaticStructureBox?.(
+            rgx - 2.4,
+            rgx + 2.4,
+            rgz - 2.4,
+            rgz + 2.4,
+            'runway_gate_booth'
+          );
 
           const rBooth = new THREE.Mesh(
             new THREE.BoxGeometry(3.6, 3.2, 3.6),
@@ -1057,40 +1231,42 @@ export const TerrainGenerator = {
       this.buildJurassicJungleStructures();
     }
 
-    // 3. Three Grand Stone/Concrete Bridges spanning the River Gorge (z = -220, 0, +220)
-    //    Central Bridge C (z = 0) features an expanded 42m x 36m plaza deck!
-    const bridgeDeckGeo = new THREE.BoxGeometry(42, 0.8, 17.0);
-    const centralPlazaDeckGeo = new THREE.BoxGeometry(42, 0.8, 36.0);
+    // 3. Three Grand 92m-Wide Stone/Concrete Bridges spanning the full 84m River Gorge (z = -400, 0, +400)
+    //    Anchors 4m deep into both dry riverbanks (x = -46m..+46m at y = 1.25m) so Objective C & all 3 bridges
+    //    have 100% flush, continuous walk/drive access from BOTH West & East banks!
+    const bridgeDeckGeo = new THREE.BoxGeometry(92, 0.9, 17.5);
+    const centralPlazaDeckGeo = new THREE.BoxGeometry(92, 0.9, 36.5);
     const bridgeDeckMat = new THREE.MeshStandardMaterial({
       map: TEXTURES.darkConcrete,
       color: isMedieval ? 0x6c727a : 0xffffff,
       roughness: 0.88
     });
-    const pierGeo = new THREE.BoxGeometry(3.2, 5.4, 15.5);
+    const pierGeo = new THREE.BoxGeometry(3.4, 5.6, 15.5);
+    const plazaPierGeo = new THREE.BoxGeometry(3.6, 5.6, 33.5);
 
-    for (const bz of [-220, 0, 220]) {
+    for (const bz of [-400, 0, 400]) {
       const bridge = new THREE.Mesh(
         bz === 0 ? centralPlazaDeckGeo : bridgeDeckGeo,
         bridgeDeckMat
       );
-      bridge.position.set(0, 0.75, bz);
+      bridge.position.set(0, 0.8, bz); // Top deck surface = 0.8 + 0.45 = exact 1.25m (flush with banks & roads!)
       bridge.castShadow = true;
       bridge.receiveShadow = true;
       this.scene.add(bridge);
       if (this._ownedWorldObjects) this._ownedWorldObjects.push(bridge);
 
-      for (const px of [-11, 0, 11]) {
-        const pier = new THREE.Mesh(pierGeo, bridgeDeckMat);
-        pier.position.set(px, -1.6, bz);
+      for (const px of [-26, -13, 0, 13, 26]) {
+        const pier = new THREE.Mesh(bz === 0 ? plazaPierGeo : pierGeo, bridgeDeckMat);
+        pier.position.set(px, -1.65, bz);
         this.scene.add(pier);
         if (this._ownedWorldObjects) this._ownedWorldObjects.push(pier);
       }
 
-      // Destructible bridge parapets: Crenellated Gothic Stone Merlons in Medieval Era, Sandbag/Concrete in Modern Era
-      const halfSpanZ = bz === 0 ? 17.2 : 7.2;
+      // Destructible side bridge parapets along North & South edges (West & East ends stay 100% open for vehicles & troops!)
+      const halfSpanZ = bz === 0 ? 17.4 : 7.4;
       const gzMin = Math.round((bz - halfSpanZ) / VOXEL_SIZE);
       const gzMax = Math.round((bz + halfSpanZ) / VOXEL_SIZE);
-      for (let gx = -14; gx <= 14; gx++) {
+      for (let gx = -34; gx <= 34; gx++) {
         this.addVoxel(gx, 1, gzMin, 'darkConcrete');
         this.addVoxel(gx, 1, gzMax, 'darkConcrete');
         if (Math.abs(gx) % 2 === 0) {
@@ -1157,7 +1333,7 @@ export const TerrainGenerator = {
     // =========================================================================
     if (era === 'modern') {
       const lampPositions = [];
-      for (let x = -900; x <= 900; x += 60) {
+      for (let x = -1420; x <= 1420; x += 65) {
         if (Math.abs(x) < 22) continue;
         for (const zSide of [-8.2, 8.2]) {
           lampPositions.push({ x, z: zSide, wy: this.getTerrainHeight(x, zSide) });
@@ -1390,15 +1566,15 @@ export const TerrainGenerator = {
     const fireGlowMat = new THREE.MeshBasicMaterial({ color: 0xff8c1a });
 
     const castleSites = [
-      { cx: -950, cz: 0, halfGx: 26, halfGz: 22, wallH: 6, keepH: 12, faction: 'US', isHQ: true },
-      { cx: 950, cz: 0, halfGx: 26, halfGz: 22, wallH: 6, keepH: 12, faction: 'RU', isHQ: true },
-      { cx: -660, cz: 0, halfGx: 18, halfGz: 15, wallH: 5, keepH: 9, faction: 'US', isHQ: false },
-      { cx: 660, cz: 0, halfGx: 18, halfGz: 15, wallH: 5, keepH: 9, faction: 'RU', isHQ: false },
-      { cx: -380, cz: -140, halfGx: 20, halfGz: 17, wallH: 6, keepH: 11, faction: 'US', isHQ: false },
-      { cx: -185, cz: 165, halfGx: 19, halfGz: 16, wallH: 5, keepH: 10, faction: 'US', isHQ: false },
+      { cx: -1520, cz: 0, halfGx: 26, halfGz: 22, wallH: 6, keepH: 12, faction: 'US', isHQ: true },
+      { cx: 1520, cz: 0, halfGx: 26, halfGz: 22, wallH: 6, keepH: 12, faction: 'RU', isHQ: true },
+      { cx: -1060, cz: 0, halfGx: 18, halfGz: 15, wallH: 5, keepH: 9, faction: 'US', isHQ: false },
+      { cx: 1060, cz: 0, halfGx: 18, halfGz: 15, wallH: 5, keepH: 9, faction: 'RU', isHQ: false },
+      { cx: -660, cz: -280, halfGx: 20, halfGz: 17, wallH: 6, keepH: 11, faction: 'US', isHQ: false },
+      { cx: -320, cz: 320, halfGx: 19, halfGz: 16, wallH: 5, keepH: 10, faction: 'US', isHQ: false },
       { cx: 0, cz: 0, halfGx: 19, halfGz: 16, wallH: 6, keepH: 10, faction: 'NEUTRAL', isHQ: false },
-      { cx: 195, cz: -165, halfGx: 20, halfGz: 17, wallH: 6, keepH: 11, faction: 'RU', isHQ: false },
-      { cx: 380, cz: 140, halfGx: 20, halfGz: 17, wallH: 6, keepH: 11, faction: 'RU', isHQ: false }
+      { cx: 330, cz: -320, halfGx: 20, halfGz: 17, wallH: 6, keepH: 11, faction: 'RU', isHQ: false },
+      { cx: 660, cz: 280, halfGx: 20, halfGz: 17, wallH: 6, keepH: 11, faction: 'RU', isHQ: false }
     ];
     this.castleSites = castleSites;
 

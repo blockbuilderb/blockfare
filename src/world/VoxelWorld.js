@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=92';
-import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=92';
-import { getMapDefinition } from '../maps/index.js?v=92';
-import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=92';
-import { events, makeEventBridge } from '../events.js?v=92';
-import { TerrainGenerator } from './TerrainGenerator.js?v=92';
-import { BuildingFactory } from './BuildingFactory.js?v=92';
-import { ConquestSystem } from './ConquestSystem.js?v=92';
-import { ProjectileManager } from './ProjectileManager.js?v=92';
-import { WeatherSystem } from './WeatherSystem.js?v=92';
+import { TEXTURES } from '../assets/textures.js?v=105';
+import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=105';
+import { getMapDefinition } from '../maps/index.js?v=105';
+import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=105';
+import { events, makeEventBridge } from '../events.js?v=105';
+import { TerrainGenerator } from './TerrainGenerator.js?v=105';
+import { BuildingFactory } from './BuildingFactory.js?v=105';
+import { ConquestSystem } from './ConquestSystem.js?v=105';
+import { ProjectileManager } from './ProjectileManager.js?v=105';
+import { WeatherSystem } from './WeatherSystem.js?v=105';
 
 export { VOXEL_SIZE, MAT_DEFS };
 
@@ -121,6 +121,9 @@ export class VoxelWorld {
     }
 
     this.buildConquestFlags();
+    if (typeof this.buildSkyClouds === 'function') {
+      this.buildSkyClouds();
+    }
 
     // Dynamic Weather System (Battlefield 2042 inspired)
     this.weatherState = 'CLEAR';
@@ -625,6 +628,20 @@ export class VoxelWorld {
         });
       }
       this._ownedWorldObjects.length = 0;
+    }
+
+    if (this.skyCloudGroup) {
+      if (this.scene) this.scene.remove(this.skyCloudGroup);
+      this.skyCloudGroup.traverse?.((ch) => {
+        if (ch.isInstancedMesh || ch.isMesh) {
+          if (ch.geometry && !ch.geometry.userData?.shared) ch.geometry.dispose();
+          disposeMaterialSafe(ch.material);
+          if (ch.isInstancedMesh) ch.dispose?.();
+        }
+      });
+      this.skyCloudGroup = null;
+      this.skyCumulusMat = null;
+      this.skyCirrusMat = null;
     }
 
     if (this.riverTex) {

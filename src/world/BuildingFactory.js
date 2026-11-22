@@ -1,12 +1,12 @@
 import * as THREE from '../../vendor/three.module.js';
-import { createRadarTowerMesh } from '../models/prop-models.js?v=92';
+import { createRadarTowerMesh } from '../models/prop-models.js?v=105';
 
 const VOXEL_SIZE = 1.25;
-const SPATIAL_MIN_X = -1280;
-const SPATIAL_MIN_Z = -800;
+const SPATIAL_MIN_X = -2048;
+const SPATIAL_MIN_Z = -1280;
 const SPATIAL_CELL_SHIFT = 5; // 32m cells (1 << 5)
-const SPATIAL_COLS = 80; // 2560m / 32m
-const SPATIAL_ROWS = 50; // 1600m / 32m
+const SPATIAL_COLS = 128; // 4096m / 32m
+const SPATIAL_ROWS = 80; // 2560m / 32m
 const SPATIAL_MAX_PAD = 6.0; // Max padMeters supported by spatial index
 
 function markShared(asset) {
@@ -232,6 +232,26 @@ export const BuildingFactory = {
           }
         }
       }
+      if (Array.isArray(this.staticStructureBoxes)) {
+        for (let sIdx = 0; sIdx < this.staticStructureBoxes.length; sIdx++) {
+          const sb = this.staticStructureBoxes[sIdx];
+          const minX = sb.minX - padMeters;
+          const maxX = sb.maxX + padMeters;
+          const minZ = sb.minZ - padMeters;
+          const maxZ = sb.maxZ + padMeters;
+          if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) {
+            const dLeft = x - minX;
+            const dRight = maxX - x;
+            const dFront = z - minZ;
+            const dBack = maxZ - z;
+            const minDist = Math.min(dLeft, dRight, dFront, dBack);
+            if (minDist === dLeft) x = minX - 0.25;
+            else if (minDist === dRight) x = maxX + 0.25;
+            else if (minDist === dFront) z = minZ - 0.25;
+            else z = maxZ + 0.25;
+          }
+        }
+      }
     }
     return { x, z };
   },
@@ -252,11 +272,20 @@ export const BuildingFactory = {
         const dist = ring * 1.8;
         const tx = baseX + Math.cos(angle) * dist;
         const tz = baseZ + Math.sin(angle) * dist;
-        if (Math.abs(tx) < 19 && Math.abs(tz) > 8 && Math.abs(tz - 220) > 8 && Math.abs(tz + 220) > 8) {
+        const rCx = typeof this.getRiverCenterX === 'function' ? this.getRiverCenterX(tz) : 0;
+        if (
+          Math.abs(tx - rCx) < 25 &&
+          Math.abs(tz) > 18 &&
+          Math.abs(tz - 400) > 8.5 &&
+          Math.abs(tz + 400) > 8.5
+        ) {
           continue; // Never spawn inside the sunken river water
         }
-        if (this.isInsideBuildingOrContainer(tx, tz, 1.8)) {
-          continue; // Never spawn inside a building room or container
+        if (
+          this.isInsideBuildingOrContainer(tx, tz, 1.8) ||
+          this.isInsideStaticStructure(tx, tz, 1.5)
+        ) {
+          continue; // Never spawn inside a building room, container, tower, or fence
         }
 
         const ty = this.getGroundHeightAt(tx, tz);
@@ -279,34 +308,75 @@ export const BuildingFactory = {
    * Returns true if any part of an oriented vehicle hull footprint (halfW x halfL)
    * overlaps a building, shipping container, river gorge, or solid structural voxel.
    */
+  registerStaticStructureBox(minX, maxX, minZ, maxZ, label = 'structure') {
+    if (!this.staticStructureBoxes) this.staticStructureBoxes = [];
+    this.staticStructureBoxes.push({
+      minX: Math.min(minX, maxX),
+      maxX: Math.max(minX, maxX),
+      minZ: Math.min(minZ, maxZ),
+      maxZ: Math.max(minZ, maxZ),
+      label
+    });
+  },
+
+  isInsideStaticStructure(wx, wz, pad = 1.0) {
+    const list = this.staticStructureBoxes;
+    if (!Array.isArray(list) || list.length === 0) return false;
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      if (
+        wx >= b.minX - pad &&
+        wx <= b.maxX + pad &&
+        wz >= b.minZ - pad &&
+        wz <= b.maxZ + pad
+      ) {
+        return true;
+      }
+    }
+    return false;
+  },
+
   isVehicleBoxBlocked(wx, wz, yaw = 0, halfW = 1.95, halfL = 3.55, padMeters = 1.2) {
-    if (Math.abs(wx) < 21 && Math.abs(wz) > 16 && Math.abs(wz - 220) > 7.5 && Math.abs(wz + 220) > 7.5) {
+    const rCenter = typeof this.getRiverCenterX === 'function' ? this.getRiverCenterX(wz) : 0;
+    if (
+      Math.abs(wx - rCenter) < 26 &&
+      Math.abs(wz) > 16 &&
+      Math.abs(wz - 220) > 7.5 &&
+      Math.abs(wz + 220) > 7.5
+    ) {
       return true; // River gorge outside bridge decks
     }
     const fwdX = -Math.sin(yaw);
     const fwdZ = -Math.cos(yaw);
     const rightX = Math.cos(yaw);
     const rightZ = -Math.sin(yaw);
+    const centerY = this.getGroundHeightAt(wx, wz);
 
-    // Check 9 points across the oriented vehicle hull (center + 4 corners + 4 mid-edges)
+    // Check 9 points across the oriented vehicle hull/wingspan (center + 4 corners + 4 mid-edges)
     for (let i = 0; i < 9; i++) {
       const pair = _SAMPLE_OFFSETS_9[i];
       const longOff = pair[0] * halfL;
       const latOff = pair[1] * halfW;
       const px = wx + fwdX * longOff + rightX * latOff;
       const pz = wz + fwdZ * longOff + rightZ * latOff;
-      if (this.isInsideBuildingOrContainer(px, pz, padMeters)) {
+      if (
+        this.isInsideBuildingOrContainer(px, pz, padMeters) ||
+        this.isInsideStaticStructure(px, pz, padMeters)
+      ) {
         return true;
       }
       const py = this.getGroundHeightAt(px, pz);
+      if (Math.abs(py - centerY) > 2.2) {
+        return true; // Avoid spawning across steep cliffs/ditches
+      }
       const g = this.worldToGrid(px, py + 0.5, pz, _tmpGrid);
-      // 1-block high obstacles (dy === 0 with no solid wall stacked at dy === 1 or dy === 2)
-      // can be climbed / run over by tanks and armored vehicles, so only multi-block walls block!
+      const v0 = this.getVoxel(g.gx, g.gy, g.gz);
       const v1 = this.getVoxel(g.gx, g.gy + 1, g.gz);
       const v2 = this.getVoxel(g.gx, g.gy + 2, g.gz);
       if (
-        (v1 && !v1.isProp && v1.type !== 'sandbag') ||
-        (v2 && !v2.isProp && v2.type !== 'sandbag')
+        (v0 && !v0.isProp && v0.type !== 'grass' && v0.type !== 'dirt' && py + 0.8 < (g.gy + 1) * 1.25) ||
+        (v1 && !v1.isProp) ||
+        (v2 && !v2.isProp)
       ) {
         return true;
       }
@@ -315,31 +385,99 @@ export const BuildingFactory = {
   },
 
   /**
-   * Finds a safe, open world position for spawning a Tank, APC, or Tactical Car where its
-   * full 3D hull footprint (halfW x halfL) is completely outside all buildings, containers,
-   * and voxel obstacles.
+   * Finds a guaranteed clear, drivable/flyable world spawn pose `{ x, y, z, yaw }` (returned as Vector3 with `.safeYaw`):
+   * - Clears all destructible buildings, shipping containers, HESCO walls, sandbag bunkers, voxel structures,
+   *   non-voxel static 3D structures (ATC tower, fences, canopy pillars, guard booths), AND already-spawned vehicles!
+   * - Verifies a clear 10m+ forward drive-out / taxi egress corridor (automatically rotating `safeYaw` toward open street if needed)
+   *   so NO vehicle ever spawns boxed in next to a building!
    */
-  findSafeVehicleSpawnPoint(targetX, targetZ, yaw = 0, halfW = 1.95, halfL = 3.55) {
-    const clearRadius = Math.max(halfW, halfL) + 2.5;
+  findSafeVehicleSpawnPoint(
+    targetX,
+    targetZ,
+    yaw = 0,
+    halfW = 1.95,
+    halfL = 3.55,
+    existingVehicles = null,
+    lockYaw = false
+  ) {
+    const clearRadius = Math.max(halfW, halfL) + 2.6;
     const pushed = this.pushOutOfBuildingFootprint(targetX, targetZ, clearRadius);
     const baseX = pushed.x;
     const baseZ = pushed.z;
+    const minSep = Math.max(4.2, (halfW + halfL) * 0.92);
+    const minSepSq = minSep * minSep;
 
-    for (let ring = 0; ring <= 28; ring++) {
+    const overlapsOtherVehicle = (cx, cz) => {
+      if (!Array.isArray(existingVehicles)) return false;
+      for (let i = 0; i < existingVehicles.length; i++) {
+        const ev = existingVehicles[i];
+        if (!ev || ev.dead || !ev.pos) continue;
+        const dx = cx - ev.pos.x;
+        const dz = cz - ev.pos.z;
+        const reqD = Math.max(minSep, (ev.hullHalfWidth || 1.6) + halfW + 2.2);
+        if (dx * dx + dz * dz < Math.max(minSepSq, reqD * reqD)) return true;
+      }
+      return false;
+    };
+
+    const hasDriveOutEgress = (cx, cz, testYaw) => {
+      const fx = -Math.sin(testYaw);
+      const fz = -Math.cos(testYaw);
+      const step1 = halfL + 3.8;
+      const step2 = halfL + 8.2;
+      return (
+        !this.isVehicleBoxBlocked(cx + fx * step1, cz + fz * step1, testYaw, halfW * 0.9, halfL * 0.75, 0.9) &&
+        !this.isVehicleBoxBlocked(cx + fx * step2, cz + fz * step2, testYaw, halfW * 0.9, halfL * 0.75, 0.7)
+      );
+    };
+
+    const yawOffsets = lockYaw
+      ? [0]
+      : [0, 0.55, -0.55, Math.PI * 0.5, -Math.PI * 0.5, Math.PI * 0.78, -Math.PI * 0.78, Math.PI];
+
+    // Pass 1: Strict clearance + guaranteed forward drive-out egress + no vehicle overlap
+    for (let ring = 0; ring <= 32; ring++) {
       const samples = ring === 0 ? 1 : ring * 12;
       for (let i = 0; i < samples; i++) {
         const angle = (i / samples) * Math.PI * 2;
-        const dist = ring * 2.5;
+        const dist = ring * 2.8;
         const tx = baseX + Math.cos(angle) * dist;
         const tz = baseZ + Math.sin(angle) * dist;
-        if (!this.isVehicleBoxBlocked(tx, tz, yaw, halfW, halfL, 1.8)) {
-          const ty = this.getGroundHeightAt(tx, tz);
-          return new THREE.Vector3(tx, ty, tz);
+        if (overlapsOtherVehicle(tx, tz)) continue;
+        for (let yIdx = 0; yIdx < yawOffsets.length; yIdx++) {
+          const candYaw = yaw + yawOffsets[yIdx];
+          if (!this.isVehicleBoxBlocked(tx, tz, candYaw, halfW, halfL, 1.85) && hasDriveOutEgress(tx, tz, candYaw)) {
+            const ty = this.getGroundHeightAt(tx, tz);
+            const out = new THREE.Vector3(tx, ty, tz);
+            out.safeYaw = candYaw;
+            return out;
+          }
         }
       }
     }
+
+    // Pass 2: Hull clearance + no vehicle overlap (relaxed egress)
+    for (let ring = 0; ring <= 32; ring++) {
+      const samples = ring === 0 ? 1 : ring * 12;
+      for (let i = 0; i < samples; i++) {
+        const angle = (i / samples) * Math.PI * 2;
+        const dist = ring * 3.0;
+        const tx = baseX + Math.cos(angle) * dist;
+        const tz = baseZ + Math.sin(angle) * dist;
+        if (overlapsOtherVehicle(tx, tz)) continue;
+        if (!this.isVehicleBoxBlocked(tx, tz, yaw, halfW, halfL, 1.4)) {
+          const ty = this.getGroundHeightAt(tx, tz);
+          const out = new THREE.Vector3(tx, ty, tz);
+          out.safeYaw = yaw;
+          return out;
+        }
+      }
+    }
+
     const fy = this.getGroundHeightAt(baseX, baseZ);
-    return new THREE.Vector3(baseX, fy, baseZ);
+    const fallback = new THREE.Vector3(baseX, fy, baseZ);
+    fallback.safeYaw = yaw;
+    return fallback;
   },
 
   createBuildingKeyMesh() {

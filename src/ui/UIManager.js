@@ -1,15 +1,15 @@
-import { UI } from '../config.js?v=92';
-import { events, makeEventBridge } from '../events.js?v=92';
-import { DeployScreen } from './DeployScreen.js?v=92';
-import { HudRenderer } from './HudRenderer.js?v=92';
-import { Scoreboard } from './Scoreboard.js?v=92';
-import { MinimapRenderer } from './MinimapRenderer.js?v=92';
-import { CommandPanel } from './CommandPanel.js?v=92';
-import { WorldMarkers } from './WorldMarkers.js?v=92';
-import { GunsmithModal } from './GunsmithModal.js?v=92';
-import { SettingsModal } from './SettingsModal.js?v=92';
-import { VictoryScreen } from './VictoryScreen.js?v=92';
-import { DamageIndicators } from './DamageIndicators.js?v=92';
+import { UI } from '../config.js?v=105';
+import { events, makeEventBridge } from '../events.js?v=105';
+import { DeployScreen } from './DeployScreen.js?v=105';
+import { HudRenderer } from './HudRenderer.js?v=105';
+import { Scoreboard } from './Scoreboard.js?v=105';
+import { MinimapRenderer } from './MinimapRenderer.js?v=105';
+import { CommandPanel } from './CommandPanel.js?v=105';
+import { WorldMarkers } from './WorldMarkers.js?v=105';
+import { GunsmithModal } from './GunsmithModal.js?v=105';
+import { SettingsModal } from './SettingsModal.js?v=105';
+import { VictoryScreen } from './VictoryScreen.js?v=105';
+import { DamageIndicators } from './DamageIndicators.js?v=105';
 
 export class UIManager {
   constructor(world, player, botManager, vehicleManager, network) {
@@ -26,7 +26,7 @@ export class UIManager {
     this.selectedTeam = 'US';
     this.selectedRank = 'COMMANDER';
     this.selectedSquad = 'ALPHA';
-    this.selectedSpawn = 'A';
+    this.selectedSpawn = 'BASE';
     this.selectedAtmos = 'DAY';
     this.pendingDeployOrder = null;
     this.mapClickMode = 'ORDER'; // 'ORDER' or 'AIRSTRIKE' on the [K] Tactical Map
