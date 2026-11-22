@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=110';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=110';
-import { events } from '../events.js?v=110';
+import { SQUAD_DEFS } from '../bots.js?v=113';
+import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=113';
+import { events } from '../events.js?v=113';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=110';
+} from '../core/StateMachines.js?v=113';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=110';
+} from '../utils/KeyboardShortcuts.js?v=113';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -821,17 +821,20 @@ export const DeployScreen = {
     }
     const peers = Array.from(this.network.remotePlayers.values());
     const lanUrl = this.network.getShareUrl(true);
-    const localUrl = `http://localhost:${this.network.serverPort}/?mode=multiplayer&room=${encodeURIComponent(
-      this.network.roomCode
-    )}`;
+    const localUrl = this.network.getShareUrl(false);
+    const transportInfo = this.network.getTransportSummary?.() || {
+      label: '🌐 MULTIPLAYER',
+      isCloudRelay: false,
+      isWebRtc: true
+    };
     if (statusEl) {
       const peerNames =
         peers.length > 0
           ? ` &bull; <span style="color:#2ecc71">ONLINE (${peers.length + 1}): YOU, ${peers
               .map((p) => `${p.name} [${p.team}]`)
               .join(', ')}</span>`
-          : ' &bull; <span style="color:#95a5a6">WAITING FOR PLAYERS TO JOIN LINK</span>';
-      statusEl.innerHTML = `🟢 ROOM <strong style="color:#f1c40f">${this.network.roomCode}</strong> &bull; LAN JOIN URL: <code style="color:#74b9ff;background:rgba(0,0,0,0.45);padding:2px 5px;border-radius:2px;">${lanUrl}</code>${peerNames}`;
+          : ' &bull; <span style="color:#95a5a6">SHARE INVITE LINK WITH FRIENDS ANYWHERE!</span>';
+      statusEl.innerHTML = `<span style="color:#7bed9f;font-weight:900;">${transportInfo.label}</span> &bull; ROOM <strong style="color:#f1c40f">${this.network.roomCode}</strong> &bull; INVITE: <code style="color:#74b9ff;background:rgba(0,0,0,0.45);padding:2px 5px;border-radius:2px;">${lanUrl}</code>${peerNames}`;
     }
 
     const modalBody = this.el('mp-modal-dynamic-body');
@@ -969,20 +972,60 @@ export const DeployScreen = {
             )
             .join('');
 
+    const transportInfo = this.network.getTransportSummary?.() || {
+      label: '🌐 MULTIPLAYER',
+      isCloudRelay: false,
+      isWebRtc: true
+    };
+    const curRelay = this.network.relayWsUrl || '';
+    const githubInternetUrl = `https://blockbuilderb.github.io/blockfare/?mode=multiplayer&room=${encodeURIComponent(
+      this.network.roomCode
+    )}${
+      this.network.botPopulateMode !== 'FULL_AI'
+        ? `&bots=${encodeURIComponent(this.network.botPopulateMode)}`
+        : ''
+    }${curRelay ? `&relay=${encodeURIComponent(curRelay)}` : ''}`;
+
     container.innerHTML = `
-      <div style="background:rgba(0,0,0,0.45);border:1px solid rgba(52,152,219,0.35);border-radius:5px;padding:10px 12px;margin-bottom:12px;font-size:12px;">
+      <div style="background:rgba(0,0,0,0.48);border:1px solid rgba(46,204,113,0.45);border-radius:5px;padding:10px 12px;margin-bottom:10px;font-size:12px;">
+        <div style="margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span><strong>ACTIVE TRANSPORT:</strong> <span style="color:#2ecc71;font-weight:900;">${transportInfo.label}</span></span>
+          <span style="color:#95a5a6;font-size:11px;">Option 1: Zero-Server WebRTC P2P &bull; Option 2: Cloud WSS Relay</span>
+        </div>
         <div style="margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
-          <span><strong>LAN / WI-FI INVITE LINK:</strong> <code style="color:#2ecc71;font-size:12.5px;">${lanUrl}</code></span>
-          <button id="mp-modal-copy-lan" style="background:#2980b9;color:#fff;border:none;border-radius:3px;padding:3px 9px;font-size:11px;font-weight:800;cursor:pointer;">📋 COPY LAN LINK</button>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><strong>🌍 INTERNET INVITE LINK:</strong> <code style="color:#2ecc71;font-size:11.5px;">${
+            this.network.isStaticHost ? lanUrl : githubInternetUrl
+          }</code></span>
+          <button id="mp-modal-copy-lan" style="background:#27ae60;color:#fff;border:none;border-radius:3px;padding:3px 9px;font-size:11px;font-weight:900;cursor:pointer;flex-shrink:0;">📋 COPY INTERNET LINK</button>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-          <span><strong>SAME PC (NEW TAB/WINDOW):</strong> <code style="color:#74b9ff;font-size:12px;">${localUrl}</code></span>
-          <button id="mp-modal-copy-local" style="background:rgba(255,255,255,0.14);color:#fff;border:none;border-radius:3px;padding:3px 9px;font-size:11px;font-weight:800;cursor:pointer;">📋 COPY LOCAL LINK</button>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><strong>📡 LOCAL / LAN LINK:</strong> <code style="color:#74b9ff;font-size:11.5px;">${lanUrl}</code></span>
+          <button id="mp-modal-copy-local" style="background:#2980b9;color:#fff;border:none;border-radius:3px;padding:3px 9px;font-size:11px;font-weight:800;cursor:pointer;flex-shrink:0;">📋 COPY LAN LINK</button>
         </div>
       </div>
+
+      <div style="background:rgba(12,22,34,0.85);border:1px solid rgba(0,210,211,0.4);border-radius:5px;padding:8px 12px;margin-bottom:10px;font-size:11.5px;">
+        <div style="font-weight:900;color:#00d2d3;margin-bottom:4px;">☁️ OPTION 2 — DEDICATED CLOUD WEBSOCKET RELAY (OPTIONAL • BYPASSES STRICT NAT &amp; SCALES TO 64P):</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <input id="mp-modal-relay-input" type="text" placeholder="wss://blockfare-relay.<your-subdomain>.workers.dev/ws (leave blank for Free P2P WebRTC)" value="${curRelay}" style="flex:1;min-width:240px;background:#091118;color:#81ecec;border:1px solid rgba(0,210,211,0.45);padding:4px 8px;border-radius:4px;font-family:Consolas,monospace;font-size:11px;" />
+          <button id="mp-modal-relay-save" type="button" style="background:#00b894;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:900;cursor:pointer;">☁️ CONNECT RELAY</button>
+          <button id="mp-modal-relay-clear" type="button" style="background:rgba(255,255,255,0.12);color:#dfe6e9;border:none;border-radius:4px;padding:4px 8px;font-size:11px;font-weight:800;cursor:pointer;">USE FREE P2P</button>
+        </div>
+      </div>
+
       <div style="margin-bottom:10px;">
-        <div style="font-size:11px;font-weight:800;color:#bdc3c7;margin-bottom:4px;">ACTIVE SERVER ROOMS (CLICK TO SWITCH):</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">${roomPillsHtml || '<span style="font-size:11px;color:#7f8c8d">FRUGIS-1</span>'}</div>
+        <div style="font-size:11px;font-weight:800;color:#bdc3c7;margin-bottom:4px;">QUICK ROOM CHANNELS (CLICK TO SWITCH):</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">${
+          roomPillsHtml ||
+          ['FRUGIS-1', 'ALPHA-SQUAD', 'AIR-COMBAT']
+            .map(
+              (c) =>
+                `<button class="mp-quick-room-btn" data-room="${c}" style="background:${
+                  c === this.network.roomCode ? '#2980b9' : 'rgba(255,255,255,0.08)'
+                };color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:3px;padding:3px 9px;font-size:11px;font-weight:800;cursor:pointer;">${c}</button>`
+            )
+            .join(' ')
+        }</div>
       </div>
       <div>
         <div style="font-size:11px;font-weight:800;color:#2ecc71;margin-bottom:5px;">CONNECTED HUMAN PLAYERS IN ROOM (${
@@ -992,11 +1035,12 @@ export const DeployScreen = {
       </div>
     `;
 
+    const internetShareTarget = this.network.isStaticHost ? lanUrl : githubInternetUrl;
     const copyLanBtn = container.querySelector('#mp-modal-copy-lan');
     if (copyLanBtn) {
       copyLanBtn.addEventListener('click', () => {
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(lanUrl).catch(() => {});
+          navigator.clipboard.writeText(internetShareTarget).catch(() => {});
         }
         copyLanBtn.textContent = '✅ COPIED!';
       });
@@ -1005,9 +1049,30 @@ export const DeployScreen = {
     if (copyLocalBtn) {
       copyLocalBtn.addEventListener('click', () => {
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(localUrl).catch(() => {});
+          navigator.clipboard.writeText(lanUrl).catch(() => {});
         }
         copyLocalBtn.textContent = '✅ COPIED!';
+      });
+    }
+    const relayInput = container.querySelector('#mp-modal-relay-input');
+    const relaySaveBtn = container.querySelector('#mp-modal-relay-save');
+    const relayClearBtn = container.querySelector('#mp-modal-relay-clear');
+    if (relaySaveBtn && relayInput) {
+      relaySaveBtn.addEventListener('click', () => {
+        this.network.setGameMode('MULTIPLAYER');
+        const saved = this.network.setRelayUrl(relayInput.value);
+        this.updateMultiplayerLobbyUI();
+        this.addXpNotification(
+          0,
+          saved ? `☁️ CLOUD RELAY SET: ${saved}` : '🌐 USING FREE WEBRTC P2P TRANSPORT'
+        );
+      });
+    }
+    if (relayClearBtn) {
+      relayClearBtn.addEventListener('click', () => {
+        this.network.setRelayUrl('');
+        this.updateMultiplayerLobbyUI();
+        this.addXpNotification(0, '🌐 SWITCHED TO FREE ZERO-SERVER WEBRTC P2P');
       });
     }
 

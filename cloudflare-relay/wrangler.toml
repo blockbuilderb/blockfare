@@ -1,0 +1,13 @@
+name = "blockfare-relay"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+[durable_objects]
+bindings = [
+  { name = "BATTLE_ROOMS", class_name = "BattleRoom" }
+]
+
+# Uses new_sqlite_classes so Durable Objects work on Cloudflare's $0 Free Tier!
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["BattleRoom"]

@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=110';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=110';
+import { UI, getEraRoles } from '../config.js?v=113';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=113';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -2017,9 +2017,10 @@ export const HudRenderer = {
       this._rosterTimer = UI.ROSTER_UPDATE_INTERVAL; // 4 Hz
       const remoteCount = this.network.remotePlayers.size;
       if (this.network && this.network.isMultiplayer()) {
-        this.netLabelEl.textContent = `🌐 MULTIPLAYER [${this.network.roomCode}] • ${
+        const netSum = this.network.getTransportSummary?.() || { label: 'MULTIPLAYER' };
+        this.netLabelEl.textContent = `${netSum.label} [${this.network.roomCode}] • ${
           1 + remoteCount
-        } PLAYERS • ${this.botManager.bots.length} BOTS`;
+        }P + ${this.botManager.bots.length} AI`;
       } else {
         const aiCnt = this.botManager.bots.length;
         this.netLabelEl.textContent = `🎮 SINGLEPLAYER • ${1 + aiCnt} PLAYERS (1 YOU + ${aiCnt} AI)`;

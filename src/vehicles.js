@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=110';
-import { VEHICLE_STATS, PROJECTILES } from './config.js?v=110';
+import { sound } from './audio.js?v=113';
+import { VEHICLE_STATS, PROJECTILES } from './config.js?v=113';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=110';
-import { createVehicleMesh } from './models/vehicle-model.js?v=110';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=110';
-import { events, makeEventBridge } from './events.js?v=110';
+} from './assets/vehicle-defs.js?v=113';
+import { createVehicleMesh } from './models/vehicle-model.js?v=113';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=113';
+import { events, makeEventBridge } from './events.js?v=113';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=110';
+} from './core/StateMachines.js?v=113';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -792,7 +792,7 @@ export class VehicleManager {
     let best = null;
     let bestDist = maxDist;
     for (const v of this.vehicles) {
-      if (v.dead || v.driver) continue;
+      if (v.dead || v.driver || v.remoteDriverId) continue;
       // Allow player to enter any unoccupied vehicle OR commandeer a friendly NPC-driven vehicle!
       if (v.npcDriver && playerTeam && v.team !== playerTeam) continue;
       if (v.isAircraft && v.aiPilotActive && playerTeam && v.team !== playerTeam) continue;
@@ -824,6 +824,7 @@ export class VehicleManager {
           v.team === team &&
           v.aircraftRole === preferredRole &&
           !v.driver &&
+          !v.remoteDriverId &&
           (allowSecretBypass || (!v.b2LockedUntilKills && (!v.dead || v.respawnTimer <= 0.5)))
       ) ||
       (preferredRole !== 'b2_spirit'
@@ -1787,6 +1788,25 @@ export class VehicleManager {
       const hitLabel = armorNote ? `${weaponName || 'ANTI-ARMOR'} • ${armorNote}` : weaponName || 'ANTI-ARMOR';
       vehicle.driver.notifyVehicleHit(amount, attackerName, hitLabel, attackerPos);
     }
+    // Forward PvP vehicle hit to remote human pilot/driver over WebRTC / Cloud Relay!
+    if (
+      vehicle.remoteDriverId &&
+      !vehicle._receivingRemoteDamage &&
+      amount > 0 &&
+      this.lastPlayer?.onBroadcast &&
+      attackerName === this.lastPlayer.name
+    ) {
+      this.lastPlayer.onBroadcast({
+        type: 'veh_hit',
+        vehicleId: vehicle.id,
+        targetDriverId: vehicle.remoteDriverId,
+        damage: amount,
+        attackerName,
+        attackerTeam,
+        weapon: weaponName || 'ANTI-ARMOR',
+        attackerPos: attackerPos ? [attackerPos.x, attackerPos.y, attackerPos.z] : null
+      });
+    }
 
     if (vehicle.hp <= 0) {
       // Airborne planes do NOT immediately explode mid-air! Instead they enter a burning Mayday spiral
@@ -2437,7 +2457,7 @@ export class VehicleManager {
       }
 
       // Clear invalid NPC driver if that NPC died or was downed
-      if (v.npcDriver && (v.npcDriver.dead || v.npcDriver.downed || v.driver)) {
+      if (v.npcDriver && (v.npcDriver.dead || v.npcDriver.downed || v.driver || v.remoteDriverId)) {
         v.npcDriver.drivingVehicle = null;
         v.npcDriver = null;
       }
@@ -2459,7 +2479,7 @@ export class VehicleManager {
       // =====================================================================
       // PHYSICAL NPC DRIVER CONTROL (ONLY when an NPC has walked to the vehicle and boarded it!)
       // =====================================================================
-      if (!v.driver && v.npcDriver && v.patrolPoints && v.patrolPoints.length > 0) {
+      if (!v.driver && !v.remoteDriverId && v.npcDriver && v.patrolPoints && v.patrolPoints.length > 0) {
         let wp = v.patrolPoints[v.patrolIndex % v.patrolPoints.length];
         const drv = v.npcDriver;
         const vIdx = v.fleetIndex ?? Math.max(0, this.vehicles.indexOf(v));
@@ -3576,7 +3596,7 @@ export class VehicleManager {
    *   disappear while a player is running toward them!
    */
   updateAircraftAiAndPhysics(v, dt, player, botManager, onDeployMenu = false) {
-    if (v.aircraftRole === 'gunship' && v.wheels && (v.driver || v.aiPilotActive)) {
+    if (v.aircraftRole === 'gunship' && v.wheels && (v.driver || v.remoteDriverId || v.aiPilotActive)) {
       for (const prop of v.wheels) {
         prop.rotation.z += dt * 22;
       }
@@ -3584,7 +3604,7 @@ export class VehicleManager {
     if (
       v.aircraftRole === 'wright_flyer' &&
       v.mesh?.userData?.wrightProps &&
-      (v.driver || v.aiPilotActive)
+      (v.driver || v.remoteDriverId || v.aiPilotActive)
     ) {
       for (const prop of v.mesh.userData.wrightProps) {
         prop.rotation.z += dt * 20 * (prop.userData.spinDir || 1);
@@ -3625,7 +3645,7 @@ export class VehicleManager {
       }
     }
 
-    if (v.driver) {
+    if (v.driver || v.remoteDriverId) {
       v.mesh.position.copy(v.pos);
       v.mesh.rotation.set(v.pitch || 0, v.yaw || 0, v.roll || 0, 'YXZ');
       return;

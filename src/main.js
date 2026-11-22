@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=110';
-import { VehicleManager } from './vehicles.js?v=110';
-import { BotManager } from './bots.js?v=110';
-import { PlayerController } from './player.js?v=110';
-import { NetworkManager } from './network.js?v=110';
-import { UIManager } from './ui.js?v=110';
-import { TelemetryLogger } from './telemetry.js?v=110';
-import { sound } from './audio.js?v=110';
-import { CAMERA, LIGHTING, MATCH, WEATHER, SKY_FOG_COLOR } from './config.js?v=110';
-import { events, makeEventBridge } from './events.js?v=110';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=110';
+import { VoxelWorld } from './world.js?v=113';
+import { VehicleManager } from './vehicles.js?v=113';
+import { BotManager } from './bots.js?v=113';
+import { PlayerController } from './player.js?v=113';
+import { NetworkManager } from './network.js?v=113';
+import { UIManager } from './ui.js?v=113';
+import { TelemetryLogger } from './telemetry.js?v=113';
+import { sound } from './audio.js?v=113';
+import { CAMERA, LIGHTING, MATCH, WEATHER, SKY_FOG_COLOR } from './config.js?v=113';
+import { events, makeEventBridge } from './events.js?v=113';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=113';
 
 class BattleBitGame {
   constructor() {
@@ -701,6 +701,7 @@ class BattleBitGame {
     this.network.onPlayerJoinedRoom = makeEventBridge('network:player-joined', (msg) => ({ msg }));
 
     // Synchronous query/transport hooks
+    this.network.vehicleManager = this.vehicleManager;
     this.player.onBroadcast = (payload) => this.network.send(payload);
     this.player.onGetRemoteMeshes = () => this.network.getRemoteMeshes();
     this.botManager.canTeamAffordRespawn = (team, cost) => this.canTeamAffordRespawn(team, cost);
@@ -822,8 +823,23 @@ class BattleBitGame {
 
     events.on('kill:event', (data) => {
       if (!data) return;
-      const { killer, kTeam, victim, vTeam, weapon, isHs } = data;
+      const { killer, kTeam, victim, vTeam, weapon, isHs, _fromNetwork } = data;
       this.ui.addKillfeed(killer, kTeam, victim, vTeam, weapon, isHs);
+      if (
+        !_fromNetwork &&
+        this.network?.isMultiplayer?.() &&
+        (killer === this.player?.name || victim === this.player?.name)
+      ) {
+        this.network.send({
+          type: 'kill_sync',
+          killer,
+          kTeam,
+          victim,
+          vTeam,
+          weapon,
+          isHs: Boolean(isHs)
+        });
+      }
       // Track faction kills (+1 kill, +$120 faction funds) and unlock B-2 Spirit Stealth Bomber at 25 kills!
       if (weapon !== 'REVIVED' && kTeam && kTeam !== vTeam && this.vehicleManager?.recordTeamKillAndCheckB2) {
         this.vehicleManager.recordTeamKillAndCheckB2(kTeam);

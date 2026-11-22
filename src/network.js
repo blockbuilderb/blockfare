@@ -1,34 +1,116 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=110';
-import { sound } from './audio.js?v=110';
-import { NETWORK } from './config.js?v=110';
-import { events, makeEventBridge } from './events.js?v=110';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=113';
+import { sound } from './audio.js?v=113';
+import { NETWORK } from './config.js?v=113';
+import { events, makeEventBridge } from './events.js?v=113';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=110';
+} from './core/StateMachines.js?v=113';
+import { WebRtcTransport } from './network/WebRtcTransport.js?v=113';
+
+function safeStorageGet(key) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem(key) || '';
+    }
+  } catch (_e) {
+    // Ignore storage access errors
+  }
+  return '';
+}
+
+function safeStorageSet(key, val) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      if (val) localStorage.setItem(key, val);
+      else localStorage.removeItem(key);
+    }
+  } catch (_e) {
+    // Ignore storage access errors
+  }
+}
+
+export function normalizeRelayWsUrl(rawUrl) {
+  const trimmed = String(rawUrl || '').trim();
+  if (!trimmed) return '';
+  let normalized = trimmed;
+  if (normalized.startsWith('https://')) {
+    normalized = 'wss://' + normalized.slice('https://'.length);
+  } else if (normalized.startsWith('http://')) {
+    normalized = 'ws://' + normalized.slice('http://'.length);
+  } else if (!normalized.startsWith('wss://') && !normalized.startsWith('ws://')) {
+    normalized = 'wss://' + normalized;
+  }
+  try {
+    const u = new URL(normalized);
+    if (!u.pathname || u.pathname === '/') {
+      u.pathname = '/ws';
+    }
+    u.search = '';
+    u.hash = '';
+    return u.toString();
+  } catch (_e) {
+    return '';
+  }
+}
+
+export function deriveRelayHttpOrigin(wsUrl) {
+  const clean = normalizeRelayWsUrl(wsUrl);
+  if (!clean) return '';
+  try {
+    const u = new URL(clean);
+    const proto = u.protocol === 'wss:' ? 'https:' : 'http:';
+    return `${proto}//${u.host}`;
+  } catch (_e) {
+    return '';
+  }
+}
 
 export class NetworkManager {
-  constructor(scene, world, player, botManager) {
+  constructor(scene, world, player, botManager, options = {}) {
     this.scene = scene;
     this.world = world;
     this.player = player;
     this.botManager = botManager;
+    this.vehicleManager = options.vehicleManager || null;
     this.gameRef = null; // Wired by BattleBitGame for shared Conquest ticket/flag sync
 
     this.onPlayerJoinedRoom = makeEventBridge('network:player-joined', (msg) => ({ msg }));
     this.onRemoteCommsMessage = makeEventBridge('network:remote-comms', (msg, rp) => ({ msg, rp }));
 
-    this.clientId = 'p_' + Math.random().toString(36).slice(2, 9);
+    const winLoc =
+      typeof window !== 'undefined' && window.location
+        ? window.location
+        : {
+            search: '',
+            hostname: '127.0.0.1',
+            port: '8080',
+            host: 'localhost:8080',
+            protocol: 'http:',
+            origin: 'http://localhost:8080',
+            pathname: '/',
+            href: 'http://localhost:8080/'
+          };
+
+    this.clientId = options.clientId || 'p_' + Math.random().toString(36).slice(2, 9);
     this.playerId = this.clientId;
     this._txSeq = 0;
     this._peerSeqState = new Map();
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(winLoc.search || '');
     const urlMode = (params.get('mode') || '').trim().toUpperCase();
     const urlRoom = (params.get('room') || '').trim().toUpperCase();
     const urlBots = (params.get('bots') || '').trim().toUpperCase();
-    const savedRoom = (localStorage.getItem('bb_room') || '').trim().toUpperCase();
+    const urlRelay = params.get('relay') || '';
+    const savedRoom = safeStorageGet('bb_room').trim().toUpperCase();
     this.roomCode = urlRoom || savedRoom || 'FRUGIS-1';
+
+    // Option 2 Cloud WebSocket Relay URL (`wss://blockfare-relay.<sub.>.workers.dev/ws`)
+    const savedRelay = safeStorageGet('bb_ws_relay');
+    this.relayWsUrl = normalizeRelayWsUrl(options.relayWsUrl ?? (urlRelay || savedRelay));
+    if (urlRelay && this.relayWsUrl) {
+      safeStorageSet('bb_ws_relay', this.relayWsUrl);
+    }
 
     // Determine initial Game Mode:
     // If URL has ?mode=multiplayer or ?room=..., start in MULTIPLAYER mode; otherwise SINGLEPLAYER mode
@@ -58,15 +140,18 @@ export class NetworkManager {
     }
 
     const urlName = (params.get('name') || '').trim();
-    const savedName = (localStorage.getItem('bb_callsign') || '').trim();
+    const savedName = safeStorageGet('bb_callsign').trim();
     this.callsign =
       urlName || savedName || `VIPER_${this.clientId.slice(2, 5).toUpperCase()}`;
-    this.player.name = this.callsign;
+    if (this.player) {
+      this.player.name = this.callsign;
+    }
 
-    this.lanIp = window.location.hostname || '127.0.0.1';
-    this.serverPort = window.location.port || '8080';
+    this.lanIp = winLoc.hostname || '127.0.0.1';
+    this.serverPort = winLoc.port || '8080';
     this.availableRooms = [];
     this.isStaticHost =
+      Boolean(options.isStaticHost) ||
       this.lanIp.endsWith('.github.io') ||
       this.lanIp.endsWith('.pages.dev') ||
       this.lanIp.endsWith('.netlify.app') ||
@@ -77,23 +162,53 @@ export class NetworkManager {
     this.ws = null;
     this.wsConnected = false;
     this.broadcastChannel = null;
+    this.webrtc = new WebRtcTransport({
+      clientId: this.clientId,
+      roomCode: this.roomCode,
+      WebSocketImpl: options.WebSocketImpl,
+      RTCPeerConnectionImpl: options.RTCPeerConnectionImpl,
+      signalingEndpoints: options.signalingEndpoints,
+      onMessage: (msg) => {
+        if (
+          this.gameMode === 'MULTIPLAYER' &&
+          msg &&
+          msg.senderId !== this.clientId &&
+          (!msg.room || msg.room === this.roomCode)
+        ) {
+          this.handleMessage(msg);
+        }
+      },
+      onStatusChange: (info) => {
+        if (info?.status === 'CONNECTED' && this.gameMode === 'MULTIPLAYER') {
+          this._sendJoinAnnounce();
+          this.send(this.buildLocalStatePacket());
+        }
+        if (this.onLobbyUpdated) {
+          this.onLobbyUpdated();
+        }
+      }
+    });
+
     this.syncTimer = 0;
+    this.conquestSyncTimer = 0;
     this.httpSyncTimer = 0;
     this.roomPollTimer = 0;
+    this._wsHeartbeatTimer = 0;
     this.httpSyncInFlight = false;
     this.pendingHttpEvents = [];
     this.lastEventSeq = 0;
     this._syncEpoch = 1;
     createNetworkTransportFSM(this);
 
-    this.initTransports();
-    this.applyBotPopulationMode();
-    if (this.gameMode === 'MULTIPLAYER') {
-      this.pollRoomsInfo();
-      this.syncHttpNow();
-    } else {
-      // Still fetch LAN IP once so if the user clicks Multiplayer tab, the LAN URL is ready
-      this.pollRoomsInfo();
+    if (options.autoInitTransports !== false) {
+      this.initTransports();
+      this.applyBotPopulationMode();
+      if (this.gameMode === 'MULTIPLAYER') {
+        this.pollRoomsInfo();
+        this.syncHttpNow();
+      } else {
+        this.pollRoomsInfo();
+      }
     }
 
     // Immediately broadcast weapon & attachment changes in Multiplayer so every remote player sees the exact 3D gun model
@@ -108,6 +223,98 @@ export class NetworkManager {
     return this.gameMode === 'MULTIPLAYER';
   }
 
+  isRoomAuthority() {
+    if (this.webrtc && this.webrtc.active && this.webrtc.isHost()) {
+      return true;
+    }
+    if (this.remotePlayers.size === 0) {
+      return true;
+    }
+    // Deterministic lowest-clientId tie-breaker when on symmetric Cloud/LAN WebSocket relay
+    for (const peerId of this.remotePlayers.keys()) {
+      if (peerId < this.clientId) return false;
+    }
+    return true;
+  }
+
+  getTransportSummary() {
+    if (this.gameMode !== 'MULTIPLAYER') {
+      return { mode: 'OFFLINE', label: 'OFFLINE SOLO', isCloudRelay: false, isWebRtc: false };
+    }
+    const wsOpen = Boolean(this.wsConnected && this.ws && this.ws.readyState === 1);
+    if (wsOpen && this.relayWsUrl) {
+      return {
+        mode: 'CLOUD_RELAY',
+        label: '☁️ CLOUD RELAY WSS LIVE',
+        isCloudRelay: true,
+        isWebRtc: false
+      };
+    }
+    if (wsOpen) {
+      return {
+        mode: 'LAN_WS',
+        label: '📡 LAN WEBSOCKET LIVE',
+        isCloudRelay: false,
+        isWebRtc: false
+      };
+    }
+    if (this.webrtc && this.webrtc.active) {
+      const rtcPeers = this.webrtc.getConnectedPeerCount();
+      if (this.webrtc.role === 'HOST') {
+        return {
+          mode: 'WEBRTC_HOST',
+          label:
+            rtcPeers > 0
+              ? `🌐 P2P WEBRTC HOST (${rtcPeers} PEER${rtcPeers === 1 ? '' : 'S'})`
+              : '🌐 P2P WEBRTC HOST READY',
+          isCloudRelay: false,
+          isWebRtc: true
+        };
+      }
+      if (rtcPeers > 0) {
+        return {
+          mode: 'WEBRTC_GUEST',
+          label: '🌐 P2P WEBRTC CONNECTED',
+          isCloudRelay: false,
+          isWebRtc: true
+        };
+      }
+      return {
+        mode: 'WEBRTC_SIGNALING',
+        label: '🌐 P2P WEBRTC SIGNALING...',
+        isCloudRelay: false,
+        isWebRtc: true
+      };
+    }
+    return {
+      mode: 'FALLBACK',
+      label: this.isStaticHost ? '🌐 P2P STANDBY' : '📡 HTTP SYNC',
+      isCloudRelay: false,
+      isWebRtc: false
+    };
+  }
+
+  setRelayUrl(rawUrl) {
+    const clean = normalizeRelayWsUrl(rawUrl);
+    const changed = clean !== this.relayWsUrl;
+    this.relayWsUrl = clean;
+    safeStorageSet('bb_ws_relay', clean);
+    this._syncBrowserUrlParams();
+
+    if (changed) {
+      this._closeActiveWebSocket();
+      if (this.gameMode === 'MULTIPLAYER') {
+        this._connectWebSocketTransport();
+        this._syncWebRtcLifecycle();
+        this.pollRoomsInfo();
+      }
+      if (this.onLobbyUpdated) {
+        this.onLobbyUpdated();
+      }
+    }
+    return this.relayWsUrl;
+  }
+
   getTargetBotsPerTeam() {
     if (this.botPopulateMode === 'NO_AI') return 0;
     if (this.botPopulateMode === 'SQUAD_AI') return NETWORK.BOTS_SQUAD_AI;
@@ -120,7 +327,10 @@ export class NetworkManager {
   applyBotPopulationMode() {
     if (!this.botManager || typeof this.botManager.setBotCountPerSide !== 'function') return;
     const countPerSide = this.getTargetBotsPerTeam();
-    if (countPerSide <= 0) return;
+    if (countPerSide <= 0) {
+      this.botManager.setBotCountPerSide(0, { playerTeam: null });
+      return;
+    }
     const playerTeam =
       this.gameMode === 'SINGLEPLAYER' ? this.player?.team || 'US' : null;
     this.botManager.setBotCountPerSide(countPerSide, { playerTeam });
@@ -140,7 +350,6 @@ export class NetworkManager {
       'NO_AI'
     ];
     const clean = validModes.includes(botMode) ? botMode : 'ULTRA_AI';
-    // In Singleplayer, prevent 0-bot empty world unless in Multiplayer PvP
     this.botPopulateMode =
       this.gameMode === 'SINGLEPLAYER' && clean === 'NO_AI' ? 'ULTRA_AI' : clean;
     this.applyBotPopulationMode();
@@ -150,15 +359,61 @@ export class NetworkManager {
     return this.botPopulateMode;
   }
 
+  _releaseRemoteVehicleForPlayer(rpId) {
+    const vm = this.vehicleManager || this.world?.vehicleManager;
+    if (!vm || !Array.isArray(vm.vehicles)) return;
+    for (let i = 0; i < vm.vehicles.length; i++) {
+      const v = vm.vehicles[i];
+      if (v && v.remoteDriverId === rpId) {
+        v.remoteDriverId = null;
+      }
+    }
+  }
+
   clearRemotePlayers() {
-    for (const rp of this.remotePlayers.values()) {
-      if (rp.mesh) {
+    for (const [id, rp] of this.remotePlayers.entries()) {
+      this._releaseRemoteVehicleForPlayer(id);
+      if (rp.mesh && this.scene) {
         this.scene.remove(rp.mesh);
       }
     }
     this.remotePlayers.clear();
     this.remoteHitMeshes = [];
     if (this._peerSeqState) this._peerSeqState.clear();
+  }
+
+  _syncBrowserUrlParams() {
+    if (typeof window === 'undefined' || !window.history || !window.location) return;
+    try {
+      const url = new URL(window.location.href);
+      if (this.gameMode === 'MULTIPLAYER') {
+        url.searchParams.set('mode', 'multiplayer');
+        url.searchParams.set('room', this.roomCode);
+        if (this.relayWsUrl) {
+          url.searchParams.set('relay', this.relayWsUrl);
+        } else {
+          url.searchParams.delete('relay');
+        }
+      } else {
+        url.searchParams.delete('mode');
+        url.searchParams.delete('room');
+      }
+      window.history.replaceState({}, '', url.toString());
+    } catch (_e) {
+      // Ignore URL update errors
+    }
+  }
+
+  _sendJoinAnnounce() {
+    if (!this.player) return;
+    this.send({
+      type: 'join_announce',
+      name: this.callsign,
+      team: this.player.team,
+      squad: this.player.squad || 'ALPHA',
+      role: String(this.player.role || 'engineer').toUpperCase(),
+      commandRank: this.player.commandRank || 'COMMANDER'
+    });
   }
 
   setGameMode(newMode, optionalBotMode = null) {
@@ -173,23 +428,11 @@ export class NetworkManager {
     }
 
     this.applyBotPopulationMode();
-
-    try {
-      const url = new URL(window.location.href);
-      if (this.gameMode === 'MULTIPLAYER') {
-        url.searchParams.set('mode', 'multiplayer');
-        url.searchParams.set('room', this.roomCode);
-      } else {
-        url.searchParams.delete('mode');
-        url.searchParams.delete('room');
-      }
-      window.history.replaceState({}, '', url.toString());
-    } catch (_e) {
-      // Ignore URL update errors
-    }
+    this._syncBrowserUrlParams();
 
     if (this.gameMode === 'SINGLEPLAYER') {
       this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.DISABLE_MP);
+      if (this.webrtc) this.webrtc.stop(false);
       this.clearRemotePlayers();
       this.pendingHttpEvents = [];
     } else if (modeChanged || this.gameMode === 'MULTIPLAYER') {
@@ -197,15 +440,10 @@ export class NetworkManager {
         this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.ENABLE_MP_WS_READY);
       } else {
         this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.ENABLE_MP_HTTP_FALLBACK);
+        this._connectWebSocketTransport();
       }
-      this.send({
-        type: 'join_announce',
-        name: this.callsign,
-        team: this.player.team,
-        squad: this.player.squad || 'ALPHA',
-        role: this.player.role.toUpperCase(),
-        commandRank: this.player.commandRank || 'COMMANDER'
-      });
+      this._syncWebRtcLifecycle();
+      this._sendJoinAnnounce();
       this.syncHttpNow();
       this.pollRoomsInfo();
     }
@@ -223,12 +461,8 @@ export class NetworkManager {
       .toUpperCase();
     if (!clean) return this.callsign;
     this.callsign = clean;
-    this.player.name = clean;
-    try {
-      localStorage.setItem('bb_callsign', clean);
-    } catch (_e) {
-      // Ignore storage errors
-    }
+    if (this.player) this.player.name = clean;
+    safeStorageSet('bb_callsign', clean);
     return this.callsign;
   }
 
@@ -241,33 +475,28 @@ export class NetworkManager {
         .slice(0, 20) || 'FRUGIS-1';
     const changed = clean !== this.roomCode;
     this.roomCode = clean;
-    try {
-      localStorage.setItem('bb_room', clean);
-      if (this.gameMode === 'MULTIPLAYER') {
-        const url = new URL(window.location.href);
-        url.searchParams.set('mode', 'multiplayer');
-        url.searchParams.set('room', clean);
-        window.history.replaceState({}, '', url.toString());
-      }
-    } catch (_e) {
-      // Ignore URL state errors
-    }
+    safeStorageSet('bb_room', clean);
+    this._syncBrowserUrlParams();
 
     if (changed) {
       this._syncEpoch = (this._syncEpoch || 1) + 1;
       this.clearRemotePlayers();
       this.lastEventSeq = 0;
+      if (this.relayWsUrl) {
+        // Reconnect Cloud Relay socket to the newly selected Durable Object room
+        this._closeActiveWebSocket();
+        if (this.gameMode === 'MULTIPLAYER') {
+          this._connectWebSocketTransport();
+        }
+      }
+      if (this.webrtc) {
+        this.webrtc.setRoom(clean);
+      }
     }
 
     if (this.gameMode === 'MULTIPLAYER') {
-      this.send({
-        type: 'join_announce',
-        name: this.callsign,
-        team: this.player.team,
-        squad: this.player.squad || 'ALPHA',
-        role: this.player.role.toUpperCase(),
-        commandRank: this.player.commandRank || 'COMMANDER'
-      });
+      this._syncWebRtcLifecycle();
+      this._sendJoinAnnounce();
       this.syncHttpNow();
       this.pollRoomsInfo();
     }
@@ -275,29 +504,166 @@ export class NetworkManager {
   }
 
   getShareUrl(useLan = true) {
+    const winLoc =
+      typeof window !== 'undefined' && window.location
+        ? window.location
+        : {
+            protocol: 'http:',
+            host: `localhost:${this.serverPort}`,
+            origin: `http://localhost:${this.serverPort}`,
+            pathname: '/'
+          };
+
+    const botsParam =
+      this.botPopulateMode !== 'FULL_AI' ? `&bots=${encodeURIComponent(this.botPopulateMode)}` : '';
+    const relayParam = this.relayWsUrl ? `&relay=${encodeURIComponent(this.relayWsUrl)}` : '';
+
+    // On static hosts (GitHub Pages / Cloudflare Pages / Vercel), preserve exact origin + repo subpath!
+    if (this.isStaticHost) {
+      const basePath = (winLoc.pathname || '/').endsWith('/')
+        ? winLoc.pathname || '/'
+        : `${winLoc.pathname}/`;
+      return `${winLoc.origin}${basePath}?mode=multiplayer&room=${encodeURIComponent(
+        this.roomCode
+      )}${botsParam}${relayParam}`;
+    }
+
     const host =
       useLan && this.lanIp && this.lanIp !== '0.0.0.0'
         ? `${this.lanIp}:${this.serverPort}`
-        : window.location.host || `localhost:${this.serverPort}`;
-    const botsParam =
-      this.botPopulateMode !== 'FULL_AI' ? `&bots=${encodeURIComponent(this.botPopulateMode)}` : '';
-    return `${window.location.protocol}//${host}/?mode=multiplayer&room=${encodeURIComponent(
+        : winLoc.host || `localhost:${this.serverPort}`;
+    return `${winLoc.protocol}//${host}/?mode=multiplayer&room=${encodeURIComponent(
       this.roomCode
-    )}${botsParam}`;
+    )}${botsParam}${relayParam}`;
   }
 
   openCoopTestWindow() {
     this.setGameMode('MULTIPLAYER');
+    const baseShare = this.getShareUrl(false);
     const randSuffix = Math.floor(10 + Math.random() * 89);
-    const url = `${window.location.protocol}//${window.location.host}/?mode=multiplayer&room=${encodeURIComponent(
-      this.roomCode
-    )}&name=ALLY_${randSuffix}&bots=${encodeURIComponent(this.botPopulateMode)}`;
-    window.open(url, '_blank');
+    const url = `${baseShare}&name=ALLY_${randSuffix}`;
+    if (typeof window !== 'undefined' && typeof window.open === 'function') {
+      window.open(url, '_blank');
+    }
     return url;
   }
 
+  _closeActiveWebSocket() {
+    if (this.ws) {
+      const sock = this.ws;
+      this.ws = null;
+      this.wsConnected = false;
+      sock.onopen = null;
+      sock.onmessage = null;
+      sock.onclose = null;
+      sock.onerror = null;
+      try {
+        sock.close();
+      } catch (_e) {
+        // Ignore
+      }
+      this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR);
+    }
+  }
+
+  _buildTargetWebSocketUrl() {
+    if (this.relayWsUrl) {
+      const sep = this.relayWsUrl.includes('?') ? '&' : '?';
+      return `${this.relayWsUrl}${sep}room=${encodeURIComponent(this.roomCode)}`;
+    }
+    if (this.isStaticHost) {
+      return '';
+    }
+    if (typeof window === 'undefined' || !window.location) return '';
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}/ws`;
+  }
+
+  _connectWebSocketTransport() {
+    if (typeof WebSocket === 'undefined') return;
+    if (this.ws && (this.ws.readyState === 0 || this.ws.readyState === 1)) return;
+    const wsUrl = this._buildTargetWebSocketUrl();
+    if (!wsUrl) {
+      this.wsConnected = false;
+      return;
+    }
+
+    try {
+      const ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        this.wsConnected = true;
+        this.ws = ws;
+        this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.WS_OPEN);
+        this._syncWebRtcLifecycle();
+        if (this.gameMode === 'MULTIPLAYER') {
+          this._sendJoinAnnounce();
+          this.send(this.buildLocalStatePacket());
+        }
+        if (this.onLobbyUpdated) {
+          this.onLobbyUpdated();
+        }
+      };
+
+      ws.onmessage = (ev) => {
+        if (this.gameMode !== 'MULTIPLAYER') return;
+        try {
+          const msg = JSON.parse(ev.data);
+          if (!msg || msg.type === 'pong') return;
+          if (
+            msg.senderId !== this.clientId &&
+            (!msg.room || msg.room === this.roomCode)
+          ) {
+            this.handleMessage(msg);
+          }
+        } catch (_err) {
+          // Ignore malformed packet
+        }
+      };
+
+      ws.onclose = () => {
+        if (this.ws === ws) {
+          this.ws = null;
+        }
+        this.wsConnected = false;
+        this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR);
+        this._syncWebRtcLifecycle();
+        if (this.onLobbyUpdated) {
+          this.onLobbyUpdated();
+        }
+      };
+
+      ws.onerror = () => {
+        this.wsConnected = false;
+        this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR);
+        this._syncWebRtcLifecycle();
+      };
+    } catch (_e) {
+      this.wsConnected = false;
+      this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR);
+      this._syncWebRtcLifecycle();
+    }
+  }
+
+  _syncWebRtcLifecycle() {
+    if (!this.webrtc) return;
+    if (this.gameMode !== 'MULTIPLAYER') {
+      if (this.webrtc.active) this.webrtc.stop(false);
+      return;
+    }
+    // Option 1 (Zero-Server WebRTC P2P) runs whenever no dedicated Cloud Relay WSS is open,
+    // enabling instant Internet Multiplayer on GitHub Pages (and automatic P2P fallback if Cloud Relay drops)!
+    const cloudRelayOpen = Boolean(
+      this.relayWsUrl && this.wsConnected && this.ws && this.ws.readyState === 1
+    );
+    if (cloudRelayOpen) {
+      if (this.webrtc.active) this.webrtc.stop(false);
+    } else if (!this.webrtc.active) {
+      this.webrtc.start(this.roomCode);
+    }
+  }
+
   initTransports() {
-    // 1. Browser BroadcastChannel for instant multi-tab multiplayer
+    // 1. Browser BroadcastChannel for instant 0ms multi-tab local testing
     if (typeof BroadcastChannel !== 'undefined') {
       this.broadcastChannel = new BroadcastChannel('battlebit_clone_net_v1');
       this.broadcastChannel.onmessage = (ev) => {
@@ -312,62 +678,11 @@ export class NetworkManager {
       };
     }
 
-    // 2. WebSocket connection for LAN / multi-client server.py (skipped on static CDN hosts like GitHub Pages / Cloudflare Pages)
-    if (this.isStaticHost) {
-      this.wsConnected = false;
-      return;
-    }
-    try {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${window.location.host}/ws`;
-      const ws = new WebSocket(wsUrl);
+    // 2. Option 2 Cloud Relay WebSocket (`wss://...`) or Local `server.py` LAN WebSocket (`/ws`)
+    this._connectWebSocketTransport();
 
-      ws.onopen = () => {
-        this.wsConnected = true;
-        this.ws = ws;
-        this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.WS_OPEN);
-        if (this.gameMode === 'MULTIPLAYER') {
-          this.send({
-            type: 'join_announce',
-            name: this.callsign,
-            team: this.player.team,
-            squad: this.player.squad || 'ALPHA',
-            role: this.player.role.toUpperCase(),
-            commandRank: this.player.commandRank || 'COMMANDER'
-          });
-        }
-      };
-
-      ws.onmessage = (ev) => {
-        if (this.gameMode !== 'MULTIPLAYER') return;
-        try {
-          const msg = JSON.parse(ev.data);
-          if (
-            msg &&
-            msg.senderId !== this.clientId &&
-            (!msg.room || msg.room === this.roomCode)
-          ) {
-            this.handleMessage(msg);
-          }
-        } catch (_err) {
-          // Ignore malformed packet
-        }
-      };
-
-      ws.onclose = () => {
-        this.wsConnected = false;
-        this.ws = null;
-        this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR);
-      };
-
-      ws.onerror = () => {
-        this.wsConnected = false;
-        this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR);
-      };
-    } catch (_e) {
-      this.wsConnected = false;
-      this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.WS_CLOSE_OR_ERROR);
-    }
+    // 3. Option 1 Zero-Server WebRTC P2P Internet Rooms (active automatically in Multiplayer!)
+    this._syncWebRtcLifecycle();
   }
 
   _isDuplicatePacket(msg) {
@@ -418,17 +733,34 @@ export class NetworkManager {
       room: this.roomCode,
       ts: performance.now()
     };
-    const wsOpen = Boolean(
-      this.wsConnected && this.ws && this.ws.readyState === WebSocket.OPEN
-    );
-    if (wsOpen) {
-      this.ws.send(JSON.stringify(packet));
-      return;
-    }
+
+    const isUnreliableState = payload.type === 'state';
+
+    // Always echo to same-browser BroadcastChannel for 0ms local +2P tab testing
     if (this.broadcastChannel) {
       this.broadcastChannel.postMessage(packet);
     }
-    if (!this.isStaticHost && payload.type !== 'state') {
+
+    // Option 1: Send over WebRTC DataChannels (`fast` UDP-style for state, `reliable` for combat events)
+    if (this.webrtc && this.webrtc.active) {
+      this.webrtc.send(packet, !isUnreliableState);
+    }
+
+    // Option 2 / LAN: Send over open WebSocket (Cloud Relay WSS or local server.py /ws)
+    const wsOpen = Boolean(
+      this.wsConnected && this.ws && this.ws.readyState === 1
+    );
+    if (wsOpen) {
+      try {
+        this.ws.send(JSON.stringify(packet));
+      } catch (_e) {
+        // Ignore transient WS send error
+      }
+      return;
+    }
+
+    // HTTP Fallback Event Queue (when using server.py or Cloud Relay HTTP without open WS)
+    if ((!this.isStaticHost || this.relayWsUrl) && !isUnreliableState) {
       this.pendingHttpEvents.push(packet);
       if (this.pendingHttpEvents.length > 40) {
         this.pendingHttpEvents.shift();
@@ -447,13 +779,13 @@ export class NetworkManager {
         this.handleRemoteShoot(msg);
         break;
       case 'voxel_destroy':
-        this.world.destroyVoxel(msg.gx, msg.gy, msg.gz, true);
+        this.world?.destroyVoxel?.(msg.gx, msg.gy, msg.gz, true);
         break;
       case 'voxel_add':
-        this.world.addVoxel(msg.gx, msg.gy, msg.gz, msg.mat || 'sandbag');
+        this.world?.addVoxel?.(msg.gx, msg.gy, msg.gz, msg.mat || 'sandbag');
         break;
       case 'player_hit':
-        if (msg.targetId === this.clientId) {
+        if (msg.targetId === this.clientId && this.player) {
           this.player.takeDamage(
             msg.damage,
             msg.attackerName,
@@ -463,8 +795,27 @@ export class NetworkManager {
           );
         }
         break;
+      case 'veh_hit':
+        this.handleRemoteVehicleHit(msg);
+        break;
+      case 'kill_sync':
+        if (msg.killer && msg.victim) {
+          events.emit('kill:event', {
+            killer: msg.killer,
+            kTeam: msg.kTeam,
+            victim: msg.victim,
+            vTeam: msg.vTeam,
+            weapon: msg.weapon || 'FIREARM',
+            isHs: Boolean(msg.isHs),
+            _fromNetwork: true
+          });
+        }
+        break;
+      case 'conquest_sync':
+        this.applyRemoteConquestSync(msg);
+        break;
       case 'order_sync': {
-        if (msg.team === this.player.team && this.botManager) {
+        if (msg.team === this.player?.team && this.botManager) {
           this.botManager.issueStrategicOrder(this.player, {
             team: msg.team,
             scope: msg.scope || 'ALL',
@@ -502,6 +853,124 @@ export class NetworkManager {
     }
   }
 
+  handleRemoteVehicleHit(msg) {
+    const vm = this.vehicleManager || this.world?.vehicleManager;
+    if (!vm || !Array.isArray(vm.vehicles) || !msg.vehicleId) return;
+    const veh = vm.vehicles.find((v) => v.id === msg.vehicleId);
+    if (!veh || veh.dead) return;
+
+    // Apply authoritative damage if we are driving this vehicle or we are Room Authority
+    const isMyVehicle = Boolean(this.player && this.player.activeVehicle === veh);
+    if (!isMyVehicle && veh.remoteDriverId && veh.remoteDriverId !== this.clientId) {
+      return;
+    }
+    const srcPos = Array.isArray(msg.attackerPos)
+      ? new THREE.Vector3().fromArray(msg.attackerPos)
+      : null;
+    veh._receivingRemoteDamage = true;
+    try {
+      vm.damageVehicle(
+        veh,
+        msg.damage || 25,
+        msg.attackerName || 'ENEMY PLAYER',
+        msg.attackerTeam || (veh.team === 'US' ? 'RU' : 'US'),
+        msg.weapon || 'ANTI-ARMOR',
+        this.player?.onKillEvent || null,
+        null,
+        srcPos
+      );
+    } finally {
+      veh._receivingRemoteDamage = false;
+    }
+  }
+
+  buildConquestSyncPacket() {
+    const g = this.gameRef;
+    if (!g || !this.world?.flags) return null;
+    return {
+      type: 'conquest_sync',
+      ticketsUS: Math.round(g.ticketsUS ?? 400),
+      ticketsRU: Math.round(g.ticketsRU ?? 400),
+      matchTimeRemaining: Number((g.matchTimeRemaining ?? 900).toFixed(1)),
+      flags: this.world.flags.map((f) => ({
+        id: f.id,
+        owner: f.owner,
+        prog: Math.round(f.captureProgress || 0)
+      }))
+    };
+  }
+
+  applyRemoteConquestSync(msg) {
+    if (this.isRoomAuthority()) return;
+    const g = this.gameRef;
+    if (g) {
+      if (typeof msg.ticketsUS === 'number') g.ticketsUS = msg.ticketsUS;
+      if (typeof msg.ticketsRU === 'number') g.ticketsRU = msg.ticketsRU;
+      if (typeof msg.matchTimeRemaining === 'number') {
+        g.matchTimeRemaining = msg.matchTimeRemaining;
+      }
+    }
+    if (Array.isArray(msg.flags) && Array.isArray(this.world?.flags)) {
+      for (let i = 0; i < msg.flags.length; i++) {
+        const sf = msg.flags[i];
+        const localFlag = this.world.flags.find((fl) => fl.id === sf.id);
+        if (localFlag) {
+          localFlag.owner = sf.owner || localFlag.owner;
+          if (typeof sf.prog === 'number') {
+            localFlag.captureProgress = sf.prog;
+          }
+        }
+      }
+    }
+  }
+
+  _applyRemoteVehicleState(rp, vehState) {
+    const vm = this.vehicleManager || this.world?.vehicleManager;
+    if (!vm || !Array.isArray(vm.vehicles)) return;
+
+    if (!vehState || !vehState.id) {
+      if (rp._lastVehicleId) {
+        this._releaseRemoteVehicleForPlayer(rp.id);
+        rp._lastVehicleId = null;
+      }
+      return;
+    }
+
+    if (rp._lastVehicleId && rp._lastVehicleId !== vehState.id) {
+      this._releaseRemoteVehicleForPlayer(rp.id);
+    }
+    rp._lastVehicleId = vehState.id;
+
+    const v = vm.vehicles.find((cand) => cand.id === vehState.id);
+    if (!v || (this.player && this.player.activeVehicle === v)) return;
+
+    if (v.npcDriver) {
+      v.npcDriver.drivingVehicle = null;
+      v.npcDriver = null;
+    }
+    v.aiPilotActive = false;
+    v.remoteDriverId = rp.id;
+    v.team = rp.team || v.team;
+
+    if (Array.isArray(vehState.pos)) {
+      if (!v._remoteTargetPos) v._remoteTargetPos = new THREE.Vector3();
+      v._remoteTargetPos.fromArray(vehState.pos);
+      if (v.pos.distanceToSquared(v._remoteTargetPos) > 45 * 45) {
+        v.pos.copy(v._remoteTargetPos);
+      }
+    }
+    if (typeof vehState.yaw === 'number') v._remoteTargetYaw = vehState.yaw;
+    if (typeof vehState.pitch === 'number') v._remoteTargetPitch = vehState.pitch;
+    if (typeof vehState.roll === 'number') v._remoteTargetRoll = vehState.roll;
+    if (typeof vehState.turretYaw === 'number') v.turretYaw = vehState.turretYaw;
+    if (typeof vehState.turretPitch === 'number') v.turretPitch = vehState.turretPitch;
+    if (typeof vehState.forwardSpeed === 'number') v.forwardSpeed = vehState.forwardSpeed;
+    if (typeof vehState.hp === 'number') v.hp = vehState.hp;
+    if (typeof vehState.flareActiveTimer === 'number') v.flareActiveTimer = vehState.flareActiveTimer;
+    if (typeof vehState.isShotDown === 'boolean') v.isShotDown = vehState.isShotDown;
+    if (!v.dead && v.mesh) v.mesh.visible = true;
+  }
+
   updateRemotePlayer(msg) {
     let rp = this.remotePlayers.get(msg.senderId);
     const rank = msg.commandRank || 'COMMANDER';
@@ -509,7 +978,7 @@ export class NetworkManager {
 
     if (!rp) {
       const mesh = createSoldierMesh(msg.team || 'US', role, rank);
-      this.scene.add(mesh);
+      if (this.scene) this.scene.add(mesh);
       rp = {
         id: msg.senderId,
         name: msg.name || `PLAYER_${msg.senderId.slice(2, 5)}`,
@@ -518,14 +987,18 @@ export class NetworkManager {
         role,
         commandRank: rank,
         pos: new THREE.Vector3(),
+        targetPos: new THREE.Vector3(),
         yaw: 0,
+        targetYaw: 0,
         pitch: 0,
+        walkPhase: 0,
         hp: 100,
         dead: false,
         downed: false,
         crouching: false,
         prone: false,
         vehicleId: null,
+        _lastVehicleId: null,
         weaponId: msg.weaponId || null,
         weaponName: msg.weaponName || null,
         weaponType: msg.weaponType || 'gun',
@@ -583,22 +1056,36 @@ export class NetworkManager {
     rp.vehiclesDestroyed = msg.vehiclesDestroyed || 0;
     rp.score = msg.score || 0;
 
-    // Update 3D weapon model in remote player's hands whenever their equipped weapon, skin, or attachments change
-    updateSoldierEquippedWeapon(rp.mesh, rp.weaponId, rp.team, {
-      skinFinish: rp.skinFinish,
-      attachments: rp.attachments,
-      role: rp.role
-    });
+    // Update 3D weapon model in remote player's hands ONLY when weapon/skin/attachments signature changes
+    const wepSig = `${rp.weaponId || ''}|${rp.skinFinish || ''}|${
+      rp.attachments ? JSON.stringify(rp.attachments) : ''
+    }|${rp.team}|${rp.role}`;
+    if (rp._lastWepSig !== wepSig) {
+      rp._lastWepSig = wepSig;
+      updateSoldierEquippedWeapon(rp.mesh, rp.weaponId, rp.team, {
+        skinFinish: rp.skinFinish,
+        attachments: rp.attachments,
+        role: rp.role
+      });
+    }
 
     rp.mesh.visible = !rp.dead && !rp.vehicleId;
 
     if (msg.pos) {
-      rp.pos.fromArray(msg.pos);
-      rp.mesh.position.copy(rp.pos);
+      rp.targetPos.fromArray(msg.pos);
+      if (!rp._hasInitialPos || rp.pos.distanceToSquared(rp.targetPos) > 25 * 25) {
+        rp._hasInitialPos = true;
+        rp.pos.copy(rp.targetPos);
+        rp.mesh.position.copy(rp.pos);
+      }
     }
     if (typeof msg.yaw === 'number') {
-      rp.yaw = msg.yaw;
-      rp.mesh.rotation.y = rp.yaw + Math.PI;
+      rp.targetYaw = msg.yaw;
+      if (!rp._hasInitialYaw) {
+        rp._hasInitialYaw = true;
+        rp.yaw = msg.yaw;
+        rp.mesh.rotation.y = rp.yaw + Math.PI;
+      }
     }
     if (typeof msg.pitch === 'number') {
       rp.pitch = msg.pitch;
@@ -624,32 +1111,28 @@ export class NetworkManager {
       rp.mesh.rotation.x = 0;
       rp.mesh.scale.set(1, 1, 1);
     }
+
+    this._applyRemoteVehicleState(rp, msg.vehState || null);
   }
 
   handleRemoteShoot(msg) {
     if (!msg.origin || !msg.end) return;
     const start = new THREE.Vector3().fromArray(msg.origin);
     const end = new THREE.Vector3().fromArray(msg.end);
-    if (msg.isTracer !== false) {
+    if (msg.isTracer !== false && this.botManager?.spawnTracer) {
       this.botManager.spawnTracer(start, end, 0xffeaa7);
     }
     if (msg.senderId) {
       const rp = this.remotePlayers.get(msg.senderId);
       if (rp) {
         rp.muzzleFlashTimer = 0.045;
-        if (msg.weaponId && msg.weaponId !== rp.weaponId) {
-          rp.weaponId = msg.weaponId;
-          updateSoldierEquippedWeapon(rp.mesh, rp.weaponId, rp.team, {
-            skinFinish: rp.skinFinish,
-            attachments: rp.attachments,
-            role: rp.role
-          });
-        }
       }
     }
-    const dist = start.distanceTo(this.player.pos);
-    if (dist < 130) {
-      sound.playGunshot(msg.soundType || 'rifle', dist, 0, Boolean(msg.silenced));
+    if (this.player?.pos) {
+      const dist = start.distanceTo(this.player.pos);
+      if (dist < 130) {
+        sound.playGunshot(msg.soundType || 'rifle', dist, 0, Boolean(msg.silenced));
+      }
     }
   }
 
@@ -670,23 +1153,52 @@ export class NetworkManager {
         ? this.player.getWeaponAttachmentMap(curWeaponId)
         : null;
 
+    const av = this.player.activeVehicle;
+    const vehState =
+      av && !av.dead
+        ? {
+            id: av.id,
+            type: av.type,
+            aircraftRole: av.aircraftRole || null,
+            pos: [
+              Number(av.pos.x.toFixed(2)),
+              Number(av.pos.y.toFixed(2)),
+              Number(av.pos.z.toFixed(2))
+            ],
+            yaw: Number((av.yaw || 0).toFixed(4)),
+            pitch: Number((av.pitch || 0).toFixed(4)),
+            roll: Number((av.roll || 0).toFixed(4)),
+            turretYaw: Number(((av.turretYaw ?? av.yaw) || 0).toFixed(4)),
+            turretPitch: Number(((av.turretPitch ?? av.pitch) || 0).toFixed(4)),
+            forwardSpeed: Number((av.forwardSpeed || 0).toFixed(2)),
+            hp: Math.ceil(av.hp || 0),
+            flareActiveTimer: Number((av.flareActiveTimer || 0).toFixed(2)),
+            isShotDown: Boolean(av.isShotDown)
+          }
+        : null;
+
     return {
       type: 'state',
       room: this.roomCode,
       name: this.callsign,
       team: this.player.team,
       squad: this.player.squad || 'ALPHA',
-      role: this.player.role.toUpperCase(),
+      role: String(this.player.role || 'engineer').toUpperCase(),
       commandRank: this.player.commandRank || 'COMMANDER',
-      pos: this.player.pos.toArray(),
-      yaw: this.player.yaw,
-      pitch: this.player.pitch || 0,
+      pos: [
+        Number(this.player.pos.x.toFixed(2)),
+        Number(this.player.pos.y.toFixed(2)),
+        Number(this.player.pos.z.toFixed(2))
+      ],
+      yaw: Number((this.player.yaw || 0).toFixed(4)),
+      pitch: Number((this.player.pitch || 0).toFixed(4)),
       hp: Math.ceil(this.player.hp || 100),
       dead: this.player.dead,
       downed: Boolean(this.player.downed),
       crouching: Boolean(this.player.crouching),
       prone: Boolean(this.player.prone),
-      vehicleId: this.player.activeVehicle ? this.player.activeVehicle.id : null,
+      vehicleId: av ? av.id : null,
+      vehState,
       weaponId: curWeaponId,
       weaponName: curDef?.shortName || curDef?.name || curWeaponId.toUpperCase(),
       weaponType: curDef?.type || 'gun',
@@ -705,12 +1217,27 @@ export class NetworkManager {
     };
   }
 
+  _getHttpApiBase() {
+    if (this.relayWsUrl) {
+      return deriveRelayHttpOrigin(this.relayWsUrl);
+    }
+    if (this.isStaticHost) return '';
+    return '';
+  }
+
   async pollRoomsInfo() {
-    if (this.isStaticHost) return;
+    if (this.isStaticHost && !this.relayWsUrl) return;
+    if (typeof fetch !== 'function') return;
+    const apiBase = this._getHttpApiBase();
+    const roomsUrl = this.relayWsUrl
+      ? `${apiBase}/api/mp/rooms?room=${encodeURIComponent(this.roomCode)}`
+      : '/api/mp/rooms';
     try {
-      const res = await fetch('/api/mp/rooms', { cache: 'no-store' });
+      const res = await fetch(roomsUrl, { cache: 'no-store' });
       if (!res.ok) {
-        if (res.status === 404 || res.status === 405) this.isStaticHost = true;
+        if (!this.relayWsUrl && (res.status === 404 || res.status === 405)) {
+          this.isStaticHost = true;
+        }
         return;
       }
       const data = await res.json();
@@ -730,15 +1257,23 @@ export class NetworkManager {
   }
 
   async syncHttpNow() {
-    if (this.isStaticHost || this.gameMode !== 'MULTIPLAYER' || this.httpSyncInFlight) return;
-    if (this.wsConnected && this.ws && this.ws.readyState === WebSocket.OPEN) return;
+    if ((this.isStaticHost && !this.relayWsUrl) || this.gameMode !== 'MULTIPLAYER' || this.httpSyncInFlight) {
+      return;
+    }
+    if (typeof fetch !== 'function') return;
+    if (this.wsConnected && this.ws && this.ws.readyState === 1) return;
+    if (this.webrtc && this.webrtc.getConnectedPeerCount() > 0) return;
+
     const reqEpoch = this._syncEpoch || 1;
     const reqRoom = this.roomCode;
+    const apiBase = this._getHttpApiBase();
+    const syncUrl = this.relayWsUrl ? `${apiBase}/api/mp/sync` : '/api/mp/sync';
+
     this.httpSyncInFlight = true;
     this.transportFSM?.send(NETWORK_TRANSPORT_EVENTS.HTTP_SYNC_START);
     const eventsBatch = this.pendingHttpEvents.splice(0, this.pendingHttpEvents.length);
     try {
-      const res = await fetch('/api/mp/sync', {
+      const res = await fetch(syncUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -792,10 +1327,77 @@ export class NetworkManager {
     }
   }
 
+  _interpolateRemoteEntities(dt) {
+    const blend = Math.min(1, dt * 15);
+    for (const rp of this.remotePlayers.values()) {
+      if (rp.targetPos) {
+        const dx = rp.targetPos.x - rp.pos.x;
+        const dz = rp.targetPos.z - rp.pos.z;
+        const horizDist = Math.hypot(dx, dz);
+        rp.pos.lerp(rp.targetPos, blend);
+        rp.mesh.position.copy(rp.pos);
+
+        // Animate 3D leg & arm stride when remote human player runs!
+        const parts = rp.mesh.userData?.parts;
+        if (parts && parts.leftLeg && parts.rightLeg && !rp.downed && !rp.prone) {
+          if (horizDist > 0.025) {
+            rp.walkPhase = (rp.walkPhase || 0) + dt * 11;
+            const swing = Math.sin(rp.walkPhase) * 0.55;
+            parts.leftLeg.rotation.x = swing;
+            parts.rightLeg.rotation.x = -swing;
+          } else {
+            parts.leftLeg.rotation.x *= 0.82;
+            parts.rightLeg.rotation.x *= 0.82;
+          }
+        }
+      }
+      if (typeof rp.targetYaw === 'number') {
+        let dy = rp.targetYaw - rp.yaw;
+        while (dy > Math.PI) dy -= Math.PI * 2;
+        while (dy < -Math.PI) dy += Math.PI * 2;
+        rp.yaw += dy * blend;
+        rp.mesh.rotation.y = rp.yaw + Math.PI;
+      }
+    }
+
+    // Smoothly interpolate any vehicle currently driven/piloted by a remote human player
+    const vm = this.vehicleManager || this.world?.vehicleManager;
+    if (vm && Array.isArray(vm.vehicles)) {
+      for (let i = 0; i < vm.vehicles.length; i++) {
+        const v = vm.vehicles[i];
+        if (!v || !v.remoteDriverId || v.dead) continue;
+        if (v._remoteTargetPos) {
+          v.pos.lerp(v._remoteTargetPos, blend);
+        }
+        if (typeof v._remoteTargetYaw === 'number') {
+          let dy = v._remoteTargetYaw - (v.yaw || 0);
+          while (dy > Math.PI) dy -= Math.PI * 2;
+          while (dy < -Math.PI) dy += Math.PI * 2;
+          v.yaw = (v.yaw || 0) + dy * blend;
+        }
+        if (typeof v._remoteTargetPitch === 'number') {
+          v.pitch = THREE.MathUtils.lerp(v.pitch || 0, v._remoteTargetPitch, blend);
+        }
+        if (typeof v._remoteTargetRoll === 'number') {
+          v.roll = THREE.MathUtils.lerp(v.roll || 0, v._remoteTargetRoll, blend);
+        }
+        if (v.mesh) {
+          v.mesh.position.copy(v.pos);
+          v.mesh.rotation.set(v.pitch || 0, v.yaw || 0, v.roll || 0, 'YXZ');
+          if (v.turretGroup && !v.isAircraft && typeof v.turretYaw === 'number') {
+            v.turretGroup.rotation.y = v.turretYaw - (v.yaw || 0);
+          }
+        }
+      }
+    }
+  }
+
   update(dt) {
     if (this.gameMode !== 'MULTIPLAYER') {
       return;
     }
+
+    this._interpolateRemoteEntities(dt);
 
     this.syncTimer += dt;
     if (this.syncTimer >= NETWORK.WS_SYNC_INTERVAL) {
@@ -803,8 +1405,33 @@ export class NetworkManager {
       this.send(this.buildLocalStatePacket());
     }
 
-    // Reliable HTTP Room Sync every 0.16s ONLY in HTTP fallback mode (when WebSocket is not open)
-    if (!(this.wsConnected && this.ws && this.ws.readyState === WebSocket.OPEN)) {
+    // Room Host broadcasts 2 Hz Conquest ticket/clock/flag sync when human peers are connected
+    if (this.remotePlayers.size > 0 && this.isRoomAuthority()) {
+      this.conquestSyncTimer += dt;
+      if (this.conquestSyncTimer >= 0.5) {
+        this.conquestSyncTimer = 0;
+        const cqPkt = this.buildConquestSyncPacket();
+        if (cqPkt) this.send(cqPkt);
+      }
+    }
+
+    // Keep Cloud Relay Durable Object WebSocket warm across idle periods
+    if (this.wsConnected && this.ws && this.ws.readyState === 1 && this.relayWsUrl) {
+      this._wsHeartbeatTimer += dt;
+      if (this._wsHeartbeatTimer >= 15) {
+        this._wsHeartbeatTimer = 0;
+        try {
+          this.ws.send(JSON.stringify({ type: 'ping' }));
+        } catch (_e) {
+          // Ignore
+        }
+      }
+    }
+
+    // Reliable HTTP Room Sync every 0.16s ONLY in HTTP fallback mode (when neither WS nor WebRTC is connected)
+    const wsOpen = Boolean(this.wsConnected && this.ws && this.ws.readyState === 1);
+    const rtcOpen = Boolean(this.webrtc && this.webrtc.getConnectedPeerCount() > 0);
+    if (!wsOpen && !rtcOpen) {
       this.httpSyncTimer += dt;
       if (this.httpSyncTimer >= NETWORK.HTTP_SYNC_INTERVAL) {
         this.httpSyncTimer = 0;
@@ -835,7 +1462,8 @@ export class NetworkManager {
         mFlash.material.opacity = 0;
       }
       if (now - rp.lastSeen > NETWORK.REMOTE_TIMEOUT_MS) {
-        this.scene.remove(rp.mesh);
+        this._releaseRemoteVehicleForPlayer(id);
+        if (this.scene && rp.mesh) this.scene.remove(rp.mesh);
         this.remoteHitMeshes = this.remoteHitMeshes.filter(
           (m) => m.userData?.remotePlayer !== rp
         );

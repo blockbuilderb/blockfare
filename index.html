@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MODERN BLOCKFARE — Multi-Era Voxel Combined Arms FPS</title>
-  <link rel="stylesheet" href="./style.css?v=110" />
+  <link rel="stylesheet" href="./style.css?v=113" />
   <script type="importmap">
     {
       "imports": {
@@ -1148,13 +1148,16 @@
     </div>
   </div>
 
-  <!-- Main Menu: Era & Map Theater Selection Screen -->
-  <div id="main-menu-screen" style="position:fixed;inset:0;z-index:9500;background:radial-gradient(circle at 50% 22%, rgba(18,30,46,0.95), rgba(6,10,16,0.99));display:flex;align-items:center;justify-content:center;padding:18px;font-family:'Rajdhani','Segoe UI',sans-serif;color:#ecf0f1;overflow-y:auto;">
+  <!-- Optional Era & Map Theater Switcher Overlay (Hidden by default; Modern Blockfare Deploy Screen is the default menu!) -->
+  <div id="main-menu-screen" class="hidden" style="position:fixed;inset:0;z-index:9500;background:radial-gradient(circle at 50% 22%, rgba(18,30,46,0.95), rgba(6,10,16,0.99));display:none;align-items:center;justify-content:center;padding:18px;font-family:'Rajdhani','Segoe UI',sans-serif;color:#ecf0f1;overflow-y:auto;">
     <div style="width:1120px;max-width:96vw;background:rgba(10,16,24,0.97);border:1.5px solid rgba(241,196,15,0.45);border-radius:12px;padding:24px 28px;box-shadow:0 20px 65px rgba(0,0,0,0.9);">
-      <div style="border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:14px;margin-bottom:18px;">
-        <div style="font-size:11.5px;font-weight:900;color:#f1c40f;letter-spacing:2px;">BLOCKFARE &bull; MULTI-ERA COMBINED ARMS SANDBOX</div>
-        <h1 id="main-menu-title" style="margin:2px 0 0 0;font-size:28px;font-weight:900;letter-spacing:1px;color:#ffffff;">BLOCKFARE — SELECT YOUR ERA</h1>
-        <div style="font-size:13px;color:#94a3b8;margin-top:2px;">Choose between Modern Blockfare, Medieval Blockfare, and Jurassic Blockfare to configure your combat role, squad, and deployment point.</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:14px;margin-bottom:18px;">
+        <div>
+          <div style="font-size:11.5px;font-weight:900;color:#f1c40f;letter-spacing:2px;">BLOCKFARE &bull; OPTIONAL ERA / THEATER SWITCHER</div>
+          <h1 id="main-menu-title" style="margin:2px 0 0 0;font-size:28px;font-weight:900;letter-spacing:1px;color:#ffffff;">SWITCH COMBAT ERA</h1>
+          <div style="font-size:13px;color:#94a3b8;margin-top:2px;">Modern Blockfare (Frugis River Valley) is the default theater. Switch anytime to preview Medieval or Jurassic Beta theaters.</div>
+        </div>
+        <button type="button" id="close-era-menu-btn" onclick="var m=document.getElementById('main-menu-screen');if(m){m.classList.add('hidden');m.style.display='none';}" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:#ecf0f1;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:900;cursor:pointer;white-space:nowrap;">✕ BACK TO DEPLOY</button>
       </div>
 
       <!-- 3 Era Selection Cards (Click card or button to open that Era's Configure & Deploy screen) -->
@@ -1260,7 +1263,7 @@
           <button type="button" id="deploy-gunsmith-btn" class="deploy-tool-btn armory" title="Customize Weapons, 16 Optics, Attachments, Body Armor &amp; Armory Cases [L]">🔧 [L] Armory (<span id="deploy-cash-val">$600</span>)</button>
           <button type="button" id="deploy-backpack-btn" class="deploy-tool-btn backpack" title="Open Backpack &amp; Extracted Loot Warehouse [I]">🎒 [I] Pack</button>
           <button type="button" id="deploy-settings-btn" class="deploy-tool-btn settings" title="Audio Volume, Building Destruction, Friendly Fire &amp; FPS Settings">⚙️ Settings</button>
-          <button id="open-main-menu-btn" type="button" class="deploy-nav-btn" title="Return to Era Selection Menu">← Eras</button>
+          <button id="open-main-menu-btn" type="button" class="deploy-nav-btn" title="Optional: Switch Era / Theater (Medieval &amp; Jurassic Beta)">🌍 Eras</button>
         </div>
       </div>
 
@@ -1438,6 +1441,6 @@
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=110"></script>
+  <script type="module" src="./src/main.js?v=113"></script>
 </body>
 </html>
