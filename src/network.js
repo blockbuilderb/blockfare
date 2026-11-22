@@ -1,13 +1,13 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=114';
-import { sound } from './audio.js?v=114';
-import { NETWORK } from './config.js?v=114';
-import { events, makeEventBridge } from './events.js?v=114';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=115';
+import { sound } from './audio.js?v=115';
+import { NETWORK } from './config.js?v=115';
+import { events, makeEventBridge } from './events.js?v=115';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=114';
-import { WebRtcTransport } from './network/WebRtcTransport.js?v=114';
+} from './core/StateMachines.js?v=115';
+import { WebRtcTransport } from './network/WebRtcTransport.js?v=115';
 
 function safeStorageGet(key) {
   try {
@@ -101,11 +101,10 @@ export class NetworkManager {
     this._peerSeqState = new Map();
     const params = new URLSearchParams(winLoc.search || '');
     const urlMode = (params.get('mode') || '').trim().toUpperCase();
-    const urlRoom = (params.get('room') || '').trim().toUpperCase();
-    const urlBots = (params.get('bots') || '').trim().toUpperCase();
+    const urlRoom = (params.get('r') || params.get('room') || '').trim().toUpperCase();
+    const urlBots = (params.get('b') || params.get('bots') || '').trim().toUpperCase();
     const urlRelay = params.get('relay') || '';
-    const savedRoom = safeStorageGet('bb_room').trim().toUpperCase();
-    this.roomCode = urlRoom || savedRoom || 'FRUGIS-1';
+    this.roomCode = urlRoom || 'FRUGIS-1';
 
     // Option 2 Live Cloud WebSocket Relay URL (`wss://blockfare-relay.blockbuilderb.workers.dev/ws` by default!)
     const savedRelayMode = safeStorageGet('bb_relay_mode');
@@ -126,7 +125,13 @@ export class NetworkManager {
 
     // Default to Online Room Mode ('MULTIPLAYER' in room FRUGIS-1):
     // A 1-player room runs 1 You + 499 AI = 500 soldiers identically to Solo, while letting friends drop right in!
-    if (urlMode === 'SINGLEPLAYER' || urlMode === 'SOLO' || urlMode === 'OFFLINE') {
+    if (
+      params.has('solo') ||
+      params.has('offline') ||
+      urlMode === 'SINGLEPLAYER' ||
+      urlMode === 'SOLO' ||
+      urlMode === 'OFFLINE'
+    ) {
       this.gameMode = 'SINGLEPLAYER';
     } else {
       this.gameMode = 'MULTIPLAYER';
@@ -209,6 +214,7 @@ export class NetworkManager {
     createNetworkTransportFSM(this);
 
     if (options.autoInitTransports !== false) {
+      this._syncBrowserUrlParams();
       this.initTransports();
       this.applyBotPopulationMode();
       if (this.gameMode === 'MULTIPLAYER') {
@@ -410,12 +416,16 @@ export class NetworkManager {
     if (typeof window === 'undefined' || !window.history || !window.location) return;
     try {
       const url = new URL(window.location.href);
+      url.searchParams.delete('room');
+      url.searchParams.delete('bots');
       if (this.gameMode === 'MULTIPLAYER') {
         url.searchParams.delete('mode');
+        url.searchParams.delete('solo');
+        url.searchParams.delete('offline');
         if (this.roomCode && this.roomCode !== 'FRUGIS-1') {
-          url.searchParams.set('room', this.roomCode);
+          url.searchParams.set('r', this.roomCode);
         } else {
-          url.searchParams.delete('room');
+          url.searchParams.delete('r');
         }
         if (this.relayWsUrl && this.relayWsUrl !== DEFAULT_CLOUD_RELAY_WS_URL) {
           url.searchParams.set('relay', this.relayWsUrl);
@@ -423,8 +433,8 @@ export class NetworkManager {
           url.searchParams.delete('relay');
         }
       } else {
+        url.searchParams.delete('r');
         url.searchParams.set('mode', 'solo');
-        url.searchParams.delete('room');
       }
       window.history.replaceState({}, '', url.toString());
     } catch (_e) {
@@ -542,37 +552,39 @@ export class NetworkManager {
             pathname: '/'
           };
 
-    const botsParam =
-      this.botPopulateMode !== 'ULTRA_AI' ? `&bots=${encodeURIComponent(this.botPopulateMode)}` : '';
-    const relayParam =
-      this.relayWsUrl && this.relayWsUrl !== DEFAULT_CLOUD_RELAY_WS_URL
-        ? `&relay=${encodeURIComponent(this.relayWsUrl)}`
-        : '';
+    const queryParts = [];
+    if (this.roomCode && this.roomCode !== 'FRUGIS-1') {
+      queryParts.push(`r=${encodeURIComponent(this.roomCode)}`);
+    }
+    if (this.botPopulateMode !== 'ULTRA_AI') {
+      queryParts.push(`b=${encodeURIComponent(this.botPopulateMode)}`);
+    }
+    if (this.relayWsUrl && this.relayWsUrl !== DEFAULT_CLOUD_RELAY_WS_URL) {
+      queryParts.push(`relay=${encodeURIComponent(this.relayWsUrl)}`);
+    }
+    const qs = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
 
     // On static hosts (GitHub Pages / Cloudflare Pages / Vercel), preserve exact origin + repo subpath!
     if (this.isStaticHost) {
       const basePath = (winLoc.pathname || '/').endsWith('/')
         ? winLoc.pathname || '/'
         : `${winLoc.pathname}/`;
-      return `${winLoc.origin}${basePath}?mode=multiplayer&room=${encodeURIComponent(
-        this.roomCode
-      )}${botsParam}${relayParam}`;
+      return `${winLoc.origin}${basePath}${qs}`;
     }
 
     const host =
       useLan && this.lanIp && this.lanIp !== '0.0.0.0'
         ? `${this.lanIp}:${this.serverPort}`
         : winLoc.host || `localhost:${this.serverPort}`;
-    return `${winLoc.protocol}//${host}/?mode=multiplayer&room=${encodeURIComponent(
-      this.roomCode
-    )}${botsParam}${relayParam}`;
+    return `${winLoc.protocol}//${host}/${qs}`;
   }
 
   openCoopTestWindow() {
     this.setGameMode('MULTIPLAYER');
     const baseShare = this.getShareUrl(false);
     const randSuffix = Math.floor(10 + Math.random() * 89);
-    const url = `${baseShare}&name=ALLY_${randSuffix}`;
+    const sep = baseShare.includes('?') ? '&' : '?';
+    const url = `${baseShare}${sep}name=ALLY_${randSuffix}`;
     if (typeof window !== 'undefined' && typeof window.open === 'function') {
       window.open(url, '_blank');
     }

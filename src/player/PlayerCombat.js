@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=114';
+import { sound } from '../audio.js?v=115';
 import {
   PLAYER,
   COMBAT,
@@ -8,9 +8,9 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=114';
-import { events } from '../events.js?v=114';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=114';
+} from '../config.js?v=115';
+import { events } from '../events.js?v=115';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=115';
 
 function markShared(asset) {
   if (asset) {

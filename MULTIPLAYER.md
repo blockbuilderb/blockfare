@@ -3,7 +3,10 @@
 Blockfare defaults directly into **Online Room Mode (`FRUGIS-1`, `500P` scale)** so that:
 - **1 player in a room** plays identically to Singleplayer (`1 Human + 499 AI = 500 combatants`).
 - **Additional players opening the URL** drop seamlessly into the same live Conquest theater with zero server setup.
-- **`🎮 Offline` mode** remains available anytime as a 1-click toggle in the Deploy Screen header (or via `?mode=offline`).
+- **Clean Short URLs**:
+  - Default room (`FRUGIS-1`): **`https://blockbuilderb.github.io/blockfare/`** *(no query string needed!)*
+  - Custom room (e.g. `2` or `ALPHA`): **`https://blockbuilderb.github.io/blockfare/?r=2`** *(also accepts legacy `?room=...`)*
+  - Offline Solo mode: **`https://blockbuilderb.github.io/blockfare/?solo`** *(or toggle **`🎮 Offline`** in the top bar)*
 
 ---
 

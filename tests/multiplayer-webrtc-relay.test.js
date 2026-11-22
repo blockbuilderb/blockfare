@@ -4,12 +4,12 @@ import * as THREE from '../vendor/three.module.js';
 import {
   WebRtcTransport,
   buildDeterministicRoomInfoHash
-} from '../src/network/WebRtcTransport.js?v=114';
+} from '../src/network/WebRtcTransport.js?v=115';
 import {
   NetworkManager,
   normalizeRelayWsUrl,
   deriveRelayHttpOrigin
-} from '../src/network.js?v=114';
+} from '../src/network.js?v=115';
 import {
   BattleRoomCore as BattleRoom,
   createWorkerHandler
@@ -428,8 +428,18 @@ describe('NetworkManager Unified Relay + Vehicle/Aircraft + Conquest Sync', () =
     net.gameRef = { ticketsUS: 1200, ticketsRU: 1200, matchTimeRemaining: 900 };
 
     const share = net.getShareUrl(true);
-    assert.equal(share.includes('mode=multiplayer'), true);
+    assert.equal(share.includes('mode=multiplayer'), false, 'default multiplayer omits ?mode=multiplayer');
+    assert.equal(share.includes('room='), false, 'default FRUGIS-1 room omits ?room=FRUGIS-1');
     assert.equal(share.includes('relay=wss%3A%2F%2Fcustom-relay.example.workers.dev%2Fws'), true);
+
+    // Default Cloud Relay + Default Room produces a clean zero-query base URL
+    net.relayWsUrl = 'wss://blockfare-relay.blockbuilderb.workers.dev/ws';
+    assert.equal(net.getShareUrl(true), 'http://localhost:8080/');
+
+    // Non-default room uses compact ?r=CODE query param
+    net.roomCode = '2';
+    assert.equal(net.getShareUrl(true), 'http://localhost:8080/?r=2');
+    net.roomCode = 'FRUGIS-1';
 
     net.handleMessage({
       type: 'state',
@@ -482,7 +492,7 @@ describe('NetworkManager Unified Relay + Vehicle/Aircraft + Conquest Sync', () =
   });
 
   test('BotManager.syncHumanTeamCounts retires dead AI immediately and defers live AI retirement until natural death', async () => {
-    const { BotManager } = await import('../src/bots/BotManager.js?v=114');
+    const { BotManager } = await import('../src/bots/BotManager.js?v=115');
     const scene = new THREE.Scene();
     const voxels = new Map();
     const world = {
