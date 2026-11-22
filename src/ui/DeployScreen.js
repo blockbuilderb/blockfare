@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=113';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=113';
-import { events } from '../events.js?v=113';
+import { SQUAD_DEFS } from '../bots.js?v=114';
+import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=114';
+import { events } from '../events.js?v=114';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=113';
+} from '../core/StateMachines.js?v=114';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=113';
+} from '../utils/KeyboardShortcuts.js?v=114';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -46,9 +46,8 @@ export const DeployScreen = {
         btn.classList.add('active');
         this.selectedTeam = btn.dataset.team;
         this.selectedSubFaction = btn.dataset.subfaction || btn.dataset.team;
-        if (!this.network || !this.network.isMultiplayer()) {
-          this.botManager?.syncPlayerTeamSlot?.(this.selectedTeam);
-        }
+        this.botManager?.syncPlayerTeamSlot?.(this.selectedTeam);
+        this.network?.syncDynamicHumanSlots?.(this.selectedTeam);
         this.syncEraUI?.();
       });
     });
@@ -1005,11 +1004,11 @@ export const DeployScreen = {
       </div>
 
       <div style="background:rgba(12,22,34,0.85);border:1px solid rgba(0,210,211,0.4);border-radius:5px;padding:8px 12px;margin-bottom:10px;font-size:11.5px;">
-        <div style="font-weight:900;color:#00d2d3;margin-bottom:4px;">☁️ OPTION 2 — DEDICATED CLOUD WEBSOCKET RELAY (OPTIONAL • BYPASSES STRICT NAT &amp; SCALES TO 64P):</div>
+        <div style="font-weight:900;color:#00d2d3;margin-bottom:4px;">☁️ OPTION 2 — CLOUDFLARE EDGE RELAY (DEFAULT • 32–64+ PLAYERS) OR OPTION 1 WEBRTC P2P:</div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-          <input id="mp-modal-relay-input" type="text" placeholder="wss://blockfare-relay.<your-subdomain>.workers.dev/ws (leave blank for Free P2P WebRTC)" value="${curRelay}" style="flex:1;min-width:240px;background:#091118;color:#81ecec;border:1px solid rgba(0,210,211,0.45);padding:4px 8px;border-radius:4px;font-family:Consolas,monospace;font-size:11px;" />
-          <button id="mp-modal-relay-save" type="button" style="background:#00b894;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:900;cursor:pointer;">☁️ CONNECT RELAY</button>
-          <button id="mp-modal-relay-clear" type="button" style="background:rgba(255,255,255,0.12);color:#dfe6e9;border:none;border-radius:4px;padding:4px 8px;font-size:11px;font-weight:800;cursor:pointer;">USE FREE P2P</button>
+          <input id="mp-modal-relay-input" type="text" placeholder="wss://blockfare-relay.blockbuilderb.workers.dev/ws" value="${curRelay}" style="flex:1;min-width:240px;background:#091118;color:#81ecec;border:1px solid rgba(0,210,211,0.45);padding:4px 8px;border-radius:4px;font-family:Consolas,monospace;font-size:11px;" />
+          <button id="mp-modal-relay-save" type="button" style="background:#00b894;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:900;cursor:pointer;">☁️ USE CLOUD RELAY</button>
+          <button id="mp-modal-relay-clear" type="button" style="background:rgba(255,255,255,0.12);color:#dfe6e9;border:none;border-radius:4px;padding:4px 8px;font-size:11px;font-weight:800;cursor:pointer;">🌐 USE P2P WEBRTC</button>
         </div>
       </div>
 
@@ -1060,11 +1059,14 @@ export const DeployScreen = {
     if (relaySaveBtn && relayInput) {
       relaySaveBtn.addEventListener('click', () => {
         this.network.setGameMode('MULTIPLAYER');
-        const saved = this.network.setRelayUrl(relayInput.value);
+        const urlToUse =
+          relayInput.value.trim() || 'wss://blockfare-relay.blockbuilderb.workers.dev/ws';
+        relayInput.value = urlToUse;
+        const saved = this.network.setRelayUrl(urlToUse);
         this.updateMultiplayerLobbyUI();
         this.addXpNotification(
           0,
-          saved ? `☁️ CLOUD RELAY SET: ${saved}` : '🌐 USING FREE WEBRTC P2P TRANSPORT'
+          saved ? `☁️ CLOUD RELAY ACTIVE: ${saved}` : '🌐 USING WEBRTC P2P TRANSPORT'
         );
       });
     }

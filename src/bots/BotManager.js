@@ -1,17 +1,17 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT, FORMATION } from '../config.js?v=113';
-import { sound } from '../audio.js?v=113';
-import { tmpVec3 } from '../utils/VectorPool.js?v=113';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=113';
-import { events, makeEventBridge } from '../events.js?v=113';
-import { createSoldierMesh } from './SoldierMeshFactory.js?v=113';
-import { SightlineMethods } from './SightlineSystem.js?v=113';
-import { MedicAIMethods } from './MedicAI.js?v=113';
-import { BotAIMethods } from './BotAI.js?v=113';
+import { BOT, FORMATION } from '../config.js?v=114';
+import { sound } from '../audio.js?v=114';
+import { tmpVec3 } from '../utils/VectorPool.js?v=114';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=114';
+import { events, makeEventBridge } from '../events.js?v=114';
+import { createSoldierMesh } from './SoldierMeshFactory.js?v=114';
+import { SightlineMethods } from './SightlineSystem.js?v=114';
+import { MedicAIMethods } from './MedicAI.js?v=114';
+import { BotAIMethods } from './BotAI.js?v=114';
 import {
   createBaseProtectionFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=113';
+} from '../core/StateMachines.js?v=114';
 
 const BOT_NAMES_US = [
   'SgtOkiDoki', 'WakistanVet', 'VoxelMedic', 'EagleOne', 'BlockBuster',
@@ -59,6 +59,7 @@ export class BotManager {
     this.downedByTeam = { US: [], RU: [] };
     this.aliveByTeam = { US: [], RU: [] };
     this.playerSlotTeam = null;
+    this.pendingRetireQuota = { US: 0, RU: 0 };
     this.spatialGrid = new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 640);
     this.teamGrid = {
       US: new SpatialGrid2D(-2912, 2912, -1920, 1920, 32, 320),
@@ -896,14 +897,16 @@ export class BotManager {
   }
 
   setBotCountPerSide(countPerTeam = 125, opts = {}) {
-    const cleanCount = Math.max(25, Math.min(250, Math.floor(countPerTeam)));
+    const rawFloor = Math.floor(countPerTeam);
+    const cleanCount = rawFloor <= 0 ? 0 : Math.max(25, Math.min(250, rawFloor));
     const nextPlayerTeam =
       opts && Object.prototype.hasOwnProperty.call(opts, 'playerTeam')
         ? opts.playerTeam === 'US' || opts.playerTeam === 'RU'
           ? opts.playerTeam
           : null
         : this.playerSlotTeam;
-    const expectedTotal = nextPlayerTeam ? cleanCount * 2 - 1 : cleanCount * 2;
+    const expectedTotal =
+      cleanCount === 0 ? 0 : nextPlayerTeam ? cleanCount * 2 - 1 : cleanCount * 2;
     if (
       this.currentBotsPerTeam === cleanCount &&
       this.playerSlotTeam === nextPlayerTeam &&
@@ -928,7 +931,87 @@ export class BotManager {
     this.bots = [];
     this.hitMeshes = [];
     this.squadLeaders = { US: {}, RU: {} };
+    this.pendingRetireQuota = { US: 0, RU: 0 };
+    if (cleanCount === 0) {
+      this.currentBotsPerTeam = 0;
+      this.playerSlotTeam = nextPlayerTeam;
+      return;
+    }
     this.initBots(cleanCount, nextPlayerTeam);
+  }
+
+  getActiveBotCount() {
+    let active = 0;
+    for (let i = 0; i < this.bots.length; i++) {
+      if (!this.bots[i].retiredForHuman) active++;
+    }
+    return active;
+  }
+
+  /**
+   * Dynamically balances AI slots as real human players join, switch teams, or leave:
+   * - Prefers retiring ALREADY-DEAD AI (`b.dead === true`) immediately so zero live AI disappear.
+   * - If all AI on that team are currently alive, queues `pendingRetireQuota[team]` so the very
+   *   next AI to die naturally in combat stays retired in reserve instead of respawning!
+   * - When a human disconnects, reactivates retired AI slots so the battle refills smoothly.
+   */
+  syncHumanTeamCounts(humansUS = 1, humansRU = 0) {
+    const perTeam = this.currentBotsPerTeam || 0;
+    if (perTeam <= 0 || this.bots.length === 0) {
+      this.pendingRetireQuota = { US: 0, RU: 0 };
+      return;
+    }
+    if (!this.pendingRetireQuota) this.pendingRetireQuota = { US: 0, RU: 0 };
+
+    const adjustTeam = (team, humanCount) => {
+      const targetActiveAi = Math.max(0, perTeam - Math.max(0, Math.floor(humanCount)));
+      let totalTeamPool = 0;
+      let curRetired = 0;
+      for (let i = 0; i < this.bots.length; i++) {
+        const b = this.bots[i];
+        if (b.team !== team) continue;
+        totalTeamPool++;
+        if (b.retiredForHuman) curRetired++;
+      }
+
+      const desiredRetired = Math.max(0, totalTeamPool - targetActiveAi);
+
+      if (curRetired < desiredRetired) {
+        let needToRetire = desiredRetired - curRetired;
+        // Pass 1: Retire ALREADY-DEAD non-leader AI bots immediately (zero visual pop!)
+        for (let i = this.bots.length - 1; i >= 0 && needToRetire > 0; i--) {
+          const b = this.bots[i];
+          if (b.team !== team || b.retiredForHuman || !b.dead) continue;
+          if (b.isCommander || b.isSquadLeader) continue;
+          b.retiredForHuman = true;
+          needToRetire--;
+        }
+        // Pass 2: Any remaining dead AI if needed
+        for (let i = this.bots.length - 1; i >= 0 && needToRetire > 0; i--) {
+          const b = this.bots[i];
+          if (b.team !== team || b.retiredForHuman || !b.dead) continue;
+          b.retiredForHuman = true;
+          needToRetire--;
+        }
+        // Pass 3: Never despawn live AI mid-fight — retire the next AI(s) that die naturally!
+        this.pendingRetireQuota[team] = needToRetire;
+      } else if (curRetired > desiredRetired) {
+        this.pendingRetireQuota[team] = 0;
+        let toRestore = curRetired - desiredRetired;
+        for (let i = 0; i < this.bots.length && toRestore > 0; i++) {
+          const b = this.bots[i];
+          if (b.team !== team || !b.retiredForHuman) continue;
+          b.retiredForHuman = false;
+          b.respawnTimer = Math.min(b.respawnTimer || 0.8, 0.8);
+          toRestore--;
+        }
+      } else {
+        this.pendingRetireQuota[team] = 0;
+      }
+    };
+
+    adjustTeam('US', humansUS);
+    adjustTeam('RU', humansRU);
   }
 
   /**

@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=113';
-import { VEHICLE_STATS, PROJECTILES } from './config.js?v=113';
+import { sound } from './audio.js?v=114';
+import { VEHICLE_STATS, PROJECTILES } from './config.js?v=114';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=113';
-import { createVehicleMesh } from './models/vehicle-model.js?v=113';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=113';
-import { events, makeEventBridge } from './events.js?v=113';
+} from './assets/vehicle-defs.js?v=114';
+import { createVehicleMesh } from './models/vehicle-model.js?v=114';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=114';
+import { events, makeEventBridge } from './events.js?v=114';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=113';
+} from './core/StateMachines.js?v=114';
 
 function markShared(item) {
   item.userData.shared = true;

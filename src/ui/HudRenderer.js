@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=113';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=113';
+import { UI, getEraRoles } from '../config.js?v=114';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=114';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -2016,14 +2016,17 @@ export const HudRenderer = {
     if (this._rosterTimer <= 0) {
       this._rosterTimer = UI.ROSTER_UPDATE_INTERVAL; // 4 Hz
       const remoteCount = this.network.remotePlayers.size;
+      const activeAiCnt =
+        typeof this.botManager.getActiveBotCount === 'function'
+          ? this.botManager.getActiveBotCount()
+          : this.botManager.bots.length;
       if (this.network && this.network.isMultiplayer()) {
         const netSum = this.network.getTransportSummary?.() || { label: 'MULTIPLAYER' };
         this.netLabelEl.textContent = `${netSum.label} [${this.network.roomCode}] • ${
           1 + remoteCount
-        }P + ${this.botManager.bots.length} AI`;
+        }P + ${activeAiCnt} AI`;
       } else {
-        const aiCnt = this.botManager.bots.length;
-        this.netLabelEl.textContent = `🎮 SINGLEPLAYER • ${1 + aiCnt} PLAYERS (1 YOU + ${aiCnt} AI)`;
+        this.netLabelEl.textContent = `🎮 OFFLINE SOLO • ${1 + activeAiCnt} PLAYERS (1 YOU + ${activeAiCnt} AI)`;
       }
       this.updateCommandOrderHud();
       this.updateSquadRoster();

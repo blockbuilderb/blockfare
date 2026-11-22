@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=113';
-import { BOT } from '../config.js?v=113';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=113';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=113';
-import { events } from '../events.js?v=113';
+import { sound } from '../audio.js?v=114';
+import { BOT } from '../config.js?v=114';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=114';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=114';
+import { events } from '../events.js?v=114';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -421,6 +421,19 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       if (bot.drivingVehicle) {
         if (bot.drivingVehicle.npcDriver === bot) bot.drivingVehicle.npcDriver = null;
         bot.drivingVehicle = null;
+      }
+      if (
+        !bot.retiredForHuman &&
+        (this.pendingRetireQuota?.[bot.team] || 0) > 0 &&
+        !bot.isCommander &&
+        !bot.isSquadLeader
+      ) {
+        bot.retiredForHuman = true;
+        this.pendingRetireQuota[bot.team]--;
+      }
+      if (bot.retiredForHuman) {
+        bot.respawnTimer = 2.0;
+        continue;
       }
       bot.respawnTimer -= dt;
       if (bot.respawnTimer <= 0) {

@@ -4,12 +4,12 @@ import * as THREE from '../vendor/three.module.js';
 import {
   WebRtcTransport,
   buildDeterministicRoomInfoHash
-} from '../src/network/WebRtcTransport.js?v=113';
+} from '../src/network/WebRtcTransport.js?v=114';
 import {
   NetworkManager,
   normalizeRelayWsUrl,
   deriveRelayHttpOrigin
-} from '../src/network.js?v=113';
+} from '../src/network.js?v=114';
 import {
   BattleRoomCore as BattleRoom,
   createWorkerHandler
@@ -421,7 +421,7 @@ describe('NetworkManager Unified Relay + Vehicle/Aircraft + Conquest Sync', () =
       clientId: 'p_zzz_guest',
       vehicleManager,
       isStaticHost: true,
-      relayWsUrl: 'https://blockfare-relay.blockbuilderb.workers.dev',
+      relayWsUrl: 'https://custom-relay.example.workers.dev',
       autoInitTransports: false
     });
     net.gameMode = 'MULTIPLAYER';
@@ -429,7 +429,7 @@ describe('NetworkManager Unified Relay + Vehicle/Aircraft + Conquest Sync', () =
 
     const share = net.getShareUrl(true);
     assert.equal(share.includes('mode=multiplayer'), true);
-    assert.equal(share.includes('relay=wss%3A%2F%2Fblockfare-relay.blockbuilderb.workers.dev%2Fws'), true);
+    assert.equal(share.includes('relay=wss%3A%2F%2Fcustom-relay.example.workers.dev%2Fws'), true);
 
     net.handleMessage({
       type: 'state',
@@ -479,5 +479,96 @@ describe('NetworkManager Unified Relay + Vehicle/Aircraft + Conquest Sync', () =
     assert.equal(net.gameRef.ticketsRU, 980);
     assert.equal(world.flags[0].owner, 'US');
     assert.equal(world.flags[0].captureProgress, 100);
+  });
+
+  test('BotManager.syncHumanTeamCounts retires dead AI immediately and defers live AI retirement until natural death', async () => {
+    const { BotManager } = await import('../src/bots/BotManager.js?v=114');
+    const scene = new THREE.Scene();
+    const voxels = new Map();
+    const world = {
+      era: 'modern',
+      spawns: { US_BASE: new THREE.Vector3(-100, 0, 0), RU_BASE: new THREE.Vector3(100, 0, 0) },
+      flags: [
+        { id: 'A', owner: 'US', contested: false, captureProgress: 100, radius: 34, defenseStage: 0, pos: new THREE.Vector3(-50, 0, 0) },
+        { id: 'B', owner: 'NEUTRAL', contested: false, captureProgress: 0, radius: 34, defenseStage: 0, pos: new THREE.Vector3(0, 0, 0) },
+        { id: 'C', owner: 'RU', contested: false, captureProgress: 100, radius: 34, defenseStage: 0, pos: new THREE.Vector3(50, 0, 0) }
+      ],
+      voxels,
+      ammoCrates: [],
+      key: (gx, gy, gz) => `${gx},${gy},${gz}`,
+      pushOutOfBuildingFootprint: (x, z) => ({ x, z }),
+      findSafeSpawnPoint: (x, z) => new THREE.Vector3(x, 0, z),
+      getGroundHeightAt: () => 0,
+      raycastVoxel: () => null,
+      isInsideBuildingOrContainer: () => false,
+      hasVoxel: (gx, gy, gz) => voxels.has(`${gx},${gy},${gz}`),
+      getVoxel: () => null,
+      worldToGrid: (_x, _y, _z, out = {}) => {
+        out.gx = 0;
+        out.gy = 0;
+        out.gz = 0;
+        return out;
+      },
+      spawnBulletImpact: () => {},
+      spawnDebris: () => {},
+      damageVoxel: () => {},
+      spawnEnemyLootPack: () => {}
+    };
+    const bm = new BotManager(scene, world);
+    bm.setBotCountPerSide(30, { playerTeam: 'US' });
+    // 1 US human -> 29 US AI + 30 RU AI = 59 AI (60 total)
+    assert.equal(bm.getActiveBotCount(), 59);
+
+    // Mark 1 non-leader US AI dead; a 2nd US human joins -> dead US AI retires immediately!
+    const deadUsCandidate = bm.bots.find((b) => b.team === 'US' && !b.isCommander && !b.isSquadLeader);
+    deadUsCandidate.dead = true;
+    deadUsCandidate.mesh.visible = false;
+
+    // Meanwhile all 30 RU AI are currently ALIVE when 1 RU human joins -> zero live RU AI disappear!
+    bm.syncHumanTeamCounts(2, 1);
+    assert.equal(deadUsCandidate.retiredForHuman, true);
+    assert.equal(bm.pendingRetireQuota.RU, 1);
+    assert.equal(
+      bm.bots.filter((b) => b.team === 'RU' && !b.dead).length,
+      30,
+      'no live RU AI should vanish mid-fight'
+    );
+
+    // Next RU AI dies naturally -> claims pendingRetireQuota and stays retired instead of respawning
+    const ruBot = bm.bots.find((b) => b.team === 'RU' && !b.isCommander && !b.isSquadLeader);
+    ruBot.dead = true;
+    ruBot.respawnTimer = 0.01;
+    const camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 18000);
+    const dummyPlayer = {
+      name: 'TestPlayer',
+      team: 'US',
+      squad: 'ALPHA',
+      role: 'engineer',
+      hp: 100,
+      dead: false,
+      downed: false,
+      bleeding: false,
+      isFiring: false,
+      pos: new THREE.Vector3(),
+      vel: new THREE.Vector3(),
+      yaw: 0,
+      pitch: 0,
+      camera,
+      keys: {},
+      activeVehicle: null,
+      draggedBot: null,
+      reviveTargetBot: null,
+      takeDamage() {},
+      applySuppression() {},
+      reviveFromDowned() {}
+    };
+    bm.update(0.05, dummyPlayer, null, null, null, null);
+    assert.equal(ruBot.retiredForHuman, true);
+    assert.equal(bm.pendingRetireQuota.RU, 0);
+    assert.equal(bm.getActiveBotCount(), 57); // 28 US AI + 29 RU AI + 3 Humans = 60!
+
+    // Both extra humans disconnect -> retired AI slots reactivate back to 59 AI + 1 Human = 60!
+    bm.syncHumanTeamCounts(1, 0);
+    assert.equal(bm.getActiveBotCount(), 59);
   });
 });

@@ -1,13 +1,13 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=113';
-import { sound } from './audio.js?v=113';
-import { NETWORK } from './config.js?v=113';
-import { events, makeEventBridge } from './events.js?v=113';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=114';
+import { sound } from './audio.js?v=114';
+import { NETWORK } from './config.js?v=114';
+import { events, makeEventBridge } from './events.js?v=114';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=113';
-import { WebRtcTransport } from './network/WebRtcTransport.js?v=113';
+} from './core/StateMachines.js?v=114';
+import { WebRtcTransport } from './network/WebRtcTransport.js?v=114';
 
 function safeStorageGet(key) {
   try {
@@ -30,6 +30,8 @@ function safeStorageSet(key, val) {
     // Ignore storage access errors
   }
 }
+
+export const DEFAULT_CLOUD_RELAY_WS_URL = 'wss://blockfare-relay.blockbuilderb.workers.dev/ws';
 
 export function normalizeRelayWsUrl(rawUrl) {
   const trimmed = String(rawUrl || '').trim();
@@ -105,24 +107,32 @@ export class NetworkManager {
     const savedRoom = safeStorageGet('bb_room').trim().toUpperCase();
     this.roomCode = urlRoom || savedRoom || 'FRUGIS-1';
 
-    // Option 2 Cloud WebSocket Relay URL (`wss://blockfare-relay.<sub.>.workers.dev/ws`)
+    // Option 2 Live Cloud WebSocket Relay URL (`wss://blockfare-relay.blockbuilderb.workers.dev/ws` by default!)
+    const savedRelayMode = safeStorageGet('bb_relay_mode');
     const savedRelay = safeStorageGet('bb_ws_relay');
-    this.relayWsUrl = normalizeRelayWsUrl(options.relayWsUrl ?? (urlRelay || savedRelay));
-    if (urlRelay && this.relayWsUrl) {
-      safeStorageSet('bb_ws_relay', this.relayWsUrl);
-    }
-
-    // Determine initial Game Mode:
-    // If URL has ?mode=multiplayer or ?room=..., start in MULTIPLAYER mode; otherwise SINGLEPLAYER mode
-    if (urlMode === 'MULTIPLAYER' || urlMode === 'MP' || Boolean(urlRoom)) {
-      this.gameMode = 'MULTIPLAYER';
+    if (options.relayWsUrl !== undefined) {
+      this.relayWsUrl = normalizeRelayWsUrl(options.relayWsUrl);
+    } else if (urlRelay) {
+      this.relayWsUrl = normalizeRelayWsUrl(urlRelay);
+      if (this.relayWsUrl) {
+        safeStorageSet('bb_ws_relay', this.relayWsUrl);
+        safeStorageSet('bb_relay_mode', 'CLOUD');
+      }
+    } else if (savedRelayMode === 'P2P_ONLY') {
+      this.relayWsUrl = '';
     } else {
-      this.gameMode = 'SINGLEPLAYER';
+      this.relayWsUrl = normalizeRelayWsUrl(savedRelay || DEFAULT_CLOUD_RELAY_WS_URL);
     }
 
-    // Bot population preset: 'ULTRA_AI' (500P: 1 Player + 499 AI = 250v250),
-    // 'FULL_AI' / 'MASSIVE_AI' (250P: 125v125), 'LARGE_AI' (160P: 80v80),
-    // 'TACTICAL_AI' (80P: 40v40), 'SQUAD_AI' (32P: 16v16), 'NO_AI' (0 bots Pure PvP)
+    // Default to Online Room Mode ('MULTIPLAYER' in room FRUGIS-1):
+    // A 1-player room runs 1 You + 499 AI = 500 soldiers identically to Solo, while letting friends drop right in!
+    if (urlMode === 'SINGLEPLAYER' || urlMode === 'SOLO' || urlMode === 'OFFLINE') {
+      this.gameMode = 'SINGLEPLAYER';
+    } else {
+      this.gameMode = 'MULTIPLAYER';
+    }
+
+    // Bot population preset: defaults to 'ULTRA_AI' (500P: Humans + AI = 500 total, 250v250)
     if (urlBots === 'NO_AI' || urlBots === 'PVP' || urlBots === '0') {
       this.botPopulateMode = 'NO_AI';
     } else if (urlBots === 'SQUAD_AI' || urlBots === '32') {
@@ -133,10 +143,8 @@ export class NetworkManager {
       this.botPopulateMode = 'LARGE_AI';
     } else if (urlBots === 'FULL_AI' || urlBots === 'MASSIVE_AI' || urlBots === '250') {
       this.botPopulateMode = 'FULL_AI';
-    } else if (urlBots === 'ULTRA_AI' || urlBots === '500' || urlBots === '499') {
-      this.botPopulateMode = 'ULTRA_AI';
     } else {
-      this.botPopulateMode = this.gameMode === 'SINGLEPLAYER' ? 'ULTRA_AI' : 'FULL_AI';
+      this.botPopulateMode = 'ULTRA_AI';
     }
 
     const urlName = (params.get('name') || '').trim();
@@ -299,6 +307,7 @@ export class NetworkManager {
     const changed = clean !== this.relayWsUrl;
     this.relayWsUrl = clean;
     safeStorageSet('bb_ws_relay', clean);
+    safeStorageSet('bb_relay_mode', clean ? 'CLOUD' : 'P2P_ONLY');
     this._syncBrowserUrlParams();
 
     if (changed) {
@@ -313,6 +322,20 @@ export class NetworkManager {
       }
     }
     return this.relayWsUrl;
+  }
+
+  syncDynamicHumanSlots(overrideLocalTeam = null) {
+    if (!this.botManager || typeof this.botManager.syncHumanTeamCounts !== 'function') return;
+    const myTeam = overrideLocalTeam || this.player?.team || 'US';
+    let usHumans = myTeam === 'US' ? 1 : 0;
+    let ruHumans = myTeam === 'RU' ? 1 : 0;
+    if (this.gameMode === 'MULTIPLAYER') {
+      for (const rp of this.remotePlayers.values()) {
+        if (rp.team === 'RU') ruHumans++;
+        else usHumans++;
+      }
+    }
+    this.botManager.syncHumanTeamCounts(usHumans, ruHumans);
   }
 
   getTargetBotsPerTeam() {
@@ -331,9 +354,9 @@ export class NetworkManager {
       this.botManager.setBotCountPerSide(0, { playerTeam: null });
       return;
     }
-    const playerTeam =
-      this.gameMode === 'SINGLEPLAYER' ? this.player?.team || 'US' : null;
+    const playerTeam = this.player?.team || 'US';
     this.botManager.setBotCountPerSide(countPerSide, { playerTeam });
+    this.syncDynamicHumanSlots(playerTeam);
     if (this.gameRef && typeof this.gameRef.syncMatchTicketsForArmyScale === 'function') {
       this.gameRef.syncMatchTicketsForArmyScale(countPerSide);
     }
@@ -380,6 +403,7 @@ export class NetworkManager {
     this.remotePlayers.clear();
     this.remoteHitMeshes = [];
     if (this._peerSeqState) this._peerSeqState.clear();
+    this.syncDynamicHumanSlots();
   }
 
   _syncBrowserUrlParams() {
@@ -387,15 +411,19 @@ export class NetworkManager {
     try {
       const url = new URL(window.location.href);
       if (this.gameMode === 'MULTIPLAYER') {
-        url.searchParams.set('mode', 'multiplayer');
-        url.searchParams.set('room', this.roomCode);
-        if (this.relayWsUrl) {
+        url.searchParams.delete('mode');
+        if (this.roomCode && this.roomCode !== 'FRUGIS-1') {
+          url.searchParams.set('room', this.roomCode);
+        } else {
+          url.searchParams.delete('room');
+        }
+        if (this.relayWsUrl && this.relayWsUrl !== DEFAULT_CLOUD_RELAY_WS_URL) {
           url.searchParams.set('relay', this.relayWsUrl);
         } else {
           url.searchParams.delete('relay');
         }
       } else {
-        url.searchParams.delete('mode');
+        url.searchParams.set('mode', 'solo');
         url.searchParams.delete('room');
       }
       window.history.replaceState({}, '', url.toString());
@@ -515,8 +543,11 @@ export class NetworkManager {
           };
 
     const botsParam =
-      this.botPopulateMode !== 'FULL_AI' ? `&bots=${encodeURIComponent(this.botPopulateMode)}` : '';
-    const relayParam = this.relayWsUrl ? `&relay=${encodeURIComponent(this.relayWsUrl)}` : '';
+      this.botPopulateMode !== 'ULTRA_AI' ? `&bots=${encodeURIComponent(this.botPopulateMode)}` : '';
+    const relayParam =
+      this.relayWsUrl && this.relayWsUrl !== DEFAULT_CLOUD_RELAY_WS_URL
+        ? `&relay=${encodeURIComponent(this.relayWsUrl)}`
+        : '';
 
     // On static hosts (GitHub Pages / Cloudflare Pages / Vercel), preserve exact origin + repo subpath!
     if (this.isStaticHost) {
@@ -1029,8 +1060,13 @@ export class NetworkManager {
     }
 
     rp.lastSeen = performance.now();
+    const prevTeam = rp.team;
     if (msg.name) rp.name = msg.name;
     rp.team = msg.team || rp.team;
+    if (rp.team !== prevTeam || !rp._slotSynced) {
+      rp._slotSynced = true;
+      this.syncDynamicHumanSlots();
+    }
     if (msg.squad) rp.squad = msg.squad;
     if (msg.role) rp.role = String(msg.role).toUpperCase();
     if (msg.commandRank) rp.commandRank = msg.commandRank;
@@ -1469,6 +1505,7 @@ export class NetworkManager {
         );
         this.remotePlayers.delete(id);
         if (this._peerSeqState) this._peerSeqState.delete(id);
+        this.syncDynamicHumanSlots();
         if (this.onLobbyUpdated) {
           this.onLobbyUpdated();
         }

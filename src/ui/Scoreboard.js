@@ -1,4 +1,4 @@
-import { SQUAD_DEFS } from '../bots.js?v=113';
+import { SQUAD_DEFS } from '../bots.js?v=114';
 
 export const Scoreboard = {
   computeBattleStats() {
@@ -56,6 +56,7 @@ export const Scoreboard = {
     }
 
     for (const b of this.botManager.bots) {
+      if (b.retiredForHuman) continue;
       const bPlanes = b.planesDestroyed || 0;
       const bTanks = b.tanksDestroyed || 0;
       const bCars = b.carsDestroyed || 0;
