@@ -1133,9 +1133,9 @@
   border: 1.5px solid rgba(0, 210, 211, 0.55);
   border-top: 3px solid #00d2d3;
   border-radius: 10px 10px 6px 6px;
-  padding: 7px 9px;
+  padding: 6px 8px;
   width: auto;
-  max-width: min(680px, calc(100vw - 24px));
+  max-width: min(810px, calc(100vw - 24px));
   box-shadow:
     0 12px 32px rgba(0, 0, 0, 0.88),
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
@@ -1147,21 +1147,24 @@
 }
 
 #aircraft-cockpit-hud #air-asi-svg,
+#aircraft-cockpit-hud #air-rpm-svg,
 #aircraft-cockpit-hud #air-tc-svg {
-  width: 108px;
-  height: 108px;
+  width: 90px;
+  height: 98px;
 }
 
 #aircraft-cockpit-hud #air-adi-svg,
+#aircraft-cockpit-hud #air-pitch-profile-svg,
+#aircraft-cockpit-hud #air-compass-svg,
 #aircraft-cockpit-hud #air-bvv-svg {
-  width: 96px;
-  height: 108px;
+  width: 84px;
+  height: 98px;
 }
 
 #aircraft-cockpit-hud .air-throttle-col,
 #aircraft-cockpit-hud .air-alt-col {
-  height: 108px;
-  width: 22px;
+  height: 98px;
+  width: 20px;
 }
 
 /* AC-130 Cockpit Dashboard FLIR Video Repeater MFD */

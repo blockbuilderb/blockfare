@@ -186,8 +186,99 @@
 }
 
 #command-order-panel.hidden,
-#squad-panel.hidden {
+#squad-panel.hidden,
+.role-mission-list.hidden {
   display: none !important;
+}
+
+/* Tier-specific visibility inside #command-order-panel */
+#command-order-panel[data-hud-tier="COMMANDER"] .sl-only-ctrl,
+#command-order-panel[data-hud-tier="COMMANDER"] #role-mission-list {
+  display: none !important;
+}
+
+#command-order-panel[data-hud-tier="SQUAD_LEADER"] {
+  border-color: rgba(46, 204, 113, 0.55);
+  border-left: 3px solid #2ecc71;
+  width: 244px;
+}
+
+#command-order-panel[data-hud-tier="SQUAD_LEADER"] #cmd-scope-row,
+#command-order-panel[data-hud-tier="SQUAD_LEADER"] .cmd-only-ctrl,
+#command-order-panel[data-hud-tier="SQUAD_LEADER"] #role-mission-list {
+  display: none !important;
+}
+
+#command-order-panel[data-hud-tier="SQUAD_LEADER"] .cmd-tactical-row {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+#command-order-panel[data-hud-tier="MEMBER"] {
+  border-color: rgba(0, 210, 211, 0.52);
+  border-left: 3px solid #00d2d3;
+  width: 252px;
+  padding: 5px 7px;
+}
+
+#command-order-panel[data-hud-tier="MEMBER"] #cmd-open-wheel-btn,
+#command-order-panel[data-hud-tier="MEMBER"] #cmd-scope-row,
+#command-order-panel[data-hud-tier="MEMBER"] #cmd-tactical-row,
+#command-order-panel[data-hud-tier="MEMBER"] #cmd-spacing-row,
+#command-order-panel[data-hud-tier="MEMBER"] #cmd-obj-row,
+#command-order-panel[data-hud-tier="MEMBER"] #cmd-support-row,
+#command-order-panel[data-hud-tier="MEMBER"] #cmd-hud-status-line {
+  display: none !important;
+}
+
+.role-mission-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.role-mission-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  background: rgba(14, 26, 38, 0.88);
+  border: 1px solid rgba(0, 210, 211, 0.35);
+  border-left: 2.5px solid #00d2d3;
+  border-radius: 3px;
+  padding: 3.5px 6px;
+  color: #ecf0f1;
+  font-size: 9px;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.role-mission-item:hover {
+  background: rgba(0, 210, 211, 0.2);
+  border-color: #00d2d3;
+}
+
+.role-mission-item.urgent {
+  border-left-color: #ff6b81;
+  border-color: rgba(255, 107, 129, 0.48);
+  background: rgba(44, 16, 22, 0.85);
+}
+
+.role-mission-item.warn {
+  border-left-color: #f1c40f;
+  border-color: rgba(241, 196, 15, 0.45);
+}
+
+.role-mission-dist {
+  font-family: 'Consolas', monospace;
+  font-size: 8.5px;
+  font-weight: 900;
+  color: #81ecec;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .cmd-support-row {

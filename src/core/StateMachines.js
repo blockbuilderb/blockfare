@@ -1,4 +1,4 @@
-import { events } from '../events.js?v=115';
+import { events } from '../events.js?v=116';
 
 const EMPTY_PAYLOAD = Object.freeze({});
 const NO_RESTORE_LOCK_PAYLOAD = Object.freeze({ restorePointerLock: false });

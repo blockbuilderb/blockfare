@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { createRadarTowerMesh } from '../models/prop-models.js?v=115';
+import { createRadarTowerMesh } from '../models/prop-models.js?v=116';
 
 const VOXEL_SIZE = 1.25;
 const SPATIAL_MIN_X = -2048;

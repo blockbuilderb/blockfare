@@ -6,8 +6,8 @@
 //  3. jurassic_island  — JURASSIC ERA (Prehistoric Jungle Island — Humans vs Dinosaurs)
 // ============================================================================
 
-import { TERRAIN } from '../config.js?v=115';
-import { FRUGIS_RIVER_MAP } from './frugis-river.js?v=115';
+import { TERRAIN } from '../config.js?v=116';
+import { FRUGIS_RIVER_MAP } from './frugis-river.js?v=116';
 
 export const MEDIEVAL_CITADEL_MAP = {
   id: 'medieval_citadel',

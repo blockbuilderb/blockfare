@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=115';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=115';
-import { events } from '../events.js?v=115';
+import { SQUAD_DEFS } from '../bots.js?v=116';
+import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=116';
+import { events } from '../events.js?v=116';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=115';
+} from '../core/StateMachines.js?v=116';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=115';
+} from '../utils/KeyboardShortcuts.js?v=116';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -88,7 +88,7 @@ export const DeployScreen = {
       btn.addEventListener('click', () => {
         rankBtns.forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
-        this.selectedRank = btn.dataset.rank || 'COMMANDER';
+        this.selectedRank = btn.dataset.rank || 'MEMBER';
       });
     });
 
@@ -1572,7 +1572,7 @@ export const DeployScreen = {
     this.player.squad = sqDef.id;
     this.player.squadShort = sqDef.short;
     this.player.subFaction = this.selectedSubFaction || this.selectedTeam;
-    this.player.commandRank = this.selectedRank || 'COMMANDER';
+    this.player.commandRank = this.selectedRank || 'MEMBER';
     this.player.commandScope = this.player.commandRank === 'COMMANDER' ? 'ALL' : 'SQUAD';
     this.setCommandScope(this.player.commandScope);
     if (!this.network || !this.network.isMultiplayer()) {

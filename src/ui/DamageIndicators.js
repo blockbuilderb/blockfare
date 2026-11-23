@@ -1,4 +1,4 @@
-import { events } from '../events.js?v=115';
+import { events } from '../events.js?v=116';
 
 export const DamageIndicators = {
   flashDamage(isArmorHit = false) {

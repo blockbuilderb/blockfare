@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=115';
-import { sound } from '../audio.js?v=115';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=115';
+import { VOXEL_SIZE } from '../world.js?v=116';
+import { sound } from '../audio.js?v=116';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=116';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=115';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=115';
-import { events, makeEventBridge } from '../events.js?v=115';
-import { GunsmithMethods } from './GunsmithState.js?v=115';
-import { FortificationMethods } from './FortificationBuilder.js?v=115';
-import { CommanderMethods } from './CommanderAbilities.js?v=115';
-import { VehicleControlMethods } from './VehicleControl.js?v=115';
-import { CombatMethods } from './PlayerCombat.js?v=115';
+} from '../utils/KeyboardShortcuts.js?v=116';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=116';
+import { events, makeEventBridge } from '../events.js?v=116';
+import { GunsmithMethods } from './GunsmithState.js?v=116';
+import { FortificationMethods } from './FortificationBuilder.js?v=116';
+import { CommanderMethods } from './CommanderAbilities.js?v=116';
+import { VehicleControlMethods } from './VehicleControl.js?v=116';
+import { CombatMethods } from './PlayerCombat.js?v=116';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=115';
+} from '../core/StateMachines.js?v=116';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -116,8 +116,8 @@ export class PlayerController {
     this.score = 0;
     this.squad = 'ALPHA';
     this.squadShort = 'ALP';
-    this.commandRank = 'COMMANDER'; // 'COMMANDER' | 'SQUAD_LEADER' | 'MEMBER'
-    this.commandScope = 'ALL';      // 'ALL' (Force Commander: all 6 squads) | 'SQUAD' (Squad Leader)
+    this.commandRank = 'MEMBER';    // 'MEMBER' (default) | 'SQUAD_LEADER' | 'COMMANDER'
+    this.commandScope = 'SQUAD';    // 'ALL' (Force Commander: all 6 squads) | 'SQUAD' (Squad Leader / Member)
     this.squadDoctrineEnabled = true;
     try {
       const savedDoctrine = localStorage.getItem('bb_squad_doctrine');

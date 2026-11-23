@@ -1,4 +1,4 @@
-import { sound } from '../audio.js?v=115';
+import { sound } from '../audio.js?v=116';
 
 export const SettingsModal = {
   bindSettingsEvents() {

@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=115';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=115';
+import { UI, getEraRoles } from '../config.js?v=116';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=116';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -2329,6 +2329,55 @@ export const HudRenderer = {
       thrValEl.style.color = wHeld ? '#00d2d3' : sHeld ? '#f39c12' : '#7bed9f';
     }
 
+    // 2B. Analog Engine RPM / %N1 Tachometer Meter (`#air-rpm-svg` right beside Speedometer!)
+    const targetRpmPct = v.isShotDown
+      ? 0
+      : wHeld
+      ? isWright || isGunship
+        ? 102
+        : 108
+      : sHeld
+      ? 32
+      : Math.max(46, Math.min(98, 44 + (spdMs / Math.max(1, v.maxSpeed || 95)) * 54));
+    this._smoothedAirRpmPct =
+      typeof this._smoothedAirRpmPct === 'number' && this._lastRpmVeh === v
+        ? this._smoothedAirRpmPct + (targetRpmPct - this._smoothedAirRpmPct) * Math.min(1, dt * 6.5)
+        : targetRpmPct;
+    this._lastRpmVeh = v;
+
+    const rpmPctRound = Math.max(0, Math.round(this._smoothedAirRpmPct));
+    const rpmNeedleEl = this.el('air-rpm-needle');
+    if (rpmNeedleEl) {
+      const rpmNeedleDeg = -120 + Math.max(0, Math.min(1.0, this._smoothedAirRpmPct / 110)) * 240;
+      rpmNeedleEl.setAttribute('transform', `rotate(${rpmNeedleDeg.toFixed(1)} 65 65)`);
+    }
+    const rpmUnitLblEl = this.el('air-rpm-unit-lbl');
+    if (rpmUnitLblEl) {
+      this._setText(rpmUnitLblEl, isWright ? 'PROP RPM' : isGunship ? 'TRBPRP %' : 'N1 ×10%');
+    }
+    const rpmPctEl = this.el('air-rpm-pct');
+    if (rpmPctEl) {
+      const rpmModeSuffix = v.isShotDown
+        ? 'FAIL'
+        : rpmPctRound > 100
+        ? 'WEP/AB'
+        : isGunship || isWright
+        ? 'PROP'
+        : 'N1';
+      this._setText(rpmPctEl, v.isShotDown ? '0% FAIL' : `${rpmPctRound}% ${rpmModeSuffix}`);
+      rpmPctEl.setAttribute(
+        'fill',
+        v.isShotDown ? '#ff4757' : rpmPctRound > 100 ? '#ff6b81' : rpmPctRound >= 90 ? '#f1c40f' : '#ff9f43'
+      );
+    }
+    const rpmNumEl = this.el('air-rpm-num');
+    if (rpmNumEl) {
+      const maxNominalRpm = isWright ? 1450 : isGunship ? 2200 : isCas ? 7600 : 8800;
+      const actualRpm = Math.round((this._smoothedAirRpmPct / 100) * maxNominalRpm);
+      this._setText(rpmNumEl, `${actualRpm.toLocaleString()} RPM`);
+      rpmNumEl.setAttribute('fill', v.isShotDown ? '#ff6b6b' : wHeld ? '#00d2d3' : '#7bed9f');
+    }
+
     // 3. Turn Coordinator & Slip/Skid Inclinometer ("Step on the Ball")
     let rawYawRate = 0;
     if (this._lastAirHudVeh === v && typeof this._lastAirHudYaw === 'number' && dt > 0.0005) {
@@ -2437,6 +2486,113 @@ export const HudRenderer = {
     if (vsiValEl) {
       vsiValEl.textContent = altAgl < 28 ? '🦇 MASK' : vsiStr;
       vsiValEl.style.color = altAgl < 28 ? '#00ffcc' : vsiMs > 2 ? '#7bed9f' : vsiMs < -8 ? '#ff7675' : '#bdc3c7';
+    }
+
+    // 4A-2. Side-Elevation Climb / Dive Aircraft Profile (`#air-pitch-profile-svg` vs. Horizontal 0° Line!)
+    const profGroupEl = this.el('air-profile-plane-group');
+    const profShapeEl = this.el('air-profile-shape');
+    const profFooterEl = this.el('air-profile-footer');
+    if (profShapeEl && this._lastAirProfileRole !== aRole) {
+      this._lastAirProfileRole = aRole;
+      if (isB2) {
+        profShapeEl.innerHTML = `
+          <polygon points="24,57 34,53 56,50 74,53 85,56 72,58 46,59" fill="rgba(0,210,211,0.36)" stroke="#00d2d3" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M 58 50 Q 65 47 71 52 Z" fill="#81ecec" opacity="0.85"/>
+        `;
+      } else if (isGunship) {
+        profShapeEl.innerHTML = `
+          <polygon points="24,58 22,42 32,43 37,52 72,52 83,56 80,60 34,60" fill="rgba(241,196,15,0.36)" stroke="#f1c40f" stroke-width="1.5" stroke-linejoin="round"/>
+          <line x1="48" y1="51" x2="66" y2="51" stroke="#ffeaa7" stroke-width="2.4"/>
+          <rect x="74" y="53" width="6" height="3" fill="#81ecec" opacity="0.85"/>
+        `;
+      } else if (isWright) {
+        profShapeEl.innerHTML = `
+          <line x1="26" y1="56" x2="80" y2="56" stroke="#f39c12" stroke-width="2"/>
+          <line x1="44" y1="49" x2="72" y2="49" stroke="#ffeaa7" stroke-width="2.2"/>
+          <line x1="44" y1="59" x2="72" y2="59" stroke="#ffeaa7" stroke-width="2.2"/>
+          <line x1="50" y1="49" x2="50" y2="59" stroke="#d35400" stroke-width="1.3"/>
+          <line x1="66" y1="49" x2="66" y2="59" stroke="#d35400" stroke-width="1.3"/>
+        `;
+      } else {
+        profShapeEl.innerHTML = `
+          <polygon points="26,57 22,45 31,45 36,53 56,52 67,49 75,53 84,56 74,59 54,60 32,59" fill="rgba(241,196,15,0.38)" stroke="#f1c40f" stroke-width="1.6" stroke-linejoin="round"/>
+          <path d="M 55 52 Q 63 47 70 52 Z" fill="#48dbfb" opacity="0.85"/>
+          <polygon id="air-profile-ab-flame" points="25,54 14,56 25,58" fill="#00d2d3" opacity="0.7"/>
+        `;
+      }
+    }
+    const flightPathPitchDeg = (Math.atan2(vsiMs, Math.max(8, spdMs)) * 180) / Math.PI;
+    const rawBodyPitchDeg = (pitchRad * 180) / Math.PI;
+    const effPitchDeg = Math.round(
+      Math.abs(rawBodyPitchDeg) >= Math.abs(flightPathPitchDeg)
+        ? rawBodyPitchDeg
+        : rawBodyPitchDeg * 0.45 + flightPathPitchDeg * 0.55
+    );
+    if (profGroupEl) {
+      const clampedVisualPitch = Math.max(-42, Math.min(42, effPitchDeg));
+      // Nose points right (+X), so negative SVG rotation pitches nose UP above the horizontal y=56 line
+      profGroupEl.setAttribute('transform', `rotate(${(-clampedVisualPitch).toFixed(1)} 54 56)`);
+      const abFlameEl = this.el('air-profile-ab-flame');
+      if (abFlameEl) {
+        abFlameEl.setAttribute('opacity', wHeld ? '0.95' : sHeld ? '0.15' : '0.45');
+      }
+    }
+    if (profFooterEl) {
+      const pSign = effPitchDeg > 0 ? `+${effPitchDeg}°` : `${effPitchDeg}°`;
+      if (vsiMs >= 2 || effPitchDeg >= 3) {
+        this._setText(profFooterEl, `▲ CLIMB ${pSign} • ${vsiStr}`);
+        profFooterEl.setAttribute('fill', '#7bed9f');
+      } else if (vsiMs <= -2 || effPitchDeg <= -3) {
+        this._setText(profFooterEl, `▼ DIVE ${pSign} • ${vsiStr}`);
+        profFooterEl.setAttribute('fill', vsiMs <= -14 ? '#ff6b6b' : '#ff9f43');
+      } else {
+        this._setText(profFooterEl, `● LVL ${pSign} • ${vsiStr}`);
+        profFooterEl.setAttribute('fill', '#81ecec');
+      }
+    }
+
+    // 4A-3. Dedicated Rotating 360° Magnetic Compass (`#air-compass-svg`) + Mission Waypoint Bearing Bug!
+    const compassRingEl = this.el('air-compass-ring');
+    if (compassRingEl) {
+      compassRingEl.setAttribute('transform', `rotate(${(-hdgDeg).toFixed(1)} 56 56)`);
+    }
+    const compassBugEl = this.el('air-compass-tgt-bug');
+    const compassFooterEl = this.el('air-compass-footer');
+    let navTargetX = null;
+    let navTargetZ = null;
+    let navTag = '';
+    if (this.player?.activePing && this.player.activePing.timer > 0 && this.player.activePing.pos) {
+      navTargetX = this.player.activePing.pos.x;
+      navTargetZ = this.player.activePing.pos.z;
+      navTag = 'WP';
+    } else if (this.world?.activeCasRequest && this.world.activeCasRequest.timer > 0 && this.world.activeCasRequest.team === v.team) {
+      navTargetX = this.world.activeCasRequest.pos.x;
+      navTargetZ = this.world.activeCasRequest.pos.z;
+      navTag = 'CAS';
+    } else if (Array.isArray(this._latestRoleMissions) && this._latestRoleMissions.length > 0) {
+      navTargetX = this._latestRoleMissions[0].targetX;
+      navTargetZ = this._latestRoleMissions[0].targetZ;
+      navTag = this._latestRoleMissions[0].targetFlagId || 'TGT';
+    }
+    if (compassBugEl) {
+      if (navTargetX !== null && navTargetZ !== null) {
+        const dx = navTargetX - v.pos.x;
+        const dz = navTargetZ - v.pos.z;
+        let tgtBrg = (Math.atan2(dx, -dz) * 180) / Math.PI;
+        if (tgtBrg < 0) tgtBrg += 360;
+        const relBrg = ((tgtBrg - hdgDeg + 540) % 360) - 180;
+        compassBugEl.setAttribute('opacity', '1');
+        compassBugEl.setAttribute('transform', `rotate(${relBrg.toFixed(1)} 56 56)`);
+      } else {
+        compassBugEl.setAttribute('opacity', '0');
+      }
+    }
+    if (compassFooterEl) {
+      const hdgPad = String(hdgDeg).padStart(3, '0');
+      this._setText(
+        compassFooterEl,
+        navTag ? `${hdgPad}° ${hdgDirStr} • ▶${navTag}` : `HDG ${hdgPad}° ${hdgDirStr}`
+      );
     }
 
     // 5. Visual Weapon Bay Pylon & Countermeasure Strip ([1], [2], [3], [X])

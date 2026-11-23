@@ -1,19 +1,448 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SQUAD_DEFS } from '../bots.js?v=115';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=115';
+import { SQUAD_DEFS } from '../bots.js?v=116';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=116';
 
 export const CommandPanel = {
-  setCommandScope(scope) {
-    const cleanScope = scope === 'SQUAD' ? 'SQUAD' : 'ALL';
-    this.player.commandScope = cleanScope;
-    if (cleanScope === 'ALL' && this.player.commandRank === 'MEMBER') {
+  setCommandScope(scope, opts = {}) {
+    if (opts.promoteIfMember && scope === 'ALL' && this.player.commandRank === 'MEMBER') {
       this.player.commandRank = 'COMMANDER';
     }
+    const cleanScope =
+      scope === 'ALL' && this.player.commandRank === 'COMMANDER' ? 'ALL' : 'SQUAD';
+    this.player.commandScope = cleanScope;
     const allBtn = this.el('cmd-scope-all');
     const sqBtn = this.el('cmd-scope-squad');
     if (allBtn) allBtn.classList.toggle('active', cleanScope === 'ALL');
     if (sqBtn) sqBtn.classList.toggle('active', cleanScope === 'SQUAD');
     this.updateCommandOrderHud();
+  },
+
+  _computeBearingAndDist(fromPos, tx, tz) {
+    const px = fromPos?.x || 0;
+    const pz = fromPos?.z || 0;
+    const dx = tx - px;
+    const dz = tz - pz;
+    const distM = Math.round(Math.hypot(dx, dz));
+    let brgDeg = Math.round((Math.atan2(dx, -dz) * 180) / Math.PI);
+    if (brgDeg < 0) brgDeg += 360;
+    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const dirStr = dirs[Math.round(brgDeg / 45) % 8];
+    return { distM, brgDeg, dirStr };
+  },
+
+  computeRoleMissions(eraOverride) {
+    const player = this.player;
+    if (!player) return { title: '🎯 FIELD MISSIONS', color: '#00d2d3', missions: [] };
+
+    const team = player.team || 'US';
+    const sqId = player.squad || 'ALPHA';
+    const pPos = player.activeVehicle?.pos || player.pos || { x: 0, y: 0, z: 0 };
+    const era = eraOverride || this.world?.era || 'modern';
+
+    const effRole = player.activeVehicle?.isAircraft
+      ? 'pilot'
+      : player.activeVehicle && ['tank', 'apc', 'aa'].includes(player.activeVehicle.type)
+      ? 'armor'
+      : String(player.role || 'assault').toLowerCase();
+
+    const missions = [];
+    const pushMission = (m) => {
+      if (missions.length >= 3) return;
+      const bd = this._computeBearingAndDist(pPos, m.targetX, m.targetZ);
+      missions.push({
+        ...m,
+        distM: bd.distM,
+        brgDeg: bd.brgDeg,
+        dirStr: bd.dirStr
+      });
+    };
+
+    const flags = Array.isArray(this.world?.flags) ? this.world.flags : [];
+    const vehicles = Array.isArray(this.vehicleManager?.vehicles) ? this.vehicleManager.vehicles : [];
+    const bots = Array.isArray(this.botManager?.bots) ? this.botManager.bots : [];
+
+    const cmdOrd = this.botManager?.commanderOrders?.[team];
+    const sqOrd = this.botManager?.squadOrders?.[team]?.[sqId];
+    const priorityFlagId =
+      (sqOrd && sqOrd.timer > 0 && sqOrd.flagId) ||
+      (cmdOrd && cmdOrd.timer > 0 && cmdOrd.flagId) ||
+      null;
+
+    // Sort candidate non-secure flags (priority order -> contested -> enemy-owned -> neutral -> closest)
+    const actionableFlags = flags
+      .filter((f) => f && f.pos && (f.contested || f.owner !== team))
+      .slice()
+      .sort((a, b) => {
+        const aPri = a.id === priorityFlagId ? 0 : a.contested ? 1 : a.owner !== 'NEUTRAL' ? 2 : 3;
+        const bPri = b.id === priorityFlagId ? 0 : b.contested ? 1 : b.owner !== 'NEUTRAL' ? 2 : 3;
+        if (aPri !== bPri) return aPri - bPri;
+        const da = Math.hypot(a.pos.x - pPos.x, a.pos.z - pPos.z);
+        const db = Math.hypot(b.pos.x - pPos.x, b.pos.z - pPos.z);
+        return da - db;
+      });
+
+    if (effRole === 'pilot') {
+      const cas = this.world?.activeCasRequest;
+      if (cas && cas.timer > 0 && cas.team === team && cas.pos) {
+        pushMission({
+          id: `cas_${cas.squad || 'jtac'}`,
+          text: `🔥 CAS: STRIKE ${cas.squad || 'INF'} SMOKE`,
+          targetX: cas.pos.x,
+          targetZ: cas.pos.z,
+          urgency: 'urgent'
+        });
+      }
+
+      // Live airborne enemy aircraft
+      let nearestAir = null;
+      let nearestAirDist = Infinity;
+      for (let i = 0; i < vehicles.length; i++) {
+        const v = vehicles[i];
+        if (!v || v.dead || !v.isAircraft || !v.team || v.team === 'NEUTRAL' || v.team === team) continue;
+        const gy = this.world?.getGroundHeightAt ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
+        const airborne = v.pos.y - gy > 6 || (v.forwardSpeed || 0) > 12 || v.driver || v.npcDriver || v.remoteDriverId;
+        if (!airborne) continue;
+        const d = Math.hypot(v.pos.x - pPos.x, v.pos.z - pPos.z);
+        if (d < nearestAirDist) {
+          nearestAirDist = d;
+          nearestAir = v;
+        }
+      }
+      if (nearestAir) {
+        const airLbl =
+          nearestAir.aircraftRole === 'gunship'
+            ? 'GUNSHIP'
+            : nearestAir.aircraftRole === 'b2_spirit'
+            ? 'STEALTH BOMBER'
+            : nearestAir.aircraftRole === 'cas'
+            ? 'CAS JET'
+            : 'FIGHTER';
+        pushMission({
+          id: `air_${nearestAir.id || 'enemy'}`,
+          text: `🎯 INTERCEPT ENEMY ${airLbl}`,
+          targetX: nearestAir.pos.x,
+          targetZ: nearestAir.pos.z,
+          urgency: 'urgent'
+        });
+      }
+
+      // Enemy SPAAG AA / Heavy Armor
+      let bestGroundVeh = null;
+      let bestGroundScore = Infinity;
+      for (let i = 0; i < vehicles.length; i++) {
+        const v = vehicles[i];
+        if (!v || v.dead || v.isAircraft || !v.team || v.team === 'NEUTRAL' || v.team === team) continue;
+        if (v.type !== 'aa' && v.type !== 'tank' && v.type !== 'apc') continue;
+        const occupied = Boolean(v.driver || v.npcDriver || v.remoteDriverId);
+        if (!occupied && v.type !== 'aa') continue;
+        const d = Math.hypot(v.pos.x - pPos.x, v.pos.z - pPos.z);
+        const priWeight = v.type === 'aa' ? d * 0.55 : d;
+        if (priWeight < bestGroundScore) {
+          bestGroundScore = priWeight;
+          bestGroundVeh = v;
+        }
+      }
+      if (bestGroundVeh && missions.length < 2) {
+        const gLbl =
+          bestGroundVeh.type === 'aa' ? 'SPAAG AA' : bestGroundVeh.type === 'tank' ? 'MBT TANK' : 'IFV ARMOR';
+        pushMission({
+          id: `sead_${bestGroundVeh.id || 'veh'}`,
+          text: `💥 STRIKE ENEMY ${gLbl}`,
+          targetX: bestGroundVeh.pos.x,
+          targetZ: bestGroundVeh.pos.z,
+          urgency: bestGroundVeh.type === 'aa' ? 'urgent' : 'warn'
+        });
+      }
+
+      for (let i = 0; i < actionableFlags.length && missions.length < 3; i++) {
+        const f = actionableFlags[i];
+        const verb = f.contested
+          ? `CLOSE AIR ON OBJ ${f.id}`
+          : f.owner === 'NEUTRAL'
+          ? `COVER CAPTURE AT OBJ ${f.id}`
+          : `BOMB ENEMY OBJ ${f.id}`;
+        pushMission({
+          id: `bomb_${f.id}`,
+          text: `💣 ${verb}`,
+          targetX: f.pos.x,
+          targetZ: f.pos.z,
+          targetFlagId: f.id,
+          urgency: f.contested ? 'urgent' : 'warn'
+        });
+      }
+
+      return { title: '✈️ PILOT SORTIE MISSIONS', color: '#00d2d3', missions };
+    }
+
+    if (effRole === 'armor') {
+      let nearestEnemyArmor = null;
+      let nearestArmorDist = Infinity;
+      for (let i = 0; i < vehicles.length; i++) {
+        const v = vehicles[i];
+        if (!v || v.dead || v.isAircraft || !v.team || v.team === 'NEUTRAL' || v.team === team) continue;
+        if (v.type !== 'tank' && v.type !== 'apc' && v.type !== 'aa') continue;
+        if (!(v.driver || v.npcDriver || v.remoteDriverId)) continue;
+        const d = Math.hypot(v.pos.x - pPos.x, v.pos.z - pPos.z);
+        if (d < nearestArmorDist) {
+          nearestArmorDist = d;
+          nearestEnemyArmor = v;
+        }
+      }
+      if (nearestEnemyArmor) {
+        pushMission({
+          id: `duel_${nearestEnemyArmor.id || 'armor'}`,
+          text: `💥 ENGAGE ENEMY ${nearestEnemyArmor.type.toUpperCase()}`,
+          targetX: nearestEnemyArmor.pos.x,
+          targetZ: nearestEnemyArmor.pos.z,
+          urgency: 'urgent'
+        });
+      }
+
+      if (player.activeVehicle?.type === 'aa') {
+        for (let i = 0; i < vehicles.length; i++) {
+          const v = vehicles[i];
+          if (!v || v.dead || !v.isAircraft || !v.team || v.team === 'NEUTRAL' || v.team === team) continue;
+          const gy = this.world?.getGroundHeightAt ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
+          if (v.pos.y - gy > 6 || (v.forwardSpeed || 0) > 12) {
+            pushMission({
+              id: `aa_${v.id || 'air'}`,
+              text: `🎯 SHOOT DOWN ENEMY AIRCRAFT`,
+              targetX: v.pos.x,
+              targetZ: v.pos.z,
+              urgency: 'urgent'
+            });
+            break;
+          }
+        }
+      }
+
+      for (let i = 0; i < actionableFlags.length && missions.length < 3; i++) {
+        const f = actionableFlags[i];
+        pushMission({
+          id: `spear_${f.id}`,
+          text: `🛡️ ${f.contested ? `RELIEVE CONTESTED OBJ ${f.id}` : `SPEARHEAD OBJ ${f.id}`}`,
+          targetX: f.pos.x,
+          targetZ: f.pos.z,
+          targetFlagId: f.id,
+          urgency: f.contested ? 'urgent' : 'warn'
+        });
+      }
+      return { title: '🛡️ ARMOR CREW MISSIONS', color: '#f1c40f', missions };
+    }
+
+    if (effRole === 'medic') {
+      let downedCount = 0;
+      let nearestDowned = null;
+      let nearestDownedDist = Infinity;
+      let woundedCount = 0;
+      let nearestWounded = null;
+      let nearestWoundedDist = Infinity;
+
+      for (let i = 0; i < bots.length; i++) {
+        const b = bots[i];
+        if (!b || b.dead || b.team !== team) continue;
+        const d = Math.hypot(b.pos.x - pPos.x, b.pos.z - pPos.z);
+        if (b.downed && d <= 260) {
+          downedCount++;
+          if (d < nearestDownedDist) {
+            nearestDownedDist = d;
+            nearestDowned = b;
+          }
+        } else if (!b.downed && b.hp < (b.maxHp || 100) * 0.72 && d <= 140) {
+          woundedCount++;
+          if (d < nearestWoundedDist) {
+            nearestWoundedDist = d;
+            nearestWounded = b;
+          }
+        }
+      }
+
+      if (nearestDowned) {
+        pushMission({
+          id: 'revive_ally',
+          text: `🚑 REVIVE ${downedCount > 1 ? `${downedCount} DOWNED ALLIES` : 'DOWNED ALLY'}`,
+          targetX: nearestDowned.pos.x,
+          targetZ: nearestDowned.pos.z,
+          urgency: 'urgent'
+        });
+      }
+      if (nearestWounded) {
+        pushMission({
+          id: 'heal_ally',
+          text: `➕ HEAL ${woundedCount > 1 ? `${woundedCount} WOUNDED ALLIES` : 'WOUNDED ALLY'}`,
+          targetX: nearestWounded.pos.x,
+          targetZ: nearestWounded.pos.z,
+          urgency: 'warn'
+        });
+      }
+      const contestedOrPriority = actionableFlags.find((f) => f.contested || f.id === priorityFlagId);
+      if (contestedOrPriority) {
+        pushMission({
+          id: `escort_${contestedOrPriority.id}`,
+          text: `🏃 SUPPORT ${sqId} AT OBJ ${contestedOrPriority.id}`,
+          targetX: contestedOrPriority.pos.x,
+          targetZ: contestedOrPriority.pos.z,
+          targetFlagId: contestedOrPriority.id
+        });
+      }
+      return { title: '➕ MEDIC TRIAGE MISSIONS', color: '#2ecc71', missions };
+    }
+
+    if (effRole === 'engineer') {
+      let nearestDamagedFriendly = null;
+      let nearestDamagedDist = Infinity;
+      let nearestEnemyVeh = null;
+      let nearestEnemyVehDist = Infinity;
+
+      for (let i = 0; i < vehicles.length; i++) {
+        const v = vehicles[i];
+        if (!v || v.dead || !v.pos) continue;
+        const d = Math.hypot(v.pos.x - pPos.x, v.pos.z - pPos.z);
+        if (!v.isAircraft && v.team === team && v.hp < (v.maxHp || 1000) * 0.85 && d <= 320) {
+          if (d < nearestDamagedDist) {
+            nearestDamagedDist = d;
+            nearestDamagedFriendly = v;
+          }
+        } else if (
+          v.team &&
+          v.team !== 'NEUTRAL' &&
+          v.team !== team &&
+          d <= 520 &&
+          (v.driver || v.npcDriver || v.remoteDriverId)
+        ) {
+          if (d < nearestEnemyVehDist) {
+            nearestEnemyVehDist = d;
+            nearestEnemyVeh = v;
+          }
+        }
+      }
+
+      if (nearestDamagedFriendly) {
+        const pct = Math.max(1, Math.round((nearestDamagedFriendly.hp / (nearestDamagedFriendly.maxHp || 1000)) * 100));
+        pushMission({
+          id: `rep_${nearestDamagedFriendly.id || 'veh'}`,
+          text: `🔧 REPAIR ${nearestDamagedFriendly.type.toUpperCase()} (${pct}% HP)`,
+          targetX: nearestDamagedFriendly.pos.x,
+          targetZ: nearestDamagedFriendly.pos.z,
+          urgency: 'urgent'
+        });
+      }
+      if (nearestEnemyVeh) {
+        const lbl = nearestEnemyVeh.isAircraft ? 'AIRCRAFT [STINGER]' : `${nearestEnemyVeh.type.toUpperCase()} [RPG]`;
+        pushMission({
+          id: `at_${nearestEnemyVeh.id || 'enemy'}`,
+          text: `🚀 DESTROY ENEMY ${lbl}`,
+          targetX: nearestEnemyVeh.pos.x,
+          targetZ: nearestEnemyVeh.pos.z,
+          urgency: 'urgent'
+        });
+      }
+      const fobToFortify =
+        flags.find((f) => f && f.pos && f.owner === team && f.contested) ||
+        actionableFlags[0] ||
+        null;
+      if (fobToFortify) {
+        pushMission({
+          id: `fort_${fobToFortify.id}`,
+          text: `🧱 ${
+            fobToFortify.owner === team
+              ? `DEFEND & FORTIFY OBJ ${fobToFortify.id}`
+              : `SAPPER PUSH OBJ ${fobToFortify.id}`
+          }`,
+          targetX: fobToFortify.pos.x,
+          targetZ: fobToFortify.pos.z,
+          targetFlagId: fobToFortify.id,
+          urgency: fobToFortify.contested ? 'urgent' : 'warn'
+        });
+      }
+      return { title: '🛠️ ENGINEER FIELD TASKS', color: '#ff9f43', missions };
+    }
+
+    if (effRole === 'support') {
+      let nearbyAllies = 0;
+      for (let i = 0; i < bots.length; i++) {
+        const b = bots[i];
+        if (!b || b.dead || b.team !== team) continue;
+        if (Math.hypot(b.pos.x - pPos.x, b.pos.z - pPos.z) <= 90) nearbyAllies++;
+      }
+      if (nearbyAllies >= 3 && !player.ammoStash && (player.stashCooldown || 0) <= 0 && era === 'modern') {
+        pushMission({
+          id: 'drop_stash',
+          text: `📦 DROP AMMO STASH [7] (${nearbyAllies} ALLIES)`,
+          targetX: pPos.x,
+          targetZ: pPos.z,
+          urgency: 'warn'
+        });
+      }
+      for (let i = 0; i < actionableFlags.length && missions.length < 3; i++) {
+        const f = actionableFlags[i];
+        pushMission({
+          id: `supp_${f.id}`,
+          text: `🔥 ${f.contested ? `SUPPRESS CONTESTED OBJ ${f.id}` : `ADVANCE ON OBJ ${f.id}`}`,
+          targetX: f.pos.x,
+          targetZ: f.pos.z,
+          targetFlagId: f.id,
+          urgency: f.contested ? 'urgent' : 'warn'
+        });
+      }
+      return { title: '📦 SUPPORT LOGISTICS TASKS', color: '#a29bfe', missions };
+    }
+
+    if (effRole === 'recon') {
+      const flankFlag = actionableFlags[0] || null;
+      if (flankFlag && !player.insertionBeacon && (player.beaconCooldown || 0) <= 0 && era === 'modern') {
+        pushMission({
+          id: `bcn_${flankFlag.id}`,
+          text: `📡 PLACE BEACON [6] NEAR OBJ ${flankFlag.id}`,
+          targetX: flankFlag.pos.x,
+          targetZ: flankFlag.pos.z,
+          targetFlagId: flankFlag.id,
+          urgency: 'warn'
+        });
+      }
+      if (flankFlag && (player.airstrikeCooldown || 0) <= 0 && era === 'modern') {
+        pushMission({
+          id: `jtac_${flankFlag.id}`,
+          text: `🎯 PAINT JTAC CAS [J] ON OBJ ${flankFlag.id}`,
+          targetX: flankFlag.pos.x,
+          targetZ: flankFlag.pos.z,
+          targetFlagId: flankFlag.id,
+          urgency: flankFlag.contested ? 'urgent' : 'warn'
+        });
+      }
+      return { title: '🎯 RECON & JTAC MISSIONS', color: '#74b9ff', missions };
+    }
+
+    // Assault & Medieval / Jurassic Frontline Combat Roles
+    const activeManual = (sqOrd && sqOrd.timer > 0 && sqOrd) || (cmdOrd && cmdOrd.timer > 0 && cmdOrd) || null;
+    if (activeManual && activeManual.flagId) {
+      const ordFlag = flags.find((f) => f.id === activeManual.flagId);
+      if (ordFlag && ordFlag.pos) {
+        pushMission({
+          id: `ord_${ordFlag.id}`,
+          text: `⚔️ ORDER: ${activeManual.action} OBJ ${ordFlag.id}`,
+          targetX: ordFlag.pos.x,
+          targetZ: ordFlag.pos.z,
+          targetFlagId: ordFlag.id,
+          urgency: 'urgent'
+        });
+      }
+    }
+
+    for (let i = 0; i < actionableFlags.length && missions.length < 2; i++) {
+      const f = actionableFlags[i];
+      if (missions.some((m) => m.targetFlagId === f.id)) continue;
+      pushMission({
+        id: `atk_${f.id}`,
+        text: `💥 ${f.contested ? `CLEAR CONTESTED OBJ ${f.id}` : `CAPTURE OBJ ${f.id}`}`,
+        targetX: f.pos.x,
+        targetZ: f.pos.z,
+        targetFlagId: f.id,
+        urgency: f.contested ? 'urgent' : 'warn'
+      });
+    }
+
+    return { title: '⚔️ COMBAT MISSIONS', color: '#7bed9f', missions };
   },
 
   issueHudStrategicOrder(opts = {}) {
@@ -188,15 +617,22 @@ export const CommandPanel = {
   },
 
   updateCommandOrderHud(eraOverride) {
+    const cmdPanelEl = this.el('command-order-panel');
     const rankBadgeEl = this.el('cmd-rank-badge');
     const panelTitleEl = this.el('cmd-panel-title');
     const orderTextEl = this.el('cmd-active-order-text');
     const hudStatusLineEl = this.el('cmd-hud-status-line');
     const deployOrderStatusEl = this.el('deploy-order-status');
+    const roleMissionListEl = this.el('role-mission-list');
     const allBtn = this.el('cmd-scope-all');
     const sqBtn = this.el('cmd-scope-squad');
     const team = this.player.team || 'US';
     const sqId = this.player.squad || 'ALPHA';
+    const rank = this.player.commandRank || 'MEMBER';
+
+    if (rank !== 'COMMANDER' && this.player.commandScope === 'ALL') {
+      this.player.commandScope = 'SQUAD';
+    }
 
     let aliveTeamBots = 0;
     let aliveSquadBots = 0;
@@ -218,11 +654,79 @@ export const CommandPanel = {
       sqBtn.classList.toggle('active', this.player.commandScope === 'SQUAD');
     }
 
-    if (panelTitleEl) {
-      panelTitleEl.textContent =
-        this.player.commandScope === 'ALL'
-          ? '★ FORCE COMMANDER ORDERS'
-          : `▲ ${sqId} SQUAD ORDERS`;
+    if (cmdPanelEl) {
+      cmdPanelEl.dataset.hudTier = rank;
+    }
+
+    if (rank === 'MEMBER') {
+      const { title, color, missions } = this.computeRoleMissions(eraOverride);
+      if (cmdPanelEl) {
+        const hasMissions = missions.length > 0;
+        cmdPanelEl.classList.toggle('hidden', !hasMissions);
+        cmdPanelEl.style.display = hasMissions ? '' : 'none';
+      }
+      if (panelTitleEl && missions.length > 0) {
+        panelTitleEl.textContent = title;
+        panelTitleEl.style.color = color;
+      }
+      if (roleMissionListEl) {
+        roleMissionListEl.classList.toggle('hidden', missions.length === 0);
+        if (!this._roleMissionClickBound) {
+          this._roleMissionClickBound = true;
+          roleMissionListEl.addEventListener('click', (ev) => {
+            const btn = ev.target && ev.target.closest ? ev.target.closest('.role-mission-item') : null;
+            if (!btn || !this.player) return;
+            ev.stopPropagation();
+            const tx = Number(btn.dataset.tx) || 0;
+            const tz = Number(btn.dataset.tz) || 0;
+            const lbl = btn.dataset.label || 'MISSION WAYPOINT';
+            const gy = this.world?.getGroundHeightAt ? this.world.getGroundHeightAt(tx, tz) : 0;
+            this.player.activePing = {
+              pos: new THREE.Vector3(tx, gy + 2.5, tz),
+              timer: 15.0,
+              isEnemy: true,
+              label: `📍 ${lbl}`
+            };
+            this.addXpNotification?.(0, `📍 MISSION WAYPOINT PINNED: ${lbl}`);
+          });
+        }
+        this._latestRoleMissions = missions;
+        const sig = missions.map((m) => `${m.id}:${m.text}:${m.distM}:${m.dirStr}:${m.urgency || ''}`).join('|');
+        if (this._lastRoleMissionSig !== sig) {
+          this._lastRoleMissionSig = sig;
+          roleMissionListEl.innerHTML = missions
+            .map(
+              (m) =>
+                `<button type="button" class="role-mission-item ${m.urgency || ''}" data-tx="${Math.round(
+                  m.targetX
+                )}" data-tz="${Math.round(m.targetZ)}" data-label="${m.text.replace(/"/g, '&quot;')}" title="Click to pin 3D HUD Waypoint">` +
+                `<span>${m.text}</span>` +
+                `<span class="role-mission-dist">${m.distM}m ${m.dirStr}</span>` +
+                `</button>`
+            )
+            .join('');
+        }
+      }
+    } else {
+      if (cmdPanelEl) {
+        cmdPanelEl.classList.remove('hidden');
+        cmdPanelEl.style.display = '';
+      }
+      if (roleMissionListEl) {
+        roleMissionListEl.classList.add('hidden');
+      }
+      if (panelTitleEl) {
+        if (rank === 'SQUAD_LEADER') {
+          panelTitleEl.textContent = `▲ ${sqId} SQUAD LEAD (${aliveSquadBots})`;
+          panelTitleEl.style.color = '#2ecc71';
+        } else {
+          panelTitleEl.textContent =
+            this.player.commandScope === 'ALL'
+              ? '★ FORCE COMMANDER ORDERS'
+              : `▲ ${sqId} SQUAD ORDERS`;
+          panelTitleEl.style.color = '#f1c40f';
+        }
+      }
     }
 
     if (rankBadgeEl) {
@@ -481,6 +985,24 @@ export const CommandPanel = {
         this.player.activeVehicle.isAircraft &&
         !this.player.activeVehicle.isSecretOmegaFlyer
     );
+    const cmdSupportRowEl = this.el('cmd-support-row');
+    if (cmdSupportRowEl) {
+      cmdSupportRowEl.style.display =
+        rank === 'SQUAD_LEADER' && isInAircraft ? 'none' : '';
+    }
+    const hudRallyBtn = this.el('hud-rally-btn');
+    if (hudRallyBtn) {
+      if (this.player.rallyPoint && this.player.rallyPoint.timer > 0) {
+        hudRallyBtn.textContent = `🟢 RALLY (${Math.ceil(this.player.rallyPoint.timer)}s)`;
+        hudRallyBtn.classList.add('active');
+      } else if ((this.player.rallyCooldown || 0) > 0) {
+        hudRallyBtn.textContent = `🟢 RALLY (${Math.ceil(this.player.rallyCooldown)}s)`;
+        hudRallyBtn.classList.remove('active');
+      } else {
+        hudRallyBtn.innerHTML = '🟢 RALLY <span class="cmd-hk">[5]</span>';
+        hudRallyBtn.classList.remove('active');
+      }
+    }
     const hudBuildBtn = this.el('hud-build-bunker-btn');
     if (hudBuildBtn) {
       hudBuildBtn.style.display = isInAircraft ? 'none' : '';
@@ -873,7 +1395,7 @@ export const CommandPanel = {
     const mapScopeAllBtn = modal.querySelector('#cmd-map-scope-all');
     if (mapScopeAllBtn) {
       mapScopeAllBtn.addEventListener('click', () => {
-        this.setCommandScope('ALL');
+        this.setCommandScope('ALL', { promoteIfMember: true });
         this.renderCommandModalContent(modal);
       });
     }
