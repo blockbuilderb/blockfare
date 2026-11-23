@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=116';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=116';
-import { events } from '../events.js?v=116';
+import { SQUAD_DEFS } from '../bots.js?v=117';
+import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=117';
+import { events } from '../events.js?v=117';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=116';
+} from '../core/StateMachines.js?v=117';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=116';
+} from '../utils/KeyboardShortcuts.js?v=117';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -1316,7 +1316,7 @@ export const DeployScreen = {
     this.drawDeployMap?.(true);
   },
 
-  updateDeployClassTraitsCard() {
+    updateDeployClassTraitsCard() {
     const airEcoEl = document.getElementById('deploy-air-economy-bar');
     if (airEcoEl) {
       const era = (this.world && this.world.era) || 'modern';
@@ -1325,15 +1325,15 @@ export const DeployScreen = {
       } else {
         airEcoEl.style.display = 'flex';
         const team = this.selectedTeam || 'US';
-        const funds = this.vehicleManager?.getTeamFunds ? this.vehicleManager.getTeamFunds(team) : 5000;
+        const mCash = Math.floor(this.player?.matchCash ?? 50);
         const kills = this.vehicleManager?.getTeamKills ? this.vehicleManager.getTeamKills(team) : 0;
         const reqKills = VEHICLE_STATS.B2_UNLOCK_KILLS || 25;
         const b2Unlocked = this.vehicleManager?.isB2UnlockedForTeam
           ? this.vehicleManager.isB2UnlockedForTeam(team)
           : kills >= reqKills;
         airEcoEl.innerHTML =
-          `<span title="Jets cost $${VEHICLE_STATS.FACTION_COST_PLANE || 800} (${VEHICLE_STATS.RESPAWN_DELAY_PLANE || 35}s CD) • Pilot Only">💰 ${team}: $${funds.toLocaleString()}</span>` +
-          `<span style="color:${b2Unlocked ? '#00d2d3' : '#ff9f43'};" title="B-2 Spirit Bomber costs $${VEHICLE_STATS.FACTION_COST_B2_SPIRIT || 2000} (${VEHICLE_STATS.RESPAWN_DELAY_B2_SPIRIT || 90}s CD) • Requires ${reqKills} Kills">${
+          `<span style="color:#f1c40f;" title="In-Match Requisition Cash (Starts at $50 • Earned via Captures, Revives, Repairs & Kills)">⚡ MATCH: $${mCash.toLocaleString()}</span>` +
+          `<span style="color:${b2Unlocked ? '#00d2d3' : '#ff9f43'};" title="B-2 Spirit Bomber costs ⚡$3,200 Match Cash + ${reqKills} Team Kills">${
             b2Unlocked ? `🦇 B-2 READY` : `🔒 B-2: ${kills}/${reqKills}K`
           }</span>`;
       }
@@ -1579,6 +1579,37 @@ export const DeployScreen = {
       this.botManager?.syncPlayerTeamSlot?.(this.selectedTeam);
     }
     this.player.deploy(this.selectedTeam, this.selectedClass, spawnVec);
+
+    // Fulfill 1-Click Paid Deploy Vehicle Requisition (if player chose Bike/ATV, Armor, or Aircraft!)
+    const reqVehKey = eraNow === 'modern' ? this.selectedDeployVehicle || 'foot' : 'foot';
+    this.selectedDeployVehicle = 'foot';
+    this._deployVehDrawerOpen = false;
+    if (reqVehKey !== 'foot' && this.vehicleManager) {
+      if (
+        reqVehKey === 'wright_flyer' ||
+        reqVehKey === 'cas' ||
+        reqVehKey === 'fighter' ||
+        reqVehKey === 'gunship' ||
+        reqVehKey === 'b2_spirit'
+      ) {
+        this.player.launchAircraftSortie?.(reqVehKey, true);
+      } else if (reqVehKey === 'bike' || reqVehKey === 'atv') {
+        const res = this.vehicleManager.requestPlayerLightBike?.(this.player, reqVehKey);
+        if (res && res.ok && res.vehicle) {
+          this.player.enterVehicle?.(res.vehicle, true);
+        }
+      } else if (
+        reqVehKey === 'car' ||
+        reqVehKey === 'apc' ||
+        reqVehKey === 'aa' ||
+        reqVehKey === 'tank'
+      ) {
+        const res = this.vehicleManager.requestPlayerArmorVehicle?.(this.player, reqVehKey);
+        if (res && res.ok && res.vehicle) {
+          this.player.enterVehicle?.(res.vehicle, true);
+        }
+      }
+    }
     if (
       this.pendingDeployOrder &&
       this.pendingDeployOrder.action &&

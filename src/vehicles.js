@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=116';
-import { VEHICLE_STATS, PROJECTILES } from './config.js?v=116';
+import { sound } from './audio.js?v=117';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=117';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=116';
-import { createVehicleMesh } from './models/vehicle-model.js?v=116';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=116';
-import { events, makeEventBridge } from './events.js?v=116';
+} from './assets/vehicle-defs.js?v=117';
+import { createVehicleMesh } from './models/vehicle-model.js?v=117';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=117';
+import { events, makeEventBridge } from './events.js?v=117';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=116';
+} from './core/StateMachines.js?v=117';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -983,20 +983,23 @@ export class VehicleManager {
       };
     }
 
-    const costMap = {
-      cas: VEHICLE_STATS.FACTION_COST_CAS || 800,
-      fighter: VEHICLE_STATS.FACTION_COST_FIGHTER || 900,
-      gunship: VEHICLE_STATS.FACTION_COST_GUNSHIP || 1200,
-      b2_spirit: VEHICLE_STATS.FACTION_COST_B2_SPIRIT || 2000,
-      wright_flyer: 0
-    };
-    const cost = costMap[normRole] ?? 800;
-    const funds = this.getTeamFunds(team);
-    if (cost > 0 && funds < cost) {
-      return { ok: false, reason: 'INSUFFICIENT_FUNDS', cost, funds };
-    }
-    if (cost > 0) {
-      this.addTeamFunds(team, -cost);
+    let cost = ECONOMY.VEHICLE_BASE_COST?.[normRole] ?? 1100;
+    let paidAsStock = false;
+    if (typeof player.payForVehicleRequisition === 'function') {
+      const payRes = player.payForVehicleRequisition(normRole);
+      if (!payRes.ok) {
+        return payRes;
+      }
+      cost = payRes.cost;
+      paidAsStock = Boolean(payRes.useStock);
+    } else {
+      const funds = this.getTeamFunds(team);
+      if (cost > 0 && funds < cost) {
+        return { ok: false, reason: 'INSUFFICIENT_FUNDS', cost, funds };
+      }
+      if (cost > 0) {
+        this.addTeamFunds(team, -cost);
+      }
     }
 
     let plane = this.vehicles.find(
@@ -1103,6 +1106,8 @@ export class VehicleManager {
     }
 
     plane.b2LockedUntilKills = false;
+    plane.paidByPlayer = player;
+    plane._paidAsStock = paidAsStock;
     plane.dead = false;
     plane.respawnTimer = 0;
     plane.replacementTicketPaid = false;
@@ -1214,16 +1219,20 @@ export class VehicleManager {
       return { ok: false, reason: 'ERA_LOCKED' };
     }
     const isAtv = subKind === 'atv';
-    const cost = 150;
+    const vehKey = isAtv ? 'atv' : 'bike';
+    let cost = ECONOMY.VEHICLE_BASE_COST?.[vehKey] ?? (isAtv ? 350 : 250);
     const team = player.team || 'US';
-    let paidSource = 'PERSONAL';
-    if (typeof player.spendCash === 'function' && player.spendCash(cost)) {
-      paidSource = 'PERSONAL';
-    } else if (this.getTeamFunds(team) >= cost) {
-      this.addTeamFunds(team, -cost);
-      paidSource = 'FACTION';
+    let paidSource = 'MATCH_CASH';
+    if (typeof player.payForVehicleRequisition === 'function') {
+      const payRes = player.payForVehicleRequisition(vehKey);
+      if (!payRes.ok) {
+        return payRes;
+      }
+      cost = payRes.cost;
+    } else if (typeof player.spendCash === 'function' && player.spendCash(cost)) {
+      paidSource = 'MATCH_CASH';
     } else {
-      return { ok: false, reason: 'INSUFFICIENT_FUNDS', cost, funds: this.getTeamFunds(team) };
+      return { ok: false, reason: 'INSUFFICIENT_MATCH_CASH', cost, funds: player.matchCash || 0 };
     }
 
     const fwdX = -Math.sin(player.yaw || 0);
@@ -1269,6 +1278,8 @@ export class VehicleManager {
       patrolPoints: [dropPos.clone()]
     });
     veh.claimedByBot = null;
+    veh.paidByPlayer = player;
+    veh._paidAsStock = true;
     veh.claimedByPlayer = true;
     veh.claimedByPlayerTimer = 45.0;
     veh.mesh.visible = true;
@@ -1295,18 +1306,30 @@ export class VehicleManager {
     }
     const team = player.team || 'US';
     const isRU = team === 'RU';
-    const normType = armorType === 'apc' ? 'apc' : armorType === 'aa' ? 'aa' : 'tank';
-    const costMap = {
-      tank: VEHICLE_STATS.FACTION_COST_TANK || 1100,
-      apc: VEHICLE_STATS.FACTION_COST_APC || 650,
-      aa: VEHICLE_STATS.FACTION_COST_AA || 750
-    };
-    const cost = costMap[normType] || 1100;
-    const funds = this.getTeamFunds(team);
-    if (funds < cost) {
-      return { ok: false, reason: 'INSUFFICIENT_FUNDS', cost, funds };
+    const normType =
+      armorType === 'car' || armorType === 'humvee'
+        ? 'car'
+        : armorType === 'apc'
+        ? 'apc'
+        : armorType === 'aa'
+        ? 'aa'
+        : 'tank';
+    let cost = ECONOMY.VEHICLE_BASE_COST?.[normType] ?? 1400;
+    let paidAsStock = false;
+    if (typeof player.payForVehicleRequisition === 'function') {
+      const payRes = player.payForVehicleRequisition(normType);
+      if (!payRes.ok) {
+        return payRes;
+      }
+      cost = payRes.cost;
+      paidAsStock = Boolean(payRes.useStock);
+    } else {
+      const funds = this.getTeamFunds(team);
+      if (funds < cost) {
+        return { ok: false, reason: 'INSUFFICIENT_FUNDS', cost, funds };
+      }
+      this.addTeamFunds(team, -cost);
     }
-    this.addTeamFunds(team, -cost);
 
     const fwdX = -Math.sin(player.yaw || 0);
     const fwdZ = -Math.cos(player.yaw || 0);
@@ -1378,6 +1401,7 @@ export class VehicleManager {
       veh.thermalFSM?.send(VEHICLE_THERMAL_EVENTS.RESET);
     } else {
       const nameMap = {
+        car: isRU ? 'GAZ TIGR UP-ARMORED SCOUT (.50 HMG)' : 'M1151 UP-ARMORED HUMVEE (.50 HMG)',
         tank: isRU
           ? 'T-90M PRORYV MBT (125MM + COAX)'
           : 'M1A2 SEP v3 ABRAMS MBT (120MM + COAX)',
@@ -1387,7 +1411,9 @@ export class VehicleManager {
           : 'M163 PIVADS / LAV-AD SPAAG (25MM + STINGER SAM)'
       };
       const statBlock =
-        normType === 'tank'
+        normType === 'car'
+          ? VEHICLE_STATS.HUMVEE || { maxHp: 750, speed: 24 }
+          : normType === 'tank'
           ? VEHICLE_STATS.TANK
           : normType === 'apc'
           ? VEHICLE_STATS.APC
@@ -1402,13 +1428,17 @@ export class VehicleManager {
         maxHp: statBlock.maxHp,
         speed: statBlock.speed,
         weaponType:
-          normType === 'tank'
+          normType === 'car'
+            ? 'hmg'
+            : normType === 'tank'
             ? 'tank_cannon'
             : normType === 'apc'
             ? 'autocannon'
             : 'aa_autocannon',
         rpm:
-          normType === 'tank'
+          normType === 'car'
+            ? 750
+            : normType === 'tank'
             ? isRU
               ? VEHICLE_STATS.RPM_TANK_RU
               : VEHICLE_STATS.RPM_TANK_US
@@ -1424,6 +1454,8 @@ export class VehicleManager {
     }
 
     veh.claimedByBot = null;
+    veh.paidByPlayer = player;
+    veh._paidAsStock = paidAsStock;
     veh.claimedByPlayer = true;
     veh.claimedByPlayerTimer = 30.0;
     this.refreshTeamVehicleLists();

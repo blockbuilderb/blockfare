@@ -15,7 +15,7 @@ export const PLAYER = {
   ARMOR_ABSORB_RATIO: 0.35,
   SUPPRESSION_DECAY_RATE: 0.6,
   RESPAWN_DELAY: 10,
-  STARTING_CASH: 150,
+  STARTING_CASH: 50,
   STARTING_BANDAGES: 3,
   STARTING_GRENADES: 2,
 
@@ -635,12 +635,83 @@ export const MATCH = {
   ORBIT_RADIUS_Z: 62,
   ORBIT_HEIGHT: 46,
 
-  // Cash gain
-  CASH_MIN: 10,
-  CASH_MULT: 0.45,
+  // Cash gain & Unified 3-Pillar Economy (CoD Match Cash + Squad Asset Risk + Tarkov Armory Bank)
+  CASH_MIN: 15,
+  CASH_MULT: 0.65,
 
   // UAV recon assist
-  UAV_RECON_ASSIST_PTS: 35,
+  UAV_RECON_ASSIST_PTS: 45,
+};
+
+export const ECONOMY = {
+  STARTING_MATCH_CASH: 50,
+  VICTORY_EXTRACTION_MULT: 1.5,
+  DEFEAT_EXTRACTION_MULT: 1.15,
+
+  // Base ⚡ Match Cash Requisition Prices (Always start at ⚡$50 -> earned via role play!)
+  VEHICLE_BASE_COST: {
+    foot: 0,
+    bike: 250,
+    atv: 350,
+    car: 450,
+    apc: 850,
+    aa: 950,
+    tank: 1400,
+    wright_flyer: 300,
+    cas: 1100,
+    fighter: 1350,
+    gunship: 2200,
+    b2_spirit: 3200
+  },
+
+  // Tarkov-style Modded Kit Surcharge (Only when paid Hangar/Armor mods are equipped & Stock mode is OFF)
+  VEHICLE_MOD_SURCHARGE: {
+    foot: 0,
+    bike: 0,
+    atv: 0,
+    car: 50,
+    apc: 100,
+    aa: 100,
+    tank: 150,
+    wright_flyer: 0,
+    cas: 125,
+    fighter: 125,
+    gunship: 200,
+    b2_spirit: 250
+  },
+
+  // Squad-style Per-Asset Requisition Cooldowns (seconds)
+  VEHICLE_COOLDOWN_SEC: {
+    foot: 0,
+    bike: 20,
+    atv: 25,
+    car: 25,
+    apc: 40,
+    aa: 45,
+    tank: 65,
+    wright_flyer: 25,
+    cas: 50,
+    fighter: 55,
+    gunship: 80,
+    b2_spirit: 110
+  },
+
+  // Role-Balanced ⚡ Match Cash Faucets
+  REWARDS: {
+    FLAG_NEUTRALIZE: 90,
+    FLAG_CAPTURE: 180,
+    INFANTRY_KILL: 75,
+    HEADSHOT_BONUS: 25,
+    MEDIC_REVIVE: 85,
+    MEDIC_HEAL: 35,
+    ENGINEER_REPAIR: 65,
+    AT_AA_HIT: 50,
+    DESTROY_CAR: 150,
+    DESTROY_APC: 260,
+    DESTROY_TANK: 380,
+    DESTROY_AIRCRAFT: 450,
+    LOGISTICS_ASSIST: 45
+  }
 };
 
 // ---------------------------------------------------------------------------

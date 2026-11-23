@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=116';
-import { VehicleManager } from './vehicles.js?v=116';
-import { BotManager } from './bots.js?v=116';
-import { PlayerController } from './player.js?v=116';
-import { NetworkManager } from './network.js?v=116';
-import { UIManager } from './ui.js?v=116';
-import { TelemetryLogger } from './telemetry.js?v=116';
-import { sound } from './audio.js?v=116';
-import { CAMERA, LIGHTING, MATCH, WEATHER, SKY_FOG_COLOR } from './config.js?v=116';
-import { events, makeEventBridge } from './events.js?v=116';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=116';
+import { VoxelWorld } from './world.js?v=117';
+import { VehicleManager } from './vehicles.js?v=117';
+import { BotManager } from './bots.js?v=117';
+import { PlayerController } from './player.js?v=117';
+import { NetworkManager } from './network.js?v=117';
+import { UIManager } from './ui.js?v=117';
+import { TelemetryLogger } from './telemetry.js?v=117';
+import { sound } from './audio.js?v=117';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=117';
+import { events, makeEventBridge } from './events.js?v=117';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=117';
 
 class BattleBitGame {
   constructor() {
@@ -361,6 +361,7 @@ class BattleBitGame {
       ruTank.aiPatrol = false;
 
       this.player.activeVehicle = usTank;
+      usTank.paidByPlayer = this.player;
       usTank.driver = this.player;
       this.player.thirdPersonVehicle = true;
       this.player.viewModelGroup.visible = false;
@@ -805,12 +806,38 @@ class BattleBitGame {
       this.player.score += pts;
       let cashGain = 0;
       if (pts > 0 && typeof this.player.addCash === 'function') {
-        cashGain = Math.max(MATCH.CASH_MIN, Math.round(pts * MATCH.CASH_MULT));
-        this.player.addCash(cashGain, reason);
+        const up = String(reason || '').toUpperCase();
+        const rw = ECONOMY.REWARDS || {};
+        if (up.includes('DESTROYED') && (up.includes('B-2') || up.includes('PLANE') || up.includes('FIGHTER') || up.includes('GUNSHIP') || up.includes('WARTHOG') || up.includes('AIRCRAFT'))) {
+          cashGain = rw.DESTROY_AIRCRAFT || 450;
+        } else if (up.includes('DESTROYED') && (up.includes('TANK') || up.includes('ABRAMS') || up.includes('T-90'))) {
+          cashGain = rw.DESTROY_TANK || 380;
+        } else if (up.includes('DESTROYED') && (up.includes('IFV') || up.includes('APC') || up.includes('BTR') || up.includes('LAV') || up.includes('SPAAG') || up.includes('AA'))) {
+          cashGain = rw.DESTROY_APC || 260;
+        } else if (up.includes('DESTROYED') && (up.includes('HUMVEE') || up.includes('TIGR') || up.includes('BIKE') || up.includes('ATV') || up.includes('VEHICLE'))) {
+          cashGain = rw.DESTROY_CAR || 150;
+        } else if (up.includes('CAPTURED')) {
+          cashGain = rw.FLAG_CAPTURE || 180;
+        } else if (up.includes('NEUTRALIZED')) {
+          cashGain = rw.FLAG_NEUTRALIZE || 90;
+        } else if (up.includes('REVIVE')) {
+          cashGain = rw.MEDIC_REVIVE || 85;
+        } else if (up.includes('HEAL')) {
+          cashGain = rw.MEDIC_HEAL || 35;
+        } else if (up.includes('REPAIR')) {
+          cashGain = rw.ENGINEER_REPAIR || 65;
+        } else if (up.includes('ELIMINATED') || up.includes('KILL')) {
+          cashGain = (rw.INFANTRY_KILL || 75) + (up.includes('HEADSHOT') ? rw.HEADSHOT_BONUS || 25 : 0);
+        } else if (up.includes('RESUPPLY') || up.includes('STASH') || up.includes('BEACON') || up.includes('ASSIST')) {
+          cashGain = rw.LOGISTICS_ASSIST || 45;
+        } else {
+          cashGain = Math.max(MATCH.CASH_MIN, Math.round(pts * MATCH.CASH_MULT));
+        }
+        this.player.addCash(cashGain, reason, false);
       }
       const displayReason =
         cashGain > 0
-          ? `${reason} <span style="color:#f1c40f;font-weight:900;">(+$${cashGain})</span>`
+          ? `${reason} <span style="color:#f1c40f;font-weight:900;">(+⚡$${cashGain})</span>`
           : reason;
       this.ui.addXpNotification(pts, displayReason);
     });
@@ -1996,15 +2023,19 @@ class BattleBitGame {
     this.player.vehiclesDestroyed = 0;
     this.player.captures = 0;
     this.player.score = 0;
-    this.player.matchCash = 600;
+    this.player.matchCash = ECONOMY.STARTING_MATCH_CASH || 50;
+    this.player._vehCooldownUntil = {};
     if (typeof this.player.syncTotalCash === 'function') {
       this.player.syncTotalCash();
     }
     if (typeof this.player.saveGunsmithState === 'function') {
       this.player.saveGunsmithState();
     }
-    if (this.ui && typeof this.ui.updateCashAndGunsmithHud === 'function') {
-      this.ui.updateCashAndGunsmithHud();
+    if (this.ui) {
+      this.ui.selectedDeployVehicle = 'foot';
+      if (typeof this.ui.updateCashAndGunsmithHud === 'function') {
+        this.ui.updateCashAndGunsmithHud();
+      }
     }
 
     // 3. Return all Vehicles to their clean HQ Motor Pool & Airbase Apron bays at 100% HP
@@ -2012,6 +2043,8 @@ class BattleBitGame {
       for (const v of this.vehicleManager.vehicles) {
         if (!v) continue;
         if (v.driver) v.driver = null;
+        v.paidByPlayer = null;
+        v._paidAsStock = false;
         if (v.npcDriver) {
           v.npcDriver.drivingVehicle = null;
           v.npcDriver = null;

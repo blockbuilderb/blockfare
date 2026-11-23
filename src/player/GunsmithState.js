@@ -7,11 +7,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=116';
-import { sound } from '../audio.js?v=116';
-import { PLAYER, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=116';
-import { events } from '../events.js?v=116';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=116';
+} from '../weapons.js?v=117';
+import { sound } from '../audio.js?v=117';
+import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=117';
+import { events } from '../events.js?v=117';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=117';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',
@@ -765,14 +765,21 @@ export const GunsmithMethods = {
   loadGunsmithState() {
     this.ensureWarehouseStructures();
     try {
-      // Check v4 Rebalanced Warehouse State first, with migration from v3/v2/v1
+      // v5 Dual-Wallet Separation:
+      // - `warehouseCash` (🏦 Armory Bank) persists permanently across sessions in localStorage!
+      // - `matchCash` (⚡ Match Cash) ALWAYS starts every fresh session/match at `ECONOMY.STARTING_MATCH_CASH` ($50)!
+      // - Any leftover `matchCash` from legacy v4 saves is migrated into `warehouseCash` so zero player wealth is lost.
+      const rawV5 = localStorage.getItem('bb_warehouse_state_v5');
       const rawV4 = localStorage.getItem('bb_warehouse_state_v4');
       const rawV3 = localStorage.getItem('bb_warehouse_state_v3');
       const rawV2 = localStorage.getItem('bb_warehouse_state_v2');
       const rawV1 = localStorage.getItem('bb_gunsmith_state_v1');
-      const isV4 = Boolean(rawV4);
-      const isV3OrNewer = Boolean(rawV4 || rawV3);
-      const parsed = rawV4
+      const isV5 = Boolean(rawV5);
+      const isV4OrNewer = Boolean(rawV5 || rawV4);
+      const isV3OrNewer = Boolean(rawV5 || rawV4 || rawV3);
+      const parsed = rawV5
+        ? JSON.parse(rawV5)
+        : rawV4
         ? JSON.parse(rawV4)
         : rawV3
         ? JSON.parse(rawV3)
@@ -784,14 +791,15 @@ export const GunsmithMethods = {
       if (parsed) {
         if (typeof parsed.warehouseCash === 'number' && Number.isFinite(parsed.warehouseCash)) {
           const whVal = Math.max(0, Math.round(parsed.warehouseCash * 100) / 100);
-          this.warehouseCash = isV4 ? whVal : Math.min(450, whVal);
+          this.warehouseCash = isV4OrNewer ? whVal : Math.min(450, whVal);
         } else if (typeof parsed.cash === 'number' && Number.isFinite(parsed.cash)) {
-          this.warehouseCash = isV4 ? Math.max(350, Math.round(parsed.cash * 100) / 100) : 350;
+          this.warehouseCash = isV4OrNewer ? Math.max(350, Math.round(parsed.cash * 100) / 100) : 350;
         }
-        if (typeof parsed.matchCash === 'number' && Number.isFinite(parsed.matchCash)) {
-          const mVal = Math.max(0, Math.round(parsed.matchCash * 100) / 100);
-          this.matchCash = isV4 ? mVal : Math.min(PLAYER.STARTING_CASH || 150, mVal);
+        // Migrate legacy v4 saved matchCash above $50 safely into persistent Armory Bank!
+        if (!isV5 && typeof parsed.matchCash === 'number' && Number.isFinite(parsed.matchCash) && parsed.matchCash > 50) {
+          this.warehouseCash = Math.round((this.warehouseCash + (parsed.matchCash - 50)) * 100) / 100;
         }
+        this.matchCash = ECONOMY.STARTING_MATCH_CASH || PLAYER.STARTING_CASH || 50;
         if (Array.isArray(parsed.ownedUpgrades || parsed.owned)) {
           (parsed.ownedUpgrades || parsed.owned).forEach((id) => this.ownedUpgrades.add(id));
         }
@@ -916,11 +924,15 @@ export const GunsmithMethods = {
             Math.round(parsed.friendlyFirePenaltyTotal * 100) / 100
           );
         }
-        if (!isV4) {
+        if (!isV5) {
           this.saveGunsmithState();
         }
+      } else {
+        this.matchCash = ECONOMY.STARTING_MATCH_CASH || PLAYER.STARTING_CASH || 50;
       }
-    } catch (_) {}
+    } catch (_) {
+      this.matchCash = ECONOMY.STARTING_MATCH_CASH || PLAYER.STARTING_CASH || 50;
+    }
     this.syncActiveEquippedUpgrades();
     this.syncTotalCash();
   },
@@ -931,8 +943,6 @@ export const GunsmithMethods = {
     try {
       const payload = {
         warehouseCash: this.warehouseCash,
-        matchCash: this.matchCash,
-        cash: this.cash,
         ownedWeapons: Array.from(this.ownedWeapons),
         classLoadoutSelections: this.classLoadoutSelections,
         weaponAttachments: this.weaponAttachments,
@@ -959,6 +969,7 @@ export const GunsmithMethods = {
         friendlyFireKills: this.friendlyFireKills || 0,
         friendlyFirePenaltyTotal: this.friendlyFirePenaltyTotal || 0
       };
+      localStorage.setItem('bb_warehouse_state_v5', JSON.stringify(payload));
       localStorage.setItem('bb_warehouse_state_v4', JSON.stringify(payload));
     } catch (_) {}
   },
@@ -1167,7 +1178,7 @@ export const GunsmithMethods = {
     const alreadyOwned = this.ownedVehicleUpgrades.has(item.id) || (item.price || 0) <= 0;
     let bought = false;
     if (!alreadyOwned) {
-      const spend = this.spendFunds(item.price, paySource);
+      const spend = this.spendFunds(item.price, paySource === 'auto' ? 'warehouse' : paySource);
       if (!spend.ok) {
         return { ok: false, reason: spend.reason || 'INSUFFICIENT_FUNDS', shortBy: spend.shortBy, item };
       }
@@ -1191,7 +1202,8 @@ export const GunsmithMethods = {
   applyPlayerRideCustomizations(v) {
     if (!v || v.dead) return;
     this.ensureWarehouseStructures();
-    const mods = this.getVehicleUpgradeMods();
+    const forceStock = Boolean(v._paidAsStock);
+    const mods = forceStock ? {} : this.getVehicleUpgradeMods();
 
     if (typeof v._baseMaxHp !== 'number') {
       v._baseMaxHp = v.maxHp || 1000;
@@ -1406,7 +1418,139 @@ export const GunsmithMethods = {
     return { ok: true, spentMatch: fromMatch, spentWarehouse: fromWh };
   },
 
-  buyOrSelectWeapon(roleName, slotType, weaponId, paySource = 'warehouse_first') {
+  spendCash(amount) {
+    const res = this.spendFunds(amount, 'match');
+    if (res.ok && amount > 0) {
+      this.saveGunsmithState();
+      this.emitCashUpdate(-amount, 'MATCH REQUISITION');
+    }
+    return Boolean(res.ok);
+  },
+
+  hasModdedVehicleLoadout(vehKey = 'tank') {
+    this.ensureWarehouseStructures();
+    const mods = this.getVehicleUpgradeMods ? this.getVehicleUpgradeMods() : {};
+    const isAir =
+      vehKey === 'wright_flyer' ||
+      vehKey === 'cas' ||
+      vehKey === 'fighter' ||
+      vehKey === 'gunship' ||
+      vehKey === 'b2_spirit';
+    if (vehKey === 'foot' || vehKey === 'bike' || vehKey === 'atv' || vehKey === 'wright_flyer') {
+      return false;
+    }
+    if (isAir) {
+      const slots =
+        vehKey === 'gunship'
+          ? [mods.airSensor, mods.airCountermeasure, mods.airOrdnance, mods.airFrame, mods.ac130Generation, mods.ac130Sight, mods.ac130Avionics]
+          : [mods.airSensor, mods.airCountermeasure, mods.airOrdnance, mods.airFrame];
+      return slots.some((s) => s && (s.price || 0) > 0);
+    }
+    const gSlots = [mods.armorSensor, mods.armorDefense, mods.armorWeaponMod, mods.armorChassis];
+    return gSlots.some((s) => s && (s.price || 0) > 0);
+  },
+
+  getVehicleCooldownRemaining(vehKey) {
+    if (!vehKey || vehKey === 'foot' || !this._vehCooldownUntil) return 0;
+    const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+    const rem = (this._vehCooldownUntil[vehKey] || 0) - nowSec;
+    return rem > 0.2 ? Math.ceil(rem) : 0;
+  },
+
+  startVehicleRequisitionCooldown(vehKey) {
+    if (!vehKey || vehKey === 'foot') return;
+    if (!this._vehCooldownUntil) this._vehCooldownUntil = {};
+    const cdSec = ECONOMY.VEHICLE_COOLDOWN_SEC?.[vehKey] || 0;
+    if (cdSec > 0) {
+      const nowSec = (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+      this._vehCooldownUntil[vehKey] = nowSec + cdSec;
+    }
+  },
+
+  getVehicleRequisitionQuote(vehKey = 'foot', forceStock = null) {
+    this.syncTotalCash();
+    const normKey = vehKey === 'bomber' ? 'b2_spirit' : vehKey || 'foot';
+    const baseCost = ECONOMY.VEHICLE_BASE_COST?.[normKey] ?? 0;
+    const isModded = this.hasModdedVehicleLoadout(normKey);
+    const useStock =
+      forceStock !== null
+        ? Boolean(forceStock)
+        : Boolean(this.preferStockVehicleRequisition || !isModded);
+    const rawSurcharge = isModded ? ECONOMY.VEHICLE_MOD_SURCHARGE?.[normKey] || 0 : 0;
+    const modSurcharge = useStock ? 0 : rawSurcharge;
+    const totalCost = baseCost + modSurcharge;
+    const cooldownRem = this.getVehicleCooldownRemaining(normKey);
+    const canAfford = this.matchCash >= totalCost;
+    const canAffordStock = this.matchCash >= baseCost;
+    return {
+      vehKey: normKey,
+      baseCost,
+      rawSurcharge,
+      modSurcharge,
+      totalCost,
+      isModded,
+      useStock,
+      cooldownRem,
+      canAfford,
+      canAffordStock,
+      matchCash: this.matchCash,
+      shortBy: Math.max(0, Math.ceil(totalCost - this.matchCash))
+    };
+  },
+
+  payForVehicleRequisition(vehKey, opts = {}) {
+    const normKey = vehKey === 'bomber' ? 'b2_spirit' : vehKey || 'foot';
+    if (normKey === 'foot') {
+      return { ok: true, cost: 0, useStock: true };
+    }
+    const cdRem = opts.ignoreCooldown ? 0 : this.getVehicleCooldownRemaining(normKey);
+    if (cdRem > 0) {
+      return { ok: false, reason: 'COOLDOWN', cooldownRem: cdRem, cost: 0 };
+    }
+    let quote = this.getVehicleRequisitionQuote(normKey, opts.forceStock ?? null);
+    // Helpful Tarkov fallback: if player has enough for Stock hull but is slightly short for Modded surcharge, auto-fallback to Stock!
+    if (!quote.canAfford && quote.canAffordStock && opts.allowStockFallback !== false) {
+      quote = this.getVehicleRequisitionQuote(normKey, true);
+    }
+    if (!quote.canAfford) {
+      return {
+        ok: false,
+        reason: 'INSUFFICIENT_MATCH_CASH',
+        cost: quote.totalCost,
+        baseCost: quote.baseCost,
+        matchCash: this.matchCash,
+        shortBy: quote.shortBy
+      };
+    }
+    const payRes = this.spendFunds(quote.totalCost, 'match');
+    if (!payRes.ok) {
+      return {
+        ok: false,
+        reason: 'INSUFFICIENT_MATCH_CASH',
+        cost: quote.totalCost,
+        matchCash: this.matchCash,
+        shortBy: payRes.shortBy || quote.shortBy
+      };
+    }
+    if (!opts.ignoreCooldown) {
+      this.startVehicleRequisitionCooldown(normKey);
+    }
+    this.saveGunsmithState();
+    this.emitCashUpdate(
+      -quote.totalCost,
+      `REQUISITIONED ${normKey.toUpperCase()}${quote.modSurcharge > 0 ? ` (+$${quote.modSurcharge} MOD KIT)` : ''}`
+    );
+    return {
+      ok: true,
+      cost: quote.totalCost,
+      baseCost: quote.baseCost,
+      modSurcharge: quote.modSurcharge,
+      useStock: quote.useStock,
+      matchCashRemaining: this.matchCash
+    };
+  },
+
+  buyOrSelectWeapon(roleName, slotType, weaponId, paySource = 'warehouse') {
     this.ensureWarehouseStructures();
     const wepDef = WEAPON_DEFS[weaponId];
     if (!wepDef || wepDef.type !== 'gun') {
@@ -1462,7 +1606,7 @@ export const GunsmithMethods = {
     };
   },
 
-  buyOrEquipUpgrade(category, itemId, weaponId = null, paySource = 'auto') {
+  buyOrEquipUpgrade(category, itemId, weaponId = null, paySource = 'warehouse') {
     this.ensureWarehouseStructures();
     const list = ATTACHMENT_CATALOG[category];
     if (!list) return { ok: false, reason: 'INVALID CATEGORY' };
@@ -1529,8 +1673,8 @@ export const GunsmithMethods = {
       }
     }
 
-    // Bank transfer requires In-Match Cash specifically; other tactical drops use Match Cash first, then Warehouse
-    const paySource = reqId === 'bank_transfer' ? 'match' : 'auto';
+    // Field requisitions strictly spend In-Match Cash (⚡ Match Cash)!
+    const paySource = 'match';
     const payRes = this.spendFunds(req.price, paySource);
     if (!payRes.ok) {
       return {
@@ -2030,7 +2174,7 @@ export const GunsmithMethods = {
     return { ok: false, reason: 'INVALID SKIN TYPE' };
   },
 
-  buyCaseKey(count = 1, paySource = 'auto') {
+  buyCaseKey(count = 1, paySource = 'warehouse') {
     this.ensureWarehouseStructures();
     const qty = Math.max(1, Math.floor(count || 1));
     const keyPrice = 250 * qty;
@@ -2039,7 +2183,7 @@ export const GunsmithMethods = {
       sound.playEmptyClick?.();
       return {
         ok: false,
-        reason: `NEED $${keyPrice} TO BUY ${qty} ARMORY KEY(S)`
+        reason: `NEED 🏦 $${keyPrice} IN ARMORY BANK TO BUY ${qty} ARMORY KEY(S)`
       };
     }
     this.caseKeys = Math.max(0, (this.caseKeys || 0) + qty);
@@ -2052,7 +2196,7 @@ export const GunsmithMethods = {
     };
   },
 
-  openMysteryCase(paySource = 'auto') {
+  openMysteryCase(paySource = 'warehouse') {
     this.ensureWarehouseStructures();
     if ((this.caseKeys || 0) < 1) {
       sound.playEmptyClick?.();

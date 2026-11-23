@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=116';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=116';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=116';
-import { events } from '../events.js?v=116';
+import { sound } from '../audio.js?v=117';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=117';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=117';
+import { events } from '../events.js?v=117';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +11,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=116';
+} from '../core/StateMachines.js?v=117';
 
 function markShared(asset) {
   if (asset) {
@@ -233,6 +233,40 @@ export const VehicleControlMethods = {
           );
         }
         return false;
+      }
+
+      // Unified Match Cash Requisition Gate on Unclaimed Friendly HQ Vehicles:
+      // - Captured FOB Motorpool bikes/ATVs (`fobFlagId` / `NEUTRAL`) & hijacked enemy vehicles remain $0 FREE!
+      // - Vehicles already paid for by this player (`paidByPlayer === this`) remain $0 to re-board after field repairs!
+      const isFreeFieldSpoil =
+        Boolean(nearVehicle.fobFlagId) ||
+        Boolean(nearVehicle.isEmplacement) ||
+        Boolean(nearVehicle.isSecretOmegaFlyer) ||
+        nearVehicle.team === 'NEUTRAL' ||
+        (nearVehicle.team && nearVehicle.team !== this.team);
+      if (
+        !isFreeFieldSpoil &&
+        nearVehicle.paidByPlayer !== this &&
+        typeof this.payForVehicleRequisition === 'function'
+      ) {
+        const vehKey = nearVehicle.isAircraft
+          ? nearVehicle.aircraftRole === 'bomber'
+            ? 'b2_spirit'
+            : nearVehicle.aircraftRole || 'cas'
+          : nearVehicle.type || 'car';
+        const payRes = this.payForVehicleRequisition(vehKey, { ignoreCooldown: true });
+        if (!payRes.ok) {
+          sound.playEmptyClick?.();
+          if (this.onAwardXp) {
+            this.onAwardXp(
+              0,
+              `🔒 REQUISITION COST: NEED ⚡$${(payRes.cost || 0).toLocaleString()} MATCH CASH FOR ${nearVehicle.name} (HAVE ⚡$${Math.floor(this.matchCash || 0).toLocaleString()} — EARN VIA CAPTURES, REVIVES, REPAIRS & KILLS!)`
+            );
+          }
+          return false;
+        }
+        nearVehicle.paidByPlayer = this;
+        nearVehicle._paidAsStock = Boolean(payRes.useStock);
       }
     }
     const hadExistingOccupant = Boolean(
@@ -1237,10 +1271,12 @@ export const VehicleControlMethods = {
       : null;
     if (!res || !res.ok) {
       sound.playEmptyClick?.();
-      if (res && res.reason === 'INSUFFICIENT_FUNDS' && this.onAwardXp) {
+      if (res && res.reason === 'COOLDOWN' && this.onAwardXp) {
+        this.onAwardXp(0, `⏳ ${targetType.toUpperCase()} REQUISITION COOLDOWN (${res.cooldownRem}s REMAINING)!`);
+      } else if (res && (res.reason === 'INSUFFICIENT_FUNDS' || res.reason === 'INSUFFICIENT_MATCH_CASH') && this.onAwardXp) {
         this.onAwardXp(
           0,
-          `⚠️ INSUFFICIENT FACTION FUNDS FOR ${targetType.toUpperCase()} — NEED $${res.cost.toLocaleString()} (HAVE $${res.funds.toLocaleString()})!`
+          `⚠️ NEED ⚡$${(res.cost || 0).toLocaleString()} MATCH CASH FOR ${targetType.toUpperCase()} (HAVE ⚡$${Math.floor(this.matchCash || 0).toLocaleString()})!`
         );
       }
       return null;
@@ -1249,7 +1285,7 @@ export const VehicleControlMethods = {
     if (this.onAwardXp) {
       this.onAwardXp(
         0,
-        `🛡️ ${res.vehicle.name} DELIVERED 10M AHEAD (-$${res.cost} FACTION FUNDS) — WALK UP & PRESS [E] TO BOARD!`
+        `🛡️ ${res.vehicle.name} DELIVERED 10M AHEAD (-⚡$${res.cost} MATCH CASH) — PRESS [E] TO BOARD!`
       );
     }
     return res.vehicle;
@@ -1257,7 +1293,7 @@ export const VehicleControlMethods = {
 
   /**
    * [0] Key / Vehicle Bay Button (Works for ALL Classes!):
-   * Delivers a fresh M1030M1 Recon Motorcycle ('bike') or Polaris MV850 4x4 Quad ATV ('atv') 5.8m ahead for $150!
+   * Delivers a fresh M1030M1 Recon Motorcycle ('bike', ⚡$250) or Polaris MV850 4x4 Quad ATV ('atv', ⚡$350) 5.8m ahead!
    */
   requestReconBikeDelivery(forceSubKind = null) {
     if (this.dead || this.downed || !this.vehicleManager) return null;
@@ -1275,8 +1311,13 @@ export const VehicleControlMethods = {
       : null;
     if (!res || !res.ok) {
       sound.playEmptyClick?.();
-      if (res && res.reason === 'INSUFFICIENT_FUNDS' && this.onAwardXp) {
-        this.onAwardXp(0, '⚠️ NEED $150 CASH OR FACTION FUNDS TO REQUEST A RECON MOTORCYCLE / QUAD ATV!');
+      if (res && res.reason === 'COOLDOWN' && this.onAwardXp) {
+        this.onAwardXp(0, `⏳ ${kind.toUpperCase()} COOLDOWN (${res.cooldownRem}s REMAINING)!`);
+      } else if (res && (res.reason === 'INSUFFICIENT_FUNDS' || res.reason === 'INSUFFICIENT_MATCH_CASH') && this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          `⚠️ NEED ⚡$${res.cost || (kind === 'atv' ? 350 : 250)} MATCH CASH FOR ${kind === 'atv' ? '4×4 QUAD ATV' : 'DIRT BIKE'} (HAVE ⚡$${Math.floor(this.matchCash || 0)})!`
+        );
       }
       return null;
     }
@@ -1284,7 +1325,7 @@ export const VehicleControlMethods = {
     if (this.onAwardXp) {
       this.onAwardXp(
         0,
-        `🏍️ ${res.vehicle.name} DELIVERED 5M AHEAD (-$${res.cost} ${res.paidSource}) — PRESS [E] TO RIDE!`
+        `🏍️ ${res.vehicle.name} DELIVERED 5M AHEAD (-⚡$${res.cost} MATCH CASH) — PRESS [E] TO RIDE!`
       );
     }
     return res.vehicle;
@@ -1361,13 +1402,15 @@ export const VehicleControlMethods = {
 
     if (!orderRes || !orderRes.ok || !orderRes.vehicle) {
       sound.playEmptyClick?.();
-      if (orderRes && orderRes.reason === 'INSUFFICIENT_FUNDS' && this.onAwardXp) {
+      if (orderRes && orderRes.reason === 'COOLDOWN' && this.onAwardXp) {
+        this.onAwardXp(0, `⏳ AIRFRAME REQUISITION COOLDOWN (${orderRes.cooldownRem}s REMAINING)!`);
+      } else if (orderRes && (orderRes.reason === 'INSUFFICIENT_FUNDS' || orderRes.reason === 'INSUFFICIENT_MATCH_CASH') && this.onAwardXp) {
         this.onAwardXp(
           0,
-          `⚠️ INSUFFICIENT FACTION FUNDS FOR AIRCRAFT — NEED $${orderRes.cost.toLocaleString()} (HAVE $${orderRes.funds.toLocaleString()})!`
+          `⚠️ NEED ⚡$${(orderRes.cost || 0).toLocaleString()} MATCH CASH FOR ${role.toUpperCase()} (HAVE ⚡$${Math.floor(this.matchCash || 0).toLocaleString()})!`
         );
       } else if (this.onAwardXp) {
-        this.onAwardXp(0, '⏳ AIRCRAFT UNAVAILABLE OR INSUFFICIENT FACTION FUNDS!');
+        this.onAwardXp(0, '⏳ AIRCRAFT UNAVAILABLE OR INSUFFICIENT MATCH CASH!');
       }
       return null;
     }
@@ -1380,13 +1423,13 @@ export const VehicleControlMethods = {
       if (this.onAwardXp) {
         this.onAwardXp(
           35,
-          `✈️ AIRCRAFT DELIVERED TO HQ APRON (-$${paidCost.toLocaleString()} FACTION FUNDS): ${plane.name} READY FOR TAKEOFF [E]!`
+          `✈️ AIRCRAFT DELIVERED TO HQ APRON (-⚡$${paidCost.toLocaleString()} MATCH CASH): ${plane.name} READY FOR TAKEOFF [E]!`
         );
       }
       return plane;
     }
 
-    this.enterVehicle(plane);
+    this.enterVehicle(plane, true);
     if (this.onAwardXp) {
       const costTag = paidCost > 0 ? ` (-$${paidCost.toLocaleString()} FACTION FUNDS)` : '';
       const missionDesc =

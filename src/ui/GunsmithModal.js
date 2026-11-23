@@ -6,18 +6,18 @@ import {
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from '../weapons.js?v=116';
-import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=116';
-import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=116';
-import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=116';
-import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=116';
-import { getAllowedRoleIds, resolveRoleForEra } from '../config.js?v=116';
-import { sound } from '../audio.js?v=116';
+} from '../weapons.js?v=117';
+import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=117';
+import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=117';
+import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=117';
+import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=117';
+import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=117';
+import { sound } from '../audio.js?v=117';
 import {
   ARMORY_CASE_STATES,
   ARMORY_CASE_EVENTS,
   createArmoryCaseRouletteFSM
-} from '../core/StateMachines.js?v=116';
+} from '../core/StateMachines.js?v=117';
 
 export const GunsmithModal = {
   formatCashAmount(val) {
@@ -34,27 +34,25 @@ export const GunsmithModal = {
       this.player.syncTotalCash();
     }
     const matchCash =
-      this.player && typeof this.player.matchCash === 'number' ? this.player.matchCash : 150;
+      this.player && typeof this.player.matchCash === 'number'
+        ? this.player.matchCash
+        : ECONOMY.STARTING_MATCH_CASH || 50;
     const whCash =
       this.player && typeof this.player.warehouseCash === 'number'
         ? this.player.warehouseCash
         : 100000;
-    const totalCash = Math.round((matchCash + whCash) * 100) / 100;
-    const caseKeys =
-      this.player && typeof this.player.caseKeys === 'number' ? this.player.caseKeys : 1;
 
-    const matchStr = this.formatCashAmount(matchCash);
-    const whStr = this.formatCashAmount(whCash);
-    const totStr = this.formatCashAmount(totalCash);
+    const matchStr = this.formatCashAmount(Math.floor(matchCash));
+    const whStr = this.formatCashAmount(Math.floor(whCash));
 
     if (this.hudCashValEl) {
-      this.hudCashValEl.textContent = `$${totStr}`;
+      this.hudCashValEl.textContent = `⚡$${matchStr} • 🏦$${whStr}`;
     }
     if (this.deployCashValEl) {
-      this.deployCashValEl.textContent = `$${totStr}`;
+      this.deployCashValEl.textContent = `🏦 $${whStr}`;
     }
     if (this.ammoGunsmithBtnEl) {
-      this.ammoGunsmithBtnEl.textContent = `🔧 [L] ARMORY ($${totStr})`;
+      this.ammoGunsmithBtnEl.textContent = `🔧 [L] ARMORY (🏦$${whStr})`;
     }
     this.updateFriendlyFireUI?.();
     this.renderDeployExtractedLootBar();
@@ -66,18 +64,18 @@ export const GunsmithModal = {
   },
 
   /**
-   * Renders a sleek 1-line B-2 Spirit Paint Swatch strip on `#deploy-screen` when Pilot or B2_LANE is selected.
+   * Minimal 1-Click Collapsible Vehicle Requisition Bar on `#deploy-screen`:
+   * - Replaces the old always-open B-2 livery bar (B-2 livery lives inside `[L] Armory -> Vehicles`).
+   * - Collapsed to a sleek 1-line pill by default; 1 click expands role-matched paid vehicles:
+   *   • Infantry: On Foot ($0), Dirt Bike (⚡$250), 4×4 Quad ATV (⚡$350)
+   *   • Armor Crew: On Foot ($0), Humvee (⚡$450), 8×8 IFV (⚡$850), SPAAG AA (⚡$950), MBT Tank (⚡$1,400)
+   *   • Combat Pilot: On Foot ($0), 1903 Flyer (⚡$300), A-10 CAS (⚡$1,100), F-15 Fighter (⚡$1,350), AC-130 (⚡$2,200), B-2 Spirit (⚡$3,200 + 25K)
    */
   renderDeployB2CustomizerBar() {
     if (!this.deployScreenEl || !this.player) return;
     let bar = document.getElementById('deploy-b2-customizer-bar');
     const isModern = !this.world || !this.world.era || this.world.era === 'modern';
-    const showBar =
-      isModern &&
-      (this.selectedClass === 'pilot' ||
-        this.selectedClass === 'armor' ||
-        this.selectedSpawn === 'B2_LANE');
-    if (!showBar) {
+    if (!isModern) {
       if (bar) bar.style.display = 'none';
       return;
     }
@@ -92,93 +90,189 @@ export const GunsmithModal = {
       }
     }
 
-    const bodyCol = this.player.b2SpiritColor || '#14181f';
-    const accentCol = this.player.b2SpiritAccentColor || '#00d2d3';
-    const presetId = this.player.b2SpiritPresetId || 'midnight_ram';
+    const cls = this.selectedClass || 'engineer';
+    const isPilot = cls === 'pilot';
+    const isArmor = cls === 'armor';
+    const team = this.selectedTeam || 'US';
+    const isRU = team === 'RU';
+    const matchCash = Math.floor(this.player.matchCash ?? (ECONOMY.STARTING_MATCH_CASH || 50));
+    const kills = this.vehicleManager?.getTeamKills ? this.vehicleManager.getTeamKills(team) : 0;
+    const reqKills = VEHICLE_STATS.B2_UNLOCK_KILLS || 25;
+    const b2Unlocked = this.vehicleManager?.isB2UnlockedForTeam
+      ? this.vehicleManager.isB2UnlockedForTeam(team)
+      : kills >= reqKills;
 
-    const swatchesHtml = (B2_COLOR_PRESETS || [])
-      .map((p) => {
-        const isSel = presetId === p.id;
-        return `
-          <button type="button" class="dep-b2-preset-btn" data-preset-id="${p.id}" data-body="${p.body}" data-accent="${p.accent}" style="
-            width:22px;height:18px;padding:0;border-radius:4px;overflow:hidden;display:inline-flex;cursor:pointer;
-            border:${isSel ? '2px solid #00d2d3' : '1px solid rgba(255,255,255,0.3)'};
-            box-shadow:${isSel ? '0 0 8px rgba(0,210,211,0.7)' : 'none'};
-          " title="${p.name}">
-            <span style="flex:1.3;background:${p.body};"></span>
-            <span style="flex:1;background:${p.accent};"></span>
-          </button>
-        `;
-      })
-      .join('');
+    const options = isPilot
+      ? [
+          { key: 'foot', icon: '🥾', label: 'ON FOOT', sub: 'Runway PDW' },
+          { key: 'wright_flyer', icon: '🪁', label: isRU ? '1913 MUROMETS' : '1903 FLYER', sub: 'Light Scout' },
+          { key: 'cas', icon: '🐗', label: isRU ? 'SU-25SM CAS' : 'A-10C WARTHOG', sub: '30mm + Rockets' },
+          { key: 'fighter', icon: '✈️', label: isRU ? 'SU-57 FELON' : 'F-15EX EAGLE', sub: 'FOX-3 + JDAM' },
+          { key: 'gunship', icon: '🛸', label: isRU ? 'TU-95 GUNSHIP' : 'AC-130J GHOST', sub: '25/40/105mm' },
+          {
+            key: 'b2_spirit',
+            icon: '🦇',
+            label: isRU ? 'PAK DA STEALTH' : 'B-2A SPIRIT',
+            sub: b2Unlocked ? '80× Mk82 + MOP' : `🔒 ${kills}/${reqKills} Kills`,
+            killLocked: !b2Unlocked
+          }
+        ]
+      : isArmor
+      ? [
+          { key: 'foot', icon: '🥾', label: 'ON FOOT', sub: 'Crew PDW + RPG' },
+          { key: 'car', icon: '🚙', label: isRU ? 'GAZ TIGR HMG' : 'HUMVEE .50', sub: 'Fast Armored' },
+          { key: 'apc', icon: '🛡️', label: isRU ? 'BTR-82A IFV' : 'LAV-25 IFV', sub: '30mm Autocannon' },
+          { key: 'aa', icon: '🎯', label: isRU ? 'TUNGUSKA AA' : 'LAV-AD SPAAG', sub: 'Rotary + SAM' },
+          { key: 'tank', icon: '💥', label: isRU ? 'T-90M MBT' : 'M1A2 ABRAMS', sub: '120mm APFSDS' }
+        ]
+      : [
+          { key: 'foot', icon: '🥾', label: 'ON FOOT', sub: 'Standard Kit' },
+          { key: 'bike', icon: '🏍️', label: 'DIRT BIKE', sub: 'M1030M1 Enduro' },
+          { key: 'atv', icon: '🛞', label: '4×4 QUAD ATV', sub: 'Polaris MV850' }
+        ];
 
-    bar.style.cssText =
-      'background:rgba(10,16,28,0.95);border:1px solid rgba(0,210,211,0.55);border-radius:5px;padding:4px 10px;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0;';
-
-    bar.innerHTML = `
-      <div style="display:flex;align-items:center;gap:7px;min-width:0;">
-        <svg viewBox="0 0 120 68" width="40" height="22" style="flex-shrink:0;">
-          <polygon id="dep-b2-svg-hull" points="60,6 114,46 106,54 88,42 75,54 66,46 60,54 54,46 45,54 32,42 14,54 6,46" fill="${bodyCol}" stroke="${accentCol}" stroke-width="3"/>
-          <polyline id="dep-b2-svg-trim" points="8,45 60,8 112,45" fill="none" stroke="${accentCol}" stroke-width="3"/>
-        </svg>
-        <span style="font-size:10.5px;font-weight:900;color:#00d2d3;white-space:nowrap;">🦇 B-2 SPIRIT LIVERY:</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:5px;flex-wrap:nowrap;">
-        ${swatchesHtml}
-        <label style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:800;color:#cbd5e1;cursor:pointer;" title="Hull Color">
-          HULL <input type="color" id="dep-b2-body-color" value="${bodyCol}" style="width:18px;height:15px;border:none;background:transparent;cursor:pointer;padding:0;" />
-        </label>
-        <label style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:800;color:#00d2d3;cursor:pointer;" title="Trim Color">
-          TRIM <input type="color" id="dep-b2-accent-color" value="${accentCol}" style="width:18px;height:15px;border:none;background:transparent;cursor:pointer;padding:0;" />
-        </label>
-        <button type="button" id="dep-open-hangar-bay-btn" style="background:linear-gradient(135deg,#0984e3,#00cec9);color:#06121a;border:1px solid #81ecec;border-radius:4px;padding:3px 9px;font-size:9.5px;font-weight:900;cursor:pointer;white-space:nowrap;">
-          ${this.selectedClass === 'armor' ? '🛡️ CUSTOMIZE TANK & FLIR [L]' : '✈️ CUSTOMIZE PLANE & SENSORS (NVG / IR) [L]'}
-        </button>
-      </div>
-    `;
-
-    const openHangarBtn = bar.querySelector('#dep-open-hangar-bay-btn');
-    if (openHangarBtn) {
-      openHangarBtn.addEventListener('click', () => {
-        this._gunsmithActiveTab = 'vehicles';
-        this.toggleGunsmithModal(true);
-      });
+    const validKeys = options.map((o) => o.key);
+    if (!this.selectedDeployVehicle || !validKeys.includes(this.selectedDeployVehicle)) {
+      this.selectedDeployVehicle = 'foot';
     }
 
-    bar.querySelectorAll('.dep-b2-preset-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const pId = btn.dataset.presetId || 'midnight_ram';
-        const bHex = btn.dataset.body || '#14181f';
-        const aHex = btn.dataset.accent || '#00d2d3';
-        this.player.setB2SpiritColors?.(bHex, aHex, pId);
+    // Reset selection back to 'foot' if no longer affordable or locked
+    if (this.selectedDeployVehicle !== 'foot') {
+      const selOpt = options.find((o) => o.key === this.selectedDeployVehicle);
+      const q = this.player.getVehicleRequisitionQuote?.(this.selectedDeployVehicle) || {
+        canAfford: false,
+        cooldownRem: 0
+      };
+      if (!selOpt || selOpt.killLocked || !q.canAfford || q.cooldownRem > 0) {
+        this.selectedDeployVehicle = 'foot';
+      }
+    }
+
+    const curOpt = options.find((o) => o.key === this.selectedDeployVehicle) || options[0];
+    const curQuote = this.player.getVehicleRequisitionQuote?.(curOpt.key) || { totalCost: 0 };
+    const isExpanded = Boolean(this._deployVehDrawerOpen);
+    const catTag = isPilot ? '✈️ AIRCRAFT REQUISITION' : isArmor ? '🛡️ ARMOR REQUISITION' : '🏍️ LIGHT TRANSPORT';
+    const expandHint = isPilot
+      ? 'FLYER / A-10 / F-15 / AC-130 / B-2'
+      : isArmor
+      ? 'HUMVEE / IFV / SPAAG AA / TANK'
+      : 'DIRT BIKE / 4×4 QUAD ATV';
+
+    const sampleCheckKey = isPilot ? 'cas' : isArmor ? 'tank' : 'bike';
+    const hasAnyPaidMods = Boolean(this.player.hasModdedVehicleLoadout?.(sampleCheckKey));
+    const stockPref = Boolean(this.player.preferStockVehicleRequisition);
+
+    bar.style.cssText =
+      'background:rgba(10,18,28,0.94);border:1px solid rgba(0,210,211,0.45);border-radius:5px;padding:4px 10px;margin-bottom:6px;display:flex;flex-direction:column;gap:5px;flex-shrink:0;';
+
+    const chipsHtml = isExpanded
+      ? `<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding-top:3px;border-top:1px solid rgba(255,255,255,0.09);">
+          ${options
+            .map((opt) => {
+              const q = this.player.getVehicleRequisitionQuote?.(opt.key) || {
+                totalCost: 0,
+                modSurcharge: 0,
+                canAfford: true,
+                cooldownRem: 0,
+                shortBy: 0
+              };
+              const isSel = opt.key === this.selectedDeployVehicle;
+              const locked = opt.key !== 'foot' && (opt.killLocked || !q.canAfford || q.cooldownRem > 0);
+              const priceTag =
+                opt.key === 'foot'
+                  ? 'FREE ($0)'
+                  : opt.killLocked
+                  ? `🔒 ${kills}/${reqKills}K • ⚡$${q.totalCost}`
+                  : q.cooldownRem > 0
+                  ? `⏳ ${q.cooldownRem}s • ⚡$${q.totalCost}`
+                  : q.canAfford
+                  ? `⚡$${q.totalCost}${q.modSurcharge > 0 ? ' ★MOD' : ''}`
+                  : `🔒 ⚡$${q.totalCost} (-$${q.shortBy})`;
+              return `<button type="button" class="dep-veh-req-chip" data-vkey="${opt.key}" ${
+                locked ? 'data-locked="1"' : ''
+              } style="
+                display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:4px;
+                border:${isSel ? '1.5px solid #2ecc71' : locked ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,210,211,0.45)'};
+                background:${isSel ? 'rgba(46,204,113,0.22)' : locked ? 'rgba(15,20,26,0.65)' : 'rgba(14,28,42,0.9)'};
+                color:${locked ? '#7f8c8d' : '#ecf0f1'};cursor:${locked ? 'not-allowed' : 'pointer'};
+                font-size:10px;font-weight:900;opacity:${locked ? '0.68' : '1'};
+              " title="${opt.label} (${opt.sub}) — ${priceTag}">
+                <span>${opt.icon} ${opt.label}</span>
+                <span style="color:${opt.key === 'foot' ? '#7bed9f' : locked ? '#ff7675' : '#f1c40f'};font-family:Consolas,monospace;font-size:9.5px;">${priceTag}</span>
+              </button>`;
+            })
+            .join('')}
+        </div>`
+      : '';
+
+    bar.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
+          <span style="font-size:10px;font-weight:900;color:#00d2d3;letter-spacing:0.5px;">${catTag}:</span>
+          <button type="button" id="dep-veh-req-toggle-btn" style="
+            background:${this.selectedDeployVehicle === 'foot' ? 'rgba(255,255,255,0.07)' : 'rgba(46,204,113,0.22)'};
+            border:1px solid ${this.selectedDeployVehicle === 'foot' ? 'rgba(0,210,211,0.5)' : '#2ecc71'};
+            color:#ecf0f1;border-radius:4px;padding:2.5px 9px;font-size:10px;font-weight:900;cursor:pointer;
+          ">
+            ${curOpt.icon} ${curOpt.label} (${curOpt.key === 'foot' ? '$0' : `⚡$${curQuote.totalCost}`}) &bull; <span style="color:#81ecec;">${
+      isExpanded ? '▴ HIDE OPTIONS' : `▾ + CHOOSE ${expandHint}`
+    }</span>
+          </button>
+          ${
+            hasAnyPaidMods
+              ? `<button type="button" id="dep-veh-kit-mode-btn" style="background:rgba(241,196,15,0.14);border:1px solid rgba(241,196,15,0.45);color:#ffeaa7;border-radius:4px;padding:2px 7px;font-size:9.5px;font-weight:900;cursor:pointer;" title="Toggle between deploying your upgraded Armory/Hangar vehicle mods (+small Match Cash fee) vs. Stock $0 surcharge">⚙️ KIT: ${
+                  stockPref ? 'STOCK (+$0)' : 'MODDED (+SURCHARGE)'
+                }</button>`
+              : ''
+          }
+        </div>
+        <div style="display:flex;align-items:center;gap:7px;">
+          <span style="font-size:10px;font-weight:900;color:#f1c40f;background:rgba(241,196,15,0.12);border:1px solid rgba(241,196,15,0.38);border-radius:4px;padding:2px 7px;" title="Earned live in-match via Flag Captures (+$180), Revives (+$85), Repairs (+$65), Kills (+$75) & Vehicle Destroys! Resets to $50 each match; unspent Match Cash extracts to your Armory Bank at round end.">⚡ MATCH CASH: $${matchCash.toLocaleString()}</span>
+          ${
+            isPilot || isArmor
+              ? `<button type="button" id="dep-open-hangar-bay-btn" style="background:rgba(9,132,227,0.24);color:#81ecec;border:1px solid rgba(129,236,236,0.5);border-radius:4px;padding:2px 8px;font-size:9.5px;font-weight:900;cursor:pointer;white-space:nowrap;">🔧 HANGAR TECH [L]</button>`
+              : ''
+          }
+        </div>
+      </div>
+      ${chipsHtml}
+    `;
+
+    bar.querySelector('#dep-veh-req-toggle-btn')?.addEventListener('click', () => {
+      this._deployVehDrawerOpen = !this._deployVehDrawerOpen;
+      this.renderDeployB2CustomizerBar();
+    });
+
+    bar.querySelector('#dep-veh-kit-mode-btn')?.addEventListener('click', () => {
+      this.player.preferStockVehicleRequisition = !this.player.preferStockVehicleRequisition;
+      this.renderDeployB2CustomizerBar();
+    });
+
+    bar.querySelector('#dep-open-hangar-bay-btn')?.addEventListener('click', () => {
+      this._gunsmithActiveTab = 'vehicles';
+      this.toggleGunsmithModal(true);
+    });
+
+    bar.querySelectorAll('.dep-veh-req-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const vKey = chip.dataset.vkey || 'foot';
+        if (chip.dataset.locked === '1') {
+          sound.playEmptyClick?.();
+          const q = this.player.getVehicleRequisitionQuote?.(vKey) || { totalCost: 0, shortBy: 0, cooldownRem: 0 };
+          this.addXpNotification?.(
+            0,
+            q.cooldownRem > 0
+              ? `⏳ REQUISITION COOLDOWN: WAIT ${q.cooldownRem}s!`
+              : `🔒 NEED ⚡$${q.totalCost} MATCH CASH (SHORT BY ⚡$${q.shortBy} — EARN VIA CAPTURES, REVIVES, REPAIRS & KILLS!)`
+          );
+          return;
+        }
+        this.selectedDeployVehicle = vKey;
+        this._deployVehDrawerOpen = false;
+        sound.playWeaponSwitch?.();
         this.renderDeployB2CustomizerBar();
       });
     });
-
-    const depBodyIn = bar.querySelector('#dep-b2-body-color');
-    const depAccIn = bar.querySelector('#dep-b2-accent-color');
-    const onDepCustomColor = () => {
-      const bHex = depBodyIn ? depBodyIn.value : bodyCol;
-      const aHex = depAccIn ? depAccIn.value : accentCol;
-      this.player.setB2SpiritColors?.(bHex, aHex, 'custom');
-      const hPoly = bar.querySelector('#dep-b2-svg-hull');
-      const tPoly = bar.querySelector('#dep-b2-svg-trim');
-      if (hPoly) {
-        hPoly.setAttribute('fill', bHex);
-        hPoly.setAttribute('stroke', aHex);
-      }
-      if (tPoly) {
-        tPoly.setAttribute('stroke', aHex);
-      }
-    };
-    if (depBodyIn) {
-      depBodyIn.addEventListener('input', onDepCustomColor);
-      depBodyIn.addEventListener('change', () => this.renderDeployB2CustomizerBar());
-    }
-    if (depAccIn) {
-      depAccIn.addEventListener('input', onDepCustomColor);
-      depAccIn.addEventListener('change', () => this.renderDeployB2CustomizerBar());
-    }
   },
 
   /**

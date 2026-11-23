@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=116';
-import { sound } from '../audio.js?v=116';
-import { DISTANCES } from '../config.js?v=116';
-import { events } from '../events.js?v=116';
+import { VOXEL_SIZE } from '../world.js?v=117';
+import { sound } from '../audio.js?v=117';
+import { DISTANCES } from '../config.js?v=117';
+import { events } from '../events.js?v=117';
 
 export const FortificationMethods = {
   getBlueprintName() {
@@ -108,19 +108,20 @@ export const FortificationMethods = {
         ? '🏠 2-STORY TACTICAL HOUSE'
         : '🏰 FORTIFIED COMMAND BUNKER';
 
+    const availMatchCash = typeof this.matchCash === 'number' ? this.matchCash : this.cash || 0;
     const payRes =
       typeof this.spendFunds === 'function'
-        ? this.spendFunds(cost, 'auto')
-        : this.cash >= cost
+        ? this.spendFunds(cost, 'match')
+        : availMatchCash >= cost
         ? { ok: true }
-        : { ok: false, shortBy: cost - (this.cash || 0) };
+        : { ok: false, shortBy: cost - availMatchCash };
 
     if (!payRes.ok) {
-      const shortBy = payRes.shortBy || Math.max(1, cost - (this.cash || 0));
+      const shortBy = Math.ceil(payRes.shortBy || Math.max(1, cost - availMatchCash));
       if (this.onAwardXp) {
         this.onAwardXp(
           0,
-          `⚠️ NEED $${cost.toLocaleString()} TO BUILD ${structLabel} (HAVE $${(this.cash || 0).toLocaleString()} • SHORT BY $${shortBy.toLocaleString()})`
+          `⚠️ NEED ⚡$${cost.toLocaleString()} MATCH CASH TO BUILD ${structLabel} (HAVE ⚡$${Math.floor(availMatchCash).toLocaleString()} • SHORT BY ⚡$${shortBy.toLocaleString()})`
         );
       }
       return { ok: false, reason: 'INSUFFICIENT_FUNDS', shortBy, cost };
