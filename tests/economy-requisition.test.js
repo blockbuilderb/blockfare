@@ -1,9 +1,10 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { ECONOMY } from '../src/config.js?v=117';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=117';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=117';
+import { ECONOMY, VEHICLE_STATS } from '../src/config.js?v=118';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=118';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=118';
+import { VehicleManager } from '../src/vehicles.js?v=118';
 
 function createEconomyPlayerHarness(overrides = {}) {
   const storage = new Map();
@@ -38,8 +39,8 @@ function createEconomyPlayerHarness(overrides = {}) {
   return { player, storage };
 }
 
-describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & HQ Boarding Gate', () => {
-  test('migrates legacy v4 matchCash into Armory Bank and starts every match at ⚡$50 Match Cash', () => {
+describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & $0 Free HQ Pool Boarding', () => {
+  test('migrates legacy v4 matchCash into Armory Bank, starts at ⚡$50 Match Cash, and prices field-drop Dirt Bike at ⚡$100', () => {
     const { player, storage } = createEconomyPlayerHarness();
     storage.set(
       'bb_warehouse_state_v4',
@@ -56,11 +57,13 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & HQ Boardi
     // $6,662 - $50 = $6,612 migrated safely into persistent Armory Bank!
     assert.equal(player.warehouseCash, 96612);
 
-    // At 00:00 with ⚡$50 Match Cash (even with 🏦$96,612 in Armory Bank!), player CANNOT buy a $250 Dirt Bike!
+    // Personal on-demand field-drop Dirt Bike costs ⚡$100 (short by $50 at 00:00; parked HQ/FOB bikes are $0 free!)
+    assert.equal(ECONOMY.VEHICLE_BASE_COST.bike, 100);
+    assert.equal(ECONOMY.VEHICLE_BASE_COST.atv, 150);
     const bikeFail = player.payForVehicleRequisition('bike');
     assert.equal(bikeFail.ok, false);
     assert.equal(bikeFail.reason, 'INSUFFICIENT_MATCH_CASH');
-    assert.equal(bikeFail.shortBy, 200);
+    assert.equal(bikeFail.shortBy, 50);
     assert.equal(player.warehouseCash, 96612, 'Armory Bank is untouched by failed field requisition');
 
     // Buying a permanent Hangar/Armory upgrade in [L] spends Armory Bank, leaving ⚡$50 Match Cash intact!
@@ -110,10 +113,34 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & HQ Boardi
     assert.equal(dummyTank.hasThermalFlir, false);
   });
 
-  test('enforces Match Cash requisition gate on unclaimed HQ vehicles while keeping FOB motorpools & hijacked enemy vehicles $0 free', () => {
-    const { player } = createEconomyPlayerHarness({ role: 'armor' });
-    player.loadGunsmithState(); // matchCash = $50
+  test('allows $0 free walk-up & Main Base HQ pool boarding for parked HQ planes, HQ armor & HQ/FOB bikes at 00:00', () => {
+    const { player: pilot } = createEconomyPlayerHarness({ role: 'pilot' });
+    pilot.loadGunsmithState();
+    assert.equal(pilot.matchCash, 50);
 
+    const hqPlane = {
+      id: 'us_a10_cas',
+      name: 'A-10C WARTHOG CAS',
+      type: 'plane',
+      isAircraft: true,
+      aircraftRole: 'cas',
+      team: 'US',
+      dead: false,
+      pos: new THREE.Vector3(-1560, 0, 120),
+      yaw: 0,
+      mesh: new THREE.Group()
+    };
+    const hqBike = {
+      id: 'us_hq_bike_1',
+      name: 'US HQ RECON BIKE',
+      type: 'bike',
+      isAircraft: false,
+      team: 'US',
+      dead: false,
+      pos: new THREE.Vector3(-1494, 0, 0),
+      yaw: 0,
+      mesh: new THREE.Group()
+    };
     const hqTank = {
       id: 'us_abrams_hq',
       name: 'M1A2 ABRAMS MBT',
@@ -125,60 +152,143 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & HQ Boardi
       yaw: 0,
       mesh: new THREE.Group()
     };
-    const fobBike = {
-      id: 'fob_b_bike_1',
-      name: 'FOB RECON BIKE',
-      type: 'bike',
-      isAircraft: false,
-      fobFlagId: 'B',
-      team: 'US',
-      dead: false,
-      pos: new THREE.Vector3(-200, 0, 0),
-      yaw: 0,
-      mesh: new THREE.Group()
+
+    // 1. findAvailableBaseVehicle locates parked HQ pool units for $0 Main Base deploy!
+    const vmStub = {
+      vehicles: [hqPlane, hqBike, hqTank],
+      b2UnlockedByTeam: { US: false, RU: false },
+      getTeamKills: () => 0,
+      isB2UnlockedForTeam: VehicleManager.prototype.isB2UnlockedForTeam,
+      findAvailableBaseVehicle: VehicleManager.prototype.findAvailableBaseVehicle
     };
-    const enemyTank = {
-      id: 'ru_t90_1',
-      name: 'T-90M MBT',
-      type: 'tank',
-      isAircraft: false,
-      team: 'RU',
-      dead: false,
-      pos: new THREE.Vector3(50, 0, 0),
-      yaw: 0,
-      mesh: new THREE.Group()
-    };
+    assert.equal(vmStub.findAvailableBaseVehicle('US', 'cas'), hqPlane);
+    assert.equal(vmStub.findAvailableBaseVehicle('US', 'bike'), hqBike);
+    assert.equal(vmStub.findAvailableBaseVehicle('US', 'tank'), hqTank);
+    assert.equal(vmStub.findAvailableBaseVehicle('US', 'b2_spirit'), null, 'B-2 stays locked before 25 kills');
 
-    // 1. Unclaimed HQ Tank at 00:00 (⚡$50) -> BLOCKED!
-    assert.equal(player.enterVehicle(hqTank, false), false);
-    assert.equal(player.matchCash, 50);
+    // 2. Combat Pilot boards parked HQ runway A-10 Warthog at 00:00 (⚡$50) for $0 FREE!
+    assert.equal(pilot.enterVehicle(hqPlane, false), true);
+    assert.equal(pilot.matchCash, 50);
 
-    // 2. Captured FOB Motorpool Bike -> $0 FREE!
-    assert.equal(player.enterVehicle(fobBike, false), true);
-    assert.equal(player.matchCash, 50);
+    // 3. Non-pilot Engineer is still blocked by class license on aircraft, NOT cash, and rides HQ bike for $0 FREE!
+    hqPlane.driver = null;
+    const { player: eng } = createEconomyPlayerHarness({ role: 'engineer' });
+    eng.loadGunsmithState();
+    assert.equal(eng.enterVehicle(hqPlane, false), false, 'Non-pilot blocked by class doctrine');
+    assert.equal(eng.enterVehicle(hqBike, false), true, 'HQ motorpool bike is $0 free at 00:00!');
+    assert.equal(eng.matchCash, 50);
 
-    // 3. Hijacking Enemy RU Tank -> $0 FREE!
-    assert.equal(player.enterVehicle(enemyTank, false), true);
-    assert.equal(player.matchCash, 50);
-
-    // 4. Earn ⚡$1,400 -> HQ Tank boards cleanly, deducts ⚡$1,400 once, and re-boarding is $0!
-    player.activeVehicle = null;
-    player.addCash(1400, 'OBJECTIVES & DESTROYS', false);
-    assert.equal(player.enterVehicle(hqTank, false), true);
-    assert.equal(player.matchCash, 50);
-    assert.equal(hqTank.paidByPlayer, player);
-
-    player.activeVehicle = null;
-    hqTank.driver = null;
-    assert.equal(player.enterVehicle(hqTank, false), true, 're-boarding already-paid tank is $0');
-    assert.equal(player.matchCash, 50);
+    // 4. Armor Crewman boards parked HQ Abrams at 00:00 for $0 FREE!
+    const { player: crew } = createEconomyPlayerHarness({ role: 'armor' });
+    crew.loadGunsmithState();
+    assert.equal(crew.enterVehicle(hqTank, false), true, 'HQ Abrams is $0 free for Armor Crewman!');
+    assert.equal(crew.matchCash, 50);
 
     // 5. End-of-round extraction deposits unspent Match Cash + Victory multiplier into Armory Bank and resets Match Cash to $50!
-    const bankBefore = player.warehouseCash;
-    player.kills = 4;
-    player.captures = 2;
-    player.settleMatchToWarehouse('US');
-    assert.equal(player.warehouseCash > bankBefore, true);
-    assert.equal(player.matchCash, 50);
+    const bankBefore = crew.warehouseCash;
+    crew.kills = 4;
+    crew.captures = 2;
+    crew.settleMatchToWarehouse('US');
+    assert.equal(crew.warehouseCash > bankBefore, true);
+    assert.equal(crew.matchCash, 50);
+  });
+});
+
+describe('Realistic Airspace Stratification & AC-130 / A-10 Ballistics vs. Jets & MBTs', () => {
+  test('stratifies Fighter & B-2 speeds well above subsonic CAS and blocks AC-130 side guns from hitting airborne aircraft', () => {
+    assert.equal(VEHICLE_STATS.PLANE_FIGHTER.speed > VEHICLE_STATS.PLANE_CAS.maxSpeed, true);
+    assert.equal(VEHICLE_STATS.PLANE_B2_SPIRIT.speed > VEHICLE_STATS.PLANE_CAS.maxSpeed, true);
+
+    const vm = {
+      world: { getGroundHeightAt: () => 0, spawnDebris: () => {} },
+      damageVehicle: VehicleManager.prototype.damageVehicle
+    };
+
+    const airborneF15 = {
+      id: 'ru_su57_fighter',
+      type: 'plane',
+      isAircraft: true,
+      aircraftRole: 'fighter',
+      aiPilotActive: true,
+      forwardSpeed: 114,
+      dead: false,
+      hp: 580,
+      maxHp: 580,
+      pos: new THREE.Vector3(0, 345, 0)
+    };
+
+    // AC-130 25mm, 40mm, and 105mm are downward ground-attack mounts -> 0 damage to airborne jets!
+    assert.equal(
+      vm.damageVehicle(airborneF15, 165, 'VIPER_1', 'US', '25MM GAU-12 EQUALIZER', null, null, new THREE.Vector3(0, 168, 200)),
+      false
+    );
+    assert.equal(airborneF15.hp, 580);
+
+    assert.equal(
+      vm.damageVehicle(airborneF15, 580, 'VIPER_1', 'US', '105MM M102 HOWITZER', null, null, new THREE.Vector3(0, 168, 200)),
+      false
+    );
+    assert.equal(airborneF15.hp, 580);
+  });
+
+  test('enforces MBT armor ricochets vs AC-130 25mm & shallow A-10 30mm, while rewarding AC-130 105mm & steep A-10 top/rear dives', () => {
+    const vm = {
+      world: { getGroundHeightAt: () => 0, spawnDebris: () => {} },
+      damageVehicle: VehicleManager.prototype.damageVehicle
+    };
+
+    const makeTank = () => ({
+      id: 'ru_t90_1',
+      type: 'tank',
+      isAircraft: false,
+      dead: false,
+      hp: 1600,
+      maxHp: 1600,
+      yaw: 0, // facing -Z (fwd = (0, 0, -1))
+      eraBlocksIntact: 4,
+      pos: new THREE.Vector3(0, 0, 0)
+    });
+
+    // 1. AC-130 25mm GAU-12 bounces off MBT armor (ricochet!)
+    const tankVs25 = makeTank();
+    vm.damageVehicle(tankVs25, 165, 'VIPER_1', 'US', '25MM GAU-12 EQUALIZER', null, null, new THREE.Vector3(0, 168, -220));
+    assert.equal(tankVs25.lastArmorRicochet, true);
+    assert.equal(tankVs25.lastAppliedDamage <= 12, true);
+
+    // 2. AC-130 105mm M102 Howitzer punches straight through MBT roof deck!
+    const tankVs105 = makeTank();
+    vm.damageVehicle(tankVs105, 580, 'VIPER_1', 'US', '105MM M102 HOWITZER', null, null, new THREE.Vector3(120, 168, 0));
+    assert.equal(tankVs105.lastArmorRicochet, false);
+    assert.equal(tankVs105.lastAppliedDamage >= 450, true);
+
+    // 3. A-10 30mm GAU-8 at shallow frontal angle bounces off Chobham/ERA glacis!
+    const tankShallowFront = makeTank();
+    vm.damageVehicle(
+      tankShallowFront,
+      185,
+      'VIPER_1',
+      'US',
+      '30MM GAU-8 AVENGER',
+      null,
+      null,
+      new THREE.Vector3(0, 35, -260) // ~7.6° shallow frontal pass
+    );
+    assert.equal(tankShallowFront.lastArmorRicochet, true);
+    assert.equal(tankShallowFront.lastAppliedDamage <= 12, true);
+
+    // 4. A-10 30mm GAU-8 on a steep >=30° top-down dive penetrates thin turret/engine roof!
+    const tankSteepDive = makeTank();
+    vm.damageVehicle(
+      tankSteepDive,
+      185,
+      'VIPER_1',
+      'US',
+      '30MM GAU-8 AVENGER',
+      null,
+      null,
+      new THREE.Vector3(0, 160, -220) // ~36° steep dive (elevSin = 0.588 >= 0.42)
+    );
+    assert.equal(tankSteepDive.lastArmorRicochet, false);
+    assert.equal(tankSteepDive.lastAppliedDamage >= 45, true);
   });
 });

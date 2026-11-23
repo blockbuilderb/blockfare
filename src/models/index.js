@@ -2,7 +2,7 @@
 // 3D MODELS BARREL EXPORT (src/models/index.js)
 // ============================================================================
 
-export { createWeaponViewModel } from './weapon-model.js?v=117';
-export { createVehicleMesh } from './vehicle-model.js?v=117';
-export { createSoldierMesh } from './soldier-model.js?v=117';
-export { createRadarTowerMesh, createAmmoStashMesh } from './prop-models.js?v=117';
+export { createWeaponViewModel } from './weapon-model.js?v=118';
+export { createVehicleMesh } from './vehicle-model.js?v=118';
+export { createSoldierMesh } from './soldier-model.js?v=118';
+export { createRadarTowerMesh, createAmmoStashMesh } from './prop-models.js?v=118';

@@ -1,13 +1,13 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=117';
-import { sound } from './audio.js?v=117';
-import { NETWORK } from './config.js?v=117';
-import { events, makeEventBridge } from './events.js?v=117';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=118';
+import { sound } from './audio.js?v=118';
+import { NETWORK } from './config.js?v=118';
+import { events, makeEventBridge } from './events.js?v=118';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=117';
-import { WebRtcTransport } from './network/WebRtcTransport.js?v=117';
+} from './core/StateMachines.js?v=118';
+import { WebRtcTransport } from './network/WebRtcTransport.js?v=118';
 
 function safeStorageGet(key) {
   try {

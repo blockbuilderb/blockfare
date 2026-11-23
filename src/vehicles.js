@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=117';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=117';
+import { sound } from './audio.js?v=118';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=118';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=117';
-import { createVehicleMesh } from './models/vehicle-model.js?v=117';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=117';
-import { events, makeEventBridge } from './events.js?v=117';
+} from './assets/vehicle-defs.js?v=118';
+import { createVehicleMesh } from './models/vehicle-model.js?v=118';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=118';
+import { events, makeEventBridge } from './events.js?v=118';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=117';
+} from './core/StateMachines.js?v=118';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -160,6 +160,37 @@ export class VehicleManager {
   isB2UnlockedForTeam(team = 'US') {
     const reqKills = VEHICLE_STATS.B2_UNLOCK_KILLS || 25;
     return Boolean(this.b2UnlockedByTeam?.[team] || this.getTeamKills(team) >= reqKills);
+  }
+
+  findAvailableBaseVehicle(team = 'US', vehKey = 'foot') {
+    if (!vehKey || vehKey === 'foot' || vehKey === 'wright_flyer') return null;
+    if (vehKey === 'b2_spirit' && !this.isB2UnlockedForTeam(team)) return null;
+    const bx = team === 'RU' ? (this.world?.ruBase?.x ?? 1500) : (this.world?.usBase?.x ?? -1500);
+    const bz = team === 'RU' ? (this.world?.ruBase?.z ?? 0) : (this.world?.usBase?.z ?? 0);
+
+    for (const v of this.vehicles || []) {
+      if (!v || v.dead || v.team !== team) continue;
+      if (v.driver || v.npcDriver || v.remoteDriverId || v.aiPilotActive) continue;
+      if (String(v.id || '').startsWith('secret_')) continue;
+
+      if (v.isAircraft) {
+        if (v.aircraftRole === vehKey && !v.b2LockedUntilKills) {
+          return v;
+        }
+        continue;
+      }
+
+      // Ground HQ pool unit parked within 260m of Main Base
+      const distToBase = Math.hypot((v.pos?.x || 0) - bx, (v.pos?.z || 0) - bz);
+      if (distToBase > 260) continue;
+
+      if (vehKey === 'car') {
+        if (v.type === 'humvee' || v.type === 'car') return v;
+      } else if (v.type === vehKey) {
+        return v;
+      }
+    }
+    return null;
   }
 
   recordTeamKillAndCheckB2(team = 'US') {
@@ -1695,11 +1726,44 @@ export class VehicleManager {
     onAwardXp,
     attackerPos = null
   ) {
+    vehicle.lastAppliedDamage = 0;
+    vehicle.lastArmorRicochet = false;
     if (vehicle.dead) return false;
     if (vehicle.isShotDown) {
       vehicle.hp = 1;
       return false;
     }
+
+    const wepUp = String(weaponName || '').toUpperCase();
+    const isAc13025mm = wepUp.includes('25MM GAU-12') || wepUp.includes('EQUALIZER');
+    const isAc13040mm = wepUp.includes('40MM') && wepUp.includes('BOFORS');
+    const isAc130105mm = wepUp.includes('105MM') && wepUp.includes('HOWITZER');
+    const isAc130SideGun = isAc13025mm || isAc13040mm || isAc130105mm;
+    const isA10Gau8 = wepUp.includes('30MM GAU-8') || wepUp.includes('AVENGER');
+
+    // Realistic Air-to-Ground Gunship Envelope:
+    // AC-130 port cannons are downward-firing ground-attack mounts and CANNOT shoot down airborne aircraft!
+    if (vehicle.isAircraft && isAc130SideGun) {
+      const airGroundY = this.world ? this.world.getGroundHeightAt(vehicle.pos.x, vehicle.pos.z) : 0;
+      const airAltAgl = Math.max(0, vehicle.pos.y - airGroundY);
+      if (airAltAgl > 10 || vehicle.driver || vehicle.aiPilotActive || (vehicle.forwardSpeed || 0) > 10) {
+        return false;
+      }
+    }
+
+    // Realistic Subsonic CAS vs. Supersonic Fighter / High-Altitude Stealth Bomber Envelope:
+    // A-10 30mm GAU-8 suffers severe high-aspect deflection against fast Fighters & B-2 Bombers beyond point-blank (<160m)
+    if (
+      vehicle.isAircraft &&
+      isA10Gau8 &&
+      (vehicle.aircraftRole === 'fighter' || vehicle.aircraftRole === 'b2_spirit')
+    ) {
+      const distToJet = attackerPos ? attackerPos.distanceTo(vehicle.pos) : 999;
+      if (distToJet > 160) {
+        amount = Math.max(2, Math.round(amount * 0.22));
+      }
+    }
+
     if (vehicle.type === 'warhorse' && (vehicle.armor || 0) > 0) {
       const absorbed = Math.min(vehicle.armor, Math.round(amount * 0.45));
       vehicle.armor -= absorbed;
@@ -1799,6 +1863,55 @@ export class VehicleManager {
       vehicle.lastHitDesc = armorNote;
     }
 
+    // =========================================================================
+    // REALISTIC AUTOCANNON / HOWITZER PENETRATION VS. MAIN BATTLE TANKS (MBT)
+    // - AC-130 25mm Gatling bounces off heavy MBT armor (use [3] 105mm M102 Howitzer!)
+    // - AC-130 40mm Bofors deals light concussion/track damage to MBTs; 105mm penetrates top deck!
+    // - A-10 30mm GAU-8 bounces off MBT frontal glacis, requiring steep >=25° top-deck dives,
+    //   rear-engine-deck attacks, or Slot [3] AGM/GBU heavy ordnance!
+    // =========================================================================
+    if (vehicle.type === 'tank') {
+      if (isAc13025mm) {
+        amount = Math.max(1, Math.round(amount * 0.06));
+        vehicle.lastArmorRicochet = true;
+        armorNote = 'RICOCHET: 25MM CANNOT PENETRATE MBT ARMOR — USE [3] 105MM HOWITZER!';
+        vehicle.lastHitDesc = armorNote;
+      } else if (isAc13040mm) {
+        amount = Math.max(4, Math.round(amount * 0.35));
+        if (vehicle.subsystems) vehicle.subsystems.tracks = 'DAMAGED';
+        armorNote = '40MM HE TOP CONCUSSION (-65% VS MBT • TRACKS DAMAGED)';
+        vehicle.lastHitDesc = armorNote;
+      } else if (isAc130105mm) {
+        amount = Math.round(amount * 1.15);
+        armorNote = '105MM M102 TOP-DECK ARMOR PENETRATION (+15% CRITICAL!)';
+        vehicle.lastHitDesc = armorNote;
+      } else if (isA10Gau8) {
+        let elevSin = 0;
+        if (attackerPos) {
+          const dy = attackerPos.y - vehicle.pos.y;
+          const dist3D = Math.max(1, attackerPos.distanceTo(vehicle.pos));
+          elevSin = dy / dist3D;
+        }
+        const isSteepTopAttack = elevSin >= 0.42; // >= ~25° dive onto thin top roof/engine deck
+        if (isSteepTopAttack || hitZone === 'REAR') {
+          amount = Math.max(4, Math.round(amount * 0.62));
+          armorNote = isSteepTopAttack
+            ? '30MM GAU-8 STEEP TOP-ROOF PENETRATION!'
+            : '30MM GAU-8 REAR ENGINE LOUVER PENETRATION!';
+        } else if (hitZone === 'FRONT') {
+          amount = Math.max(1, Math.round(amount * 0.08));
+          vehicle.lastArmorRicochet = true;
+          armorNote = 'RICOCHET: 30MM BOUNCED OFF MBT FRONT GLACIS — DIVE ON TOP/REAR OR USE [3] AGM/GBU!';
+        } else {
+          amount = Math.max(2, Math.round(amount * 0.2));
+          if (vehicle.subsystems) vehicle.subsystems.tracks = 'DAMAGED';
+          armorNote = '30MM GAU-8 SKIRT DEFLECTION (-80% • TRACKS DAMAGED)';
+        }
+        vehicle.lastHitDesc = armorNote;
+      }
+    }
+
+    vehicle.lastAppliedDamage = amount;
     vehicle.hp = Math.max(0, vehicle.hp - amount);
     vehicle.hullIntegrityPct = Math.max(
       0,

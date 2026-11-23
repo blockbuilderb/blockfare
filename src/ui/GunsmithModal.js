@@ -6,18 +6,18 @@ import {
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from '../weapons.js?v=117';
-import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=117';
-import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=117';
-import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=117';
-import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=117';
-import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=117';
-import { sound } from '../audio.js?v=117';
+} from '../weapons.js?v=118';
+import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=118';
+import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=118';
+import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=118';
+import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=118';
+import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=118';
+import { sound } from '../audio.js?v=118';
 import {
   ARMORY_CASE_STATES,
   ARMORY_CASE_EVENTS,
   createArmoryCaseRouletteFSM
-} from '../core/StateMachines.js?v=117';
+} from '../core/StateMachines.js?v=118';
 
 export const GunsmithModal = {
   formatCashAmount(val) {
@@ -137,21 +137,29 @@ export const GunsmithModal = {
     }
 
     // Reset selection back to 'foot' if no longer affordable or locked
+    const spawningAtMainBase = !this.selectedSpawn || this.selectedSpawn === 'BASE';
     if (this.selectedDeployVehicle !== 'foot') {
       const selOpt = options.find((o) => o.key === this.selectedDeployVehicle);
+      const hasFreeBaseUnit =
+        spawningAtMainBase &&
+        Boolean(this.vehicleManager?.findAvailableBaseVehicle?.(team, this.selectedDeployVehicle));
       const q = this.player.getVehicleRequisitionQuote?.(this.selectedDeployVehicle) || {
         canAfford: false,
         cooldownRem: 0
       };
-      if (!selOpt || selOpt.killLocked || !q.canAfford || q.cooldownRem > 0) {
+      if (!selOpt || selOpt.killLocked || (!hasFreeBaseUnit && (!q.canAfford || q.cooldownRem > 0))) {
         this.selectedDeployVehicle = 'foot';
       }
     }
 
     const curOpt = options.find((o) => o.key === this.selectedDeployVehicle) || options[0];
+    const curFreeBase =
+      curOpt.key !== 'foot' &&
+      spawningAtMainBase &&
+      Boolean(this.vehicleManager?.findAvailableBaseVehicle?.(team, curOpt.key));
     const curQuote = this.player.getVehicleRequisitionQuote?.(curOpt.key) || { totalCost: 0 };
     const isExpanded = Boolean(this._deployVehDrawerOpen);
-    const catTag = isPilot ? '✈️ AIRCRAFT REQUISITION' : isArmor ? '🛡️ ARMOR REQUISITION' : '🏍️ LIGHT TRANSPORT';
+    const catTag = isPilot ? '✈️ AIRCRAFT' : isArmor ? '🛡️ ARMOR' : '🏍️ TRANSPORT';
     const expandHint = isPilot
       ? 'FLYER / A-10 / F-15 / AC-130 / B-2'
       : isArmor
@@ -169,6 +177,10 @@ export const GunsmithModal = {
       ? `<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding-top:3px;border-top:1px solid rgba(255,255,255,0.09);">
           ${options
             .map((opt) => {
+              const hasFreeBase =
+                opt.key !== 'foot' &&
+                spawningAtMainBase &&
+                Boolean(this.vehicleManager?.findAvailableBaseVehicle?.(team, opt.key));
               const q = this.player.getVehicleRequisitionQuote?.(opt.key) || {
                 totalCost: 0,
                 modSurcharge: 0,
@@ -177,16 +189,20 @@ export const GunsmithModal = {
                 shortBy: 0
               };
               const isSel = opt.key === this.selectedDeployVehicle;
-              const locked = opt.key !== 'foot' && (opt.killLocked || !q.canAfford || q.cooldownRem > 0);
+              const locked =
+                opt.key !== 'foot' &&
+                (opt.killLocked || (!hasFreeBase && (!q.canAfford || q.cooldownRem > 0)));
               const priceTag =
                 opt.key === 'foot'
                   ? 'FREE ($0)'
                   : opt.killLocked
-                  ? `🔒 ${kills}/${reqKills}K • ⚡$${q.totalCost}`
+                  ? `🔒 ${kills}/${reqKills}K`
+                  : hasFreeBase
+                  ? 'FREE ($0 HQ)'
                   : q.cooldownRem > 0
                   ? `⏳ ${q.cooldownRem}s • ⚡$${q.totalCost}`
                   : q.canAfford
-                  ? `⚡$${q.totalCost}${q.modSurcharge > 0 ? ' ★MOD' : ''}`
+                  ? `⚡$${q.totalCost} DROP${q.modSurcharge > 0 ? ' ★' : ''}`
                   : `🔒 ⚡$${q.totalCost} (-$${q.shortBy})`;
               return `<button type="button" class="dep-veh-req-chip" data-vkey="${opt.key}" ${
                 locked ? 'data-locked="1"' : ''
@@ -196,14 +212,19 @@ export const GunsmithModal = {
                 background:${isSel ? 'rgba(46,204,113,0.22)' : locked ? 'rgba(15,20,26,0.65)' : 'rgba(14,28,42,0.9)'};
                 color:${locked ? '#7f8c8d' : '#ecf0f1'};cursor:${locked ? 'not-allowed' : 'pointer'};
                 font-size:10px;font-weight:900;opacity:${locked ? '0.68' : '1'};
-              " title="${opt.label} (${opt.sub}) — ${priceTag}">
+              " title="${opt.label} (${opt.sub}) — ${
+                hasFreeBase ? 'Parked at Main Base HQ ($0 Free!)' : `Field Drop / Extra Requisition: ${priceTag}`
+              }">
                 <span>${opt.icon} ${opt.label}</span>
-                <span style="color:${opt.key === 'foot' ? '#7bed9f' : locked ? '#ff7675' : '#f1c40f'};font-family:Consolas,monospace;font-size:9.5px;">${priceTag}</span>
+                <span style="color:${opt.key === 'foot' || hasFreeBase ? '#7bed9f' : locked ? '#ff7675' : '#f1c40f'};font-family:Consolas,monospace;font-size:9.5px;">${priceTag}</span>
               </button>`;
             })
             .join('')}
         </div>`
       : '';
+
+    const curCostLabel =
+      curOpt.key === 'foot' || curFreeBase ? '$0 FREE' : `⚡$${curQuote.totalCost} DROP`;
 
     bar.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
@@ -214,7 +235,7 @@ export const GunsmithModal = {
             border:1px solid ${this.selectedDeployVehicle === 'foot' ? 'rgba(0,210,211,0.5)' : '#2ecc71'};
             color:#ecf0f1;border-radius:4px;padding:2.5px 9px;font-size:10px;font-weight:900;cursor:pointer;
           ">
-            ${curOpt.icon} ${curOpt.label} (${curOpt.key === 'foot' ? '$0' : `⚡$${curQuote.totalCost}`}) &bull; <span style="color:#81ecec;">${
+            ${curOpt.icon} ${curOpt.label} (${curCostLabel}) &bull; <span style="color:#81ecec;">${
       isExpanded ? '▴ HIDE OPTIONS' : `▾ + CHOOSE ${expandHint}`
     }</span>
           </button>

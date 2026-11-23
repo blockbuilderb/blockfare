@@ -484,11 +484,11 @@ export const VEHICLE_STATS = {
   APC: { maxHp: 1050, speed: 23.5, accelRate: 1.95, brakeRate: 2.8, turnRate: 1.25, minPitchRad: -0.18, maxPitchRad: 0.52 },
   AA_VEHICLE: { maxHp: 980, speed: 21.5, accelRate: 1.9, brakeRate: 2.7, turnRate: 1.25, minPitchRad: -0.14, maxPitchRad: 1.48 },
   HUMVEE: { maxHp: 700, speed: 26.5, accelRate: 2.55, brakeRate: 3.4, turnRate: 1.5, minPitchRad: -0.21, maxPitchRad: 0.61 },
-  PLANE_CAS: { maxHp: 1550, speed: 62, minSpeed: 31, maxSpeed: 96, accelRate: 2.7, brakeRate: 3.1, turnRate: 1.92, dialMaxKmh: 420 },
+  PLANE_CAS: { maxHp: 1550, speed: 60, minSpeed: 31, maxSpeed: 88, accelRate: 2.7, brakeRate: 3.1, turnRate: 1.92, dialMaxKmh: 420 },
   PLANE_BOMBER: { maxHp: 1400, speed: 84, minSpeed: 42, maxSpeed: 145, accelRate: 3.8, brakeRate: 3.0, turnRate: 1.32, dialMaxKmh: 600 },
-  PLANE_FIGHTER: { maxHp: 1300, speed: 96, minSpeed: 40, maxSpeed: 175, accelRate: 4.8, brakeRate: 3.5, turnRate: 1.68, dialMaxKmh: 720 },
+  PLANE_FIGHTER: { maxHp: 1300, speed: 114, minSpeed: 44, maxSpeed: 196, accelRate: 5.4, brakeRate: 3.6, turnRate: 1.72, dialMaxKmh: 720 },
   PLANE_GUNSHIP: { maxHp: 3200, speed: 48, minSpeed: 30, maxSpeed: 68, accelRate: 2.0, brakeRate: 2.2, turnRate: 0.68, dialMaxKmh: 300 },
-  PLANE_B2_SPIRIT: { maxHp: 2400, speed: 98, minSpeed: 46, maxSpeed: 138, accelRate: 3.6, brakeRate: 3.0, turnRate: 0.78, stealthFactor: 0.12, dialMaxKmh: 600 },
+  PLANE_B2_SPIRIT: { maxHp: 2400, speed: 108, minSpeed: 48, maxSpeed: 152, accelRate: 3.8, brakeRate: 3.0, turnRate: 0.78, stealthFactor: 0.12, dialMaxKmh: 600 },
   // 1903 Wright Flyer I ("Kitty Hawk Flyer" — Secret Cave Pioneer Biplane):
   // Real-world stall speed: ~29 km/h (8.0 m/s / 18 mph); starts slow with gradual spool-up acceleration (accelRate: 0.24)
   // before winding up to an incredible 522 km/h (145 m/s) cruise and 846 km/h (235 m/s) top speed!
@@ -648,11 +648,12 @@ export const ECONOMY = {
   VICTORY_EXTRACTION_MULT: 1.5,
   DEFEAT_EXTRACTION_MULT: 1.15,
 
-  // Base ⚡ Match Cash Requisition Prices (Always start at ⚡$50 -> earned via role play!)
+  // Base ⚡ Match Cash Requisition Prices for ON-DEMAND Field Drops / Extra Sorties
+  // (Vehicles already parked at Main Base HQ Runway & Motor Pool are ALWAYS $0 FREE to board!)
   VEHICLE_BASE_COST: {
     foot: 0,
-    bike: 250,
-    atv: 350,
+    bike: 100,
+    atv: 150,
     car: 450,
     apc: 850,
     aa: 950,

@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=117';
+import { sound } from '../audio.js?v=118';
 import {
   PLAYER,
   COMBAT,
@@ -8,9 +8,9 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=117';
-import { events } from '../events.js?v=117';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=117';
+} from '../config.js?v=118';
+import { events } from '../events.js?v=118';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=118';
 
 function markShared(asset) {
   if (asset) {
@@ -2173,19 +2173,7 @@ export const CombatMethods = {
               1,
               Math.round(bullet.voxelDamage * 0.45 * bullet.armorPenMult)
             );
-            if (this.onHitmarker) {
-              if (veh.isAircraft) {
-                this.onHitmarker(
-                  'armor',
-                  bullet.isMountedMg ? `✈️ AIRFRAME HIT -${apDmg}` : `✈️ AIRCRAFT HIT -${apDmg}`
-                );
-              } else {
-                this.onHitmarker(
-                  'armor',
-                  bullet.isMountedMg ? `AP ARMOR HIT -${apDmg}` : `VEHICLE ARMOR -${apDmg}`
-                );
-              }
-            }
+            const shooterPos = this.activeVehicle?.pos || this.pos;
             this.vehicleManager.damageVehicle(
               veh,
               apDmg,
@@ -2193,8 +2181,25 @@ export const CombatMethods = {
               this.team,
               bullet.weaponLabel,
               this.onKillEvent,
-              this.onAwardXp
+              this.onAwardXp,
+              shooterPos
             );
+            const actualDmg = typeof veh.lastAppliedDamage === 'number' ? veh.lastAppliedDamage : apDmg;
+            if (this.onHitmarker && actualDmg > 0) {
+              if (veh.lastArmorRicochet) {
+                this.onHitmarker('armor', `🛡️ ARMOR RICOCHET -${actualDmg}`);
+              } else if (veh.isAircraft) {
+                this.onHitmarker(
+                  'armor',
+                  bullet.isMountedMg ? `✈️ AIRFRAME HIT -${actualDmg}` : `✈️ AIRCRAFT HIT -${actualDmg}`
+                );
+              } else {
+                this.onHitmarker(
+                  'armor',
+                  bullet.isMountedMg ? `AP ARMOR HIT -${actualDmg}` : `VEHICLE ARMOR -${actualDmg}`
+                );
+              }
+            }
           }
           terminatedOnEntity = true;
           break;
@@ -2229,6 +2234,7 @@ export const CombatMethods = {
     // Ensures dogfight cannon rounds aimed at the HUD Lead Indicator hit moving aircraft wings/fuselage reliably!
     if (
       !terminatedOnEntity &&
+      this.activeVehicle?.aircraftRole !== 'gunship' &&
       this.vehicleManager &&
       Array.isArray(this.vehicleManager.vehicles)
     ) {
@@ -2269,12 +2275,7 @@ export const CombatMethods = {
             1,
             Math.round(bullet.voxelDamage * 0.45 * bullet.armorPenMult)
           );
-          if (this.onHitmarker) {
-            this.onHitmarker(
-              'armor',
-              bullet.isMountedMg ? `✈️ AIRFRAME HIT -${apDmg}` : 'AIRCRAFT HIT'
-            );
-          }
+          const shooterPos = this.activeVehicle?.pos || this.pos;
           this.vehicleManager.damageVehicle(
             airV,
             apDmg,
@@ -2282,8 +2283,16 @@ export const CombatMethods = {
             this.team,
             bullet.weaponLabel,
             this.onKillEvent,
-            this.onAwardXp
+            this.onAwardXp,
+            shooterPos
           );
+          const actualAirDmg = typeof airV.lastAppliedDamage === 'number' ? airV.lastAppliedDamage : apDmg;
+          if (this.onHitmarker && actualAirDmg > 0) {
+            this.onHitmarker(
+              'armor',
+              bullet.isMountedMg ? `✈️ AIRFRAME HIT -${actualAirDmg}` : 'AIRCRAFT HIT'
+            );
+          }
           terminatedOnEntity = true;
           break;
         }

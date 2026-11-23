@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=117';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=117';
-import { events } from '../events.js?v=117';
+import { SQUAD_DEFS } from '../bots.js?v=118';
+import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=118';
+import { events } from '../events.js?v=118';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=117';
+} from '../core/StateMachines.js?v=118';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=117';
+} from '../utils/KeyboardShortcuts.js?v=118';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -1580,12 +1580,21 @@ export const DeployScreen = {
     }
     this.player.deploy(this.selectedTeam, this.selectedClass, spawnVec);
 
-    // Fulfill 1-Click Paid Deploy Vehicle Requisition (if player chose Bike/ATV, Armor, or Aircraft!)
+    // Fulfill 1-Click Deploy Vehicle Selection:
+    // - If spawning at MAIN BASE and an unclaimed HQ Pool vehicle of that type is parked there -> $0 FREE!
+    // - Otherwise (frontline FOB/Squad spawn or all HQ hulls taken/on cooldown) -> Paid ⚡ Match Cash Drop/Sortie!
     const reqVehKey = eraNow === 'modern' ? this.selectedDeployVehicle || 'foot' : 'foot';
+    const spawnedAtMainBase = !this.selectedSpawn || this.selectedSpawn === 'BASE';
     this.selectedDeployVehicle = 'foot';
     this._deployVehDrawerOpen = false;
     if (reqVehKey !== 'foot' && this.vehicleManager) {
-      if (
+      const freeHqVeh = spawnedAtMainBase
+        ? this.vehicleManager.findAvailableBaseVehicle?.(this.selectedTeam, reqVehKey)
+        : null;
+      if (freeHqVeh) {
+        this.player.pos.copy(freeHqVeh.pos);
+        this.player.enterVehicle?.(freeHqVeh, true);
+      } else if (
         reqVehKey === 'wright_flyer' ||
         reqVehKey === 'cas' ||
         reqVehKey === 'fighter' ||

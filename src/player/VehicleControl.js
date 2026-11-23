@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=117';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=117';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=117';
-import { events } from '../events.js?v=117';
+import { sound } from '../audio.js?v=118';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=118';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=118';
+import { events } from '../events.js?v=118';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +11,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=117';
+} from '../core/StateMachines.js?v=118';
 
 function markShared(asset) {
   if (asset) {
@@ -234,40 +234,9 @@ export const VehicleControlMethods = {
         }
         return false;
       }
-
-      // Unified Match Cash Requisition Gate on Unclaimed Friendly HQ Vehicles:
-      // - Captured FOB Motorpool bikes/ATVs (`fobFlagId` / `NEUTRAL`) & hijacked enemy vehicles remain $0 FREE!
-      // - Vehicles already paid for by this player (`paidByPlayer === this`) remain $0 to re-board after field repairs!
-      const isFreeFieldSpoil =
-        Boolean(nearVehicle.fobFlagId) ||
-        Boolean(nearVehicle.isEmplacement) ||
-        Boolean(nearVehicle.isSecretOmegaFlyer) ||
-        nearVehicle.team === 'NEUTRAL' ||
-        (nearVehicle.team && nearVehicle.team !== this.team);
-      if (
-        !isFreeFieldSpoil &&
-        nearVehicle.paidByPlayer !== this &&
-        typeof this.payForVehicleRequisition === 'function'
-      ) {
-        const vehKey = nearVehicle.isAircraft
-          ? nearVehicle.aircraftRole === 'bomber'
-            ? 'b2_spirit'
-            : nearVehicle.aircraftRole || 'cas'
-          : nearVehicle.type || 'car';
-        const payRes = this.payForVehicleRequisition(vehKey, { ignoreCooldown: true });
-        if (!payRes.ok) {
-          sound.playEmptyClick?.();
-          if (this.onAwardXp) {
-            this.onAwardXp(
-              0,
-              `🔒 REQUISITION COST: NEED ⚡$${(payRes.cost || 0).toLocaleString()} MATCH CASH FOR ${nearVehicle.name} (HAVE ⚡$${Math.floor(this.matchCash || 0).toLocaleString()} — EARN VIA CAPTURES, REVIVES, REPAIRS & KILLS!)`
-            );
-          }
-          return false;
-        }
-        nearVehicle.paidByPlayer = this;
-        nearVehicle._paidAsStock = Boolean(payRes.useStock);
-      }
+      // Squad-Aligned Base Motorpool & Runway Rule:
+      // All vehicles physically parked at Main Base HQ Runway / Motor Pool or FOBs are $0 FREE to board!
+      // (⚡ Match Cash is ONLY charged for extra on-demand personal field drops [0]/[9] or frontline Deploy Requisitions!)
     }
     const hadExistingOccupant = Boolean(
       (nearVehicle.driver && nearVehicle.driver !== this) ||
@@ -4231,9 +4200,8 @@ export const VehicleControlMethods = {
             )
           )
           .normalize();
-        const shotDir = this.applyDogfightLeadConvergence
-          ? this.applyDogfightLeadConvergence(camOrigin, rawGauDir, 360, 4.5)
-          : rawGauDir;
+        // Subsonic A-10 / Su-25 30mm GAU-8 is a pure ground-attack cannon (NO magnetic dogfight auto-lead onto fast jets/B-2s!)
+        const shotDir = rawGauDir;
 
         this._gauBurstCount = ((this._gauBurstCount || 0) + 1) % 3;
         const gauSplash =
@@ -4289,9 +4257,12 @@ export const VehicleControlMethods = {
               )
             )
             .normalize();
-          const shotDir = this.applyDogfightLeadConvergence
-            ? this.applyDogfightLeadConvergence(camOrigin, rawEqDir, eqMuzzleVel, eqGrav)
-            : rawEqDir;
+          // Realistic AC-130 Port Gun Mount: strictly angled downward toward ground targets (ZERO air-to-air elevation or dogfight lead!)
+          if (rawEqDir.y > -0.05) {
+            rawEqDir.y = -0.05;
+            rawEqDir.normalize();
+          }
+          const shotDir = rawEqDir;
 
           this._gauBurstCount = ((this._gauBurstCount || 0) + 1) % 3;
           const eqSplash =
@@ -4333,6 +4304,10 @@ export const VehicleControlMethods = {
           const bofCompPt = aimHit.point.clone();
           bofCompPt.y += 0.5 * bofGrav * tofBof * tofBof;
           const boforsDir = bofCompPt.sub(noseMuzzle).normalize();
+          if (boforsDir.y > -0.04) {
+            boforsDir.y = -0.04;
+            boforsDir.normalize();
+          }
           const boforsMesh = new THREE.Mesh(_bofors40mmGeo, _bofors40mmMat);
           boforsMesh.position.copy(noseMuzzle);
           boforsMesh.lookAt(aimHit.point);
@@ -4373,6 +4348,10 @@ export const VehicleControlMethods = {
           const howCompPt = aimHit.point.clone();
           howCompPt.y += 0.5 * howGrav * tofHow * tofHow;
           const howitzerDir = howCompPt.sub(noseMuzzle).normalize();
+          if (howitzerDir.y > -0.04) {
+            howitzerDir.y = -0.04;
+            howitzerDir.normalize();
+          }
           const howitzerMesh = new THREE.Mesh(_howitzer105mmGeo, _howitzer105mmMat);
           howitzerMesh.position.copy(noseMuzzle);
           howitzerMesh.lookAt(aimHit.point);
@@ -4631,6 +4610,10 @@ export const VehicleControlMethods = {
           const howCompPt = aimHit.point.clone();
           howCompPt.y += 0.5 * howGrav * tofHow * tofHow;
           const howitzerDir = howCompPt.sub(noseMuzzle).normalize();
+          if (howitzerDir.y > -0.04) {
+            howitzerDir.y = -0.04;
+            howitzerDir.normalize();
+          }
           const howitzerMesh = new THREE.Mesh(_howitzer105mmGeo, _howitzer105mmMat);
           howitzerMesh.position.copy(noseMuzzle);
           howitzerMesh.lookAt(aimHit.point);

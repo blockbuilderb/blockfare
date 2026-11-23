@@ -4,7 +4,7 @@
 // Positions stored as arrays [x, y, z] — y is computed at runtime via getGroundHeightAt.
 // =========================================================================
 
-import { VEHICLE_STATS } from '../config.js?v=117';
+import { VEHICLE_STATS } from '../config.js?v=118';
 
 export const VEHICLE_DEFS = [
   // ===================== US FLEET (Open Motor Pool Apron aligned with 28m Main Gate at x = -904..-884, z = -10..+10) =====================
@@ -316,10 +316,10 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_FIGHTER_VULCAN,
     coaxRpm: 45,
     patrolPoints: [
-      [-260, 170, -240],
-      [260, 175, -220],
-      [280, 170, 240],
-      [-260, 165, 220]
+      [-340, 340, -260],
+      [340, 355, -240],
+      [360, 345, 260],
+      [-340, 335, 240]
     ]
   },
   {
@@ -385,10 +385,10 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_FIGHTER_VULCAN,
     coaxRpm: 45,
     patrolPoints: [
-      [260, 170, 240],
-      [-260, 175, 220],
-      [-280, 170, -240],
-      [260, 165, -220]
+      [340, 340, 260],
+      [-340, 355, 240],
+      [-360, 345, -260],
+      [340, 335, -240]
     ]
   },
   {
@@ -434,10 +434,10 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_B2_CARPET,
     coaxRpm: 60,
     patrolPoints: [
-      [-660, 210, -280],
-      [0, 220, 0],
-      [660, 215, 280],
-      [330, 220, -320]
+      [-660, 485, -280],
+      [0, 510, 0],
+      [660, 495, 280],
+      [330, 505, -320]
     ]
   },
   {
@@ -459,10 +459,10 @@ export const VEHICLE_DEFS = [
     rpm: VEHICLE_STATS.RPM_B2_CARPET,
     coaxRpm: 60,
     patrolPoints: [
-      [660, 210, 280],
-      [0, 220, 0],
-      [-660, 215, -280],
-      [-320, 220, 320]
+      [660, 485, 280],
+      [0, 510, 0],
+      [-660, 495, -280],
+      [-320, 505, 320]
     ]
   }
 ];
