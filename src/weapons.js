@@ -14,6 +14,6 @@ export {
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from './assets/weapon-defs.js?v=118';
-export { ATTACHMENT_CATALOG } from './assets/attachment-defs.js?v=118';
-export { createWeaponViewModel } from './models/weapon-model.js?v=118';
+} from './assets/weapon-defs.js?v=119';
+export { ATTACHMENT_CATALOG } from './assets/attachment-defs.js?v=119';
+export { createWeaponViewModel } from './models/weapon-model.js?v=119';

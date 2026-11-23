@@ -1,15 +1,15 @@
-import { UI } from '../config.js?v=118';
-import { events, makeEventBridge } from '../events.js?v=118';
-import { DeployScreen } from './DeployScreen.js?v=118';
-import { HudRenderer } from './HudRenderer.js?v=118';
-import { Scoreboard } from './Scoreboard.js?v=118';
-import { MinimapRenderer } from './MinimapRenderer.js?v=118';
-import { CommandPanel } from './CommandPanel.js?v=118';
-import { WorldMarkers } from './WorldMarkers.js?v=118';
-import { GunsmithModal } from './GunsmithModal.js?v=118';
-import { SettingsModal } from './SettingsModal.js?v=118';
-import { VictoryScreen } from './VictoryScreen.js?v=118';
-import { DamageIndicators } from './DamageIndicators.js?v=118';
+import { UI } from '../config.js?v=119';
+import { events, makeEventBridge } from '../events.js?v=119';
+import { DeployScreen } from './DeployScreen.js?v=119';
+import { HudRenderer } from './HudRenderer.js?v=119';
+import { Scoreboard } from './Scoreboard.js?v=119';
+import { MinimapRenderer } from './MinimapRenderer.js?v=119';
+import { CommandPanel } from './CommandPanel.js?v=119';
+import { WorldMarkers } from './WorldMarkers.js?v=119';
+import { GunsmithModal } from './GunsmithModal.js?v=119';
+import { SettingsModal } from './SettingsModal.js?v=119';
+import { VictoryScreen } from './VictoryScreen.js?v=119';
+import { DamageIndicators } from './DamageIndicators.js?v=119';
 
 export class UIManager {
   constructor(world, player, botManager, vehicleManager, network) {

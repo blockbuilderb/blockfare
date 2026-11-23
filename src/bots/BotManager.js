@@ -1,17 +1,17 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT, FORMATION } from '../config.js?v=118';
-import { sound } from '../audio.js?v=118';
-import { tmpVec3 } from '../utils/VectorPool.js?v=118';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=118';
-import { events, makeEventBridge } from '../events.js?v=118';
-import { createSoldierMesh } from './SoldierMeshFactory.js?v=118';
-import { SightlineMethods } from './SightlineSystem.js?v=118';
-import { MedicAIMethods } from './MedicAI.js?v=118';
-import { BotAIMethods } from './BotAI.js?v=118';
+import { BOT, FORMATION } from '../config.js?v=119';
+import { sound } from '../audio.js?v=119';
+import { tmpVec3 } from '../utils/VectorPool.js?v=119';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=119';
+import { events, makeEventBridge } from '../events.js?v=119';
+import { createSoldierMesh } from './SoldierMeshFactory.js?v=119';
+import { SightlineMethods } from './SightlineSystem.js?v=119';
+import { MedicAIMethods } from './MedicAI.js?v=119';
+import { BotAIMethods } from './BotAI.js?v=119';
 import {
   createBaseProtectionFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=118';
+} from '../core/StateMachines.js?v=119';
 
 const BOT_NAMES_US = [
   'SgtOkiDoki', 'WakistanVet', 'VoxelMedic', 'EagleOne', 'BlockBuster',
@@ -1778,7 +1778,17 @@ export class BotManager {
     return returnMeta ? { pos, source } : pos;
   }
 
-  damageBot(bot, amount, attackerName, attackerTeam, weaponName, isHeadshot, onKillFn, onAwardXp = null) {
+  damageBot(
+    bot,
+    amount,
+    attackerName,
+    attackerTeam,
+    weaponName,
+    isHeadshot,
+    onKillFn,
+    onAwardXp = null,
+    blastMeta = null
+  ) {
     if (
       bot.dead ||
       bot.downed ||
@@ -1934,6 +1944,97 @@ export class BotManager {
         };
       }
 
+      // Squad-style Catastrophic Overpressure / Heavy Caliber "Dead-Dead" (Beyond Medic Rescue) + 3D Ragdoll Launch:
+      const cat = evaluateCatastrophicKill(
+        weaponName,
+        blastMeta?.dist ?? 0,
+        blastMeta?.radius ?? 0,
+        blastMeta?.rng || Math.random
+      );
+      if (cat.beyondRescue) {
+        bot.dead = true;
+        bot.downed = false;
+        bot.beyondRescue = true;
+        bot.bleedOutTimer = 0;
+        bot.respawnTimer = BOT.RESPAWN_TIMER || 8.0;
+        bot.spottedTimer = 0;
+        bot.velX = 0;
+        bot.velZ = 0;
+
+        // Compute outward 3D blast launch impulse & tumbling angular velocity
+        let dirX = 0;
+        let dirZ = 0;
+        const origin = blastMeta?.origin || null;
+        if (origin) {
+          const dx = bot.pos.x - origin.x;
+          const dz = bot.pos.z - origin.z;
+          const len = Math.hypot(dx, dz);
+          if (len > 0.05) {
+            dirX = dx / len;
+            dirZ = dz / len;
+          }
+        }
+        if (dirX === 0 && dirZ === 0) {
+          const randAng = (typeof blastMeta?.rng === 'function' ? blastMeta.rng() : Math.random()) * Math.PI * 2;
+          dirX = Math.cos(randAng);
+          dirZ = Math.sin(randAng);
+        }
+        bot.ragdollTimer = 3.6;
+        bot.ragdollBounces = 0;
+        bot.ragdollVelX = dirX * cat.hSpeed;
+        bot.ragdollVelY = cat.upSpeed;
+        bot.ragdollVelZ = dirZ * cat.hSpeed;
+        bot.ragdollSpinX = (dirZ >= 0 ? 1 : -1) * (6.8 + (cat.hSpeed || 6) * 0.35);
+        bot.ragdollSpinZ = (dirX >= 0 ? -1 : 1) * (5.2 + (cat.hSpeed || 6) * 0.25);
+        if (bot.mesh) {
+          bot.mesh.visible = true;
+        }
+
+        const playerTeam = this.player?.team || 'US';
+        if (bot.team !== playerTeam && this.world && typeof this.world.spawnEnemyLootPack === 'function') {
+          this.world.spawnEnemyLootPack(bot);
+        }
+        events.emit('bot:beyond-rescue', {
+          bot,
+          attackerName,
+          attackerTeam,
+          weaponName
+        });
+        events.emit('bot:killed', {
+          bot,
+          attackerName,
+          attackerTeam,
+          weaponName,
+          isHeadshot,
+          isMedicVictim,
+          wasRescuing,
+          beyondRescue: true,
+          stage: 'beyond_rescue'
+        });
+        const kiaWeapon = String(weaponName || 'EXPLOSIVE').includes('KIA')
+          ? weaponName
+          : `${weaponName || 'EXPLOSIVE'} [☠️ KIA]`;
+        if (onKillFn) {
+          onKillFn(attackerName, attackerTeam, bot.name, bot.team, kiaWeapon, isHeadshot);
+        } else {
+          events.emit('kill:event', {
+            killer: attackerName,
+            kTeam: attackerTeam,
+            victim: bot.name,
+            vTeam: bot.team,
+            weapon: kiaWeapon,
+            isHs: isHeadshot
+          });
+        }
+        return {
+          killed: true,
+          beyondRescue: true,
+          hitType: isHeadshot ? 'headshot' : hitType,
+          isMedicVictim,
+          wasRescuing
+        };
+      }
+
       bot.downed = true;
       bot.bleedOutTimer = BOT.BLEEDOUT_TIMER;
       bot.spottedTimer = 0;
@@ -1999,3 +2100,139 @@ export class BotManager {
 // Attach modular Sightline, MedicAI, and BotAI methods directly to BotManager.prototype
 // so 100% of existing public and internal methods remain accessible on BotManager instances.
 Object.assign(BotManager.prototype, SightlineMethods, MedicAIMethods, BotAIMethods);
+
+/**
+ * Squad-style Catastrophic Overpressure / Heavy Caliber "Dead-Dead" Evaluator:
+ * - Hand Grenades (`M67` / `GRENADE` / `FRAG`) & Small Arms / Melee / Bleed -> 0% Beyond Rescue (Medics can always rescue!).
+ * - AC-130 105mm, Tank 120mm/125mm, 500lb JDAM / GBU / Carpet Bomb / Maverick / Artillery -> 92% inner (100% direct), 55% outer + heavy ragdoll launch!
+ * - AC-130 40mm Bofors, 81mm Mortar, C4, 70mm Hydra Rocket -> 72% inner, 30% outer + high ragdoll launch!
+ * - RPG-7 HEAT -> 75% within 2.8m core / direct hit (0% on >2.8m outer shrapnel) + high ragdoll launch!
+ * - Heavy Autocannon (AC-130 25mm, A-10 30mm, IFV/AA 25-30mm, Fighter 20mm) -> 55% Beyond Rescue + medium knockback!
+ */
+export function evaluateCatastrophicKill(
+  weaponName = '',
+  distFromCenter = 0,
+  blastRadius = 0,
+  rng = Math.random
+) {
+  const w = String(weaponName || '').toUpperCase();
+  if (
+    !w ||
+    w.includes('GRENADE') ||
+    w.includes('M67') ||
+    w.includes('FRAG') ||
+    w === 'BLEED'
+  ) {
+    return { beyondRescue: false, chance: 0, hSpeed: 0, upSpeed: 0, tier: 'REVIVABLE' };
+  }
+
+  const isCatastrophicShellOrBomb =
+    w.includes('105MM') ||
+    w.includes('HOWITZER') ||
+    w.includes('120MM') ||
+    w.includes('125MM') ||
+    w.includes('APFSDS') ||
+    w.includes('APHE') ||
+    w.includes('JDAM') ||
+    w.includes('GBU') ||
+    w.includes('CARPET BOMB') ||
+    w.includes('MK-82') ||
+    w.includes('500LB') ||
+    w.includes('2,000LB') ||
+    w.includes('30,000LB') ||
+    w.includes('MAVERICK') ||
+    w.includes('AGM') ||
+    w.includes('KH-29') ||
+    w.includes('AIRSTRIKE') ||
+    w.includes('ARTILLERY') ||
+    w.includes('155MM') ||
+    w.includes('DYNAMITE') ||
+    w.includes('TREBUCHET') ||
+    w.includes('BOULDER');
+
+  if (isCatastrophicShellOrBomb) {
+    const isDirect = blastRadius > 0 && distFromCenter <= 2.2;
+    const isInner = blastRadius <= 0 || distFromCenter <= blastRadius * 0.62;
+    const chance = isDirect ? 1.0 : isInner ? 0.92 : 0.55;
+    const roll = rng();
+    const jitter = rng();
+    return {
+      beyondRescue: roll < chance,
+      chance,
+      hSpeed: isInner ? 13.5 + jitter * 4.5 : 8.5 + jitter * 3.5,
+      upSpeed: isInner ? 6.5 + jitter * 3.8 : 4.5 + jitter * 2.5,
+      tier: 'HEAVY_BLAST'
+    };
+  }
+
+  const isRpg = w.includes('RPG') || w.includes('HEAT');
+  if (isRpg) {
+    const coreCut = blastRadius > 0 ? Math.max(2.8, blastRadius * 0.56) : 2.8;
+    if (distFromCenter > coreCut) {
+      return { beyondRescue: false, chance: 0, hSpeed: 0, upSpeed: 0, tier: 'RPG_OUTER_SHRAPNEL' };
+    }
+    const chance = 0.75;
+    const roll = rng();
+    const jitter = rng();
+    return {
+      beyondRescue: roll < chance,
+      chance,
+      hSpeed: 9.0 + jitter * 4.5,
+      upSpeed: 5.5 + jitter * 3.0,
+      tier: 'RPG_CORE'
+    };
+  }
+
+  const isMediumExplosive =
+    (w.includes('40MM') && w.includes('BOFORS')) ||
+    w.includes('MORTAR') ||
+    w.includes('81MM') ||
+    w.includes('82MM') ||
+    w.includes('C4') ||
+    w.includes('70MM') ||
+    w.includes('HYDRA') ||
+    w.includes('ROCKET') ||
+    w.includes('T-REX');
+
+  if (isMediumExplosive) {
+    const isInner = blastRadius <= 0 || distFromCenter <= blastRadius * 0.65;
+    const chance = isInner ? 0.72 : 0.30;
+    const roll = rng();
+    const jitter = rng();
+    return {
+      beyondRescue: roll < chance,
+      chance,
+      hSpeed: isInner ? 8.5 + jitter * 4.0 : 5.0 + jitter * 2.5,
+      upSpeed: isInner ? 5.0 + jitter * 3.0 : 3.2 + jitter * 1.8,
+      tier: 'MEDIUM_BLAST'
+    };
+  }
+
+  const isAutocannon =
+    w.includes('25MM') ||
+    w.includes('30MM') ||
+    w.includes('20MM') ||
+    w.includes('GAU-12') ||
+    w.includes('EQUALIZER') ||
+    w.includes('GAU-8') ||
+    w.includes('AVENGER') ||
+    w.includes('VULCAN') ||
+    w.includes('2A38') ||
+    w.includes('2A42') ||
+    w.includes('AUTOCANNON');
+
+  if (isAutocannon) {
+    const chance = 0.55;
+    const roll = rng();
+    const jitter = rng();
+    return {
+      beyondRescue: roll < chance,
+      chance,
+      hSpeed: 4.5 + jitter * 2.7,
+      upSpeed: 2.5 + jitter * 1.7,
+      tier: 'AUTOCANNON'
+    };
+  }
+
+  return { beyondRescue: false, chance: 0, hSpeed: 0, upSpeed: 0, tier: 'REVIVABLE' };
+}

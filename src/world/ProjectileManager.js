@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=118';
-import { TERRAIN } from '../config.js?v=118';
-import { events } from '../events.js?v=118';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=118';
+import { sound } from '../audio.js?v=119';
+import { TERRAIN } from '../config.js?v=119';
+import { events } from '../events.js?v=119';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=119';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;
@@ -1321,14 +1321,15 @@ export const ProjectileManager = {
           190,
           (pos, rad, dmg, broken) => {
             if (onExplosionDamage) {
-              onExplosionDamage(pos, rad, dmg, proj.owner, broken);
+              onExplosionDamage(pos, rad, dmg, proj.owner, broken, 'M67 FRAG GRENADE');
             } else {
               events.emit('explosion:damage', {
                 pos,
                 radius: rad,
                 maxDamage: dmg,
                 owner: proj.owner,
-                brokenCount: broken
+                brokenCount: broken,
+                weaponOverride: 'M67 FRAG GRENADE'
               });
             }
           },

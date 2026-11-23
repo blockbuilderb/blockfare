@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=118';
-import { VehicleManager } from './vehicles.js?v=118';
-import { BotManager } from './bots.js?v=118';
-import { PlayerController } from './player.js?v=118';
-import { NetworkManager } from './network.js?v=118';
-import { UIManager } from './ui.js?v=118';
-import { TelemetryLogger } from './telemetry.js?v=118';
-import { sound } from './audio.js?v=118';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=118';
-import { events, makeEventBridge } from './events.js?v=118';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=118';
+import { VoxelWorld } from './world.js?v=119';
+import { VehicleManager } from './vehicles.js?v=119';
+import { BotManager } from './bots.js?v=119';
+import { PlayerController } from './player.js?v=119';
+import { NetworkManager } from './network.js?v=119';
+import { UIManager } from './ui.js?v=119';
+import { TelemetryLogger } from './telemetry.js?v=119';
+import { sound } from './audio.js?v=119';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=119';
+import { events, makeEventBridge } from './events.js?v=119';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=119';
 
 class BattleBitGame {
   constructor() {
@@ -999,6 +999,12 @@ class BattleBitGame {
 
     events.on('bot:killed', () => {});
 
+    events.on('bot:beyond-rescue', ({ bot }) => {
+      if (!bot || bot._alreadyBledTicket || this.matchEnded) return;
+      bot._alreadyBledTicket = true;
+      this.spendRespawnTickets(bot.team, 'SOLDIER', `${bot.name} (KIA)`, 1);
+    });
+
     // Multiplayer Human Teammate Proximity & Squad Radio Comms
     events.on('network:remote-comms', ({ msg, rp }) => {
       if (!msg || msg.team !== this.player.team) return;
@@ -1288,7 +1294,9 @@ class BattleBitGame {
           ownerTeam,
           weaponLabel,
           this.player.onKillEvent,
-          shooterPos
+          shooterPos,
+          false,
+          { origin: blastPos, dist: distToPlayer, radius }
         );
       }
     }
@@ -1326,7 +1334,9 @@ class BattleBitGame {
             ownerTeam,
             weaponLabel,
             false,
-            this.player.onKillEvent
+            this.player.onKillEvent,
+            null,
+            { origin: blastPos, dist, radius }
           );
           if (res && res.ignoredDowned) {
             continue;

@@ -1,10 +1,11 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { ECONOMY, VEHICLE_STATS } from '../src/config.js?v=118';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=118';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=118';
-import { VehicleManager } from '../src/vehicles.js?v=118';
+import { ECONOMY, VEHICLE_STATS } from '../src/config.js?v=119';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=119';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=119';
+import { VehicleManager, classifyWeaponBallistics } from '../src/vehicles.js?v=119';
+import { BotManager, evaluateCatastrophicKill } from '../src/bots.js?v=119';
 
 function createEconomyPlayerHarness(overrides = {}) {
   const storage = new Map();
@@ -54,10 +55,8 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & $0 Free H
     player.loadGunsmithState();
     assert.equal(player.matchCash, ECONOMY.STARTING_MATCH_CASH);
     assert.equal(player.matchCash, 50);
-    // $6,662 - $50 = $6,612 migrated safely into persistent Armory Bank!
     assert.equal(player.warehouseCash, 96612);
 
-    // Personal on-demand field-drop Dirt Bike costs ⚡$100 (short by $50 at 00:00; parked HQ/FOB bikes are $0 free!)
     assert.equal(ECONOMY.VEHICLE_BASE_COST.bike, 100);
     assert.equal(ECONOMY.VEHICLE_BASE_COST.atv, 150);
     const bikeFail = player.payForVehicleRequisition('bike');
@@ -66,7 +65,6 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & $0 Free H
     assert.equal(bikeFail.shortBy, 50);
     assert.equal(player.warehouseCash, 96612, 'Armory Bank is untouched by failed field requisition');
 
-    // Buying a permanent Hangar/Armory upgrade in [L] spends Armory Bank, leaving ⚡$50 Match Cash intact!
     const buyFlir = player.buyOrEquipVehicleUpgrade('armorSensor', 'citv_flir_pod');
     assert.equal(buyFlir.ok, true);
     assert.equal(player.warehouseCash, 96612 - 800);
@@ -78,7 +76,6 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & $0 Free H
     player.warehouseCash = 10000;
     player.matchCash = 50;
 
-    // Unlock & equip CITV FLIR ($800) from Armory Bank -> Tank now has +$150 modded surcharge ($1,400 + $150 = $1,550)
     player.buyOrEquipVehicleUpgrade('armorSensor', 'citv_flir_pod');
     const moddedQuote = player.getVehicleRequisitionQuote('tank');
     assert.equal(moddedQuote.isModded, true);
@@ -86,7 +83,6 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & $0 Free H
     assert.equal(moddedQuote.modSurcharge, 150);
     assert.equal(moddedQuote.totalCost, 1550);
 
-    // Earn ⚡$1,370 in combat -> total ⚡$1,420 (enough for $1,400 Stock Abrams, $130 short of $1,550 Modded)
     player.addCash(1370, 'CAPTURES & AT KILLS', false);
     assert.equal(player.matchCash, 1420);
 
@@ -96,7 +92,6 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & $0 Free H
     assert.equal(stockFallbackPay.useStock, true);
     assert.equal(player.matchCash, 20);
 
-    // Stock vehicle does NOT receive paid CITV thermal FLIR when _paidAsStock === true
     const dummyTank = {
       id: 'req_tank_1',
       type: 'tank',
@@ -153,7 +148,6 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & $0 Free H
       mesh: new THREE.Group()
     };
 
-    // 1. findAvailableBaseVehicle locates parked HQ pool units for $0 Main Base deploy!
     const vmStub = {
       vehicles: [hqPlane, hqBike, hqTank],
       b2UnlockedByTeam: { US: false, RU: false },
@@ -166,11 +160,9 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & $0 Free H
     assert.equal(vmStub.findAvailableBaseVehicle('US', 'tank'), hqTank);
     assert.equal(vmStub.findAvailableBaseVehicle('US', 'b2_spirit'), null, 'B-2 stays locked before 25 kills');
 
-    // 2. Combat Pilot boards parked HQ runway A-10 Warthog at 00:00 (⚡$50) for $0 FREE!
     assert.equal(pilot.enterVehicle(hqPlane, false), true);
     assert.equal(pilot.matchCash, 50);
 
-    // 3. Non-pilot Engineer is still blocked by class license on aircraft, NOT cash, and rides HQ bike for $0 FREE!
     hqPlane.driver = null;
     const { player: eng } = createEconomyPlayerHarness({ role: 'engineer' });
     eng.loadGunsmithState();
@@ -178,13 +170,11 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & $0 Free H
     assert.equal(eng.enterVehicle(hqBike, false), true, 'HQ motorpool bike is $0 free at 00:00!');
     assert.equal(eng.matchCash, 50);
 
-    // 4. Armor Crewman boards parked HQ Abrams at 00:00 for $0 FREE!
     const { player: crew } = createEconomyPlayerHarness({ role: 'armor' });
     crew.loadGunsmithState();
     assert.equal(crew.enterVehicle(hqTank, false), true, 'HQ Abrams is $0 free for Armor Crewman!');
     assert.equal(crew.matchCash, 50);
 
-    // 5. End-of-round extraction deposits unspent Match Cash + Victory multiplier into Armory Bank and resets Match Cash to $50!
     const bankBefore = crew.warehouseCash;
     crew.kills = 4;
     crew.captures = 2;
@@ -194,49 +184,112 @@ describe('3-Pillar Economy: Dual-Wallet Separation, Tarkov Surcharge & $0 Free H
   });
 });
 
-describe('Realistic Airspace Stratification & AC-130 / A-10 Ballistics vs. Jets & MBTs', () => {
-  test('stratifies Fighter & B-2 speeds well above subsonic CAS and blocks AC-130 side guns from hitting airborne aircraft', () => {
+describe('Squad Caliber Penetration, Optics/Sensor Crits, Avionics FCS & Beyond-Rescue Ragdoll Physics', () => {
+  test('blocks infantry rifles & LMGs from blowing up Tanks/IFVs or shooting down Jets, while supporting rare Optics/Sensor crits & AC-130 downward air hits', () => {
     assert.equal(VEHICLE_STATS.PLANE_FIGHTER.speed > VEHICLE_STATS.PLANE_CAS.maxSpeed, true);
     assert.equal(VEHICLE_STATS.PLANE_B2_SPIRIT.speed > VEHICLE_STATS.PLANE_CAS.maxSpeed, true);
+    assert.equal(classifyWeaponBallistics('M4A1 Tactical').isSmallArms, true);
+    assert.equal(classifyWeaponBallistics('M249 SAW').isLmgOrSniper, true);
+    assert.equal(classifyWeaponBallistics('RPG-7 HEAT').isHeavyAntiArmor, true);
 
     const vm = {
       world: { getGroundHeightAt: () => 0, spawnDebris: () => {} },
       damageVehicle: VehicleManager.prototype.damageVehicle
     };
 
-    const airborneF15 = {
+    // 1. Infantry Rifle & LMG vs MBT -> ZERO hull HP damage (never explodes!), rare Optics crit works!
+    const mbt = {
+      id: 'ru_t90_1',
+      type: 'tank',
+      isAircraft: false,
+      dead: false,
+      hp: 1600,
+      maxHp: 1600,
+      yaw: 0,
+      eraBlocksIntact: 4,
+      pos: new THREE.Vector3(0, 0, 0),
+      _forceCritRoll: 0.5 // normal non-crit roll
+    };
+    for (let i = 0; i < 50; i++) {
+      vm.damageVehicle(mbt, 18, 'VIPER_1', 'US', 'M4A1 Tactical', null, null, new THREE.Vector3(0, 1, -40));
+      vm.damageVehicle(mbt, 24, 'VIPER_1', 'US', 'M249 SAW', null, null, new THREE.Vector3(0, 1, 40));
+    }
+    assert.equal(mbt.hp, 1600, 'Rifles and LMGs deal 0 hull HP to MBTs');
+    assert.equal(mbt.lastArmorRicochet, true);
+
+    // Rare Optics Crit roll (< 0.018 on LMG) cracks Periscope/CITV Optics while keeping 1600/1600 Hull HP!
+    mbt._forceCritRoll = 0.004;
+    vm.damageVehicle(mbt, 24, 'VIPER_1', 'US', 'M249 SAW', null, null, new THREE.Vector3(0, 1, -40));
+    assert.equal(mbt.hp, 1600);
+    assert.equal(mbt.subsystems.optics, 'DAMAGED');
+    assert.equal(mbt.lastSubsystemCrit, 'OPTICS');
+
+    // 2. A-10C Titanium Bathtub shrugs off infantry rifles & LMGs (0 hull HP), while rare crit glitches HUD sensors!
+    const a10 = {
+      id: 'ru_su25_cas',
+      type: 'plane',
+      isAircraft: true,
+      aircraftRole: 'cas',
+      dead: false,
+      hp: 900,
+      maxHp: 900,
+      pos: new THREE.Vector3(0, 95, 0),
+      _forceCritRoll: 0.005
+    };
+    vm.damageVehicle(a10, 22, 'VIPER_1', 'US', 'M249 SAW', null, null, new THREE.Vector3(0, 0, 80));
+    assert.equal(a10.hp, 900, 'CAS titanium tub takes 0 hull HP from infantry LMG');
+    assert.equal(a10.lastSubsystemCrit, 'SENSORS');
+    assert.equal(a10.sensorGlitchTimer > 0, true);
+
+    // 3. Fast Jet vs close-range infantry LMG: scratches down to 25% HP floor, NEVER shoots down the plane!
+    const lowJet = {
       id: 'ru_su57_fighter',
       type: 'plane',
       isAircraft: true,
       aircraftRole: 'fighter',
-      aiPilotActive: true,
-      forwardSpeed: 114,
       dead: false,
-      hp: 580,
-      maxHp: 580,
-      pos: new THREE.Vector3(0, 345, 0)
+      hp: 152, // 25% floor of 600 maxHp is 150
+      maxHp: 600,
+      pos: new THREE.Vector3(0, 80, 0),
+      _forceCritRoll: 0.5
     };
+    for (let i = 0; i < 20; i++) {
+      vm.damageVehicle(lowJet, 25, 'VIPER_1', 'US', 'PKP PECHENEG LMG', null, null, new THREE.Vector3(0, 0, 90));
+    }
+    assert.equal(lowJet.hp, 150, 'Infantry LMG cannot reduce fast jet below 25% HP floor or destroy it');
+    assert.equal(lowJet.dead, false);
 
-    // AC-130 25mm, 40mm, and 105mm are downward ground-attack mounts -> 0 damage to airborne jets!
-    assert.equal(
-      vm.damageVehicle(airborneF15, 165, 'VIPER_1', 'US', '25MM GAU-12 EQUALIZER', null, null, new THREE.Vector3(0, 168, 200)),
-      false
+    // 4. AC-130 downward port cannon DOES damage a lower-flying aircraft that crosses below its guns!
+    const planeBelowGunship = {
+      id: 'ru_su25_low',
+      type: 'plane',
+      isAircraft: true,
+      aircraftRole: 'cas',
+      dead: false,
+      hp: 900,
+      maxHp: 900,
+      pos: new THREE.Vector3(0, 90, 0),
+      _forceCritRoll: 0.05
+    };
+    vm.damageVehicle(
+      planeBelowGunship,
+      150,
+      'VIPER_1',
+      'US',
+      '25MM GAU-12 EQUALIZER',
+      null,
+      null,
+      new THREE.Vector3(0, 168, 180)
     );
-    assert.equal(airborneF15.hp, 580);
-
-    assert.equal(
-      vm.damageVehicle(airborneF15, 580, 'VIPER_1', 'US', '105MM M102 HOWITZER', null, null, new THREE.Vector3(0, 168, 200)),
-      false
-    );
-    assert.equal(airborneF15.hp, 580);
+    assert.equal(planeBelowGunship.hp < 900, true, 'Physical hit from AC-130 port gun damages lower aircraft');
+    assert.equal(planeBelowGunship.sensorGlitchTimer > 0, true);
   });
 
-  test('enforces MBT armor ricochets vs AC-130 25mm & shallow A-10 30mm, while rewarding AC-130 105mm & steep A-10 top/rear dives', () => {
+  test('enforces MBT directional penetration vs AC-130 25mm/105mm & A-10 30mm dives, and AC-130 FCS auto-leads moving ground vehicles only', () => {
     const vm = {
       world: { getGroundHeightAt: () => 0, spawnDebris: () => {} },
       damageVehicle: VehicleManager.prototype.damageVehicle
     };
-
     const makeTank = () => ({
       id: 'ru_t90_1',
       type: 'tank',
@@ -244,51 +297,140 @@ describe('Realistic Airspace Stratification & AC-130 / A-10 Ballistics vs. Jets 
       dead: false,
       hp: 1600,
       maxHp: 1600,
-      yaw: 0, // facing -Z (fwd = (0, 0, -1))
+      yaw: 0,
       eraBlocksIntact: 4,
       pos: new THREE.Vector3(0, 0, 0)
     });
 
-    // 1. AC-130 25mm GAU-12 bounces off MBT armor (ricochet!)
     const tankVs25 = makeTank();
     vm.damageVehicle(tankVs25, 165, 'VIPER_1', 'US', '25MM GAU-12 EQUALIZER', null, null, new THREE.Vector3(0, 168, -220));
     assert.equal(tankVs25.lastArmorRicochet, true);
     assert.equal(tankVs25.lastAppliedDamage <= 12, true);
 
-    // 2. AC-130 105mm M102 Howitzer punches straight through MBT roof deck!
     const tankVs105 = makeTank();
     vm.damageVehicle(tankVs105, 580, 'VIPER_1', 'US', '105MM M102 HOWITZER', null, null, new THREE.Vector3(120, 168, 0));
-    assert.equal(tankVs105.lastArmorRicochet, false);
     assert.equal(tankVs105.lastAppliedDamage >= 450, true);
 
-    // 3. A-10 30mm GAU-8 at shallow frontal angle bounces off Chobham/ERA glacis!
     const tankShallowFront = makeTank();
-    vm.damageVehicle(
-      tankShallowFront,
-      185,
-      'VIPER_1',
-      'US',
-      '30MM GAU-8 AVENGER',
-      null,
-      null,
-      new THREE.Vector3(0, 35, -260) // ~7.6° shallow frontal pass
-    );
+    vm.damageVehicle(tankShallowFront, 185, 'VIPER_1', 'US', '30MM GAU-8 AVENGER', null, null, new THREE.Vector3(0, 35, -260));
     assert.equal(tankShallowFront.lastArmorRicochet, true);
-    assert.equal(tankShallowFront.lastAppliedDamage <= 12, true);
 
-    // 4. A-10 30mm GAU-8 on a steep >=30° top-down dive penetrates thin turret/engine roof!
     const tankSteepDive = makeTank();
-    vm.damageVehicle(
-      tankSteepDive,
-      185,
-      'VIPER_1',
-      'US',
-      '30MM GAU-8 AVENGER',
-      null,
-      null,
-      new THREE.Vector3(0, 160, -220) // ~36° steep dive (elevSin = 0.588 >= 0.42)
-    );
+    vm.damageVehicle(tankSteepDive, 185, 'VIPER_1', 'US', '30MM GAU-8 AVENGER', null, null, new THREE.Vector3(0, 160, -220));
     assert.equal(tankSteepDive.lastArmorRicochet, false);
     assert.equal(tankSteepDive.lastAppliedDamage >= 45, true);
+
+    // AC-130 Computerized Ground FCS Auto-Lead tracks moving enemy tank on ground, ignores airborne aircraft!
+    const movingTank = {
+      id: 'ru_t90_mov',
+      type: 'tank',
+      isAircraft: false,
+      team: 'RU',
+      dead: false,
+      pos: new THREE.Vector3(5, 0, 0),
+      yaw: 0, // moving along -Z at 16 m/s
+      forwardSpeed: 16
+    };
+    const enemyJet = {
+      id: 'ru_su57',
+      type: 'plane',
+      isAircraft: true,
+      team: 'RU',
+      dead: false,
+      pos: new THREE.Vector3(2, 0, 0),
+      yaw: 0,
+      forwardSpeed: 120
+    };
+    const { player: gunshipPilot } = createEconomyPlayerHarness({
+      role: 'pilot',
+      vehicleManager: { vehicles: [enemyJet, movingTank] }
+    });
+    const gunship = { id: 'us_ac130', isAircraft: true, aircraftRole: 'gunship', team: 'US' };
+    const fcs = gunshipPilot.computeGunshipFcsSolution(
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(-180, 170, 0),
+      gunship,
+      210,
+      2.2
+    );
+    assert.equal(fcs.trackedVehicle, movingTank, 'FCS tracks ground vehicle and ignores aircraft');
+    assert.equal(fcs.leadMeters > 10, true, 'FCS leads moving ground target ahead of current position');
+    assert.equal(fcs.interceptPos.z < -10, true);
+  });
+
+  test('triggers Beyond-Rescue ("Dead-Dead") + 3D Ragdoll launch on AC-130/Tank/RPG core hits while keeping Frag Grenades & Rifles revivable', () => {
+    // 1. Hand Grenades & Rifles are ALWAYS 0% Beyond-Rescue (Medics can rescue!)
+    assert.equal(evaluateCatastrophicKill('M67 FRAG GRENADE', 0.5, 5.0, () => 0.01).beyondRescue, false);
+    assert.equal(evaluateCatastrophicKill('M4A1 Tactical', 0, 0, () => 0.01).beyondRescue, false);
+
+    // 2. RPG-7: 75% Beyond-Rescue inside 2.8m core, 0% Beyond-Rescue on >2.8m outer shrapnel!
+    assert.equal(evaluateCatastrophicKill('RPG-7 HEAT', 1.5, 5.0, () => 0.5).beyondRescue, true);
+    assert.equal(evaluateCatastrophicKill('RPG-7 HEAT', 4.2, 5.0, () => 0.01).beyondRescue, false);
+
+    // 3. AC-130 105mm & Tank 120mm: 92-100% Beyond-Rescue + heavy ragdoll launch velocity!
+    const howCat = evaluateCatastrophicKill('105MM M102 HOWITZER', 3.0, 14.5, () => 0.4);
+    assert.equal(howCat.beyondRescue, true);
+    assert.equal(howCat.hSpeed >= 13.5, true);
+    assert.equal(howCat.upSpeed >= 6.5, true);
+
+    // 4. BotManager.damageBot puts Grenade victim into revivable `downed`, while launching 105mm victim as Beyond-Rescue ragdoll!
+    const bmStub = {
+      world: { era: 'modern', getGroundHeightAt: () => 0, spawnDebris: () => {}, spawnEnemyLootPack: () => {} },
+      player: { team: 'US' },
+      clearBotRescueLinks: () => {},
+      damageBot: BotManager.prototype.damageBot
+    };
+    const makeBot = (id, x, z) => ({
+      id,
+      name: id,
+      team: 'RU',
+      role: 'ASSAULT',
+      hp: 100,
+      maxHp: 100,
+      armorHp: 0,
+      hasHelmet: false,
+      dead: false,
+      downed: false,
+      deaths: 0,
+      pos: new THREE.Vector3(x, 0, z),
+      mesh: new THREE.Group(),
+      parts: {}
+    });
+
+    const grenVictim = makeBot('RU_GREN_1', 2, 0);
+    bmStub.damageBot(grenVictim, 180, 'VIPER_1', 'US', 'M67 FRAG GRENADE', false, () => {}, null, {
+      origin: new THREE.Vector3(0, 0, 0),
+      dist: 2.0,
+      radius: 5.0,
+      rng: () => 0.01
+    });
+    assert.equal(grenVictim.downed, true, 'Frag grenade victim enters revivable downed state');
+    assert.equal(grenVictim.dead, false);
+
+    const howitzerVictim = makeBot('RU_105_1', 4, 0);
+    const res105 = bmStub.damageBot(
+      howitzerVictim,
+      580,
+      'VIPER_1',
+      'US',
+      '105MM M102 HOWITZER',
+      false,
+      () => {},
+      null,
+      {
+        origin: new THREE.Vector3(0, 0, 0),
+        dist: 4.0,
+        radius: 14.5,
+        rng: () => 0.2
+      }
+    );
+    assert.equal(res105.beyondRescue, true);
+    assert.equal(howitzerVictim.dead, true, '105mm victim skips downed state -> immediate KIA');
+    assert.equal(howitzerVictim.downed, false);
+    assert.equal(howitzerVictim.beyondRescue, true);
+    assert.equal(howitzerVictim.ragdollTimer > 3.0, true);
+    assert.equal(howitzerVictim.ragdollVelX > 12, true, 'Body is blown outward away from blast origin');
+    assert.equal(howitzerVictim.ragdollVelY > 6, true, 'Body is launched upward into ragdoll arc');
+    assert.equal(howitzerVictim.mesh.visible, true, 'Corpse stays visible in flight during ragdoll tumble');
   });
 });

@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=118';
-import { sound } from '../audio.js?v=118';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=118';
+import { VOXEL_SIZE } from '../world.js?v=119';
+import { sound } from '../audio.js?v=119';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=119';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=118';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=118';
-import { events, makeEventBridge } from '../events.js?v=118';
-import { GunsmithMethods } from './GunsmithState.js?v=118';
-import { FortificationMethods } from './FortificationBuilder.js?v=118';
-import { CommanderMethods } from './CommanderAbilities.js?v=118';
-import { VehicleControlMethods } from './VehicleControl.js?v=118';
-import { CombatMethods } from './PlayerCombat.js?v=118';
+} from '../utils/KeyboardShortcuts.js?v=119';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=119';
+import { events, makeEventBridge } from '../events.js?v=119';
+import { GunsmithMethods } from './GunsmithState.js?v=119';
+import { FortificationMethods } from './FortificationBuilder.js?v=119';
+import { CommanderMethods } from './CommanderAbilities.js?v=119';
+import { VehicleControlMethods } from './VehicleControl.js?v=119';
+import { CombatMethods } from './PlayerCombat.js?v=119';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=118';
+} from '../core/StateMachines.js?v=119';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {

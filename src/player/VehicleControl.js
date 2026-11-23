@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=118';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=118';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=118';
-import { events } from '../events.js?v=118';
+import { sound } from '../audio.js?v=119';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=119';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=119';
+import { events } from '../events.js?v=119';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +11,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=118';
+} from '../core/StateMachines.js?v=119';
 
 function markShared(asset) {
   if (asset) {
@@ -3130,6 +3130,12 @@ export const VehicleControlMethods = {
 
       v.turretYaw = this.yaw;
       v.turretPitch = this.pitch;
+      if ((v.sensorGlitchTimer || 0) > 0) {
+        v.sensorGlitchTimer = Math.max(0, v.sensorGlitchTimer - dt);
+      }
+      if ((v.opticsGlitchTimer || 0) > 0) {
+        v.opticsGlitchTimer = Math.max(0, v.opticsGlitchTimer - dt);
+      }
       v.mesh.position.copy(v.pos);
       _airQuatYaw.setFromAxisAngle(_axisY, v.yaw || 0);
       _airQuatPitch.setFromAxisAngle(_axisX, v.pitch || 0);
@@ -3681,6 +3687,12 @@ export const VehicleControlMethods = {
 
       v.turretYaw = this.yaw;
       v.turretPitch = this.pitch;
+      if ((v.sensorGlitchTimer || 0) > 0) {
+        v.sensorGlitchTimer = Math.max(0, v.sensorGlitchTimer - dt);
+      }
+      if ((v.opticsGlitchTimer || 0) > 0) {
+        v.opticsGlitchTimer = Math.max(0, v.opticsGlitchTimer - dt);
+      }
       v.mesh.position.copy(v.pos);
       v.mesh.quaternion.copy(_airQuatCombined);
       this.pos.copy(v.pos);
@@ -3909,6 +3921,21 @@ export const VehicleControlMethods = {
     if (isGunship) {
       const gunshipHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 4800);
       ccipPos.copy(gunshipHit.point);
+      if (typeof this.computeGunshipFcsSolution === 'function') {
+        const fcsSpd =
+          activeWpnSlot === 2
+            ? Math.max(175, PROJECTILES.AC130_105MM?.speed || 175)
+            : activeWpnSlot === 1
+            ? Math.max(210, PROJECTILES.AC130_40MM?.speed || 210)
+            : 460;
+        const fcsGrav =
+          activeWpnSlot === 2
+            ? PROJECTILES.AC130_105MM?.gravity || 4.8
+            : activeWpnSlot === 1
+            ? PROJECTILES.AC130_40MM?.gravity || 2.2
+            : 4.2;
+        this.computeGunshipFcsSolution(ccipPos, camOrigin, v, fcsSpd, fcsGrav);
+      }
     } else if (!isBombOrdnanceSelected) {
       // Cannon / Rocket True Curved Ballistic Ray-March Pipper:
       // Steps along the exact gravity-curved parabola (`camOrigin + camDir * v * t - 0.5 * g * t²`)
@@ -4243,9 +4270,14 @@ export const VehicleControlMethods = {
           const spread = 0.002 + altSpreadScale * 0.0034;
           const eqMuzzleVel = 460;
           const eqGrav = 4.2;
-          const tof25 = Math.min(3.5, aimHit.distance / eqMuzzleVel);
-          const compTarget = aimHit.point.clone();
-          compTarget.y += 0.5 * eqGrav * tof25 * tof25;
+          const fcs25 = this.computeGunshipFcsSolution
+            ? this.computeGunshipFcsSolution(aimHit.point, camOrigin, v, eqMuzzleVel, eqGrav)
+            : null;
+          const compTarget = fcs25 ? fcs25.aimPoint.clone() : aimHit.point.clone();
+          if (!fcs25) {
+            const tof25 = Math.min(3.5, aimHit.distance / eqMuzzleVel);
+            compTarget.y += 0.5 * eqGrav * tof25 * tof25;
+          }
           const rawEqDir = compTarget
             .sub(camOrigin)
             .normalize()
@@ -4299,10 +4331,15 @@ export const VehicleControlMethods = {
 
           const bofSpd = Math.max(210, PROJECTILES.AC130_40MM?.speed || 210);
           const bofGrav = PROJECTILES.AC130_40MM?.gravity || 2.2;
-          const dBof = aimHit.point.distanceTo(noseMuzzle);
-          const tofBof = dBof / bofSpd;
-          const bofCompPt = aimHit.point.clone();
-          bofCompPt.y += 0.5 * bofGrav * tofBof * tofBof;
+          const fcs40 = this.computeGunshipFcsSolution
+            ? this.computeGunshipFcsSolution(aimHit.point, noseMuzzle, v, bofSpd, bofGrav)
+            : null;
+          const bofCompPt = fcs40 ? fcs40.aimPoint.clone() : aimHit.point.clone();
+          if (!fcs40) {
+            const dBof = aimHit.point.distanceTo(noseMuzzle);
+            const tofBof = dBof / bofSpd;
+            bofCompPt.y += 0.5 * bofGrav * tofBof * tofBof;
+          }
           const boforsDir = bofCompPt.sub(noseMuzzle).normalize();
           if (boforsDir.y > -0.04) {
             boforsDir.y = -0.04;
@@ -4345,8 +4382,13 @@ export const VehicleControlMethods = {
           const howGrav = PROJECTILES.AC130_105MM?.gravity || 4.8;
           const dHow = aimHit.point.distanceTo(noseMuzzle);
           const tofHow = dHow / howSpd;
-          const howCompPt = aimHit.point.clone();
-          howCompPt.y += 0.5 * howGrav * tofHow * tofHow;
+          const fcs105 = this.computeGunshipFcsSolution
+            ? this.computeGunshipFcsSolution(aimHit.point, noseMuzzle, v, howSpd, howGrav)
+            : null;
+          const howCompPt = fcs105 ? fcs105.aimPoint.clone() : aimHit.point.clone();
+          if (!fcs105) {
+            howCompPt.y += 0.5 * howGrav * tofHow * tofHow;
+          }
           const howitzerDir = howCompPt.sub(noseMuzzle).normalize();
           if (howitzerDir.y > -0.04) {
             howitzerDir.y = -0.04;
@@ -4607,8 +4649,13 @@ export const VehicleControlMethods = {
           const howGrav = PROJECTILES.AC130_105MM?.gravity || 4.8;
           const dHow = aimHit.point.distanceTo(noseMuzzle);
           const tofHow = dHow / howSpd;
-          const howCompPt = aimHit.point.clone();
-          howCompPt.y += 0.5 * howGrav * tofHow * tofHow;
+          const fcs105 = this.computeGunshipFcsSolution
+            ? this.computeGunshipFcsSolution(aimHit.point, noseMuzzle, v, howSpd, howGrav)
+            : null;
+          const howCompPt = fcs105 ? fcs105.aimPoint.clone() : aimHit.point.clone();
+          if (!fcs105) {
+            howCompPt.y += 0.5 * howGrav * tofHow * tofHow;
+          }
           const howitzerDir = howCompPt.sub(noseMuzzle).normalize();
           if (howitzerDir.y > -0.04) {
             howitzerDir.y = -0.04;
@@ -4872,5 +4919,77 @@ export const VehicleControlMethods = {
       return rawShotDir.clone().lerp(bestLeadDir, 0.72).normalize();
     }
     return rawShotDir;
+  },
+
+  /**
+   * AC-130J Computerized Ground Fire-Control System (FCS):
+   * - Automatically compensates for projectile gravity drop over slant range (`0.5 * g * tof²`), AND
+   * - Automatically tracks & leads moving enemy ground vehicles within 18m of the sensor reticle!
+   * - ZERO air-to-air tracking (`!cand.isAircraft`).
+   */
+  computeGunshipFcsSolution(groundPoint, launchOrigin, gunshipVeh, projSpeed = 210, projGrav = 2.2) {
+    const basePt = groundPoint.clone();
+    let trackedVeh = null;
+    let bestDist = 18.5;
+
+    if (this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+      for (const cand of this.vehicleManager.vehicles) {
+        if (!cand || cand.dead || cand.isAircraft || cand.team === this.team || cand === gunshipVeh) {
+          continue;
+        }
+        const d = Math.hypot(cand.pos.x - basePt.x, cand.pos.z - basePt.z);
+        if (d < bestDist) {
+          bestDist = d;
+          trackedVeh = cand;
+        }
+      }
+    }
+
+    const slantDist = Math.max(10, basePt.distanceTo(launchOrigin));
+    const tof = Math.min(4.2, slantDist / Math.max(60, projSpeed));
+    const interceptWorldPos = basePt.clone();
+    let leadMeters = 0;
+
+    if (trackedVeh) {
+      const spd = trackedVeh.forwardSpeed || 0;
+      const vx = trackedVeh.velVector ? trackedVeh.velVector.x : -Math.sin(trackedVeh.yaw || 0) * spd;
+      const vz = trackedVeh.velVector ? trackedVeh.velVector.z : -Math.cos(trackedVeh.yaw || 0) * spd;
+      const moveSpd = Math.hypot(vx, vz);
+      if (moveSpd > 0.6) {
+        interceptWorldPos.x = trackedVeh.pos.x + vx * tof;
+        interceptWorldPos.z = trackedVeh.pos.z + vz * tof;
+        interceptWorldPos.y = this.world
+          ? this.world.getGroundHeightAt(interceptWorldPos.x, interceptWorldPos.z) + 1.1
+          : trackedVeh.pos.y + 1.1;
+        leadMeters = Math.hypot(
+          interceptWorldPos.x - trackedVeh.pos.x,
+          interceptWorldPos.z - trackedVeh.pos.z
+        );
+      } else {
+        interceptWorldPos.set(trackedVeh.pos.x, trackedVeh.pos.y + 1.1, trackedVeh.pos.z);
+      }
+    }
+
+    if (gunshipVeh) {
+      gunshipVeh.fcsTrackedGroundTarget = trackedVeh;
+      if (trackedVeh) {
+        if (!gunshipVeh.fcsLeadPos) gunshipVeh.fcsLeadPos = new THREE.Vector3();
+        gunshipVeh.fcsLeadPos.copy(interceptWorldPos);
+        gunshipVeh.fcsLeadMeters = leadMeters;
+      } else {
+        gunshipVeh.fcsLeadPos = null;
+        gunshipVeh.fcsLeadMeters = 0;
+      }
+    }
+
+    const aimPoint = interceptWorldPos.clone();
+    aimPoint.y += 0.5 * projGrav * tof * tof;
+    return {
+      aimPoint,
+      interceptPos: interceptWorldPos,
+      trackedVehicle: trackedVeh,
+      tof,
+      leadMeters
+    };
   }
 };

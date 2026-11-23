@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=118';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=118';
+import { sound } from './audio.js?v=119';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=119';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=118';
-import { createVehicleMesh } from './models/vehicle-model.js?v=118';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=118';
-import { events, makeEventBridge } from './events.js?v=118';
+} from './assets/vehicle-defs.js?v=119';
+import { createVehicleMesh } from './models/vehicle-model.js?v=119';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=119';
+import { events, makeEventBridge } from './events.js?v=119';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,11 +21,132 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=118';
+} from './core/StateMachines.js?v=119';
 
 function markShared(item) {
   item.userData.shared = true;
   return item;
+}
+
+/**
+ * Squad-style Ballistic Caliber vs. Armor Classification:
+ * - Heavy Anti-Armor (`isHeavyAntiArmor`): 105mm/120mm/125mm Shells, RPG-7 HEAT, AGM/Maverick, JDAM/GBU/500lb Bombs, C4, Mortar, SAMs.
+ * - Medium Autocannon (`isAutocannon`): 20mm/25mm/30mm/40mm Cannons & 70mm Hydra Rockets.
+ * - Heavy MG .50 BMG (`isHeavyMg50`): 12.7mm / .50 Cal M2HB / Kord / 1903 Gatling.
+ * - Infantry Small Arms (`isSmallArms`): Pistols, SMGs, Assault Rifles, 7.62mm LMGs/Snipers, Coax MGs & Hand Grenades.
+ */
+export function classifyWeaponBallistics(weaponName = '') {
+  const w = String(weaponName || '').toUpperCase();
+  const isFragGrenade = w.includes('GRENADE') || w.includes('M67') || w.includes('FRAG');
+  const isHeavyAntiArmor =
+    !isFragGrenade &&
+    (w.includes('120MM') ||
+      w.includes('125MM') ||
+      w.includes('105MM') ||
+      w.includes('HOWITZER') ||
+      w.includes('RPG') ||
+      w.includes('HEAT') ||
+      w.includes('APFSDS') ||
+      w.includes('APHE') ||
+      w.includes('MAVERICK') ||
+      w.includes('AGM') ||
+      w.includes('KH-29') ||
+      w.includes('JDAM') ||
+      w.includes('GBU') ||
+      w.includes('CARPET BOMB') ||
+      w.includes('MK-82') ||
+      w.includes('500LB') ||
+      w.includes('2,000LB') ||
+      w.includes('30,000LB') ||
+      w.includes('AIRSTRIKE') ||
+      w.includes('ARTILLERY') ||
+      w.includes('155MM') ||
+      w.includes('C4') ||
+      w.includes('MORTAR') ||
+      w.includes('81MM') ||
+      w.includes('82MM') ||
+      w.includes('TREBUCHET') ||
+      w.includes('BOULDER') ||
+      w.includes('DYNAMITE') ||
+      w.includes('T-REX') ||
+      w.includes('MISSILE') ||
+      w.includes('STINGER') ||
+      w.includes('IGLA') ||
+      w.includes('SAM') ||
+      w.includes('AIM-') ||
+      w.includes('R-73') ||
+      w.includes('R-77'));
+
+  const isAutocannon =
+    !isHeavyAntiArmor &&
+    (w.includes('30MM') ||
+      w.includes('25MM') ||
+      w.includes('40MM') ||
+      w.includes('20MM') ||
+      w.includes('GAU-8') ||
+      w.includes('AVENGER') ||
+      w.includes('GAU-12') ||
+      w.includes('EQUALIZER') ||
+      w.includes('BOFORS') ||
+      w.includes('VULCAN') ||
+      w.includes('AUTOCANNON') ||
+      w.includes('2A38') ||
+      w.includes('2A42') ||
+      w.includes('ZU-23') ||
+      w.includes('70MM') ||
+      w.includes('HYDRA') ||
+      w.includes('ROCKET'));
+
+  const isHeavyMg50 =
+    !isHeavyAntiArmor &&
+    !isAutocannon &&
+    (w.includes('.50') ||
+      w.includes('50 CAL') ||
+      w.includes('50BMG') ||
+      w.includes('M2HB') ||
+      w.includes('12.7') ||
+      w.includes('KORD') ||
+      w.includes('1903 BRASS GATLING'));
+
+  const isMeleeOrPrimitive =
+    w.includes('SWORD') ||
+    w.includes('POLEARM') ||
+    w.includes('LANCE') ||
+    w.includes('HALBERD') ||
+    w.includes('SHIELD') ||
+    w.includes('LONGBOW') ||
+    w.includes('CROSSBOW') ||
+    w.includes('ARROW') ||
+    w.includes('VENOM') ||
+    w.includes('TALON');
+
+  const isSmallArms = !isHeavyAntiArmor && !isAutocannon && !isHeavyMg50 && !isMeleeOrPrimitive;
+  const isLmgOrSniper =
+    isSmallArms &&
+    !isFragGrenade &&
+    (w.includes('M249') ||
+      w.includes('SAW') ||
+      w.includes('PKP') ||
+      w.includes('PECHENEG') ||
+      w.includes('RPK') ||
+      w.includes('LMG') ||
+      w.includes('SV-98') ||
+      w.includes('SVD') ||
+      w.includes('M110') ||
+      w.includes('SNIPER') ||
+      w.includes('.338') ||
+      w.includes('7.62') ||
+      w.includes('COAX'));
+
+  return {
+    isHeavyAntiArmor,
+    isAutocannon,
+    isHeavyMg50,
+    isSmallArms,
+    isLmgOrSniper,
+    isFragGrenade,
+    isMeleeOrPrimitive
+  };
 }
 
 const SHARED_TREB_BOULDER_GEO = markShared(new THREE.DodecahedronGeometry(0.68, 1));
@@ -1728,6 +1849,7 @@ export class VehicleManager {
   ) {
     vehicle.lastAppliedDamage = 0;
     vehicle.lastArmorRicochet = false;
+    vehicle.lastSubsystemCrit = null;
     if (vehicle.dead) return false;
     if (vehicle.isShotDown) {
       vehicle.hp = 1;
@@ -1740,28 +1862,125 @@ export class VehicleManager {
     const isAc130105mm = wepUp.includes('105MM') && wepUp.includes('HOWITZER');
     const isAc130SideGun = isAc13025mm || isAc13040mm || isAc130105mm;
     const isA10Gau8 = wepUp.includes('30MM GAU-8') || wepUp.includes('AVENGER');
+    const ballistics = classifyWeaponBallistics(weaponName);
+    const critRng =
+      typeof vehicle._forceCritRoll === 'number' ? vehicle._forceCritRoll : Math.random();
+    const distToAttacker = attackerPos ? attackerPos.distanceTo(vehicle.pos) : 120;
 
-    // Realistic Air-to-Ground Gunship Envelope:
-    // AC-130 port cannons are downward-firing ground-attack mounts and CANNOT shoot down airborne aircraft!
-    if (vehicle.isAircraft && isAc130SideGun) {
-      const airGroundY = this.world ? this.world.getGroundHeightAt(vehicle.pos.x, vehicle.pos.z) : 0;
-      const airAltAgl = Math.max(0, vehicle.pos.y - airGroundY);
-      if (airAltAgl > 10 || vehicle.driver || vehicle.aiPilotActive || (vehicle.forwardSpeed || 0) > 10) {
-        return false;
+    // =========================================================================
+    // SQUAD-STYLE AIRCRAFT SKIN & TITANIUM BATHTUB PENETRATION + SENSOR CRITS
+    // - AC-130 downward port cannons DO damage lower-flying aircraft that cross below its guns!
+    // - A-10 / Su-25 (`cas`) 1,200-lb titanium bathtub shrugs off infantry rifles/LMGs (0 hull HP; rare 1.5% HUD sensor glitch).
+    // - Fast Jets & Gunships (`fighter`, `b2_spirit`, `gunship`): immune to rifles/SMGs/pistols; close-range (<220m) 7.62mm LMG
+    //   only scratches airframe (never below 25% HP — infantry MGs CANNOT shoot down a jet!) with 2.5% HUD/FLIR sensor glitch!
+    // =========================================================================
+    if (vehicle.isAircraft) {
+      const aRole = vehicle.aircraftRole || vehicle.type;
+      if (isAc130SideGun && critRng < 0.14) {
+        vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 4.5);
+        vehicle.lastSubsystemCrit = 'SENSORS';
+      }
+
+      if (aRole !== 'wright_flyer') {
+        if (ballistics.isSmallArms) {
+          if (aRole === 'cas') {
+            // Titanium armored bathtub: 0 hull damage from small arms, rare 1.5% external targeting-pod/HUD glitch
+            if (ballistics.isLmgOrSniper && distToAttacker <= 260 && critRng < 0.015) {
+              vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 5.0);
+              vehicle.lastSubsystemCrit = 'SENSORS';
+              vehicle.lastHitDesc = '📡 EXTERNAL TGP / HUD SENSOR GLITCHED BY GROUND FIRE (0 HULL DMG)';
+            } else {
+              vehicle.lastHitDesc = '🛡️ TITANIUM ARMOR TUB DEFLECTED SMALL ARMS (0 DMG)';
+            }
+            vehicle.lastArmorRicochet = true;
+            if (vehicle.driver && typeof vehicle.driver.notifyVehicleHit === 'function') {
+              vehicle.driver.notifyVehicleHit(0, attackerName, vehicle.lastHitDesc, attackerPos);
+            }
+            return false;
+          }
+
+          // Fighters, B-2 Stealth Bombers & AC-130 Gunships vs. Infantry Small Arms:
+          if (!ballistics.isLmgOrSniper || distToAttacker > 220) {
+            if (distToAttacker <= 180 && critRng < 0.01) {
+              vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 3.5);
+              vehicle.lastSubsystemCrit = 'SENSORS';
+              vehicle.lastHitDesc = '📡 AVIONICS RADOME SCRATCHED BY SMALL ARMS (0 HULL DMG)';
+            } else {
+              vehicle.lastHitDesc = '🛡️ AIRFRAME SKIN DEFLECTED SMALL ARMS (0 DMG)';
+            }
+            vehicle.lastArmorRicochet = true;
+            return false;
+          }
+
+          // Close-range (<220m) 7.62mm LMG / Sniper harassment: tiny 1-2 HP scratch, NEVER reduces jet below 25% HP!
+          if (critRng < 0.025) {
+            vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 4.5);
+            vehicle.lastSubsystemCrit = 'SENSORS';
+          }
+          const minHpFloor = Math.ceil((vehicle.maxHp || 600) * 0.25);
+          if (vehicle.hp <= minHpFloor) {
+            vehicle.lastArmorRicochet = true;
+            vehicle.lastHitDesc = '🛡️ SMALL ARMS CANNOT DOWN JET AIRFRAME — USE .50 HMG / AA / STINGER!';
+            return false;
+          }
+          amount = Math.min(2, Math.max(1, vehicle.hp - minHpFloor));
+        } else if (ballistics.isHeavyMg50) {
+          if (distToAttacker > 680) {
+            vehicle.lastArmorRicochet = true;
+            return false;
+          }
+          if (critRng < 0.055) {
+            vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 4.5);
+            vehicle.lastSubsystemCrit = 'SENSORS';
+          }
+          if (aRole === 'cas') {
+            amount = Math.max(1, Math.round(amount * 0.34));
+          }
+        }
+      }
+
+      // Realistic Subsonic CAS vs. Supersonic Fighter / High-Altitude Stealth Bomber Envelope:
+      if (isA10Gau8 && (aRole === 'fighter' || aRole === 'b2_spirit') && distToAttacker > 160) {
+        amount = Math.max(2, Math.round(amount * 0.22));
       }
     }
 
-    // Realistic Subsonic CAS vs. Supersonic Fighter / High-Altitude Stealth Bomber Envelope:
-    // A-10 30mm GAU-8 suffers severe high-aspect deflection against fast Fighters & B-2 Bombers beyond point-blank (<160m)
-    if (
-      vehicle.isAircraft &&
-      isA10Gau8 &&
-      (vehicle.aircraftRole === 'fighter' || vehicle.aircraftRole === 'b2_spirit')
-    ) {
-      const distToJet = attackerPos ? attackerPos.distanceTo(vehicle.pos) : 999;
-      if (distToJet > 160) {
-        amount = Math.max(2, Math.round(amount * 0.22));
+    // =========================================================================
+    // SQUAD-STYLE ALL-OR-NOTHING ARMOR PENETRATION VS. TANKS, IFVs & SPAAG AA
+    // - Infantry rifles, SMGs, pistols, LMGs & frag grenades deal ZERO hull HP damage to Tanks/IFVs/AA
+    //   (a rifle can NEVER make a tank explode!), with a tiny 1.8% LMG/Sniper chance to crack external Optics!
+    // - .50 BMG HMG deals 0 hull HP to MBTs (6% Optics crit chance) and only penetrates thin APC side/rear plates!
+    // =========================================================================
+    const isArmoredHull =
+      vehicle.type === 'tank' || vehicle.type === 'apc' || vehicle.type === 'aa';
+    if (isArmoredHull && (ballistics.isSmallArms || (ballistics.isHeavyMg50 && vehicle.type === 'tank'))) {
+      if (!vehicle.subsystems) {
+        vehicle.subsystems = { tracks: 'OK', turret: 'OK', engine: 'OK', optics: 'OK' };
       }
+      const opticsCritChance = ballistics.isHeavyMg50
+        ? 0.06
+        : ballistics.isLmgOrSniper
+        ? 0.018
+        : 0.005;
+      if (critRng < opticsCritChance) {
+        vehicle.subsystems.optics = 'DAMAGED';
+        vehicle.opticsGlitchTimer = 14.0;
+        vehicle.lastSubsystemCrit = 'OPTICS';
+        vehicle.lastHitDesc =
+          '🔭 PERISCOPE / CITV OPTIC CRACKED BY SMALL ARMS (0 HULL DMG — REPAIR [F]/[T])!';
+      } else {
+        vehicle.lastHitDesc = '🛡️ NON-PENETRATION: SMALL ARMS BOUNCED OFF HEAVY ARMOR (0 DMG)';
+      }
+      vehicle.lastArmorRicochet = true;
+      if (vehicle.driver && typeof vehicle.driver.notifyVehicleHit === 'function') {
+        vehicle.driver.notifyVehicleHit(
+          0,
+          attackerName,
+          vehicle.lastSubsystemCrit === 'OPTICS' ? vehicle.lastHitDesc : 'SMALL ARMS DEFLECTED',
+          attackerPos
+        );
+      }
+      return false;
     }
 
     if (vehicle.type === 'warhorse' && (vehicle.armor || 0) > 0) {
@@ -1861,6 +2080,24 @@ export class VehicleManager {
       }
       vehicle.lastHitZone = hitZone;
       vehicle.lastHitDesc = armorNote;
+
+      // .50 BMG HMG vs APC / SPAAG: bounces off frontal glacis (0 DMG + 6% Optics crit), light 0.28x penetration on thin Side/Rear plates
+      if (ballistics.isHeavyMg50 && (vehicle.type === 'apc' || vehicle.type === 'aa')) {
+        if (critRng < 0.06 && vehicle.subsystems) {
+          vehicle.subsystems.optics = 'DAMAGED';
+          vehicle.opticsGlitchTimer = 14.0;
+          vehicle.lastSubsystemCrit = 'OPTICS';
+        }
+        if (hitZone === 'FRONT') {
+          vehicle.lastArmorRicochet = true;
+          vehicle.lastHitDesc =
+            vehicle.lastSubsystemCrit === 'OPTICS'
+              ? '🔭 .50 BMG CRACKED FRONT OPTIC (0 HULL DMG — REPAIR [F]/[T])!'
+              : '🛡️ .50 BMG BOUNCED OFF APC FRONTAL ARMOR (0 DMG — FLANK SIDE/REAR!)';
+          return false;
+        }
+        amount = Math.max(1, Math.round(amount * 0.28));
+      }
     }
 
     // =========================================================================

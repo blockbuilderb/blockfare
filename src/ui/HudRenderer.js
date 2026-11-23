@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=118';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=118';
+import { UI, getEraRoles } from '../config.js?v=119';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=119';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -580,32 +580,44 @@ export const HudRenderer = {
         this.crosshairEl._lastOpacity = '0';
         this.crosshairEl.style.opacity = '0';
       }
-      this._setText(this.downedKillerEl, `HIT BY ${this.player.downedKiller}`);
+      this._setText(
+        this.downedKillerEl,
+        this.player.beyondRescue
+          ? `☠️ CATASTROPHIC HIT BY ${this.player.downedKiller} (${this.player.downedWeapon || 'HEAVY ORDNANCE'})`
+          : `HIT BY ${this.player.downedKiller}`
+      );
       this._setText(this.downedTimerValEl, Math.max(0, Math.ceil(this.player.downedTimer)));
       this._setWidth(this.giveupBarFillEl, `${Math.min(100, this.player.giveUpProgress * 100).toFixed(1)}%`);
-      // Find nearest friendly Medic or Squadmate distance who still has Field Dressings (> 0) to revive!
-      let bestMedicDist = Infinity;
-      let bestMedicName = null;
-      let bestMedicDressings = 0;
-      let bestMedicMaxDressings = 9;
-      for (const b of this.botManager.bots) {
-        if (b.dead || b.downed || b.team !== this.player.team || (b.fieldDressings ?? 1) <= 0) continue;
-        if (b.role === 'MEDIC' || b.inPlayerSquad) {
-          const d = b.pos.distanceTo(this.player.pos);
-          if (d < bestMedicDist) {
-            bestMedicDist = d;
-            bestMedicName = b.name;
-            bestMedicDressings = b.fieldDressings ?? 9;
-            bestMedicMaxDressings = b.maxFieldDressings || (b.role === 'MEDIC' ? 9 : 2);
+      if (this.player.beyondRescue) {
+        this._setText(
+          this.downedMedicDistEl,
+          '☠️ BEYOND MEDIC RESCUE — LETHAL OVERPRESSURE / HEAVY CALIBER (RETURNING TO DEPLOY...)'
+        );
+      } else {
+        // Find nearest friendly Medic or Squadmate distance who still has Field Dressings (> 0) to revive!
+        let bestMedicDist = Infinity;
+        let bestMedicName = null;
+        let bestMedicDressings = 0;
+        let bestMedicMaxDressings = 9;
+        for (const b of this.botManager.bots) {
+          if (b.dead || b.downed || b.team !== this.player.team || (b.fieldDressings ?? 1) <= 0) continue;
+          if (b.role === 'MEDIC' || b.inPlayerSquad) {
+            const d = b.pos.distanceTo(this.player.pos);
+            if (d < bestMedicDist) {
+              bestMedicDist = d;
+              bestMedicName = b.name;
+              bestMedicDressings = b.fieldDressings ?? 9;
+              bestMedicMaxDressings = b.maxFieldDressings || (b.role === 'MEDIC' ? 9 : 2);
+            }
           }
         }
+        this._setText(
+          this.downedMedicDistEl,
+          bestMedicName
+            ? `NEAREST MEDIC: ${bestMedicName} (${Math.round(bestMedicDist)}m • ${bestMedicDressings}/${bestMedicMaxDressings} DRESSINGS) — EN ROUTE`
+            : 'NEAREST MEDIC: NONE WITH FIELD DRESSINGS IN RANGE'
+        );
       }
-      this._setText(
-        this.downedMedicDistEl,
-        bestMedicName
-          ? `NEAREST MEDIC: ${bestMedicName} (${Math.round(bestMedicDist)}m • ${bestMedicDressings}/${bestMedicMaxDressings} DRESSINGS) — EN ROUTE`
-          : 'NEAREST MEDIC: NONE WITH FIELD DRESSINGS IN RANGE'
-      );
     } else if (this.downedOverlayEl && !this.downedOverlayEl.classList.contains('hidden')) {
       this.downedOverlayEl.classList.add('hidden');
     }
@@ -3368,11 +3380,16 @@ export const HudRenderer = {
         const rng = Math.round(this.player?.mortarRangeM || 200);
         topTxt = `🎯 IMPACT ARC ${rng}M`;
       } else if (v.type === 'tank' || v.type === 'apc') {
-        if (v.fireCooldown > 0.05 && v.weaponType === 'tank_cannon') {
+        if (v.subsystems?.optics && v.subsystems.optics !== 'OK') {
+          botTxt = '🔭 OPTICS CRACKED — REPAIR [F]/[T]';
+        } else if (v.fireCooldown > 0.05 && v.weaponType === 'tank_cannon') {
           botTxt = `⏳ RELOADING (${v.fireCooldown.toFixed(1)}S)`;
         } else if (v.coaxOverheated) {
           botTxt = '🔥 COAX OVERHEATED';
         }
+      }
+      if (v.isAircraft && (v.sensorGlitchTimer || 0) > 0) {
+        botTxt = `📡 HUD / TGP SENSOR GLITCH (${v.sensorGlitchTimer.toFixed(1)}S)`;
       }
 
       this._setText(topTagEl, topTxt);

@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=118';
-import { sound } from '../audio.js?v=118';
-import { DISTANCES } from '../config.js?v=118';
-import { events } from '../events.js?v=118';
+import { VOXEL_SIZE } from '../world.js?v=119';
+import { sound } from '../audio.js?v=119';
+import { DISTANCES } from '../config.js?v=119';
+import { events } from '../events.js?v=119';
 
 export const FortificationMethods = {
   getBlueprintName() {
@@ -323,7 +323,15 @@ export const FortificationMethods = {
       let bestVeh = null;
       let bestDist = 8.5;
       for (const veh of this.vehicleManager.vehicles) {
-        if (!veh || veh.dead || veh.team !== this.team || veh.hp >= veh.maxHp) continue;
+        if (!veh || veh.dead || veh.team !== this.team) continue;
+        const hasDamagedSub =
+          veh.subsystems &&
+          (veh.subsystems.optics !== 'OK' ||
+            veh.subsystems.tracks !== 'OK' ||
+            veh.subsystems.turret !== 'OK' ||
+            veh.subsystems.engine !== 'OK');
+        const hasSensorGlitch = (veh.sensorGlitchTimer || 0) > 0 || (veh.opticsGlitchTimer || 0) > 0;
+        if (veh.hp >= veh.maxHp && !hasDamagedSub && !hasSensorGlitch) continue;
         const d = veh.pos.distanceTo(this.pos);
         if (d < bestDist) {
           bestDist = d;
@@ -338,12 +346,26 @@ export const FortificationMethods = {
             ? 360
             : 180;
         bestVeh.hp = Math.min(bestVeh.maxHp, bestVeh.hp + repairAmt);
+        let subRepaired = false;
+        if (bestVeh.subsystems) {
+          for (const k of ['optics', 'tracks', 'turret', 'engine']) {
+            if (bestVeh.subsystems[k] && bestVeh.subsystems[k] !== 'OK') {
+              bestVeh.subsystems[k] = 'OK';
+              subRepaired = true;
+            }
+          }
+        }
+        if ((bestVeh.sensorGlitchTimer || 0) > 0 || (bestVeh.opticsGlitchTimer || 0) > 0) {
+          bestVeh.sensorGlitchTimer = 0;
+          bestVeh.opticsGlitchTimer = 0;
+          subRepaired = true;
+        }
         sound.playReload?.();
         this.score = (this.score || 0) + 50;
         if (this.onAwardXp) {
           this.onAwardXp(
             50,
-            `🔧 REPAIRED ${bestVeh.name} (+${repairAmt} HP • ${Math.round(bestVeh.hp)}/${bestVeh.maxHp} HP)`
+            `🔧 REPAIRED ${bestVeh.name}${subRepaired ? ' + OPTICS/SENSORS RESTORED' : ''} (${Math.round(bestVeh.hp)}/${bestVeh.maxHp} HP)`
           );
         }
         if (!fromInteractKey) return 1;

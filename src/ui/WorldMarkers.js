@@ -530,12 +530,21 @@ export const WorldMarkers = {
         if (ccipScr) {
           const refPos = activeVeh ? activeVeh.pos : this.player.pos;
           const ccipDist = Math.round(refPos.distanceTo(this.player.aircraftCcipPoint));
+          const aRoleNow = activeAircraft ? activeAircraft.aircraftRole || activeAircraft.type : '';
+          const isCasPipe = aRoleNow === 'cas';
           const isBombOrMortar =
             isMortarEmplace ||
             (activeAircraft &&
-              (activeAircraft.aircraftRole === 'gunship' ||
-                (activeAircraft.aircraftRole === 'fighter' && activeAircraft.activeWeaponSlot === 2)));
-          const ringColor = isMortarEmplace ? '#f1c40f' : isBombOrMortar ? '#2ecc71' : '#00d2d3';
+              (aRoleNow === 'gunship' ||
+                aRoleNow === 'b2_spirit' ||
+                (aRoleNow === 'fighter' && activeAircraft.activeWeaponSlot === 2)));
+          const ringColor = isMortarEmplace
+            ? '#f1c40f'
+            : isCasPipe
+            ? '#7bed9f'
+            : isBombOrMortar
+            ? '#2ecc71'
+            : '#00d2d3';
           const slot = this._acquireWorldMarkerSlot('airBox');
           this._configureMarkerSlot(slot, {
             x: ccipScr.x,
@@ -546,10 +555,41 @@ export const WorldMarkers = {
             iconText: '⊕',
             distText: isMortarEmplace
               ? `81MM IMPACT (${ccipDist}m)`
+              : isCasPipe
+              ? activeAircraft.activeWeaponSlot === 1
+                ? `CCIP RKT (${ccipDist}m)`
+                : `CCIP 30MM (${ccipDist}m)`
               : isBombOrMortar
               ? `CCIP (${ccipDist}m)`
               : `PIPPER (${ccipDist}m)`,
             distColor: ringColor,
+            distWeight: '900'
+          });
+        }
+      }
+
+      // 1b) AC-130 Computerized Fire-Control System (FCS) Ground Moving-Target Auto-Lead Indicator
+      if (
+        activeAircraft &&
+        activeAircraft.aircraftRole === 'gunship' &&
+        activeAircraft.fcsTrackedGroundTarget &&
+        activeAircraft.fcsLeadPos &&
+        !activeAircraft.fcsTrackedGroundTarget.dead
+      ) {
+        const fcsScr = projectToScreen(activeAircraft.fcsLeadPos, 1.4);
+        if (fcsScr) {
+          const leadM = Math.round(activeAircraft.fcsLeadMeters || 0);
+          const fcsSlot = this._acquireWorldMarkerSlot('airBox');
+          this._configureMarkerSlot(fcsSlot, {
+            x: fcsScr.x,
+            y: fcsScr.y,
+            opacity: 0.96,
+            iconClass: '',
+            iconStyle:
+              'width:22px;height:22px;background:transparent;border:2px solid #00d2d3;border-radius:50%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;color:#00d2d3;font-size:10px;font-weight:900;box-shadow:0 0 10px rgba(0,210,211,0.85);',
+            iconText: '⊹',
+            distText: leadM >= 2 ? `FCS AUTO-LEAD (+${leadM}m)` : 'FCS TRACK LOCKED',
+            distColor: '#00d2d3',
             distWeight: '900'
           });
         }
@@ -709,16 +749,31 @@ export const WorldMarkers = {
               distWeight: '900'
             });
 
-            // 2b) Dogfight Machine Gun / Rotary Cannon Ballistic Lead Indicator (EEGS / LCOS Lead Pipper):
-            // Suppressed as soon as an aircraft is shot down (`!v.isShotDown`) so pilots never chase a falling wreck!
-            const showMgLead =
+            // 2b) Authentic Air-to-Air Avionics Sighting Hierarchy:
+            // - Fighter (F-15EX / Su-57), Ground SPAAG AA, B-2 Defense & Wright Flyer: Full Radar-Locked EEGS Lead Pipper (<1,450m)
+            // - A-10C / Su-25 (`cas`): NO air-to-air radar! Passive Close-Range Wingspan Gun Funnel ONLY (<350m & inside forward HUD)!
+            // - AC-130 (`gunship`): ZERO air-to-air lead indicator (downward ground-attack sensor suite only)!
+            const myAirRole = activeAircraft ? activeAircraft.aircraftRole || activeAircraft.type : null;
+            const isGunshipObserver = myAirRole === 'gunship';
+            const isCasPassiveFunnel = myAirRole === 'cas';
+            const showRadarEeegsLead =
               isEnemy &&
               !v.isShotDown &&
+              !isGunshipObserver &&
+              !isCasPassiveFunnel &&
               !holdingStinger &&
               !isMortarEmplace &&
               vDist < 1450 &&
               typeof this.player.computeAircraftLeadData === 'function';
-            if (showMgLead) {
+            const showCasCloseFunnel =
+              isEnemy &&
+              !v.isShotDown &&
+              isCasPassiveFunnel &&
+              vDist <= 350 &&
+              vCenterDist <= 220 &&
+              typeof this.player.computeAircraftLeadData === 'function';
+
+            if (showRadarEeegsLead || showCasCloseFunnel) {
               const leadData = this.player.computeAircraftLeadData(v, refPos, 360, 4.5);
               const leadScr = leadData && leadData.leadPos ? projectToScreen(leadData.leadPos, 0) : null;
               if (leadScr) {
@@ -731,53 +786,71 @@ export const WorldMarkers = {
                 const angleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
                 const isOnLead = lCenterDist <= 34;
                 const isNearLead = lCenterDist <= 85;
-                const pipperCol = isOnLead
-                  ? '#2ecc71'
-                  : isNearLead
-                  ? '#ffeb3b'
-                  : '#00d2d3';
 
-                // Connecting Flight-Path Lead Vector Line (compositor-only translate3d + rotate + scaleX, zero width reflow)
-                if (lineLen > 14 && lineLen < 680) {
-                  const invLen = 1 / lineLen;
-                  const startX = vx + dx * invLen * 11;
-                  const startY = vy + dy * invLen * 11;
-                  const segLen = Math.max(8, lineLen - 22);
-                  const lineSlot = this._acquireWorldMarkerSlot('leadLine');
-                  this._configureLeadLineSlot(
-                    lineSlot,
-                    startX,
-                    startY,
-                    angleDeg,
-                    segLen,
-                    pipperCol,
-                    isOnLead ? 0.95 : 0.78
-                  );
+                if (showCasCloseFunnel) {
+                  // Passive A-10C Wingspan Gun Funnel (No radar lock vector line — amber wingspan brackets!)
+                  const funnelCol = isOnLead ? '#2ecc71' : '#f1c40f';
+                  const leadSlot = this._acquireWorldMarkerSlot('airBox');
+                  this._configureMarkerSlot(leadSlot, {
+                    x: lx,
+                    y: ly,
+                    opacity: 0.92,
+                    iconClass: '',
+                    iconStyle: `padding:1px 5px;background:transparent;border-left:2px solid ${funnelCol};border-right:2px solid ${funnelCol};border-radius:6px;color:${funnelCol};font-size:10px;font-weight:900;white-space:nowrap;`,
+                    iconText: '⊹',
+                    distText: `FUNNEL ${vDist}m`,
+                    distColor: funnelCol,
+                    distWeight: '900'
+                  });
+                } else {
+                  const pipperCol = isOnLead
+                    ? '#2ecc71'
+                    : isNearLead
+                    ? '#ffeb3b'
+                    : '#00d2d3';
+
+                  // Connecting Flight-Path Lead Vector Line (compositor-only translate3d + rotate + scaleX, zero width reflow)
+                  if (lineLen > 14 && lineLen < 680) {
+                    const invLen = 1 / lineLen;
+                    const startX = vx + dx * invLen * 11;
+                    const startY = vy + dy * invLen * 11;
+                    const segLen = Math.max(8, lineLen - 22);
+                    const lineSlot = this._acquireWorldMarkerSlot('leadLine');
+                    this._configureLeadLineSlot(
+                      lineSlot,
+                      startX,
+                      startY,
+                      angleDeg,
+                      segLen,
+                      pipperCol,
+                      isOnLead ? 0.95 : 0.78
+                    );
+                  }
+
+                  // Hollow Circular MG Lead Pipper Reticle ahead of the enemy plane
+                  const leadTag = isOnLead
+                    ? `🎯 SHOOT LEAD (+${Math.round(leadData.leadMeters)}m • ${leadData.tof.toFixed(2)}s)`
+                    : isNearLead
+                    ? `LEAD +${Math.round(leadData.leadMeters)}m (${leadData.tof.toFixed(1)}s)`
+                    : vCenterDist < 420
+                    ? `LEAD +${Math.round(leadData.leadMeters)}m`
+                    : '';
+                  const pipperBorder = isOnLead
+                    ? `2.2px solid #2ecc71;box-shadow:0 0 12px rgba(46,204,113,0.95), inset 0 0 6px rgba(46,204,113,0.45)`
+                    : `1.8px solid ${pipperCol};box-shadow:0 0 6px rgba(0,0,0,0.75)`;
+                  const leadSlot = this._acquireWorldMarkerSlot('airBox');
+                  this._configureMarkerSlot(leadSlot, {
+                    x: lx,
+                    y: ly,
+                    opacity: isOnLead ? 1.0 : 0.92,
+                    iconClass: '',
+                    iconStyle: `width:22px;height:22px;background:transparent;border:${pipperBorder};border-radius:50%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;color:${pipperCol};font-size:10px;font-weight:900;`,
+                    iconText: '⌖',
+                    distText: leadTag,
+                    distColor: pipperCol,
+                    distWeight: '900'
+                  });
                 }
-
-                // Hollow Circular MG Lead Pipper Reticle ahead of the enemy plane
-                const leadTag = isOnLead
-                  ? `🎯 SHOOT LEAD (+${Math.round(leadData.leadMeters)}m • ${leadData.tof.toFixed(2)}s)`
-                  : isNearLead
-                  ? `LEAD +${Math.round(leadData.leadMeters)}m (${leadData.tof.toFixed(1)}s)`
-                  : vCenterDist < 420
-                  ? `LEAD +${Math.round(leadData.leadMeters)}m`
-                  : '';
-                const pipperBorder = isOnLead
-                  ? `2.2px solid #2ecc71;box-shadow:0 0 12px rgba(46,204,113,0.95), inset 0 0 6px rgba(46,204,113,0.45)`
-                  : `1.8px solid ${pipperCol};box-shadow:0 0 6px rgba(0,0,0,0.75)`;
-                const leadSlot = this._acquireWorldMarkerSlot('airBox');
-                this._configureMarkerSlot(leadSlot, {
-                  x: lx,
-                  y: ly,
-                  opacity: isOnLead ? 1.0 : 0.92,
-                  iconClass: '',
-                  iconStyle: `width:22px;height:22px;background:transparent;border:${pipperBorder};border-radius:50%;box-sizing:border-box;display:flex;align-items:center;justify-content:center;color:${pipperCol};font-size:10px;font-weight:900;`,
-                  iconText: '⌖',
-                  distText: leadTag,
-                  distColor: pipperCol,
-                  distWeight: '900'
-                });
               }
             }
           } else if (activeAircraft && v.team !== this.player.team && vDist < 1350) {

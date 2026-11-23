@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=118';
+import { sound } from '../audio.js?v=119';
 import {
   PLAYER,
   COMBAT,
@@ -8,9 +8,10 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=118';
-import { events } from '../events.js?v=118';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=118';
+} from '../config.js?v=119';
+import { events } from '../events.js?v=119';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=119';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=119';
 
 function markShared(asset) {
   if (asset) {
@@ -2067,7 +2068,8 @@ export const CombatMethods = {
             bullet.weaponLabel,
             isHeadshot,
             this.onKillEvent,
-            this.onAwardXp
+            this.onAwardXp,
+            { origin: this.activeVehicle?.pos || this.pos, dist: 0, radius: 0 }
           );
           if (res && res.ignoredDowned) {
             continue;
@@ -2185,15 +2187,25 @@ export const CombatMethods = {
               shooterPos
             );
             const actualDmg = typeof veh.lastAppliedDamage === 'number' ? veh.lastAppliedDamage : apDmg;
-            if (this.onHitmarker && actualDmg > 0) {
-              if (veh.lastArmorRicochet) {
-                this.onHitmarker('armor', `🛡️ ARMOR RICOCHET -${actualDmg}`);
-              } else if (veh.isAircraft) {
+            if (this.onHitmarker) {
+              if (veh.lastSubsystemCrit === 'OPTICS') {
+                this.onHitmarker('armor', '🔭 OPTICS CRACKED! (0 HULL DMG)');
+              } else if (veh.lastSubsystemCrit === 'SENSORS') {
+                this.onHitmarker(
+                  'armor',
+                  actualDmg > 0 ? `📡 SENSOR GLITCH -${actualDmg}` : '📡 SENSOR GLITCH! (0 HULL DMG)'
+                );
+              } else if (veh.lastArmorRicochet) {
+                this.onHitmarker(
+                  'armor',
+                  actualDmg > 0 ? `🛡️ ARMOR RICOCHET -${actualDmg}` : '🛡️ NO PENETRATION (0 DMG)'
+                );
+              } else if (actualDmg > 0 && veh.isAircraft) {
                 this.onHitmarker(
                   'armor',
                   bullet.isMountedMg ? `✈️ AIRFRAME HIT -${actualDmg}` : `✈️ AIRCRAFT HIT -${actualDmg}`
                 );
-              } else {
+              } else if (actualDmg > 0) {
                 this.onHitmarker(
                   'armor',
                   bullet.isMountedMg ? `AP ARMOR HIT -${actualDmg}` : `VEHICLE ARMOR -${actualDmg}`
@@ -2231,10 +2243,9 @@ export const CombatMethods = {
     }
 
     // 3b. Swept-Sphere Airborne Aircraft Hit Detection along `[prevPos, prevPos + stepDir * maxSegmentEntityDist]`:
-    // Ensures dogfight cannon rounds aimed at the HUD Lead Indicator hit moving aircraft wings/fuselage reliably!
+    // Ensures dogfight cannon rounds & downward AC-130 rounds that physically cross a lower plane hit moving wings/fuselage!
     if (
       !terminatedOnEntity &&
-      this.activeVehicle?.aircraftRole !== 'gunship' &&
       this.vehicleManager &&
       Array.isArray(this.vehicleManager.vehicles)
     ) {
@@ -3135,7 +3146,8 @@ export const CombatMethods = {
     weaponName,
     onKillFn,
     attackerPos = null,
-    isHeadshot = false
+    isHeadshot = false,
+    blastMeta = null
   ) {
     if (this.dead || this.downed) return;
     this.outOfCombatTimer = 0;
@@ -3307,9 +3319,29 @@ export const CombatMethods = {
         pos: this.pos.clone()
       });
 
-      // Enter BattleBit Downed State (waiting for Medic revive or Hold [Space] to Give Up)
+      // Evaluate Squad-style Catastrophic "Dead-Dead" (Beyond Medic Rescue):
+      const cat = evaluateCatastrophicKill(
+        weaponName,
+        blastMeta?.dist ?? 0,
+        blastMeta?.radius ?? 0,
+        blastMeta?.rng || Math.random
+      );
+      this.beyondRescue = Boolean(cat.beyondRescue);
+      if (this.beyondRescue && this.vel) {
+        const bOrig = blastMeta?.origin || attackerPos;
+        if (bOrig) {
+          const kdx = this.pos.x - bOrig.x;
+          const kdz = this.pos.z - bOrig.z;
+          const klen = Math.hypot(kdx, kdz) || 1;
+          this.vel.x = (kdx / klen) * Math.min(14, cat.hSpeed || 8);
+          this.vel.z = (kdz / klen) * Math.min(14, cat.hSpeed || 8);
+          this.vel.y = Math.min(8, cat.upSpeed || 5);
+        }
+      }
+
+      // Enter Downed State (2.6s un-revivable blast aftermath if Beyond Rescue, else 120s Medic window)
       this.downed = true;
-      this.downedTimer = PLAYER.DOWNED_TIMER;
+      this.downedTimer = this.beyondRescue ? 2.6 : PLAYER.DOWNED_TIMER;
       this.giveUpProgress = 0;
       this.downedKiller = attackerName;
       this.downedWeapon = weaponName;
@@ -3323,8 +3355,9 @@ export const CombatMethods = {
     dressingsLeft = 8,
     maxDressings = 9
   ) {
-    if (!this.downed || this.dead) return;
+    if (!this.downed || this.dead || this.beyondRescue) return;
     this.downed = false;
+    this.beyondRescue = false;
     this.downedTimer = 0;
     this.giveUpProgress = 0;
     // Squad 2-Stage Medical Treatment:
@@ -3346,6 +3379,7 @@ export const CombatMethods = {
 
   finalizeDeath() {
     this.downed = false;
+    this.beyondRescue = false;
     this.dead = true;
     if (typeof this.resetVisionSensors === 'function') {
       this.resetVisionSensors();

@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=118';
-import { BOT } from '../config.js?v=118';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=118';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=118';
-import { events } from '../events.js?v=118';
+import { sound } from '../audio.js?v=119';
+import { BOT } from '../config.js?v=119';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=119';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=119';
+import { events } from '../events.js?v=119';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -422,6 +422,56 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         if (bot.drivingVehicle.npcDriver === bot) bot.drivingVehicle.npcDriver = null;
         bot.drivingVehicle = null;
       }
+
+      // 3D Explosive Ragdoll Blast Flight & Ground Bounce for Beyond-Rescue ("Dead-Dead") Casualties!
+      if ((bot.ragdollTimer || 0) > 0 && bot.mesh) {
+        bot.ragdollTimer -= dt;
+        const rvx = bot.ragdollVelX || 0;
+        const rvy = bot.ragdollVelY || 0;
+        const rvz = bot.ragdollVelZ || 0;
+        if (Math.abs(rvx) > 0.02 || Math.abs(rvy) > 0.02 || Math.abs(rvz) > 0.02) {
+          bot.pos.x = THREE.MathUtils.clamp(bot.pos.x + rvx * dt, -2850, 2850);
+          bot.pos.z = THREE.MathUtils.clamp(bot.pos.z + rvz * dt, -1850, 1850);
+          bot.ragdollVelY = rvy - 22.0 * dt;
+          bot.pos.y += bot.ragdollVelY * dt;
+          bot.mesh.rotation.x += (bot.ragdollSpinX || 0) * dt;
+          bot.mesh.rotation.z += (bot.ragdollSpinZ || 0) * dt;
+
+          if (parts && bot.ragdollVelY > -1.5) {
+            const flail = bot.ragdollTimer * 12.0;
+            if (parts.leftLeg) parts.leftLeg.rotation.x = Math.sin(flail) * 0.85;
+            if (parts.rightLeg) parts.rightLeg.rotation.x = -Math.sin(flail) * 0.85;
+            if (parts.upperBody) parts.upperBody.rotation.x = 0.25 * Math.cos(flail);
+          }
+
+          const gY = this.world ? this.world.getGroundHeightAt(bot.pos.x, bot.pos.z) : 0;
+          if (bot.pos.y <= gY + 0.22) {
+            bot.pos.y = gY + 0.22;
+            if (bot.ragdollVelY < -3.2 && (bot.ragdollBounces || 0) < 2) {
+              bot.ragdollVelY = -bot.ragdollVelY * 0.34;
+              bot.ragdollVelX *= 0.52;
+              bot.ragdollVelZ *= 0.52;
+              bot.ragdollSpinX *= 0.45;
+              bot.ragdollSpinZ *= 0.45;
+              bot.ragdollBounces = (bot.ragdollBounces || 0) + 1;
+            } else {
+              bot.ragdollVelX = 0;
+              bot.ragdollVelY = 0;
+              bot.ragdollVelZ = 0;
+              bot.ragdollSpinX = 0;
+              bot.ragdollSpinZ = 0;
+              bot.mesh.rotation.x = -Math.PI / 2;
+              bot.mesh.rotation.z *= 0.25;
+            }
+          }
+          bot.mesh.position.copy(bot.pos);
+        }
+        if (bot.ragdollTimer <= 0) {
+          bot.ragdollTimer = 0;
+          bot.mesh.visible = false;
+          bot.mesh.rotation.set(0, bot.yaw, 0);
+        }
+      }
       if (
         !bot.retiredForHuman &&
         (this.pendingRetireQuota?.[bot.team] || 0) > 0 &&
@@ -460,6 +510,10 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
 
         bot.dead = false;
         bot.downed = false;
+        bot.beyondRescue = false;
+        bot.ragdollTimer = 0;
+        const alreadyBled = Boolean(bot._alreadyBledTicket);
+        bot._alreadyBledTicket = false;
         bot._losCache?.clear();
         bot.hp = bot.maxHp || BOT.HP;
         bot.hasHelmet = true;
@@ -502,7 +556,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         }
         bot.mesh._culledOffFrustum = false;
         bot.mesh.visible = true;
-        if (onTicketBleedFn) onTicketBleedFn(bot.team, 1, 'SOLDIER', bot.name);
+        if (onTicketBleedFn && !alreadyBled) onTicketBleedFn(bot.team, 1, 'SOLDIER', bot.name);
       }
       continue;
     }
