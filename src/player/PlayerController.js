@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=121';
-import { sound } from '../audio.js?v=121';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=121';
+import { VOXEL_SIZE } from '../world.js?v=122';
+import { sound } from '../audio.js?v=122';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=122';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=121';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=121';
-import { events, makeEventBridge } from '../events.js?v=121';
-import { GunsmithMethods } from './GunsmithState.js?v=121';
-import { FortificationMethods } from './FortificationBuilder.js?v=121';
-import { CommanderMethods } from './CommanderAbilities.js?v=121';
-import { VehicleControlMethods } from './VehicleControl.js?v=121';
-import { CombatMethods } from './PlayerCombat.js?v=121';
+} from '../utils/KeyboardShortcuts.js?v=122';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=122';
+import { events, makeEventBridge } from '../events.js?v=122';
+import { GunsmithMethods } from './GunsmithState.js?v=122';
+import { FortificationMethods } from './FortificationBuilder.js?v=122';
+import { CommanderMethods } from './CommanderAbilities.js?v=122';
+import { VehicleControlMethods } from './VehicleControl.js?v=122';
+import { CombatMethods } from './PlayerCombat.js?v=122';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=121';
+} from '../core/StateMachines.js?v=122';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -668,56 +668,80 @@ export class PlayerController {
 
       if (!hasAnyModifier(e) && e.code === 'KeyN' && !e.repeat) {
         const av = this.activeVehicle;
-        let allowedModes = ['OFF', 'NVG'];
-        if (av) {
-          const hasFlir = Boolean(av.hasThermalFlir || av.aircraftRole === 'b2_spirit');
-          const hasNvg = Boolean(hasFlir || av.hasNightVision || this.hasThermalGoggles);
-          if (hasFlir) {
-            allowedModes =
-              av.isAircraft && av.aircraftRole === 'gunship'
-                ? ['OFF', 'WHOT', 'BHOT', 'NVG']
-                : ['OFF', 'NVG', 'WHOT', 'BHOT'];
-          } else if (hasNvg) {
-            allowedModes = ['OFF', 'NVG'];
-          } else {
-            allowedModes = ['OFF'];
-          }
-        } else if (this.hasThermalGoggles) {
-          allowedModes = ['OFF', 'NVG', 'WHOT'];
-        }
-        if (allowedModes.length <= 1) {
-          this.sensorMode = 'OFF';
-          this.nvgActive = false;
+        const curWepForN = !av && typeof this.currentWeapon === 'function' ? this.currentWeapon() : null;
+        const activeOpticForN =
+          !av && typeof this.getActiveOpticType === 'function'
+            ? this.getActiveOpticType()
+            : curWepForN?.def?.opticType;
+        const inThermalWeaponScope = Boolean(
+          !av &&
+            this.isAds &&
+            !this.useCantedSight &&
+            (activeOpticForN === 'flir' || activeOpticForN === 'sniperFlir' || curWepForN?.def?.isThermal)
+        );
+        if (inThermalWeaponScope) {
+          this.scopeThermalPolarity = this.scopeThermalPolarity === 'BHOT' ? 'WHOT' : 'BHOT';
           sound.playEmptyClick?.();
           if (this.onAwardXp) {
             this.onAwardXp(
               0,
-              av?.isAircraft
-                ? '🔭 NO NIGHT-VISION / FLIR POD INSTALLED — EQUIP AVS-9 NVG OR SNIPER FLIR POD IN [L] AIRCRAFT HANGAR!'
-                : '🔭 NO THERMAL / NVG SIGHT INSTALLED — EQUIP CREW NVG OR CITV FLIR IN [L] VEHICLE BAY!'
+              this.scopeThermalPolarity === 'BHOT'
+                ? '🌡️ SCOPE THERMAL [N]: BLACK-HOT INFRARED (BHOT IR) POLARITY'
+                : '🌡️ SCOPE THERMAL [N]: WHITE-HOT INFRARED (WHOT IR) POLARITY'
             );
           }
         } else {
-          const curMode = allowedModes.includes(this.sensorMode)
-            ? this.sensorMode
-            : this.nvgActive
-            ? 'NVG'
-            : 'OFF';
-          const nextMode = allowedModes[(allowedModes.indexOf(curMode) + 1) % allowedModes.length];
-          this.sensorMode = nextMode;
-          this.nvgActive = nextMode !== 'OFF';
-          if (av) av._userToggledSensorManually = true;
-          sound.playEmptyClick?.();
-          if (this.onAwardXp) {
-            const modeLabel =
-              nextMode === 'WHOT'
-                ? '🌡️ SENSOR [N]: WHITE-HOT FLIR INFRARED (WHOT IR) ACTIVE'
-                : nextMode === 'BHOT'
-                ? '🌡️ SENSOR [N]: BLACK-HOT FLIR INFRARED (BHOT IR) ACTIVE'
-                : nextMode === 'NVG'
-                ? '🥽 SENSOR [N]: GEN-3 GREEN PHOSPHOR NIGHT VISION (NVG) ACTIVE'
-                : '☀️ SENSOR [N]: DAYLIGHT OPTICAL TV MODE';
-            this.onAwardXp(0, modeLabel);
+          let allowedModes = ['OFF', 'NVG'];
+          if (av) {
+            const hasFlir = Boolean(av.hasThermalFlir || av.aircraftRole === 'b2_spirit');
+            const hasNvg = Boolean(hasFlir || av.hasNightVision || this.hasThermalGoggles);
+            if (hasFlir) {
+              allowedModes =
+                av.isAircraft && av.aircraftRole === 'gunship'
+                  ? ['OFF', 'WHOT', 'BHOT', 'NVG']
+                  : ['OFF', 'NVG', 'WHOT', 'BHOT'];
+            } else if (hasNvg) {
+              allowedModes = ['OFF', 'NVG'];
+            } else {
+              allowedModes = ['OFF'];
+            }
+          } else if (this.hasThermalGoggles) {
+            allowedModes = ['OFF', 'NVG', 'WHOT'];
+          }
+          if (allowedModes.length <= 1) {
+            this.sensorMode = 'OFF';
+            this.nvgActive = false;
+            sound.playEmptyClick?.();
+            if (this.onAwardXp) {
+              this.onAwardXp(
+                0,
+                av?.isAircraft
+                  ? '🔭 NO NIGHT-VISION / FLIR POD INSTALLED — EQUIP AVS-9 NVG OR SNIPER FLIR POD IN [L] AIRCRAFT HANGAR!'
+                  : '🔭 NO THERMAL / NVG SIGHT INSTALLED — EQUIP CREW NVG OR CITV FLIR IN [L] VEHICLE BAY!'
+              );
+            }
+          } else {
+            const curMode = allowedModes.includes(this.sensorMode)
+              ? this.sensorMode
+              : this.nvgActive
+              ? 'NVG'
+              : 'OFF';
+            const nextMode = allowedModes[(allowedModes.indexOf(curMode) + 1) % allowedModes.length];
+            this.sensorMode = nextMode;
+            this.nvgActive = nextMode !== 'OFF';
+            if (av) av._userToggledSensorManually = true;
+            sound.playEmptyClick?.();
+            if (this.onAwardXp) {
+              const modeLabel =
+                nextMode === 'WHOT'
+                  ? '🌡️ SENSOR [N]: WHITE-HOT FLIR INFRARED (WHOT IR) ACTIVE'
+                  : nextMode === 'BHOT'
+                  ? '🌡️ SENSOR [N]: BLACK-HOT FLIR INFRARED (BHOT IR) ACTIVE'
+                  : nextMode === 'NVG'
+                  ? '🥽 SENSOR [N]: GEN-3 GREEN PHOSPHOR NIGHT VISION (NVG) ACTIVE'
+                  : '☀️ SENSOR [N]: DAYLIGHT OPTICAL TV MODE';
+              this.onAwardXp(0, modeLabel);
+            }
           }
         }
       }
@@ -1990,7 +2014,46 @@ export class PlayerController {
       this.crouching = false;
     }
 
+    if (this.camera && this.camera.near !== 0.08) {
+      this.camera.near = 0.08;
+      this.camera.updateProjectionMatrix();
+    }
+
     const isDraggingBody = Boolean(this.draggedBot || (nearDownedBot && this.keys['KeyF']));
+    const activeOpticForBreath =
+      typeof this.getActiveOpticType === 'function' ? this.getActiveOpticType() : cur?.def?.opticType;
+    const isHighZoomScope = Boolean(
+      !this.useCantedSight &&
+        (cur?.def?.isScoped ||
+          activeOpticForBreath === 'sniper8x' ||
+          activeOpticForBreath === 'sniper12x' ||
+          activeOpticForBreath === 'sniperFlir' ||
+          activeOpticForBreath === 'valday6x' ||
+          activeOpticForBreath === 'lpvo36' ||
+          activeOpticForBreath === 'flir' ||
+          activeOpticForBreath === 'acog' ||
+          activeOpticForBreath === 'elcan4x')
+    );
+    if (typeof this.breathStamina !== 'number') this.breathStamina = 4.5;
+    const canHoldBreath = Boolean(
+      !modalOpenNow && this.isAds && this.adsAmount > 0.4 && isHighZoomScope && !this.reloading
+    );
+    if (canHoldBreath && this.keys['ShiftLeft'] && !this._breathExhausted) {
+      this.breathStamina = Math.max(0, this.breathStamina - dt * 1.0);
+      if (this.breathStamina <= 0.02) {
+        this._breathExhausted = true;
+        this.isHoldingBreath = false;
+      } else {
+        this.isHoldingBreath = true;
+      }
+    } else {
+      this.isHoldingBreath = false;
+      this.breathStamina = Math.min(4.5, this.breathStamina + dt * 1.45);
+      if (this._breathExhausted && (!this.keys['ShiftLeft'] || this.breathStamina >= 1.25)) {
+        if (this.breathStamina >= 1.25) this._breathExhausted = false;
+      }
+    }
+
     const sprinting =
       !modalOpenNow &&
       this.keys['ShiftLeft'] &&
@@ -2250,8 +2313,9 @@ export class PlayerController {
     this.boltCycleTimer = Math.max(0, (this.boltCycleTimer || 0) - dt);
     this.triggerPullTimer = Math.max(0, (this.triggerPullTimer || 0) - dt);
     this.weaponDrawTimer = Math.max(0, (this.weaponDrawTimer || 0) - dt);
-    this.swayX *= Math.pow(0.04, dt);
-    this.swayY *= Math.pow(0.04, dt);
+    const swayDecayBase = this.isHoldingBreath ? 0.0002 : 0.04;
+    this.swayX *= Math.pow(swayDecayBase, dt);
+    this.swayY *= Math.pow(swayDecayBase, dt);
     this.shakeTrauma = Math.max(0, this.shakeTrauma - dt * 1.8);
 
     // Smooth airborne lift & boot-landing knee/arm compression spring
@@ -2305,12 +2369,12 @@ export class PlayerController {
     const shakeYaw = (Math.random() - 0.5) * shakeMag;
     const shakePitch = (Math.random() - 0.5) * shakeMag;
 
-    // Camera height, lean & headbob (heavily stabilized while in ADS)
+    // Camera height, lean & headbob (heavily stabilized while in ADS; rock-steady 0-bob when holding breath!)
     if (isMoving && this.isGrounded) {
       this.walkBobPhase += dt * (sprinting ? 14 : 9.5);
     }
-    const bobAmpY = this.isAds ? 0.005 : 0.036;
-    const bobAmpX = this.isAds ? 0.004 : 0.026;
+    const bobAmpY = this.isHoldingBreath ? 0.0005 : this.isAds ? 0.0042 : 0.036;
+    const bobAmpX = this.isHoldingBreath ? 0.0004 : this.isAds ? 0.0034 : 0.026;
     const bobY = isMoving && this.isGrounded ? Math.sin(this.walkBobPhase) * bobAmpY : 0;
     const bobX = isMoving && this.isGrounded ? Math.cos(this.walkBobPhase * 0.5) * bobAmpX : 0;
 
@@ -2343,9 +2407,10 @@ export class PlayerController {
       }
     }
 
-    // ADS FOV & First-Person ViewModel Animation (supports 45° Canted Red-Dot Sight!)
+    // ADS FOV & First-Person ViewModel Animation (Call of Duty snappy ADS + 45° Canted Sight + Hold-Breath!)
     const targetAds = this.isAds && !this.reloading ? 1 : 0;
-    this.adsAmount += (targetAds - this.adsAmount) * Math.min(1, dt * 15);
+    const adsSpeed = cur?.def?.adsSpeed || 18.5;
+    this.adsAmount += (targetAds - this.adsAmount) * Math.min(1, dt * adsSpeed);
 
     let activeAdsFov = 75;
     if (cur && cur.def) {
@@ -2365,7 +2430,7 @@ export class PlayerController {
     }
 
     if (cur && cur.mesh) {
-      const breathScale = 1 - this.adsAmount * 0.9;
+      const breathScale = this.isHoldingBreath ? 0 : Math.max(0, 1 - this.adsAmount * 0.92);
       const idleBreathY = Math.sin(this.idleBreathPhase || 0) * 0.0032 * breathScale;
       const idleBreathX = Math.cos((this.idleBreathPhase || 0) * 0.5) * 0.0018 * breathScale;
       const vertInertiaY = ((this.landingDip || 0) + (this.airborneArmLift || 0)) * (1 - this.adsAmount * 0.72);
@@ -2394,6 +2459,7 @@ export class PlayerController {
         cur.def.id === 'usp45' ||
         cur.def.id === 'g18' ||
         cur.def.id === 'deagle';
+      const isLauncher = Boolean(cur.def.type === 'rpg' || cur.def.type === 'stinger');
       const activeOptic =
         typeof this.getActiveOpticType === 'function'
           ? this.getActiveOpticType()
@@ -2404,6 +2470,7 @@ export class PlayerController {
         !isCantedActive &&
         (activeOptic === 'sniper8x' ||
           activeOptic === 'sniper12x' ||
+          activeOptic === 'sniperFlir' ||
           activeOptic === 'valday6x' ||
           activeOptic === 'lpvo36' ||
           activeOptic === 'flir');
@@ -2417,14 +2484,9 @@ export class PlayerController {
       const isKobra =
         !isCantedActive &&
         (activeOptic === 'kobra' || activeOptic === 'okp7' || activeOptic === 'rmr');
-      // Exact optical sight-over-bore heights so the bottom of every 2D scope/reflex frame
-      // sits directly on the 3D Picatinny rail / pistol slide mount (never floating in mid-air
-      // and never blocking the reticle window!):
-      //   - Kobra (240px tall, bottom at +120px) / Holo (230px tall, bottom at +115px)
-      //   - Red-Dot (250px tall, bottom at +125px)
-      //   - ACOG 3.4x (350px tall, FOV 28, bottom at +175px)
-      //   - Sniper 8x (56vh blackout scope)
-      const sightCenterY = isBareIronSights
+      const sightCenterY = isLauncher && (isBareIronSights || activeOptic === 'rpgSight')
+        ? -0.108
+        : isBareIronSights
         ? isPistol
           ? -0.052
           : -0.060
@@ -2443,7 +2505,9 @@ export class PlayerController {
         : isPistol
         ? -0.076
         : -0.085;
-      const baseAdsZ = isBareIronSights
+      const baseAdsZ = isLauncher
+        ? -0.22
+        : isBareIronSights
         ? isPistol
           ? -0.22
           : -0.18
@@ -2466,14 +2530,18 @@ export class PlayerController {
       const adsZ =
         (isMeleeWep ? -0.3 : isBowWep ? -0.25 : isXbowWep ? -0.23 : baseAdsZ) +
         this.recoilKickZ * 0.4;
+      const swayMultAds = this.isHoldingBreath ? 0.0 : 0.12;
       const adsPos = new THREE.Vector3(
-        adsOffsetX + this.swayX * 0.12,
-        adsOffsetY + this.swayY * 0.12,
+        adsOffsetX + this.swayX * swayMultAds,
+        adsOffsetY + this.swayY * swayMultAds,
         adsZ
       );
       cur.mesh.position.lerpVectors(hipPos, adsPos, this.adsAmount);
 
       const animRefs = this._getWeaponAnimRefs(cur.mesh);
+      if (animRefs.opticSight) {
+        animRefs.opticSight.visible = !(activeOptic && this.adsAmount > 0.45 && !isCantedActive);
+      }
       const magMesh = animRefs.mag;
       const magTopBrass = animRefs.magTopBrass;
       if (magTopBrass) {

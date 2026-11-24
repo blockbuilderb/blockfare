@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=121';
-import { VehicleManager } from './vehicles.js?v=121';
-import { BotManager } from './bots.js?v=121';
-import { PlayerController } from './player.js?v=121';
-import { NetworkManager } from './network.js?v=121';
-import { UIManager } from './ui.js?v=121';
-import { TelemetryLogger } from './telemetry.js?v=121';
-import { sound } from './audio.js?v=121';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=121';
-import { events, makeEventBridge } from './events.js?v=121';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=121';
+import { VoxelWorld } from './world.js?v=122';
+import { VehicleManager } from './vehicles.js?v=122';
+import { BotManager } from './bots.js?v=122';
+import { PlayerController } from './player.js?v=122';
+import { NetworkManager } from './network.js?v=122';
+import { UIManager } from './ui.js?v=122';
+import { TelemetryLogger } from './telemetry.js?v=122';
+import { sound } from './audio.js?v=122';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=122';
+import { events, makeEventBridge } from './events.js?v=122';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=122';
 
 class BattleBitGame {
   constructor() {
@@ -1770,8 +1770,19 @@ class BattleBitGame {
       p && !p.dead && !onDeployMenu && p.nvgActive && (p.sensorMode === 'WHOT' || p.sensorMode === 'BHOT')
     );
     const curWep = p && !p.activeVehicle ? p.currentWeapon?.() : null;
+    const activeOptic =
+      p && !p.activeVehicle && typeof p.getActiveOpticType === 'function'
+        ? p.getActiveOpticType()
+        : curWep?.def?.opticType;
     const isScopeFlir = Boolean(
-      p && !p.dead && !onDeployMenu && !p.activeVehicle && p.isAds && (p.adsAmount || 0) > 0.45 && curWep?.def?.opticType === 'flir'
+      p &&
+        !p.dead &&
+        !onDeployMenu &&
+        !p.activeVehicle &&
+        p.isAds &&
+        (p.adsAmount || 0) > 0.42 &&
+        !p.useCantedSight &&
+        (activeOptic === 'flir' || activeOptic === 'sniperFlir' || curWep?.def?.isThermal)
     );
     const wantFlir = isSensorFlir || isScopeFlir;
 

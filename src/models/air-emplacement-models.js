@@ -1291,13 +1291,13 @@ export function buildEmplacementModel(ctx) {
   const sandbagRingGeo = getCachedMergedGeo('emplace_sandbag_ring', mergeParts, () => {
     const p = [];
     const bagGeo = getBox(0.68, 0.24, 0.38);
-    // 7-of-8 arc segments (leaving a neat rear entry step at -Z, i = 4) in 2 staggered courses
+    // 7-of-8 arc segments (leaving a neat rear entry step at +Z behind the -Z gun arc) in 2 staggered courses
     for (let course = 0; course < 2; course++) {
       const segs = 8;
       for (let i = 0; i < segs; i++) {
         const ang = (i / segs) * Math.PI * 2 + course * 0.2;
-        // Keep rear -Z entryway slightly lower on upper course for gunner access
-        if (course === 1 && Math.cos(ang) < -0.82) continue;
+        // Keep rear +Z entryway slightly lower on upper course for gunner access
+        if (course === 1 && Math.cos(ang) > 0.82) continue;
         const r = 1.24;
         p.push({
           geo: bagGeo,

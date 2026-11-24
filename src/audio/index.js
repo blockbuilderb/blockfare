@@ -2,5 +2,5 @@
 // AUDIO MODULE BARREL EXPORT (src/audio/index.js)
 // ============================================================================
 
-export { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=121';
-export { SoundManager, sound } from './SoundManager.js?v=121';
+export { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=122';
+export { SoundManager, sound } from './SoundManager.js?v=122';

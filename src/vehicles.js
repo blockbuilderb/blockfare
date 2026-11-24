@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=121';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=121';
+import { sound } from './audio.js?v=122';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=122';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=121';
-import { createVehicleMesh } from './models/vehicle-model.js?v=121';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=121';
-import { events, makeEventBridge } from './events.js?v=121';
+} from './assets/vehicle-defs.js?v=122';
+import { createVehicleMesh } from './models/vehicle-model.js?v=122';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=122';
+import { events, makeEventBridge } from './events.js?v=122';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=121';
+} from './core/StateMachines.js?v=122';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -89,28 +89,29 @@ export function initVehicleOrdnance(v) {
   if (v.isAircraft) {
     const role = v.aircraftRole || 'cas';
     if (role === 'gunship') {
-      maxPools = { slot0: 1800, slot1: 80, slot2: 20 }; // 1800× 25mm, 80× 40mm, 20× 105mm
+      maxPools = { slot0: 1800, slot1: 80, slot2: 20 }; // 1800× 25mm, 80× 40mm Bofors, 20× 105mm ready rack
     } else if (role === 'cas') {
-      maxPools = { slot0: 1150, slot1: 14, slot2: 4 }; // 1150× 30mm GAU-8, 14× Hydra, 4× Maverick/Mk-82
+      maxPools = { slot0: 1150, slot1: 14, slot2: 4 }; // 1150× 30mm GAU-8 drum, 14× Hydra-70, 4× AGM-65 Maverick
     } else if (role === 'b2_spirit') {
-      maxPools = { slot0: 16, slot1: 2, slot2: 4 }; // 2 Carpet Passes (16×5 = 80 Mk-82), 2× GBU-57 MOP, 4× AIM-9X
+      maxPools = { slot0: 8, slot1: 1, slot2: 4 }; // Stock CSRL: 8 Carpet Waves (40× 500lb Mk-82), 1× Twin GBU-57 MOP drop (2 MOPs), 4× AIM-9X
     } else if (role === 'wright_flyer') {
       maxPools = { slot0: 600, slot1: 8, slot2: 4 };
     } else {
-      maxPools = { slot0: 500, slot1: 6, slot2: 4 }; // 500× 20mm Vulcan, 6× AIM-120D, 4× JDAM/GBU-28
+      maxPools = { slot0: 500, slot1: 6, slot2: 4 }; // 500× 20mm M61 Vulcan, 6× AIM-120D AMRAAM, 4× JDAM/GBU-28
     }
   } else if (v.type === 'tank') {
-    maxPools = { slot0: 24, slot1: 600 }; // 24× 120mm/125mm Shells, 600× Coax MG
+    maxPools = { slot0: 24, slot1: 1200 }; // 24× 120mm/125mm Ready-Bustle/Carousel Shells, 1,200× Coax / .50 RWS MG
   } else if (v.type === 'apc') {
-    maxPools = { slot0: 180, slot1: 600 }; // 180× 30mm Autocannon, 600× Coax MG
+    maxPools = { slot0: 210, slot1: 1200 }; // 210× 25mm/30mm Dual-Bin Ready Autocannon, 1,200× Coax MG
   } else if (v.type === 'aa' || v.type === 'emplace_aa') {
-    maxPools = { slot0: 400, slot1: 8 }; // 400× Radar AA Bursts, 8× SAMs
+    maxPools = { slot0: 600, slot1: 8 }; // 600× Radar AA Bursts, 8× Ready-Pod Stinger / 9M311 SAMs
   } else if (v.type === 'emplace_mortar') {
-    maxPools = { slot0: 24, slot1: 6 };
+    maxPools = { slot0: 24, slot1: 6 }; // 24× 81mm HE Shells, 6× 3-Round Rapid Barrages
   } else if (v.type === 'humvee' || v.type === 'emplace_hmg') {
-    maxPools = { slot0: 500, slot1: 500 };
+    maxPools = { slot0: 500, slot1: 500 }; // 500× .50 BMG M2HB / Kord Heavy Ammo Cans
   }
 
+  v._baseOrdnancePools = maxPools ? { ...maxPools } : null;
   v.maxOrdnancePools = maxPools ? { ...maxPools } : null;
   v.ordnancePools = maxPools ? { ...maxPools } : null;
   return v.ordnancePools;
@@ -252,7 +253,8 @@ const PITCH_LIMITS_DEFAULT = Object.freeze({ min: -0.18, max: 0.35 });
 const PITCH_LIMITS_AA = Object.freeze({ min: -0.14, max: 1.48 });
 const PITCH_LIMITS_MORTAR = Object.freeze({ min: -0.35, max: 0.85 });
 const PITCH_LIMITS_APC = Object.freeze({ min: -0.18, max: 0.52 });
-const PITCH_LIMITS_CAR = Object.freeze({ min: -0.21, max: 0.61 });
+export const PITCH_LIMITS_CAR = Object.freeze({ min: -0.26, max: 1.05 }); // -15° to +60° real-world CROWS / OGPK Roof .50 Cal elevation!
+export const PITCH_LIMITS_COMMANDER_RWS = Object.freeze({ min: -0.31, max: 1.05 }); // -18° to +60° Tank Commander Roof .50 Cal RWS!
 
 const COLOR_FIRE_ORANGE = new THREE.Color(0xff7f11);
 const COLOR_ERA_SPARK = new THREE.Color(0xff9f1a);
@@ -4029,7 +4031,7 @@ export class VehicleManager {
           }
         } else {
           for (const w of v.wheels) {
-            w.rotation.x += v.forwardSpeed * dt * (v.type === 'bike' || v.type === 'atv' ? 2.6 : 1.4);
+            w.rotation.x -= v.forwardSpeed * dt * (v.type === 'bike' || v.type === 'atv' ? 2.6 : 1.4);
           }
         }
 
@@ -4136,7 +4138,7 @@ export class VehicleManager {
       }
     }
 
-    // Update 3D spatial aircraft flyby engine audio & fade out cockpit engine audio when on foot or in a ground vehicle
+    // Update 3D spatial aircraft flyby engine audio & continuous ground/motorcycle engine audio
     if (player && (!player.activeVehicle || !player.activeVehicle.isAircraft)) {
       sound.updateAircraftEngineAudio?.(
         null,
@@ -4144,6 +4146,16 @@ export class VehicleManager {
         player.pos,
         player.yaw || 0,
         false
+      );
+    }
+    if (onDeployMenu || !player || player.dead) {
+      sound.updateGroundVehicleEngineAudio?.(null, null, null, 0);
+    } else {
+      sound.updateGroundVehicleEngineAudio?.(
+        player.activeVehicle && !player.activeVehicle.isAircraft ? player.activeVehicle : null,
+        this.vehicles,
+        player.pos,
+        player.yaw || 0
       );
     }
   }

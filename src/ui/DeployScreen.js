@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=121';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=121';
-import { events } from '../events.js?v=121';
+import { SQUAD_DEFS } from '../bots.js?v=122';
+import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=122';
+import { events } from '../events.js?v=122';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=121';
+} from '../core/StateMachines.js?v=122';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=121';
+} from '../utils/KeyboardShortcuts.js?v=122';
 
 export const DeployScreen = {
   bindDeployEvents() {

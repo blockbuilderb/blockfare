@@ -4,8 +4,8 @@
 // panning, distance air-absorption filtering, and procedural sub-bass layers.
 // ============================================================================
 
-import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=121';
-import { AUDIO } from '../config.js?v=121';
+import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=122';
+import { AUDIO } from '../config.js?v=122';
 
 const AUDIO_STORAGE_KEY = 'bb_audio_settings_v1';
 
@@ -1604,6 +1604,408 @@ export class SoundManager {
       this._setAirParam(nodes.extBusGain.gain, 'extBus', Math.max(0.0001, extVol), now, 0.07);
     } else {
       this._setAirParam(nodes.extBusGain.gain, 'extBus', 0.0001, now, 0.08);
+    }
+  }
+
+  _isMotorizedGroundVehicle(v) {
+    if (!v || v.dead || v.isAircraft) return false;
+    const t = v.type;
+    return (
+      t === 'bike' ||
+      t === 'atv' ||
+      t === 'humvee' ||
+      t === 'apc' ||
+      t === 'aa' ||
+      t === 'tank'
+    );
+  }
+
+  _ensureGroundEngineGraph() {
+    if (!this.ctx) return null;
+    if (this._groundEngineNodes) return this._groundEngineNodes;
+
+    const ctx = this.ctx;
+    const noiseBuf = this._createNoiseBuffer(2.0);
+
+    // 1. Player / Ridden Ground Vehicle Continuous Engine + Exhaust + Track/Turbine Graph
+    const selfBusGain = ctx.createGain();
+    selfBusGain.gain.value = 0.0001;
+    selfBusGain.connect(this.masterGain || ctx.destination);
+
+    const selfCoreOsc = ctx.createOscillator();
+    selfCoreOsc.type = 'sawtooth';
+    selfCoreOsc.frequency.value = 54;
+    const selfCoreGain = ctx.createGain();
+    selfCoreGain.gain.value = 0.45;
+
+    const selfSubOsc = ctx.createOscillator();
+    selfSubOsc.type = 'triangle';
+    selfSubOsc.frequency.value = 27;
+    const selfSubGain = ctx.createGain();
+    selfSubGain.gain.value = 0.35;
+
+    // High-frequency turbine / EV inverter / turbocharger whine oscillator
+    const selfWhineOsc = ctx.createOscillator();
+    selfWhineOsc.type = 'sine';
+    selfWhineOsc.frequency.value = 420;
+    const selfWhineGain = ctx.createGain();
+    selfWhineGain.gain.value = 0.02;
+
+    const selfExhaustLp = ctx.createBiquadFilter();
+    selfExhaustLp.type = 'lowpass';
+    selfExhaustLp.frequency.value = 260;
+    selfExhaustLp.Q.value = 2.4;
+
+    selfCoreOsc.connect(selfCoreGain);
+    selfSubOsc.connect(selfSubGain);
+    selfCoreGain.connect(selfExhaustLp);
+    selfSubGain.connect(selfExhaustLp);
+    selfExhaustLp.connect(selfBusGain);
+
+    selfWhineOsc.connect(selfWhineGain);
+    selfWhineGain.connect(selfBusGain);
+
+    // Mechanical intake / tire / caterpillar track rumble loop
+    const selfMechNoise = ctx.createBufferSource();
+    selfMechNoise.buffer = noiseBuf;
+    selfMechNoise.loop = true;
+    const selfMechBp = ctx.createBiquadFilter();
+    selfMechBp.type = 'bandpass';
+    selfMechBp.frequency.value = 180;
+    selfMechBp.Q.value = 1.4;
+    const selfMechGain = ctx.createGain();
+    selfMechGain.gain.value = 0.08;
+    selfMechNoise.connect(selfMechBp);
+    selfMechBp.connect(selfMechGain);
+    selfMechGain.connect(selfBusGain);
+
+    selfCoreOsc.start();
+    selfSubOsc.start();
+    selfWhineOsc.start();
+    selfMechNoise.start();
+
+    // 2. Nearest AI / Remote Driven Ground Vehicle Spatial Pass-By + Doppler Bus
+    const extBusGain = ctx.createGain();
+    extBusGain.gain.value = 0.0001;
+    let extPanner = null;
+    if (typeof ctx.createStereoPanner === 'function') {
+      extPanner = ctx.createStereoPanner();
+      extBusGain.connect(extPanner);
+      extPanner.connect(this.masterGain || ctx.destination);
+    } else {
+      extBusGain.connect(this.masterGain || ctx.destination);
+    }
+
+    const extOsc = ctx.createOscillator();
+    extOsc.type = 'sawtooth';
+    extOsc.frequency.value = 62;
+    const extLp = ctx.createBiquadFilter();
+    extLp.type = 'lowpass';
+    extLp.frequency.value = 320;
+    extLp.Q.value = 2.1;
+    extOsc.connect(extLp);
+    extLp.connect(extBusGain);
+
+    const extNoise = ctx.createBufferSource();
+    extNoise.buffer = noiseBuf;
+    extNoise.loop = true;
+    const extNoiseBp = ctx.createBiquadFilter();
+    extNoiseBp.type = 'bandpass';
+    extNoiseBp.frequency.value = 210;
+    extNoiseBp.Q.value = 1.2;
+    const extNoiseGain = ctx.createGain();
+    extNoiseGain.gain.value = 0.25;
+    extNoise.connect(extNoiseBp);
+    extNoiseBp.connect(extNoiseGain);
+    extNoiseGain.connect(extBusGain);
+
+    extOsc.start();
+    extNoise.start();
+
+    this._groundEngineNodes = {
+      selfBusGain,
+      selfCoreOsc,
+      selfCoreGain,
+      selfSubOsc,
+      selfSubGain,
+      selfWhineOsc,
+      selfWhineGain,
+      selfExhaustLp,
+      selfMechBp,
+      selfMechGain,
+      extBusGain,
+      extPanner,
+      extOsc,
+      extLp,
+      extNoiseBp,
+      cache: {}
+    };
+    return this._groundEngineNodes;
+  }
+
+  _setGroundParam(audioParam, key, targetVal, now, timeConst = 0.055) {
+    if (!audioParam || !this._groundEngineNodes) return;
+    const cache = this._groundEngineNodes.cache;
+    const prev = cache[key];
+    if (prev !== undefined && Math.abs(prev - targetVal) < 0.0015) return;
+    cache[key] = targetVal;
+    audioParam.setTargetAtTime(targetVal, now, timeConst);
+  }
+
+  /**
+   * Continuous real-time procedural engine, exhaust, turbine & track audio for ALL motorized
+   * ground vehicles (Motorcycles — 4-stroke, 2-stroke, Electric e-Moto — Quad ATVs, Humvees,
+   * 8x8 IFVs/SPAAGs, M1A2 Gas-Turbine Tanks & T-90M V-12 Diesel Tanks) + 3D spatial Doppler pass-by!
+   */
+  updateGroundVehicleEngineAudio(arg1, arg2, listenerPos, listenerYaw = 0) {
+    const vehicles = Array.isArray(arg1) ? arg1 : Array.isArray(arg2) ? arg2 : null;
+    const playerVeh = Array.isArray(arg1) ? arg2 : arg1;
+    if (!this.ctx || !this.enabled || this.muted) {
+      if (this._groundEngineNodes && this.ctx) {
+        const t = this.ctx.currentTime;
+        this._setGroundParam(this._groundEngineNodes.selfBusGain.gain, 'selfBus', 0.0001, t, 0.06);
+        this._setGroundParam(this._groundEngineNodes.extBusGain.gain, 'extBus', 0.0001, t, 0.06);
+      }
+      return;
+    }
+
+    const catMult = this.getCategoryGain('vehicles');
+    if (catMult <= 0.001) {
+      if (this._groundEngineNodes) {
+        const t = this.ctx.currentTime;
+        this._setGroundParam(this._groundEngineNodes.selfBusGain.gain, 'selfBus', 0.0001, t, 0.06);
+        this._setGroundParam(this._groundEngineNodes.extBusGain.gain, 'extBus', 0.0001, t, 0.06);
+      }
+      return;
+    }
+
+    const activePlayerGround = this._isMotorizedGroundVehicle(playerVeh) ? playerVeh : null;
+    let nearestExtVeh = null;
+    let nearestExtDistSq = 145 * 145;
+
+    if (listenerPos && Array.isArray(vehicles)) {
+      for (let i = 0; i < vehicles.length; i++) {
+        const v = vehicles[i];
+        if (!this._isMotorizedGroundVehicle(v) || v === activePlayerGround || !v.pos) continue;
+        const spdAbs = Math.abs(v.forwardSpeed || 0);
+        const isOccupied = Boolean(v.driver || v.npcDriver || spdAbs > 0.65);
+        if (!isOccupied) continue;
+        const dx = v.pos.x - listenerPos.x;
+        const dy = v.pos.y - listenerPos.y;
+        const dz = v.pos.z - listenerPos.z;
+        const dSq = dx * dx + dy * dy + dz * dz;
+        if (dSq < nearestExtDistSq) {
+          nearestExtDistSq = dSq;
+          nearestExtVeh = v;
+        }
+      }
+    }
+
+    if (!activePlayerGround && !nearestExtVeh) {
+      if (this._groundEngineNodes) {
+        const t = this.ctx.currentTime;
+        this._setGroundParam(this._groundEngineNodes.selfBusGain.gain, 'selfBus', 0.0001, t, 0.07);
+        this._setGroundParam(this._groundEngineNodes.extBusGain.gain, 'extBus', 0.0001, t, 0.07);
+      }
+      return;
+    }
+
+    if (this.ctx.state === 'suspended') return;
+    const nodes = this._ensureGroundEngineGraph();
+    if (!nodes) return;
+    const now = this.ctx.currentTime;
+
+    // A. Ridden Ground Vehicle Engine Synthesis
+    if (activePlayerGround) {
+      const v = activePlayerGround;
+      const spdAbs = Math.abs(v.forwardSpeed || 0);
+      const maxSpd = Math.max(8, v.maxSpeed || 24);
+      const spdRatio = Math.min(1.2, spdAbs / maxSpd);
+      const rpmNorm =
+        typeof v.engineRpm === 'number' && v.maxRpm > 1000
+          ? Math.max(0, Math.min(1.12, (v.engineRpm - (v.idleRpm || 1200)) / Math.max(800, v.maxRpm - (v.idleRpm || 1200))))
+          : Math.min(1.05, spdRatio * 0.92 + (spdAbs > 0.5 ? 0.14 : 0.0));
+      const loadBoost = v.boostActive || v.wheelieFactor > 0.15 ? 0.18 : 0;
+
+      let coreHz = 52;
+      let subHz = 26;
+      let lpHz = 260;
+      let whineHz = 400;
+      let whineLvl = 0.01;
+      let mechHz = 180;
+      let mechLvl = 0.06;
+      let masterVol = 0.16;
+
+      if (v.type === 'bike') {
+        const isEv = Boolean(v.isElectric || v.bikeEngine === 'electric_stealth');
+        const isTwoStroke = Boolean(v.bikeEngine === 'two_stroke_race');
+        if (isEv) {
+          // Zero FX Electric Recon Bike: quiet stealth idle + futuristic PWM inverter whine + tire hum
+          if (nodes.selfCoreOsc.type !== 'sine') nodes.selfCoreOsc.type = 'sine';
+          coreHz = 145 + spdRatio * 560;
+          subHz = 72 + spdRatio * 240;
+          lpHz = 520 + spdRatio * 1400;
+          whineHz = 380 + spdRatio * 1420;
+          whineLvl = 0.025 + spdRatio * 0.085;
+          mechHz = 240 + spdRatio * 420;
+          mechLvl = spdRatio * 0.045;
+          masterVol = 0.045 + spdRatio * 0.11;
+        } else if (isTwoStroke) {
+          // 250cc 2-Stroke Dirt Bike: crisp high-revving resonant ring-ding powerband!
+          if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
+          coreHz = 86 + (rpmNorm + loadBoost) * 235;
+          subHz = coreHz * 0.5;
+          lpHz = 420 + (rpmNorm + loadBoost) * 1650;
+          whineHz = coreHz * 2.0;
+          whineLvl = 0.025 + rpmNorm * 0.05;
+          mechHz = 310 + spdRatio * 380;
+          mechLvl = 0.035 + spdRatio * 0.065;
+          masterVol = 0.12 + rpmNorm * 0.12;
+        } else {
+          // 450cc 4-Stroke Single-Cylinder Enduro Thumper ("braaap" exhaust pulse + gear shifts!)
+          if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
+          coreHz = 52 + (rpmNorm + loadBoost) * 168;
+          subHz = coreHz * 0.5;
+          lpHz = 270 + (rpmNorm + loadBoost) * 1180;
+          whineHz = 280 + rpmNorm * 520;
+          whineLvl = 0.015 + rpmNorm * 0.035;
+          mechHz = 210 + spdRatio * 340;
+          mechLvl = 0.04 + spdRatio * 0.065;
+          masterVol = 0.125 + rpmNorm * 0.12;
+        }
+      } else if (v.type === 'atv') {
+        // 850cc Twin-Cylinder 4x4 Tactical Quad ATV
+        if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
+        coreHz = 46 + (rpmNorm + loadBoost) * 144;
+        subHz = coreHz * 0.5;
+        lpHz = 240 + (rpmNorm + loadBoost) * 960;
+        whineHz = 240 + rpmNorm * 460;
+        whineLvl = 0.018 + rpmNorm * 0.03;
+        mechHz = 185 + spdRatio * 290;
+        mechLvl = 0.05 + spdRatio * 0.075;
+        masterVol = 0.13 + rpmNorm * 0.115;
+      } else if (v.type === 'humvee') {
+        // 6.5L V8 Turbo-Diesel Armored Utility Truck
+        if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
+        coreHz = 36 + rpmNorm * 102;
+        subHz = coreHz * 0.5;
+        lpHz = 195 + rpmNorm * 680;
+        whineHz = 520 + rpmNorm * 920; // turbocharger whistle
+        whineLvl = 0.012 + rpmNorm * 0.042;
+        mechHz = 150 + spdRatio * 240;
+        mechLvl = 0.055 + spdRatio * 0.075;
+        masterVol = 0.135 + rpmNorm * 0.11;
+      } else if (v.type === 'apc' || v.type === 'aa') {
+        // 8x8 Armored IFV / SPAAG Heavy Inline-6 Turbo-Diesel + Drivetrain Whine
+        if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
+        coreHz = 39 + rpmNorm * 108;
+        subHz = coreHz * 0.5;
+        lpHz = 210 + rpmNorm * 720;
+        whineHz = 480 + rpmNorm * 880;
+        whineLvl = 0.018 + rpmNorm * 0.048;
+        mechHz = 165 + spdRatio * 260;
+        mechLvl = 0.065 + spdRatio * 0.085;
+        masterVol = 0.145 + rpmNorm * 0.115;
+      } else if (v.type === 'tank') {
+        const isAbramsTurbine = v.team !== 'RU';
+        if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
+        if (isAbramsTurbine) {
+          // M1A2 SEP v3 Honeywell AGT1500 Gas-Turbine Whine + Steel Track Clatter
+          coreHz = 48 + spdRatio * 68;
+          subHz = 24 + spdRatio * 34;
+          lpHz = 220 + spdRatio * 460;
+          whineHz = 690 + spdRatio * 960;
+          whineLvl = 0.055 + spdRatio * 0.095;
+          mechHz = 135 + spdRatio * 245;
+          mechLvl = 0.05 + spdRatio * 0.13;
+          masterVol = 0.15 + spdRatio * 0.12;
+        } else {
+          // T-90M Proryv V-92S2F V-12 Twin-Turbo Diesel Roar + Steel Track Clatter
+          coreHz = 31 + spdRatio * 84;
+          subHz = 16 + spdRatio * 42;
+          lpHz = 185 + spdRatio * 620;
+          whineHz = 540 + spdRatio * 840;
+          whineLvl = 0.024 + spdRatio * 0.062;
+          mechHz = 130 + spdRatio * 235;
+          mechLvl = 0.065 + spdRatio * 0.135;
+          masterVol = 0.155 + spdRatio * 0.12;
+        }
+      }
+
+      this._setGroundParam(nodes.selfCoreOsc.frequency, 'sCoreHz', coreHz, now, 0.045);
+      this._setGroundParam(nodes.selfSubOsc.frequency, 'sSubHz', subHz, now, 0.045);
+      this._setGroundParam(nodes.selfExhaustLp.frequency, 'sLpHz', lpHz, now, 0.05);
+      this._setGroundParam(nodes.selfWhineOsc.frequency, 'sWhineHz', whineHz, now, 0.05);
+      this._setGroundParam(nodes.selfWhineGain.gain, 'sWhineGain', whineLvl, now, 0.05);
+      this._setGroundParam(nodes.selfMechBp.frequency, 'sMechHz', mechHz, now, 0.05);
+      this._setGroundParam(nodes.selfMechGain.gain, 'sMechGain', mechLvl, now, 0.05);
+      this._setGroundParam(
+        nodes.selfBusGain.gain,
+        'selfBus',
+        Math.max(0.0001, Math.min(0.32, masterVol * catMult)),
+        now,
+        0.055
+      );
+    } else {
+      this._setGroundParam(nodes.selfBusGain.gain, 'selfBus', 0.0001, now, 0.07);
+    }
+
+    // B. Nearest External Ground Vehicle 3D Spatial Pass-By + Doppler Shift
+    if (nearestExtVeh && listenerPos) {
+      const dist = Math.sqrt(nearestExtDistSq);
+      const distRatio = Math.min(1, Math.max(0, dist / 145));
+      const atten = Math.pow(1 - distRatio, 1.75);
+      const spdSigned = nearestExtVeh.forwardSpeed || 0;
+      const spdAbs = Math.abs(spdSigned);
+      const maxSpd = Math.max(8, nearestExtVeh.maxSpeed || 22);
+      const spdFrac = Math.min(1.15, spdAbs / maxSpd);
+
+      const dx = nearestExtVeh.pos.x - listenerPos.x;
+      const dz = nearestExtVeh.pos.z - listenerPos.z;
+      const invD = 1 / Math.max(1, dist);
+      const vx = -Math.sin(nearestExtVeh.yaw || 0) * spdSigned;
+      const vz = -Math.cos(nearestExtVeh.yaw || 0) * spdSigned;
+      const radialVel = (dx * vx + dz * vz) * invD;
+      const doppler = Math.max(0.76, Math.min(1.32, 1.0 - radialVel / 145));
+
+      const baseExtHz =
+        nearestExtVeh.type === 'bike'
+          ? nearestExtVeh.isElectric
+            ? 190 + spdFrac * 380
+            : 64 + spdFrac * 155
+          : nearestExtVeh.type === 'atv'
+          ? 52 + spdFrac * 125
+          : nearestExtVeh.type === 'tank'
+          ? 36 + spdFrac * 72
+          : 42 + spdFrac * 96;
+
+      this._setGroundParam(nodes.extOsc.frequency, 'extHz', baseExtHz * doppler, now, 0.06);
+      this._setGroundParam(
+        nodes.extLp.frequency,
+        'extLp',
+        (220 + (1 - distRatio) * 580 + spdFrac * 360) * doppler,
+        now,
+        0.06
+      );
+      this._setGroundParam(
+        nodes.extNoiseBp.frequency,
+        'extBp',
+        (165 + spdFrac * 260) * doppler,
+        now,
+        0.06
+      );
+
+      if (nodes.extPanner) {
+        const rightX = Math.cos(listenerYaw);
+        const rightZ = -Math.sin(listenerYaw);
+        const pan = Math.max(-0.9, Math.min(0.9, (dx * rightX + dz * rightZ) * invD));
+        this._setGroundParam(nodes.extPanner.pan, 'extPan', pan, now, 0.055);
+      }
+
+      const extVol = Math.min(0.24, (0.08 + spdFrac * 0.14) * atten * catMult);
+      this._setGroundParam(nodes.extBusGain.gain, 'extBus', Math.max(0.0001, extVol), now, 0.065);
+    } else {
+      this._setGroundParam(nodes.extBusGain.gain, 'extBus', 0.0001, now, 0.08);
     }
   }
 }

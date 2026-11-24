@@ -6,18 +6,18 @@ import {
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from '../weapons.js?v=121';
-import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=121';
-import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=121';
-import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=121';
-import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=121';
-import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=121';
-import { sound } from '../audio.js?v=121';
+} from '../weapons.js?v=122';
+import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=122';
+import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=122';
+import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=122';
+import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=122';
+import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=122';
+import { sound } from '../audio.js?v=122';
 import {
   ARMORY_CASE_STATES,
   ARMORY_CASE_EVENTS,
   createArmoryCaseRouletteFSM
-} from '../core/StateMachines.js?v=121';
+} from '../core/StateMachines.js?v=122';
 
 export const GunsmithModal = {
   formatCashAmount(val) {
@@ -2622,6 +2622,9 @@ export const GunsmithModal = {
                 ${renderSlotSection('airOrdnance', 'SLOT 3 // ORDNANCE & FOX-3 AMRAAM', 'Faster reload & +blast damage', '#48dbfb')}
                 ${renderSlotSection('airFrame', 'SLOT 4 // TITANIUM AIRFRAME & G-VECTOR', '+Max HP & faster roll/pitch agility', '#48dbfb')}
               </div>
+              <div style="margin-top:8px;">
+                ${renderSlotSection('airAmmoRack', 'SLOT 5 // HEAVY MUNITIONS RACKS (~2× PAYLOAD: AMBER / BRU-55 / B-2 SBRA)', 'Doubles missiles/bombs & palletized AC-130 ammo (-4% turn rate)', '#ffd32a')}
+              </div>
             </div>
           </div>
 
@@ -2629,16 +2632,17 @@ export const GunsmithModal = {
           <div style="display:${vSubTab === 'ac130' ? 'flex' : 'none'};flex-direction:column;gap:6px;flex:1;min-height:0;overflow-y:auto;">
             <div style="background:linear-gradient(135deg, rgba(10,22,20,0.98), rgba(12,18,28,0.98));border:1.5px solid #2ecc71;border-radius:6px;padding:8px 10px;">
               <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px;">
-                <span style="font-size:12px;font-weight:900;color:#7bed9f;">🛸 AC-130 EVOLUTION (1968 VIETNAM ➔ 2024 GHOSTRIDER) • [Q/Z] ALT 180–1,800M • [SCROLL] ZOOM</span>
+                <span style="font-size:12px;font-weight:900;color:#7bed9f;">🛸 AC-130 EVOLUTION (1968 VIETNAM ➔ 2024 GHOSTRIDER) • [Q/Z] ALT 180–9,100M • [SCROLL] ZOOM</span>
                 <button type="button" id="gs-open-ac130-manual-btn" style="background:rgba(0,210,211,0.2);border:1px solid #00d2d3;color:#81ecec;border-radius:4px;padding:3px 8px;font-size:9.5px;font-weight:900;cursor:pointer;">📖 [F1] AC-130 MANUAL</button>
               </div>
               ${renderSlotSection('ac130Generation', 'TRACK 1 // AIRFRAME & BELLY EO/IR SENSOR POD [KEY C]', '1968 Rigid Floor ➔ 1995 Belly FLIR Pod ➔ 2024 Ghostrider', '#2ecc71')}
               ${renderSlotSection('ac130Sight', 'TRACK 2 // PILOT LEFT-WINDOW SIGHT (UNLOCK @ 3 KILLS)', 'Analog Pylon HUD ➔ AFSOC EOTech EXPS3 Holographic Sight', '#ff6b81')}
               ${renderSlotSection('ac130Avionics', 'TRACK 3 // FLIR MFD & COUPLED GPS ORBIT [KEY R]', 'Cockpit FLIR Video Repeater (2K) & Coupled GPS Pylon Autopilot (6K)', '#00d2d3')}
+              ${renderSlotSection('airAmmoRack', 'TRACK 4 // PALLETIZED CARGO MUNITIONS STOWAGE (~2× ORDNANCE)', '1,800/80/20 Ready Racks ➔ 3,000× 25mm / 192× 40mm / 45× 105mm!', '#ffd32a')}
             </div>
           </div>
 
-          <!-- SUB-TAB 3: GROUND ARMOR BAY (2x2 GRID — FITS 100% ON ONE SCREEN!) -->
+          <!-- SUB-TAB 3: GROUND ARMOR BAY (2x2 GRID + HULL STOWAGE — FITS 100% ON ONE SCREEN!) -->
           <div style="display:${vSubTab === 'armor' ? 'flex' : 'none'};flex-direction:column;gap:6px;flex:1;min-height:0;overflow-y:auto;">
             <div style="background:rgba(12,18,26,0.96);border:1px solid rgba(241,196,15,0.35);border-radius:6px;padding:8px 10px;">
               <div style="font-size:11.5px;font-weight:900;color:#f1c40f;margin-bottom:6px;">
@@ -2649,6 +2653,9 @@ export const GunsmithModal = {
                 ${renderSlotSection('armorDefense', 'SLOT 2 // TROPHY APS, ERA & SMOKE [KEY X]', 'Intercepts incoming RPGs & AT missiles', '#f1c40f')}
                 ${renderSlotSection('armorWeaponMod', 'SLOT 3 // M829A4 APFSDS & AUTOLOADER', 'Faster cannon reload & higher shell velocity', '#f1c40f')}
                 ${renderSlotSection('armorChassis', 'SLOT 4 // AGT-1500 TURBINE & DOZER BLADE', '+Max Hull HP & higher off-road top speed', '#f1c40f')}
+              </div>
+              <div style="margin-top:8px;">
+                ${renderSlotSection('armorAmmoRack', 'SLOT 5 // DEEP-HULL WET AMMO STOWAGE & DOUBLE CANS (~2× MUNITIONS)', '24 ➔ 42 MBT Shells • 210 ➔ 420 IFV 30mm • 8 ➔ 16 SAMs • 1,000 .50 BMG (-4% accel)', '#ffd32a')}
               </div>
             </div>
           </div>

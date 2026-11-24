@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=121';
+import { sound } from '../audio.js?v=122';
 import {
   PLAYER,
   COMBAT,
@@ -8,10 +8,10 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=121';
-import { events } from '../events.js?v=121';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=121';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=121';
+} from '../config.js?v=122';
+import { events } from '../events.js?v=122';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=122';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=122';
 
 function markShared(asset) {
   if (asset) {
@@ -2036,6 +2036,13 @@ export const CombatMethods = {
           }
 
           const isHeadshot = Boolean(bestBotHit.object.userData.isHead);
+          const relHitY = bestBotHit.point.y - bot.pos.y;
+          const isUpperChest =
+            !isHeadshot && (Boolean(bestBotHit.object.userData.isTorso) || relHitY >= 0.92);
+          const chestZoneMult =
+            isUpperChest && bullet.wepDef && bullet.wepDef.chestMult > 1
+              ? bullet.wepDef.chestMult
+              : 1.0;
           const hitThroughCover = Boolean(bullet.penetratedCover);
           const totalFlightDist = bullet.traveledDist + bestBotHit.distance;
 
@@ -2056,7 +2063,7 @@ export const CombatMethods = {
                 distMult *
                 bodyPenMult *
                 envMult *
-                (isHeadshot ? bullet.headshotMult : 1)
+                (isHeadshot ? bullet.headshotMult : chestZoneMult)
             )
           );
 
@@ -2110,6 +2117,8 @@ export const CombatMethods = {
             : res.killed
             ? isHeadshot
               ? `HEADSHOT KILL!${colTag}`
+              : bullet.wepDef?.isBoltSniper && isUpperChest
+              ? `🎯 SNIPER ONE-SHOT!${colTag}`
               : `ELIMINATED!${colTag}`
             : isHeadshot
             ? `HEADSHOT -${dmg}${colTag}`

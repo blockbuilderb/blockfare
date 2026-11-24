@@ -315,6 +315,19 @@ export const ATTACHMENT_CATALOG = {
       zoomFovs: [16.5, 9.5],
       grantCanted: true,
       desc: 'Extreme long-range 6.0x ⇄ 12.0x Horus Tremor3 ballistic sniper optic (Scroll Wheel) + [V] 45° Canted Red Dot!'
+    },
+    {
+      id: 'an_pas13_sniper_ir',
+      name: 'AN/PAS-13G LWTS THERMAL SNIPER (6.0X ⇄ 12.0X WHOT/BHOT IR + CANTED)',
+      shortName: 'SNIPER IR 6-12X',
+      price: 4200,
+      opticType: 'sniperFlir',
+      adsFov: 16.5,
+      zoomLevels: [6.0, 12.0],
+      zoomFovs: [16.5, 9.5],
+      isThermal: true,
+      grantCanted: true,
+      desc: 'High-magnification 6.0x ⇄ 12.0x Infrared Thermal Sniper Scope: lights up distant targets in glowing WHOT/BHOT IR ([N] Polarity • [SHIFT] Steady Breath • [V] Canted)!'
     }
   ],
   grip: [

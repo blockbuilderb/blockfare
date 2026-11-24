@@ -6,10 +6,21 @@
 //   2. buildHumveeModel(ctx) — US M1151 Up-Armored Humvee vs RU GAZ-233014 Tigr-M
 //   3. buildApcModel(ctx)    — US LAV-25A2 / Stryker vs RU BTR-82A 8x8
 //   4. buildSpaagModel(ctx)  — US LAV-AD 8x8 vs RU 2K22M1 Tunguska SPAAG
-// Orientation invariant: LOCAL +Z = FRONT (Nose/Glacis/Barrels), -Z = REAR.
+// Orientation invariant: Vehicle group forward is LOCAL -Z (Nose/Glacis/Headlights),
+// +Z = REAR (Taillights/Exhaust). Hull meshes attach to a Math.PI-rotated hullRoot
+// while turretPivot uses vehicles.js (+Math.PI) so both hull & turret face -Z!
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
+
+function _createForwardHullRoot(group) {
+  const hullRoot = new THREE.Group();
+  hullRoot.name = 'armorHullRoot';
+  hullRoot.rotation.y = Math.PI;
+  hullRoot.updateMatrix();
+  group.add(hullRoot);
+  return hullRoot;
+}
 
 // ─── MODULE-SCOPE SHARED GEOMETRY & MATERIAL CACHE (.userData.shared = true) ──
 const _armorGeoCache = new Map();
@@ -176,9 +187,11 @@ export function buildTankModel(ctx) {
     }
   }
 
+  const hullRoot = _createForwardHullRoot(group);
+
   // ── B. Hull Caterpillar Tracks, Sprockets, Idlers, Shackles & Engine Louvers (darkMat -> FLIR white-hot!) ──
   _addMerged(
-    group,
+    hullRoot,
     `tank:${sideTag}:hullDark`,
     ctx,
     darkMat,
@@ -226,9 +239,9 @@ export function buildTankModel(ctx) {
     true
   );
 
-  // ── C. Main Armored Lower/Upper Hull, Sloped Glacis (+Z) & Driver Periscope Hood (hullMat) ──
+  // ── C. Main Armored Lower/Upper Hull, Sloped Glacis (-Z world) & Driver Periscope Hood (hullMat) ──
   _addMerged(
-    group,
+    hullRoot,
     `tank:${sideTag}:hullMain`,
     ctx,
     hullMat,
@@ -264,7 +277,7 @@ export function buildTankModel(ctx) {
 
   // ── D. Hull ERA Side Skirts, Glacis Applique & T-90M External Rear Fuel Drums (eraMat) ──
   _addMerged(
-    group,
+    hullRoot,
     `tank:${sideTag}:hullEra`,
     ctx,
     eraMat,
@@ -307,7 +320,7 @@ export function buildTankModel(ctx) {
 
   // ── E. RU T-90M Rear Hull Slat-Armor Cage Bars / US Tow Cables (barrelMat) ──
   _addMerged(
-    group,
+    hullRoot,
     `tank:${sideTag}:hullSteel`,
     ctx,
     barrelMat,
@@ -340,9 +353,9 @@ export function buildTankModel(ctx) {
     false
   );
 
-  // ── F. Driver Vision Periscopes, Armored Headlights (+Z) & Convoy Taillights (-Z) ──
+  // ── F. Driver Vision Periscopes, Armored Headlights (world -Z front) & Convoy Taillights (world +Z rear) ──
   _addMerged(
-    group,
+    hullRoot,
     `tank:${sideTag}:hullGlass`,
     ctx,
     glassMat,
@@ -355,7 +368,7 @@ export function buildTankModel(ctx) {
     false
   );
   _addMerged(
-    group,
+    hullRoot,
     `tank:${sideTag}:headlights`,
     ctx,
     _headlightMat,
@@ -368,7 +381,7 @@ export function buildTankModel(ctx) {
     false
   );
   _addMerged(
-    group,
+    hullRoot,
     `tank:${sideTag}:taillights`,
     ctx,
     _taillightMat,
@@ -382,11 +395,11 @@ export function buildTankModel(ctx) {
   );
 
   // ==========================================================================
-  // 2. ROTATING TURRET (turretPivot at y = 1.95, z = 0.15)
+  // 2. ROTATING TURRET (turretPivot at y = 1.95, z = -0.15 forward of engine deck)
   // Sightline note: 1P & Optic cameras sit at world y = 2.68 (local y = 0.73)
   // along x = 0. Keep center roof <= 0.46 local Y & offset sights to |x| >= 0.52!
   // ==========================================================================
-  turretPivot.position.set(0, 1.95, 0.15);
+  turretPivot.position.set(0, 1.95, -0.15);
 
   if (isUS) {
     // ── US M1A2 SEP v3 ABRAMS ANGULAR CHOBHAM TURRET ──
@@ -772,10 +785,10 @@ export function buildHumveeModel(ctx) {
   const tireGeo = ctx.getTreadTire(0.56, 0.42, 14, 10, 0.43, 0.055, 0.09, 0.55);
   const hubGeo = _getCtisWheelHubGeo(ctx, 0.33, 0.43, 'humvee');
   for (const [wx, wz] of [
-    [-1.32, 1.58],
-    [1.32, 1.58],
     [-1.32, -1.58],
-    [1.32, -1.58]
+    [1.32, -1.58],
+    [-1.32, 1.58],
+    [1.32, 1.58]
   ]) {
     const wheelPivot = new THREE.Group();
     wheelPivot.position.set(wx, 0.56, wz);
@@ -791,9 +804,11 @@ export function buildHumveeModel(ctx) {
     wheels.push(wheelPivot);
   }
 
+  const hullRoot = _createForwardHullRoot(group);
+
   // ── B. Armored Body, Sloped Hood, Flared Fenders & Slant-Back / Troop Roof (hullMat) ──
   _addMerged(
-    group,
+    hullRoot,
     `humvee:${sideTag}:hullMain`,
     ctx,
     hullMat,
@@ -849,7 +864,7 @@ export function buildHumveeModel(ctx) {
 
   // ── C. 4 Recessed FRAG-5 Armored Side Doors, Hinges & Applique Armor (eraMat) ──
   _addMerged(
-    group,
+    hullRoot,
     `humvee:${sideTag}:hullEra`,
     ctx,
     eraMat,
@@ -883,7 +898,7 @@ export function buildHumveeModel(ctx) {
 
   // ── D. Underbody Skidplate, Louvered Hood Intake, 7-Slot Grille, Brush Guard, Snorkel & Handles (darkMat -> FLIR white-hot!) ──
   _addMerged(
-    group,
+    hullRoot,
     `humvee:${sideTag}:hullDark`,
     ctx,
     darkMat,
@@ -949,12 +964,12 @@ export function buildHumveeModel(ctx) {
 
   // ── E. Front Winch Drum, Tow Hooks & Rear Whip Antenna (barrelMat) ──
   _addMerged(
-    group,
+    hullRoot,
     `humvee:${sideTag}:hullSteel`,
     ctx,
     barrelMat,
     (p) => {
-      // Front Warn winch cable drum + shackles (+Z)
+      // Front Warn winch cable drum + shackles (world -Z)
       p.push(_part(ctx.getCyl(0.095, 0.095, 0.44, 8, Math.PI / 2), 0, 0.96, 2.48));
       for (const s of [-1, 1]) {
         p.push(_part(ctx.getBox(0.07, 0.11, 0.14), s * 0.82, 0.92, 2.52));
@@ -969,13 +984,13 @@ export function buildHumveeModel(ctx) {
 
   // ── F. Split Ballistic Windshield & 4 Armored Door Windows (glassMat) + LED Lights ──
   _addMerged(
-    group,
+    hullRoot,
     `humvee:${sideTag}:glass`,
     ctx,
     glassMat,
     (p) => {
       for (const s of [-1, 1]) {
-        // Left & right ballistic windshield panes (+Z)
+        // Left & right ballistic windshield panes (world -Z)
         p.push(_part(ctx.getBox(0.92, 0.52, 0.08), s * 0.56, 1.9, 0.98, -0.26, 0, 0));
         // Front & rear recessed ballistic door windows
         p.push(_part(ctx.getBox(0.06, 0.28, 0.54), s * 1.18, 2.02, 0.42));
@@ -989,7 +1004,7 @@ export function buildHumveeModel(ctx) {
     false
   );
   _addMerged(
-    group,
+    hullRoot,
     `humvee:${sideTag}:headlights`,
     ctx,
     _headlightMat,
@@ -1002,7 +1017,7 @@ export function buildHumveeModel(ctx) {
     false
   );
   _addMerged(
-    group,
+    hullRoot,
     `humvee:${sideTag}:taillights`,
     ctx,
     _taillightMat,
@@ -1016,11 +1031,11 @@ export function buildHumveeModel(ctx) {
   );
 
   // ==========================================================================
-  // 2. ROOF GUNNER TURRET (turretPivot at y = 2.48, z = -0.2)
+  // 2. ROOF GUNNER TURRET (turretPivot at y = 2.48, z = +0.2 over crew cabin)
   // STRICT INVARIANT: All turret vertices kept <= 0.30 local Y (<= 2.78 world Y
   // < 2.80 limit) so 1P (2.96) & Optic (2.88) cameras are 100% unobstructed!
   // ==========================================================================
-  turretPivot.position.set(0, 2.48, -0.2);
+  turretPivot.position.set(0, 2.48, 0.2);
 
   if (isUS) {
     // Octagonal OGPK ballistic gunner shield (top at local y = 0.28 -> world 2.76 <= 2.80!)
@@ -1176,9 +1191,11 @@ function _buildWheeled8x8Chassis(ctx, variantKey, isUS) {
     }
   }
 
-  // 2. Boat-Shaped Amphibious V-Hull, Sloped Upper/Lower Glacis (+Z) & Wheel-Arch Mudguards (hullMat)
+  const hullRoot = _createForwardHullRoot(group);
+
+  // 2. Boat-Shaped Amphibious V-Hull, Sloped Upper/Lower Glacis (world -Z) & Wheel-Arch Mudguards (hullMat)
   _addMerged(
-    group,
+    hullRoot,
     `${variantKey}:hullMain`,
     ctx,
     hullMat,
@@ -1213,9 +1230,9 @@ function _buildWheeled8x8Chassis(ctx, variantKey, isUS) {
     true
   );
 
-  // 3. Foldable Bow Wave-Breaker Trim Vane (+Z), Applique Armor & Troop Doors/Cowling (eraMat)
+  // 3. Foldable Bow Wave-Breaker Trim Vane (world -Z), Applique Armor & Troop Doors/Cowling (eraMat)
   _addMerged(
-    group,
+    hullRoot,
     `${variantKey}:hullEra`,
     ctx,
     eraMat,
@@ -1255,7 +1272,7 @@ function _buildWheeled8x8Chassis(ctx, variantKey, isUS) {
 
   // 4. Axles, Exhaust Muffler Pipe, Engine Louvers & Tow Shackles (darkMat -> FLIR white-hot!)
   _addMerged(
-    group,
+    hullRoot,
     `${variantKey}:hullDark`,
     ctx,
     darkMat,
@@ -1294,14 +1311,14 @@ function _buildWheeled8x8Chassis(ctx, variantKey, isUS) {
 
   // 5. Pioneer Tools / Whip Antennas / Stowage & Vision Periscopes + Lights
   _addMerged(
-    group,
+    hullRoot,
     `${variantKey}:hullSteel`,
     ctx,
     barrelMat,
     (p) => {
       p.push(_part(ctx.getCyl(0.028, 0.028, 2.8, 6), -1.36, 1.74, -0.5, Math.PI / 2, 0, 0));
       if (variantKey.startsWith('spaag:')) {
-        // LAV-AD twin tall rear communication whip antennas (-Z)
+        // LAV-AD twin tall rear communication whip antennas (world +Z)
         for (const s of [-1, 1]) {
           p.push(_part(ctx.getCyl(0.016, 0.026, 1.55, 6), s * 1.22, 2.62, -2.88, -0.12, 0, 0));
         }
@@ -1315,7 +1332,7 @@ function _buildWheeled8x8Chassis(ctx, variantKey, isUS) {
 
   if (isUS) {
     _addMerged(
-      group,
+      hullRoot,
       `${variantKey}:hullGear`,
       ctx,
       _oliveGearMat,
@@ -1330,7 +1347,7 @@ function _buildWheeled8x8Chassis(ctx, variantKey, isUS) {
   }
 
   _addMerged(
-    group,
+    hullRoot,
     `${variantKey}:hullGlass`,
     ctx,
     glassMat,
@@ -1346,7 +1363,7 @@ function _buildWheeled8x8Chassis(ctx, variantKey, isUS) {
     false
   );
   _addMerged(
-    group,
+    hullRoot,
     `${variantKey}:headlights`,
     ctx,
     _headlightMat,
@@ -1359,7 +1376,7 @@ function _buildWheeled8x8Chassis(ctx, variantKey, isUS) {
     false
   );
   _addMerged(
-    group,
+    hullRoot,
     `${variantKey}:taillights`,
     ctx,
     _taillightMat,
@@ -1375,7 +1392,7 @@ function _buildWheeled8x8Chassis(ctx, variantKey, isUS) {
 
 // ============================================================================
 // 3. 8x8 WHEELED IFV / APC — US LAV-25A2 / STRYKER vs RU BTR-82A
-// Footprint: ~3.0m W x 6.5m L | turretPivot at (0, 2.15, -0.2)
+// Footprint: ~3.0m W x 6.5m L | turretPivot at (0, 2.15, 0.2)
 // ============================================================================
 export function buildApcModel(ctx) {
   const { isUS, group, turretPivot, hullMat, eraMat, darkMat, barrelMat } = ctx;
@@ -1384,7 +1401,7 @@ export function buildApcModel(ctx) {
   _buildWheeled8x8Chassis(ctx, `apc:${sideTag}`, isUS);
 
   // Rotating Turret (1P camera at world 2.75 = local 0.60; Optic at 2.68 = local 0.53)
-  turretPivot.position.set(0, 2.15, -0.2);
+  turretPivot.position.set(0, 2.15, 0.2);
 
   if (isUS) {
     // ── US LAV-25A2 SLOPED TWO-MAN TURRET + 25MM M242 BUSHMASTER ──
@@ -1590,7 +1607,7 @@ export function buildApcModel(ctx) {
 export function buildSpaagModel(ctx) {
   const { isUS, group, wheels, turretPivot, hullMat, eraMat, darkMat, barrelMat, glassMat } = ctx;
 
-  turretPivot.position.set(0, 2.22, -0.25);
+  turretPivot.position.set(0, 2.22, 0.25);
   const barrelGroup = new THREE.Group();
 
   if (isUS) {
@@ -1744,9 +1761,11 @@ export function buildSpaagModel(ctx) {
       }
     }
 
+    const hullRoot = _createForwardHullRoot(group);
+
     // Tracked GM-352M caterpillar tracks, sprockets, idlers & hot engine louvers (darkMat -> FLIR white-hot!)
     _addMerged(
-      group,
+      hullRoot,
       'spaag:ru:hullDark',
       ctx,
       darkMat,
@@ -1765,7 +1784,7 @@ export function buildSpaagModel(ctx) {
     );
 
     _addMerged(
-      group,
+      hullRoot,
       'spaag:ru:hullMain',
       ctx,
       hullMat,
@@ -1782,7 +1801,7 @@ export function buildSpaagModel(ctx) {
     );
 
     _addMerged(
-      group,
+      hullRoot,
       'spaag:ru:hullEra',
       ctx,
       eraMat,
@@ -1799,7 +1818,7 @@ export function buildSpaagModel(ctx) {
     );
 
     _addMerged(
-      group,
+      hullRoot,
       'spaag:ru:hullGlass',
       ctx,
       glassMat,
@@ -1812,7 +1831,7 @@ export function buildSpaagModel(ctx) {
       false
     );
     _addMerged(
-      group,
+      hullRoot,
       'spaag:ru:headlights',
       ctx,
       _headlightMat,
@@ -1825,7 +1844,7 @@ export function buildSpaagModel(ctx) {
       false
     );
     _addMerged(
-      group,
+      hullRoot,
       'spaag:ru:taillights',
       ctx,
       _taillightMat,

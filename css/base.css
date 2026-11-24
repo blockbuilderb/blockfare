@@ -92,7 +92,8 @@ body, html {
   pointer-events: none;
   z-index: 0;
 }
-#optic-frame.optic-flir #flir-thermal-canvas {
+#optic-frame.optic-flir #flir-thermal-canvas,
+#optic-frame.optic-sniperFlir #flir-thermal-canvas {
   display: block;
 }
 
@@ -180,7 +181,16 @@ body, html {
   border: 14px solid #151a1e;
   border-radius: 18px;
   overflow: hidden;
-  background: rgba(18, 28, 26, 0.55);
+  background: rgba(18, 28, 26, 0.42);
+}
+
+#optic-frame.optic-sniperFlir .optic-lens {
+  width: 56vh;
+  height: 56vh;
+  border: 8px solid #0e1418;
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(10, 22, 20, 0.28);
 }
 
 #optic-frame.optic-sniper8x .optic-lens,
@@ -243,6 +253,7 @@ body, html {
 #optic-frame.optic-valday6x .ret-valday6x,
 #optic-frame.optic-lpvo36 .ret-lpvo36,
 #optic-frame.optic-flir .ret-flir,
+#optic-frame.optic-sniperFlir .ret-sniperFlir,
 #optic-frame.optic-sniper8x .ret-sniper8x,
 #optic-frame.optic-sniper12x .ret-sniper12x,
 #optic-frame.optic-rpgSight .ret-rpgSight,
@@ -1063,7 +1074,8 @@ body.flir-scope-mode #game-container > canvas {
   filter: grayscale(100%) contrast(158%) brightness(66%);
 }
 
-body.flir-bhot-mode #game-container > canvas {
+body.flir-bhot-mode #game-container > canvas,
+body.flir-scope-bhot-mode #game-container > canvas {
   filter: grayscale(100%) invert(94%) contrast(156%) brightness(106%);
 }
 

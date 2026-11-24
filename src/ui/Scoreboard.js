@@ -1,4 +1,4 @@
-import { SQUAD_DEFS } from '../bots.js?v=121';
+import { SQUAD_DEFS } from '../bots.js?v=122';
 
 export const Scoreboard = {
   computeBattleStats() {

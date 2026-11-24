@@ -427,14 +427,14 @@ export const PROJECTILES = {
   AIR_ROCKET: { speed: 175, gravity: 0.65, life: 4.5 },
   A2A_MISSILE: { speed: 215, gravity: 0.0, life: 6.5, turnRate: 3.8 },
   STINGER_SAM: { speed: 265, gravity: 0.0, life: 6.5, turnRate: 5.2, blastRadius: 10.5, blastDamage: 560 },
-  JDAM_BOMB: { speed: 42, gravity: 26.0, life: 26.0, blastRadius: 11.5, blastDamage: 380 },
-  GBU28_BOMB: { speed: 38, gravity: 28.0, life: 26.0, blastRadius: 16.5, blastDamage: 560 },
-  B2_CARPET_BOMB: { speed: 95, gravity: 28.0, life: 28.0, blastRadius: 13.5, blastDamage: 460 },
-  GBU57_MOP: { speed: 85, gravity: 28.0, life: 28.0, blastRadius: 24.0, blastDamage: 950 },
-  WRIGHT_DYNAMITE: { speed: 28, gravity: 20.0, life: 26.0, blastRadius: 15.0, blastDamage: 680 },
+  JDAM_BOMB: { speed: 42, gravity: 26.0, life: 68.0, blastRadius: 11.5, blastDamage: 380 },
+  GBU28_BOMB: { speed: 38, gravity: 28.0, life: 68.0, blastRadius: 16.5, blastDamage: 560 },
+  B2_CARPET_BOMB: { speed: 95, gravity: 28.0, life: 68.0, blastRadius: 13.5, blastDamage: 460 },
+  GBU57_MOP: { speed: 85, gravity: 28.0, life: 68.0, blastRadius: 24.0, blastDamage: 950 },
+  WRIGHT_DYNAMITE: { speed: 28, gravity: 20.0, life: 45.0, blastRadius: 15.0, blastDamage: 680 },
   MORTAR_SHELL: { speed: 78, gravity: 18.0, life: 18.0, blastRadius: 11.5, blastDamage: 340 },
-  AC130_40MM: { speed: 165, gravity: 1.8, life: 18.0, blastRadius: 7.5, blastDamage: 240 },
-  AC130_105MM: { speed: 145, gravity: 4.5, life: 22.0, blastRadius: 14.5, blastDamage: 620 },
+  AC130_40MM: { speed: 165, gravity: 1.8, life: 32.0, blastRadius: 7.5, blastDamage: 240 },
+  AC130_105MM: { speed: 145, gravity: 4.5, life: 36.0, blastRadius: 14.5, blastDamage: 620 },
   C4_BLAST_RADIUS: 5.6,
   C4_BLAST_DAMAGE: 250,
 };
@@ -483,17 +483,17 @@ export const VEHICLE_STATS = {
   TANK: { maxHp: 1600, speed: 19.0, accelRate: 1.45, brakeRate: 2.4, turnRate: 0.98, minPitchRad: -0.18, maxPitchRad: 0.35 },
   APC: { maxHp: 1050, speed: 23.5, accelRate: 1.95, brakeRate: 2.8, turnRate: 1.25, minPitchRad: -0.18, maxPitchRad: 0.52 },
   AA_VEHICLE: { maxHp: 980, speed: 21.5, accelRate: 1.9, brakeRate: 2.7, turnRate: 1.25, minPitchRad: -0.14, maxPitchRad: 1.48 },
-  HUMVEE: { maxHp: 700, speed: 26.5, accelRate: 2.55, brakeRate: 3.4, turnRate: 1.5, minPitchRad: -0.21, maxPitchRad: 0.61 },
-  PLANE_CAS: { maxHp: 1550, speed: 60, minSpeed: 31, maxSpeed: 88, accelRate: 2.7, brakeRate: 3.1, turnRate: 1.92, dialMaxKmh: 420 },
-  PLANE_BOMBER: { maxHp: 1400, speed: 84, minSpeed: 42, maxSpeed: 145, accelRate: 3.8, brakeRate: 3.0, turnRate: 1.32, dialMaxKmh: 600 },
-  PLANE_FIGHTER: { maxHp: 1300, speed: 114, minSpeed: 44, maxSpeed: 196, accelRate: 5.4, brakeRate: 3.6, turnRate: 1.72, dialMaxKmh: 720 },
-  PLANE_GUNSHIP: { maxHp: 3200, speed: 48, minSpeed: 30, maxSpeed: 68, accelRate: 2.0, brakeRate: 2.2, turnRate: 0.68, dialMaxKmh: 300 },
-  PLANE_B2_SPIRIT: { maxHp: 2400, speed: 108, minSpeed: 48, maxSpeed: 152, accelRate: 3.8, brakeRate: 3.0, turnRate: 0.78, stealthFactor: 0.12, dialMaxKmh: 600 },
+  HUMVEE: { maxHp: 700, speed: 26.5, accelRate: 2.55, brakeRate: 3.4, turnRate: 1.5, minPitchRad: -0.26, maxPitchRad: 1.05 },
+  PLANE_CAS: { maxHp: 1550, speed: 60, minSpeed: 31, maxSpeed: 88, accelRate: 2.7, brakeRate: 3.1, turnRate: 1.92, dialMaxKmh: 420, serviceCeilingM: 13700 },
+  PLANE_BOMBER: { maxHp: 1400, speed: 84, minSpeed: 42, maxSpeed: 145, accelRate: 3.8, brakeRate: 3.0, turnRate: 1.32, dialMaxKmh: 600, serviceCeilingM: 18300 },
+  PLANE_FIGHTER: { maxHp: 1300, speed: 114, minSpeed: 44, maxSpeed: 196, accelRate: 5.4, brakeRate: 3.6, turnRate: 1.72, dialMaxKmh: 720, serviceCeilingM: 19800 },
+  PLANE_GUNSHIP: { maxHp: 3200, speed: 48, minSpeed: 30, maxSpeed: 68, accelRate: 2.0, brakeRate: 2.2, turnRate: 0.68, dialMaxKmh: 300, serviceCeilingM: 9100 },
+  PLANE_B2_SPIRIT: { maxHp: 2400, speed: 108, minSpeed: 48, maxSpeed: 152, accelRate: 3.8, brakeRate: 3.0, turnRate: 0.78, stealthFactor: 0.12, dialMaxKmh: 600, serviceCeilingM: 15240 },
   // 1903 Wright Flyer I ("Kitty Hawk Flyer" — Secret Cave Pioneer Biplane):
   // Real-world stall speed: ~29 km/h (8.0 m/s / 18 mph); starts slow with gradual spool-up acceleration (accelRate: 0.24)
   // before winding up to an incredible 522 km/h (145 m/s) cruise and 846 km/h (235 m/s) top speed!
-  PLANE_WRIGHT_FLYER: { maxHp: 1800, speed: 145.0, minSpeed: 8.0, maxSpeed: 235.0, accelRate: 0.24, brakeRate: 1.85, turnRate: 2.25, stealthFactor: 0.25 },
-  EMPLACEMENT: { maxHp: 650, speed: 0, accelRate: 0, brakeRate: 10, turnRate: 0, minPitchRad: -0.20, maxPitchRad: 0.65 },
+  PLANE_WRIGHT_FLYER: { maxHp: 1800, speed: 145.0, minSpeed: 8.0, maxSpeed: 235.0, accelRate: 0.24, brakeRate: 1.85, turnRate: 2.25, stealthFactor: 0.25, serviceCeilingM: 2400 },
+  EMPLACEMENT: { maxHp: 650, speed: 0, accelRate: 0, brakeRate: 10, turnRate: 0, minPitchRad: -0.26, maxPitchRad: 1.05 },
 
   // Military Recon Motorcycles, Silent E-Motos & Tactical 4x4 Quad ATV Stats (Consistent combat speeds)
   BIKE_50CC: { maxHp: 380, speed: 24.0, accelRate: 3.5, brakeRate: 4.8, turnRate: 2.45, cc: 50 },
@@ -586,11 +586,19 @@ export const VEHICLE_STATS = {
   ROADKILL_DAMAGE_BOT: 160,
   ROADKILL_DAMAGE_PLAYER: 150,
 
-  // Expanded Battlefield Two-Tier Map & High-Altitude Airspace Bounds (7,600m x 5,200m Grand Theater, 6,000m Troposphere Ceiling)
-  AIRSPACE_MAX_X: 3600,
-  AIRSPACE_MAX_Z: 2500,
-  AIRSPACE_MAX_ALT: 6000,
+  // Expanded Battlefield Two-Tier Map & Realistic Stratosphere Airspace Bounds (19,800m / 65,000 ft Fighter Ceiling)
+  AIRSPACE_MAX_X: 4600,
+  AIRSPACE_MAX_Z: 3400,
+  AIRSPACE_MAX_ALT: 19800,
   AIRSPACE_DEFAULT_ALT: 220,
+  SERVICE_CEILINGS: {
+    wright_flyer: 2400,  // Barnstorming biplane unpressurized open-frame ceiling (~7,870 ft)
+    gunship: 9100,       // AC-130J / Tu-95MS pressurized turboprop ceiling (30,000 ft)
+    cas: 13700,          // A-10C Thunderbolt II / Su-25SM service ceiling (45,000 ft)
+    b2_spirit: 15240,    // Northrop B-2A Spirit high-altitude stealth cruise ceiling (50,000 ft)
+    bomber: 18300,       // F-15E Strike Eagle / Su-34 Fullback ceiling (60,000 ft)
+    fighter: 19800       // F-15EX / F-22A / Su-57 stratosphere ceiling (65,000 ft)
+  },
 };
 export const VEHICLES = VEHICLE_STATS;
 
@@ -600,7 +608,7 @@ export const VEHICLES = VEHICLE_STATS;
 export const CAMERA = {
   FOV: 75,
   NEAR: 0.08,
-  FAR: 18000,
+  FAR: 68000,
   PIXEL_RATIO_CAP: 1.35,
 };
 

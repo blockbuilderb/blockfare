@@ -1,8 +1,8 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=121';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=121';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=122';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=122';
 
 function makeMockElement(id = '') {
   const attrs = new Map();

@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../textures.js?v=121';
-import { TERRAIN } from '../config.js?v=121';
-import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=121';
+import { TEXTURES } from '../textures.js?v=122';
+import { TERRAIN } from '../config.js?v=122';
+import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=122';
 
 const VOXEL_SIZE = 1.25;
 
@@ -526,22 +526,154 @@ export const TerrainGenerator = {
     this.scene.add(ground);
     if (this._ownedWorldObjects) this._ownedWorldObjects.push(ground);
 
-    // 2. Unbroken Meandering Water Ribbon inside the Sunken River Gorge (follows getRiverCenterX(z) cleanly!)
-    const waterCanvas = document.createElement('canvas');
-    waterCanvas.width = 128;
-    waterCanvas.height = 128;
-    const wCtx = waterCanvas.getContext('2d');
-    wCtx.fillStyle = '#1d6f99';
-    wCtx.fillRect(0, 0, 128, 128);
-    for (let y = 0; y < 128; y += 8) {
-      wCtx.fillStyle = (y / 8) % 2 === 0 ? 'rgba(135, 215, 245, 0.18)' : 'rgba(12, 48, 72, 0.15)';
-      wCtx.fillRect((y * 7) % 32, y, 76, 3);
-      wCtx.fillRect(((y * 13) + 64) % 96, y + 4, 48, 2);
+    // 1B. Stitched Seamless Continental Horizon Apron (±58,000m = 116 km × 116 km Surround):
+    // Shares the exact outer perimeter coordinates & vertex heights of `groundGeo` (±3,800m × ±2,600m)
+    // and smoothly transitions through alpine foothills, patchwork valleys, distant ridges, and sky-horizon haze
+    // so the playable terrain NEVER looks like a rectangular island floating in empty air from high altitude!
+    const skirtSegsPerEdge = 28;
+    const perimCount = skirtSegsPerEdge * 4;
+    const ringScales = [1.0, 1.08, 1.2, 1.38, 1.65, 2.05, 2.65, 3.55, 4.9, 6.8, 9.6, 13.2, 15.5];
+    const numRings = ringScales.length;
+    const skirtPos = new Float32Array(perimCount * numRings * 3);
+    const skirtCol = new Float32Array(perimCount * numRings * 3);
+    const skirtIdx = [];
+    const cHorizonSky = new THREE.Color(0x87b8d8);
+    const cDistantForest = new THREE.Color(isJurassic ? 0x3f753a : isMedieval ? 0x6c8f54 : 0x729463);
+    const cTempSkirt = new THREE.Color();
+
+    const basePerimX = new Float64Array(perimCount);
+    const basePerimZ = new Float64Array(perimCount);
+    let pCursor = 0;
+    // Top edge: (-3800..+3800, -2600)
+    for (let s = 0; s < skirtSegsPerEdge; s++) {
+      basePerimX[pCursor] = -3800 + (s / skirtSegsPerEdge) * 7600;
+      basePerimZ[pCursor] = -2600;
+      pCursor++;
     }
-    const riverTex = new THREE.CanvasTexture(waterCanvas);
-    riverTex.wrapS = THREE.RepeatWrapping;
-    riverTex.wrapT = THREE.RepeatWrapping;
-    riverTex.repeat.set(4, 145);
+    // Right edge: (+3800, -2600..+2600)
+    for (let s = 0; s < skirtSegsPerEdge; s++) {
+      basePerimX[pCursor] = 3800;
+      basePerimZ[pCursor] = -2600 + (s / skirtSegsPerEdge) * 5200;
+      pCursor++;
+    }
+    // Bottom edge: (+3800..-3800, +2600)
+    for (let s = 0; s < skirtSegsPerEdge; s++) {
+      basePerimX[pCursor] = 3800 - (s / skirtSegsPerEdge) * 7600;
+      basePerimZ[pCursor] = 2600;
+      pCursor++;
+    }
+    // Left edge: (-3800, +2600..-2600)
+    for (let s = 0; s < skirtSegsPerEdge; s++) {
+      basePerimX[pCursor] = -3800;
+      basePerimZ[pCursor] = 2600 - (s / skirtSegsPerEdge) * 5200;
+      pCursor++;
+    }
+
+    for (let r = 0; r < numRings; r++) {
+      const scale = ringScales[r];
+      const outwardFrac = r === 0 ? 0 : Math.min(1, (scale - 1.0) / 14.5);
+      const foothillsDecay = Math.exp(-outwardFrac * 4.2);
+      const horizonHaze = Math.pow(Math.max(0, (scale - 2.4) / 13.1), 1.15);
+
+      for (let p = 0; p < perimCount; p++) {
+        const bx = basePerimX[p];
+        const bz = basePerimZ[p];
+        // Smoothly round rectangular corners into a natural circular 60km horizon disc at outer rings
+        const ang = Math.atan2(bz, bx);
+        const rectDist = Math.hypot(bx, bz);
+        const discRadius = 3800 * scale;
+        const roundMix = Math.min(1, outwardFrac * 1.6);
+        const vx = r === 0 ? bx : THREE.MathUtils.lerp(bx * scale, Math.cos(ang) * discRadius, roundMix);
+        const vz = r === 0 ? bz : THREE.MathUtils.lerp(bz * scale, Math.sin(ang) * discRadius, roundMix);
+
+        const seamY = this.getTerrainHeight(bx, bz);
+        let vy;
+        if (r === 0) {
+          vy = seamY;
+        } else {
+          const outerRolling =
+            Math.sin(vx * 0.00085 + 0.4) * Math.cos(vz * 0.00095 - 0.3) * 38.0 +
+            Math.sin(vx * 0.0021 - vz * 0.0017) * 16.0 +
+            Math.max(0, Math.sin(vx * 0.00042 + vz * 0.00038)) * 95.0 * (1 - horizonHaze * 0.65);
+          vy = seamY * foothillsDecay + outerRolling * (1 - foothillsDecay) - horizonHaze * 18.0;
+        }
+
+        const vIdx = (r * perimCount + p) * 3;
+        skirtPos[vIdx] = vx;
+        skirtPos[vIdx + 1] = vy;
+        skirtPos[vIdx + 2] = vz;
+
+        let baseCol = cGrass;
+        if (vy > 52.0 && !isJurassic) {
+          baseCol = cSnow;
+        } else if (vy > 18.0) {
+          baseCol = cRock;
+        } else {
+          const macroPatch = Math.sin(vx * 0.0019 + 0.5) * Math.cos(vz * 0.0022 - 0.3);
+          baseCol = macroPatch > 0.32 ? cFieldWheat : macroPatch < -0.25 ? cDistantForest : cFieldMeadow;
+        }
+        cTempSkirt.copy(baseCol).lerp(cHorizonSky, Math.min(0.92, horizonHaze * 0.92));
+        skirtCol[vIdx] = cTempSkirt.r;
+        skirtCol[vIdx + 1] = cTempSkirt.g;
+        skirtCol[vIdx + 2] = cTempSkirt.b;
+      }
+    }
+
+    for (let r = 0; r < numRings - 1; r++) {
+      for (let p = 0; p < perimCount; p++) {
+        const pNext = (p + 1) % perimCount;
+        const a = r * perimCount + p;
+        const b = r * perimCount + pNext;
+        const c = (r + 1) * perimCount + p;
+        const d = (r + 1) * perimCount + pNext;
+        skirtIdx.push(a, c, b, b, c, d);
+      }
+    }
+
+    const skirtGeo = new THREE.BufferGeometry();
+    skirtGeo.setAttribute('position', new THREE.BufferAttribute(skirtPos, 3));
+    skirtGeo.setAttribute('color', new THREE.BufferAttribute(skirtCol, 3));
+    skirtGeo.setIndex(skirtIdx);
+    skirtGeo.computeVertexNormals();
+
+    const skirtMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.96,
+      metalness: 0.0,
+      flatShading: true
+    });
+    const horizonSkirt = new THREE.Mesh(skirtGeo, skirtMat);
+    horizonSkirt.name = 'ContinentalHorizonSkirt';
+    horizonSkirt.receiveShadow = false;
+    horizonSkirt.castShadow = false;
+    horizonSkirt.frustumCulled = false;
+    horizonSkirt.matrixAutoUpdate = false;
+    horizonSkirt.updateMatrix();
+    this.continentalSkirtMesh = horizonSkirt;
+    this.scene.add(horizonSkirt);
+    if (this._ownedWorldObjects) this._ownedWorldObjects.push(horizonSkirt);
+
+    // 2. Unbroken Meandering Water Ribbon inside the Sunken River Gorge (follows getRiverCenterX(z) cleanly!)
+    let riverTex = null;
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+      const waterCanvas = document.createElement('canvas');
+      waterCanvas.width = 128;
+      waterCanvas.height = 128;
+      const wCtx = waterCanvas.getContext('2d');
+      if (wCtx) {
+        wCtx.fillStyle = '#1d6f99';
+        wCtx.fillRect(0, 0, 128, 128);
+        for (let y = 0; y < 128; y += 8) {
+          wCtx.fillStyle = (y / 8) % 2 === 0 ? 'rgba(135, 215, 245, 0.18)' : 'rgba(12, 48, 72, 0.15)';
+          wCtx.fillRect((y * 7) % 32, y, 76, 3);
+          wCtx.fillRect(((y * 13) + 64) % 96, y + 4, 48, 2);
+        }
+      }
+      riverTex = new THREE.CanvasTexture(waterCanvas);
+      riverTex.wrapS = THREE.RepeatWrapping;
+      riverTex.wrapT = THREE.RepeatWrapping;
+      riverTex.repeat.set(4, 145);
+    }
     this.riverTex = riverTex;
 
     const riverGeo = new THREE.PlaneGeometry(48, 5200, 6, 420);
@@ -559,7 +691,10 @@ export const TerrainGenerator = {
       roughness: 0.16,
       metalness: 0.48,
       transparent: true,
-      opacity: 0.92
+      opacity: 0.92,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -4
     });
     const river = new THREE.Mesh(riverGeo, riverMat);
     river.position.set(0, -0.85, 0);

@@ -7,11 +7,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=121';
-import { sound } from '../audio.js?v=121';
-import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=121';
-import { events } from '../events.js?v=121';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=121';
+} from '../weapons.js?v=122';
+import { sound } from '../audio.js?v=122';
+import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=122';
+import { events } from '../events.js?v=122';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=122';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',
@@ -181,6 +181,28 @@ export const VEHICLE_UPGRADE_CATALOG = {
       desc: 'Mounts a 3D Steel Dozer Blade on the front hull: +250 Max Hull HP & rams through barricades!'
     }
   ],
+  armorAmmoRack: [
+    {
+      id: 'std_armor_rack',
+      name: 'STANDARD TURRET BUSTLE / CAROUSEL READY-RACK (STOCK)',
+      shortName: 'STD READY-RACK (1×)',
+      icon: '📦',
+      price: 0,
+      isExpandedRack: false,
+      accelMult: 1.0,
+      desc: 'Authentic ready-to-fire turret stowage: 24 MBT Shells (1,200 MG), 210 IFV 30mm (1,200 Coax), 600 AA + 8 SAMs, 500 .50 BMG.'
+    },
+    {
+      id: 'heavy_hull_stowage',
+      name: 'FULL COMBAT LOAD // DEEP-HULL WET STOWAGE & DOUBLE AMMO CANS (~2×)',
+      shortName: 'FULL HULL RACK (~2×)',
+      icon: '💣',
+      price: 700,
+      isExpandedRack: true,
+      accelMult: 0.96,
+      desc: 'Authentic full hull combat stowage (-4% accel mass): 42 MBT Shells (2,400 MG), 420 IFV 30mm, 1,200 AA + 16 SAMs, 1,000 .50 BMG, 48 Mortar!'
+    }
+  ],
   airSensor: [
     {
       id: 'std_air_hud',
@@ -321,6 +343,28 @@ export const VEHICLE_UPGRADE_CATALOG = {
       desc: '+25% Bank/Turn Agility, +18% Afterburner Top Speed & +200 Airframe HP!'
     }
   ],
+  airAmmoRack: [
+    {
+      id: 'std_air_rack',
+      name: 'STANDARD TACTICAL SORTIE PYLONS & ROTARY BAY (STOCK)',
+      shortName: 'STD MUNITIONS (1×)',
+      icon: '🎯',
+      price: 0,
+      isExpandedRack: false,
+      turnMult: 1.0,
+      desc: 'Authentic standard sortie load: AC-130 (1,800/80/20), A-10C (1,150/14/4), F-15EX (500/6/4), B-2 CSRL (40× Mk-82 / 1 Twin MOP / 4 AIM-9X).'
+    },
+    {
+      id: 'amber_heavy_racks',
+      name: 'AMBER / BRU-55 / B-2 SBRA HEAVY MUNITIONS RACKS (~2× PAYLOAD)',
+      shortName: 'AMBER/SBRA (~2× AMMO)',
+      icon: '🚀',
+      price: 850,
+      isExpandedRack: true,
+      turnMult: 0.96,
+      desc: 'Real-world heavy racks (-4% turn rate): AC-130 Palletized (3,000/192/45), A-10 Dual-LAU (1,350/38/8), F-15EX AMBER (940/12/8), B-2 SBRA (80× Mk-82 / 2 Twin MOPs / 8 AIM-9X)!'
+    }
+  ],
   ac130Generation: [
     {
       id: 'ac130a_1968',
@@ -455,10 +499,12 @@ const DEFAULT_VEHICLE_UPGRADES = {
   armorDefense: 'smoke_disp',
   armorWeaponMod: 'std_autoloader',
   armorChassis: 'std_turbine',
+  armorAmmoRack: 'std_armor_rack',
   airSensor: 'std_air_hud',
   airCountermeasure: 'std_flares',
   airOrdnance: 'std_pylons',
   airFrame: 'std_airframe',
+  airAmmoRack: 'std_air_rack',
   ac130Generation: 'ac130a_1968',
   ac130Sight: 'sight_1968_hud',
   ac130Avionics: 'avio_manual_1968'
@@ -592,6 +638,8 @@ export const GunsmithMethods = {
         'stock',
         'std_mag',
         'factory',
+        'sniper8x',
+        'nightforce_12x',
         'std_grip',
         'fmj',
         'std_vest',
@@ -602,6 +650,7 @@ export const GunsmithMethods = {
       this.ownedUpgrades.add('fmj');
       this.ownedUpgrades.add('no_pack');
       this.ownedUpgrades.add('std_helmet');
+      this.ownedUpgrades.add('sniper8x');
     }
     if (!this.equippedUpgrades || typeof this.equippedUpgrades !== 'object') {
       this.equippedUpgrades = {
@@ -676,12 +725,18 @@ export const GunsmithMethods = {
   getWeaponAttachmentMap(weaponId) {
     this.ensureWarehouseStructures();
     const id = weaponId || this.getSelectedWeaponIdForClass(this.role, 'primary') || 'm4a1';
+    const defaultOpticForWep =
+      id === 'sv98' ? 'sniper8x' : id === 'awm' ? 'nightforce_12x' : DEFAULT_WEAPON_ATTACHMENTS.optic;
     if (!this.weaponAttachments[id] || typeof this.weaponAttachments[id] !== 'object') {
-      this.weaponAttachments[id] = { ...DEFAULT_WEAPON_ATTACHMENTS };
+      this.weaponAttachments[id] = {
+        ...DEFAULT_WEAPON_ATTACHMENTS,
+        optic: defaultOpticForWep
+      };
     }
     for (const k of ['muzzle', 'magazine', 'optic', 'grip', 'ammoType']) {
       if (!this.weaponAttachments[id][k]) {
-        this.weaponAttachments[id][k] = DEFAULT_WEAPON_ATTACHMENTS[k];
+        this.weaponAttachments[id][k] =
+          k === 'optic' ? defaultOpticForWep : DEFAULT_WEAPON_ATTACHMENTS[k];
       }
     }
     return this.weaponAttachments[id];
@@ -1107,10 +1162,12 @@ export const GunsmithMethods = {
       armorDefense: this.getEquippedVehicleUpgrade('armorDefense'),
       armorWeaponMod: this.getEquippedVehicleUpgrade('armorWeaponMod'),
       armorChassis: this.getEquippedVehicleUpgrade('armorChassis'),
+      armorAmmoRack: this.getEquippedVehicleUpgrade('armorAmmoRack'),
       airSensor: this.getEquippedVehicleUpgrade('airSensor'),
       airCountermeasure: this.getEquippedVehicleUpgrade('airCountermeasure'),
       airOrdnance: this.getEquippedVehicleUpgrade('airOrdnance'),
       airFrame: this.getEquippedVehicleUpgrade('airFrame'),
+      airAmmoRack: this.getEquippedVehicleUpgrade('airAmmoRack'),
       ac130Generation: this.getEquippedVehicleUpgrade('ac130Generation'),
       ac130Sight: this.getEquippedVehicleUpgrade('ac130Sight'),
       ac130Avionics: this.getEquippedVehicleUpgrade('ac130Avionics')
@@ -1217,11 +1274,57 @@ export const GunsmithMethods = {
     const oldMaxHp = v.maxHp || v._baseMaxHp;
     const hpRatio = oldMaxHp > 0 ? Math.min(1, (v.hp || oldMaxHp) / oldMaxHp) : 1;
 
+    const applyOrdnanceRackScale = (isExpanded) => {
+      if (!v._baseOrdnancePools && v.maxOrdnancePools) {
+        v._baseOrdnancePools = { ...v.maxOrdnancePools };
+      }
+      if (!v._baseOrdnancePools) return;
+      let targetMax = { ...v._baseOrdnancePools };
+      if (isExpanded) {
+        if (v.isAircraft) {
+          const role = v.aircraftRole || 'cas';
+          if (role === 'gunship') {
+            targetMax = { slot0: 3000, slot1: 192, slot2: 45 }; // Palletized AC-130 Heavy Combat Stowage
+          } else if (role === 'cas') {
+            targetMax = { slot0: 1350, slot1: 38, slot2: 8 }; // Full GAU-8 Drum + Dual LAU-131 + TER AGM-65
+          } else if (role === 'b2_spirit') {
+            targetMax = { slot0: 16, slot1: 2, slot2: 8 }; // B-2 SBRA Smart Bomb Rack Assembly (80× Mk-82 + 2 Twin MOPs)
+          } else if (role === 'wright_flyer') {
+            targetMax = { slot0: 1200, slot1: 16, slot2: 8 };
+          } else {
+            targetMax = { slot0: 940, slot1: 12, slot2: 8 }; // F-15EX AMBER / Su-57 Heavy External Pylons
+          }
+        } else if (v.type === 'tank') {
+          targetMax = { slot0: 42, slot1: 2400 }; // Full M1A2 / T-90M Deep-Hull + Turret Bustle Combat Load (42 shells!)
+        } else if (v.type === 'apc') {
+          targetMax = { slot0: 420, slot1: 2400 }; // Hull-Stowed Spare 25mm/30mm Ammo Bins (420 rds)
+        } else if (v.type === 'aa' || v.type === 'emplace_aa') {
+          targetMax = { slot0: 1200, slot1: 16 }; // Dual Stinger / 9M311 Reload Cassettes (16 SAMs)
+        } else if (v.type === 'emplace_mortar') {
+          targetMax = { slot0: 48, slot1: 12 };
+        } else if (v.type === 'humvee' || v.type === 'emplace_hmg') {
+          targetMax = { slot0: 1000, slot1: 1000 }; // Extended .50 BMG Tombstone Drum Cans
+        }
+      }
+      const prevMax = v.maxOrdnancePools || v._baseOrdnancePools;
+      const prevCur = v.ordnancePools || { ...prevMax };
+      const nextCur = {};
+      for (const k of Object.keys(targetMax)) {
+        const oldM = Math.max(1, prevMax[k] || targetMax[k]);
+        const curV = prevCur[k] ?? oldM;
+        const wasFull = curV >= oldM;
+        nextCur[k] = wasFull ? targetMax[k] : Math.min(targetMax[k], Math.round((curV / oldM) * targetMax[k]));
+      }
+      v.maxOrdnancePools = targetMax;
+      v.ordnancePools = nextCur;
+    };
+
     if (v.isAircraft) {
       const sen = mods.airSensor || {};
       const cm = mods.airCountermeasure || {};
       const ord = mods.airOrdnance || {};
       const frame = mods.airFrame || {};
+      const airRack = mods.airAmmoRack || {};
       const acGen = mods.ac130Generation || {};
       const acSight = mods.ac130Sight || {};
       const acAvio = mods.ac130Avionics || {};
@@ -1235,7 +1338,9 @@ export const GunsmithMethods = {
         (isGunship ? acGen.bonusHp || 0 : 0) +
         (isPilotRole ? 350 : 0);
       const speedMult = (frame.speedMult || 1.0) * (isPilotRole ? 1.15 : 1.0);
-      const turnMult = (frame.turnMult || 1.0) * (isPilotRole ? 1.22 : 1.0);
+      const turnMult =
+        (frame.turnMult || 1.0) * (airRack.turnMult || 1.0) * (isPilotRole ? 1.22 : 1.0);
+      applyOrdnanceRackScale(Boolean(airRack.isExpandedRack));
 
       v.maxHp = Math.round(v._baseMaxHp + bonusHp);
       v.hp = Math.min(v.maxHp, Math.max(v.hp || v.maxHp, Math.round(v.maxHp * hpRatio)));
@@ -1309,12 +1414,15 @@ export const GunsmithMethods = {
       const def = mods.armorDefense || {};
       const wep = mods.armorWeaponMod || {};
       const chas = mods.armorChassis || {};
+      const armRack = mods.armorAmmoRack || {};
       const isArmorRole = this.role === 'armor';
 
       const bonusHp = (def.bonusHp || 0) + (chas.bonusHp || 0) + (isArmorRole ? 300 : 0);
       const speedMult = (chas.speedMult || 1.0) * (isArmorRole ? 1.14 : 1.0);
-      const accelMult = (chas.accelMult || 1.0) * (isArmorRole ? 1.2 : 1.0);
+      const accelMult =
+        (chas.accelMult || 1.0) * (armRack.accelMult || 1.0) * (isArmorRole ? 1.2 : 1.0);
       const rpmMult = (wep.rpmMult || 1.0) * (isArmorRole ? 1.18 : 1.0);
+      applyOrdnanceRackScale(Boolean(armRack.isExpandedRack));
 
       v.maxHp = Math.round(v._baseMaxHp + bonusHp);
       v.hp = Math.min(v.maxHp, Math.max(v.hp || v.maxHp, Math.round(v.maxHp * hpRatio)));
@@ -1442,11 +1550,11 @@ export const GunsmithMethods = {
     if (isAir) {
       const slots =
         vehKey === 'gunship'
-          ? [mods.airSensor, mods.airCountermeasure, mods.airOrdnance, mods.airFrame, mods.ac130Generation, mods.ac130Sight, mods.ac130Avionics]
-          : [mods.airSensor, mods.airCountermeasure, mods.airOrdnance, mods.airFrame];
+          ? [mods.airSensor, mods.airCountermeasure, mods.airOrdnance, mods.airFrame, mods.airAmmoRack, mods.ac130Generation, mods.ac130Sight, mods.ac130Avionics]
+          : [mods.airSensor, mods.airCountermeasure, mods.airOrdnance, mods.airFrame, mods.airAmmoRack];
       return slots.some((s) => s && (s.price || 0) > 0);
     }
-    const gSlots = [mods.armorSensor, mods.armorDefense, mods.armorWeaponMod, mods.armorChassis];
+    const gSlots = [mods.armorSensor, mods.armorDefense, mods.armorWeaponMod, mods.armorChassis, mods.armorAmmoRack];
     return gSlots.some((s) => s && (s.price || 0) > 0);
   },
 
@@ -2517,16 +2625,22 @@ export const GunsmithMethods = {
       ammo && ammo.isSlugAmmo && baseDef.pellets && baseDef.pellets > 1
     );
 
-    // All firearms default to bare iron sights (opticType: null, adsFov: 56); use mounted optic only when equipped
+    // Explicit 'factory' selects bare iron sights even on factory-scoped sniper rifles (SV-98 / AWM)
+    const explicitBareIron = Boolean(optic && optic.id === 'factory');
     const useCustomOptic = Boolean(optic && optic.id !== 'factory' && optic.opticType);
-    const finalOpticType = useCustomOptic ? optic.opticType : baseDef.opticType;
-    const finalAdsFov = useCustomOptic && optic.adsFov ? optic.adsFov : baseDef.adsFov || 56;
-    const finalHasCanted = Boolean(
-      baseDef.hasCantedSight || (useCustomOptic && optic.grantCanted)
-    );
+    const finalOpticType = explicitBareIron ? null : useCustomOptic ? optic.opticType : baseDef.opticType;
+    const finalAdsFov = explicitBareIron
+      ? 56
+      : useCustomOptic && optic.adsFov
+      ? optic.adsFov
+      : baseDef.adsFov || 56;
+    const finalHasCanted = explicitBareIron
+      ? false
+      : Boolean(baseDef.hasCantedSight || (useCustomOptic && optic.grantCanted));
     const finalIsScoped = Boolean(
       finalOpticType === 'sniper8x' ||
         finalOpticType === 'sniper12x' ||
+        finalOpticType === 'sniperFlir' ||
         finalOpticType === 'lpvo36' ||
         finalOpticType === 'flir'
     );
@@ -2598,13 +2712,25 @@ export const GunsmithMethods = {
         ? Number((0.0004 * gripSpreadMult * muzzleSpreadMult).toFixed(4))
         : Number(((baseDef.spreadAds || 0.0001) * spreadMult).toFixed(4)),
       rpm: Math.round(baseDef.rpm * rpmMult),
-      opticId: useCustomOptic ? optic.id : 'factory',
-      opticName: useCustomOptic ? optic.name : 'IRON SIGHTS',
+      opticId: explicitBareIron ? 'factory' : useCustomOptic ? optic.id : baseDef.opticType || 'factory',
+      opticName: explicitBareIron ? 'IRON SIGHTS' : useCustomOptic ? optic.name : baseDef.opticType ? baseDef.opticType.toUpperCase() : 'IRON SIGHTS',
       opticType: finalOpticType,
       adsFov: finalAdsFov,
-      zoomLevels: useCustomOptic && Array.isArray(optic.zoomLevels) ? optic.zoomLevels : null,
-      zoomFovs: useCustomOptic && Array.isArray(optic.zoomFovs) ? optic.zoomFovs : null,
-      isThermal: Boolean(useCustomOptic && optic.isThermal),
+      zoomLevels: explicitBareIron
+        ? null
+        : useCustomOptic && Array.isArray(optic.zoomLevels)
+        ? optic.zoomLevels
+        : Array.isArray(baseDef.zoomLevels)
+        ? baseDef.zoomLevels
+        : null,
+      zoomFovs: explicitBareIron
+        ? null
+        : useCustomOptic && Array.isArray(optic.zoomFovs)
+        ? optic.zoomFovs
+        : Array.isArray(baseDef.zoomFovs)
+        ? baseDef.zoomFovs
+        : null,
+      isThermal: Boolean(!explicitBareIron && ((useCustomOptic && optic.isThermal) || baseDef.isThermal)),
       isSlugAmmo: Boolean(ammo && ammo.isSlugAmmo),
       isIncendiaryAmmo: Boolean(ammo && ammo.isIncendiaryAmmo),
       hasCantedSight: finalHasCanted,

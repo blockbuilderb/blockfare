@@ -7,8 +7,10 @@ import {
   createSoldierMesh,
   updateSoldierEquippedWeapon
 } from '../src/models/soldier-model.js';
-import { createWeaponViewModel } from '../src/models/weapon-model.js?v=121';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=121';
+import { createWeaponViewModel } from '../src/models/weapon-model.js?v=122';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=122';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=122';
+import { TerrainGenerator } from '../src/world/TerrainGenerator.js?v=122';
 import { SpatialGrid2D } from '../src/utils/SpatialGrid2D.js';
 
 /**
@@ -751,4 +753,238 @@ test('createWeaponViewModel: builds articulated 1st-person Spec-Ops arms, tactic
   updateSoldierEquippedWeapon(soldier, 'm4a1', 'US', { role: 'ASSAULT' });
   assert.equal(soldier.userData.parts.gunGroup.getObjectByName('leftArmGroup'), undefined);
   assert.equal(soldier.userData.parts.gunGroup.getObjectByName('rightArmGroup'), undefined);
+});
+
+test('All 29 Firearms & Launchers × All 18 Gunsmith Optics have 100% unobstructed center ADS sightlines (including Assault ak15 & Sniper Thermal IR)', () => {
+  const opticAttachments = [
+    null,
+    ...ATTACHMENT_CATALOG.optic.filter((a) => a.id !== 'factory').map((a) => a.id)
+  ];
+  const opticMap = Object.fromEntries(ATTACHMENT_CATALOG.optic.map((a) => [a.id, a]));
+  const firearmDefs = Object.values(WEAPON_DEFS).filter(
+    (w) => !w.isBow && !w.isCrossbow && w.type !== 'melee_sword' && w.type !== 'hammer'
+  );
+  assert.ok(firearmDefs.length >= 27, `Expected >=27 firearms/launchers, got ${firearmDefs.length}`);
+
+  const raycaster = new THREE.Raycaster(
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -1),
+    0.08,
+    2.0
+  );
+  const blocked = [];
+
+  for (const def of firearmDefs) {
+    const isPistol =
+      def.slot === 'secondary' || ['mp443', 'usp45', 'g18', 'deagle'].includes(def.id);
+    const isLauncher = def.type === 'rpg' || def.type === 'stinger';
+    const testOptics = isLauncher ? [null] : opticAttachments;
+
+    for (const opticId of testOptics) {
+      const attOpticType = opticId ? opticMap[opticId]?.opticType : null;
+      const activeOptic = opticId ? attOpticType : isLauncher ? def.opticType : null;
+      const mesh = createWeaponViewModel(def, 'US', opticId ? { optic: opticId } : { optic: 'factory' });
+
+      const isBareIronSights = !activeOptic;
+      const isSniper8x = [
+        'sniper8x',
+        'sniper12x',
+        'sniperFlir',
+        'valday6x',
+        'lpvo36',
+        'flir'
+      ].includes(activeOptic);
+      const isAcog = ['acog', 'elcan4x', 'prism2x', 'holo3x'].includes(activeOptic);
+      const isHolo = ['holo', 'uh1'].includes(activeOptic);
+      const isKobra = ['kobra', 'okp7', 'rmr'].includes(activeOptic);
+
+      const sightCenterY =
+        isLauncher && (isBareIronSights || activeOptic === 'rpgSight')
+          ? -0.108
+          : isBareIronSights
+          ? isPistol
+            ? -0.052
+            : -0.06
+          : isSniper8x
+          ? -0.118
+          : isAcog
+          ? isPistol
+            ? -0.072
+            : -0.076
+          : isHolo || isKobra
+          ? isPistol
+            ? -0.073
+            : -0.082
+          : isPistol
+          ? -0.076
+          : -0.085;
+
+      const baseAdsZ = isLauncher
+        ? -0.22
+        : isBareIronSights
+        ? isPistol
+          ? -0.22
+          : -0.18
+        : isSniper8x
+        ? -0.14
+        : isAcog
+        ? isPistol
+          ? -0.21
+          : -0.17
+        : isPistol
+        ? -0.25
+        : -0.21;
+
+      mesh.position.set(0, sightCenterY, baseAdsZ);
+      const opticNode = mesh.getObjectByName('opticSight');
+      if (opticNode && activeOptic) opticNode.visible = false;
+      mesh.updateMatrixWorld(true);
+
+      const hits = raycaster.intersectObject(mesh, true).filter((h) => {
+        if (!isEffectivelyVisible(h.object, mesh)) return false;
+        if (h.object.material?.transparent && (h.object.material.opacity ?? 1) < 0.35) {
+          return false;
+        }
+        return true;
+      });
+      if (hits.length > 0) {
+        blocked.push(`${def.id}+${opticId || 'iron_sights'}@${hits[0].point.z.toFixed(3)}`);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    blocked,
+    [],
+    `Every firearm & launcher ADS sightline must be 100% clear, found blocked: ${blocked.join(', ')}`
+  );
+});
+
+test('All US & RU Ground Vehicles orient headlights forward (-Z), red taillights aft (+Z), and main barrels forward (-Z)', () => {
+  const groundTypes = ['tank', 'humvee', 'apc', 'aa'];
+  for (const team of ['US', 'RU']) {
+    for (const type of groundTypes) {
+      const { group: mesh, turretPivot, barrelGroup } = createVehicleMesh({ type, team });
+      // Apply runtime forward-aligned turret transform (`v.turretPivot.rotation.y = v.turretYaw - v.yaw + Math.PI` at yaw=0, turretYaw=0)
+      if (turretPivot) turretPivot.rotation.y = Math.PI;
+      mesh.updateMatrixWorld(true);
+
+      let minWhiteLightZ = Infinity;
+      let maxRedTaillightZ = -Infinity;
+      const box = new THREE.Box3();
+
+      mesh.traverse((c) => {
+        if (!c.isMesh || !c.material?.color) return;
+        const hex = c.material.color.getHex();
+        if (
+          hex === 0xf5f6fa ||
+          hex === 0xfef9e7 ||
+          hex === 0xffffff ||
+          hex === 0xdff9fb
+        ) {
+          box.setFromObject(c);
+          if (box.min.z < minWhiteLightZ) minWhiteLightZ = box.min.z;
+        }
+        if (
+          hex === 0xd63031 ||
+          hex === 0xc0392b ||
+          hex === 0xe74c3c ||
+          hex === 0xff3b30
+        ) {
+          box.setFromObject(c);
+          if (box.max.z > maxRedTaillightZ) maxRedTaillightZ = box.max.z;
+        }
+      });
+
+      assert.ok(
+        minWhiteLightZ < -1.2,
+        `${team} ${type} white headlights must sit on the -Z front nose (got z=${minWhiteLightZ})`
+      );
+      assert.ok(
+        maxRedTaillightZ > 1.2,
+        `${team} ${type} red taillights must sit on the +Z rear hull (got z=${maxRedTaillightZ})`
+      );
+
+      if (barrelGroup) {
+        const bbox = new THREE.Box3().setFromObject(barrelGroup);
+        assert.ok(
+          bbox.min.z < -1.0,
+          `${team} ${type} turret barrel must extend forward along -Z (got min.z=${bbox.min.z})`
+        );
+      }
+    }
+  }
+});
+
+test('TerrainGenerator ContinentalHorizonSkirt stitches seamlessly to ±3800m × ±2600m ground perimeter out to ±58,000m', () => {
+  const worldStub = Object.assign(
+    {
+      era: 'modern',
+      scene: new THREE.Scene(),
+      flags: [],
+      gradedPads: [],
+      addVoxel: () => null,
+      spawns: { US_BASE: new THREE.Vector3(-3000, 0, 0), RU_BASE: new THREE.Vector3(3000, 0, 0) },
+      getGroundHeightAt(x, z) {
+        return this.getTerrainHeight(x, z);
+      }
+    },
+    TerrainGenerator
+  );
+  const prevDoc = globalThis.document;
+  if (!globalThis.document) {
+    globalThis.document = {
+      createElement: () => ({
+        width: 64,
+        height: 64,
+        getContext: () => ({
+          fillStyle: '',
+          strokeStyle: '',
+          font: '',
+          textAlign: '',
+          textBaseline: '',
+          lineWidth: 1,
+          fillRect: () => {},
+          strokeRect: () => {},
+          fillText: () => {},
+          beginPath: () => {},
+          moveTo: () => {},
+          lineTo: () => {},
+          stroke: () => {},
+          arc: () => {},
+          fill: () => {}
+        })
+      })
+    };
+  }
+  try {
+    worldStub.buildEnvironment();
+  } finally {
+    globalThis.document = prevDoc;
+  }
+  assert.ok(worldStub.continentalSkirtMesh instanceof THREE.Mesh, 'Must create continentalSkirtMesh');
+  assert.equal(worldStub.continentalSkirtMesh.name, 'ContinentalHorizonSkirt');
+
+  const posAttr = worldStub.continentalSkirtMesh.geometry.attributes.position;
+  assert.ok(posAttr.count > 400, 'Continental skirt should contain multi-ring horizon geometry');
+
+  let maxAbsX = 0;
+  let maxAbsZ = 0;
+  for (let i = 0; i < posAttr.count; i++) {
+    maxAbsX = Math.max(maxAbsX, Math.abs(posAttr.getX(i)));
+    maxAbsZ = Math.max(maxAbsZ, Math.abs(posAttr.getZ(i)));
+  }
+  assert.ok(maxAbsX >= 55000 && maxAbsZ >= 55000, 'Continental skirt must extend >=55km to horizon');
+
+  // Inner ring vertices (ring 0: first 112 perimeter vertices) must match exact getGroundHeightAt(x, z) with zero gap!
+  for (let i = 0; i < 112; i++) {
+    const vx = posAttr.getX(i);
+    const vy = posAttr.getY(i);
+    const vz = posAttr.getZ(i);
+    const expectedY = worldStub.getGroundHeightAt(vx, vz);
+    assert.ok(
+      Math.abs(vy - expectedY) < 1e-3,
+      `Inner skirt seam vertex ${i} at (${vx}, ${vz}) must match ground height ${expectedY}, got ${vy}`
+    );
+  }
 });

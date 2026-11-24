@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=121';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=121';
+import { UI, getEraRoles } from '../config.js?v=122';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=122';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -517,18 +517,25 @@ export const HudRenderer = {
         : 'NVG'
       : 'OFF';
     const curInfWep = !this.player.activeVehicle ? this.player.currentWeapon?.() : null;
+    const activeScopeOptic =
+      !this.player.activeVehicle && typeof this.player.getActiveOpticType === 'function'
+        ? this.player.getActiveOpticType()
+        : curInfWep?.def?.opticType;
     const isScopeFlir = Boolean(
       !this.player.activeVehicle &&
         this.player.isAds &&
-        (this.player.adsAmount || 0) > 0.45 &&
-        curInfWep?.def?.opticType === 'flir'
+        (this.player.adsAmount || 0) > 0.42 &&
+        !this.player.useCantedSight &&
+        (activeScopeOptic === 'flir' || activeScopeOptic === 'sniperFlir' || curInfWep?.def?.isThermal)
     );
+    const scopeBhot = isScopeFlir && this.player.scopeThermalPolarity === 'BHOT';
     const isFlirMode = activeSensorMode === 'WHOT' || activeSensorMode === 'BHOT';
     if (document.body) {
       document.body.classList.toggle('nvg-green-mode', activeSensorMode === 'NVG');
       document.body.classList.toggle('flir-whot-mode', activeSensorMode === 'WHOT');
       document.body.classList.toggle('flir-bhot-mode', activeSensorMode === 'BHOT');
-      document.body.classList.toggle('flir-scope-mode', isScopeFlir && !isFlirMode);
+      document.body.classList.toggle('flir-scope-mode', isScopeFlir && !scopeBhot && !isFlirMode);
+      document.body.classList.toggle('flir-scope-bhot-mode', scopeBhot && !isFlirMode);
     }
     if (this.nvgOverlayEl) {
       const hideNvg = activeSensorMode === 'OFF';
@@ -1208,7 +1215,7 @@ export const HudRenderer = {
       if (selWepIndEl) selWepIndEl.classList.remove('hidden');
       if (airCockpitHudEl) airCockpitHudEl.classList.add('hidden');
       const opticType = this.player.getActiveOpticType();
-      const inAdsOptic = Boolean(opticType && this.player.adsAmount > 0.55);
+      const inAdsOptic = Boolean(opticType && this.player.adsAmount > 0.45);
 
       if (inAdsOptic && this.opticFrameEl) {
         this.scopeOverlayEl.classList.remove('hidden');
@@ -1228,6 +1235,7 @@ export const HudRenderer = {
           !this.player.useCantedSight &&
           (opticType === 'sniper8x' ||
             opticType === 'sniper12x' ||
+            opticType === 'sniperFlir' ||
             opticType === 'lpvo36' ||
             opticType === 'flir' ||
             ((opticType === 'elcan4x' || opticType === 'valday6x' || opticType === 'holo3x') &&
@@ -1237,6 +1245,13 @@ export const HudRenderer = {
         this.opticFrameEl.className = `optic-${opticType}`;
 
         const zHint = zLevels && zLevels.length > 1 ? ` [SCROLL/V: ${activeZoom}]` : '';
+        const polStr = this.player.scopeThermalPolarity === 'BHOT' ? 'BHOT' : 'WHOT';
+        const breathSec = Math.max(0, this.player.breathStamina ?? 4.5).toFixed(1);
+        const breathHint = this.player.isHoldingBreath
+          ? ` • 🎯 STEADY LOCKED (${breathSec}s)`
+          : isBlackout
+          ? ' • [SHIFT] HOLD BREATH'
+          : '';
         const opticLabels = {
           rmr: 'TRIJICON RMR TYPE 2 • 1.0X MICRO DOT',
           reddot: this.player.useCantedSight
@@ -1250,18 +1265,19 @@ export const HudRenderer = {
           holo3x: `EOTECH HHS-II + G33 • ${activeZoom || '3.0X'}${zHint}`,
           acog: `TRIJICON ACOG • 3.4X (ZERO ${this.player.zeroDistance}M)`,
           elcan4x: `ELCAN SPECTER DR • ${activeZoom || '4.0X'}${zHint}`,
-          valday6x: `VALDAY PS-320 • ${activeZoom || '6.0X'} LPVO${zHint}`,
-          lpvo36: `EOTECH VUDU • ${activeZoom || '3.0X-6.0X'} DUAL-ZOOM${zHint}`,
-          flir: `FLIR RS-32 WHITE-HOT THERMAL • ${activeZoom || '2.5X'}${zHint}`,
-          sniper8x: `RAZOR HD • 8.0X MIL-DOT (ZERO ${this.player.zeroDistance}M)`,
-          sniper12x: `NIGHTFORCE ATACR • ${activeZoom || '12.0X'} BALLISTIC${zHint}`,
+          valday6x: `VALDAY PS-320 • ${activeZoom || '6.0X'} LPVO${zHint}${breathHint}`,
+          lpvo36: `EOTECH VUDU • ${activeZoom || '3.0X-6.0X'} DUAL-ZOOM${zHint}${breathHint}`,
+          flir: `FLIR RS-32 ${polStr} THERMAL • ${activeZoom || '2.5X'}${zHint} • [N] POLARITY${breathHint}`,
+          sniperFlir: `AN/PAS-13G ${polStr} THERMAL SNIPER • ${activeZoom || '6.0X'}${zHint} • [N] POLARITY${breathHint}`,
+          sniper8x: `RAZOR HD • 8.0X MIL-DOT (ZERO ${this.player.zeroDistance}M)${breathHint}`,
+          sniper12x: `NIGHTFORCE ATACR • ${activeZoom || '12.0X'} BALLISTIC${zHint}${breathHint}`,
           rpgSight: 'PGO-7V • ROCKET OPTICAL GRID'
         };
         if (this.opticLabelEl) {
           this._setText(this.opticLabelEl, opticLabels[opticType] || 'OPTIC SIGHT');
         }
-        if (opticType === 'flir') {
-          this.renderFlirThermalLens?.();
+        if (opticType === 'flir' || opticType === 'sniperFlir') {
+          this.renderFlirThermalLens?.(opticType);
         }
         this.opticFrameEl.style.transform = `scale(${1 + this.player.recoilKickZ * 0.28})`;
       } else {
@@ -1818,10 +1834,23 @@ export const HudRenderer = {
           activeVeh.ordnancePools && typeof activeVeh.ordnancePools.slot0 === 'number'
             ? activeVeh.ordnancePools.slot0
             : null;
-        if (activeSlot === 1) {
-          this._setText(this.ammoClipEl, activeVeh.coaxOverheated ? 'HOT' : 'INF');
+        const maxTankShells = activeVeh.maxOrdnancePools?.slot0 || 24;
+        if (this.player.vehicleSeatIndex === 2) {
+          const rwsRds = activeVeh.ordnancePools?.slot1 ?? 1200;
+          this._setText(this.ammoClipEl, activeVeh.coaxOverheated ? 'HOT' : `${rwsRds}`);
+          this._setText(this.ammoReserveEl, '.50 RWS');
+          this._setText(
+            this.fireModeEl,
+            'ROOF .50 CAL CROWS / KORD RWS (+60° HIGH-ANGLE ELEVATION [LMB / SPACE]) • [F1–F3] SEATS'
+          );
+        } else if (activeSlot === 1) {
+          const coaxRds = activeVeh.ordnancePools?.slot1 ?? 1200;
+          this._setText(this.ammoClipEl, activeVeh.coaxOverheated ? 'HOT' : `${coaxRds}`);
           this._setText(this.ammoReserveEl, '7.62 AP');
-          this._setText(this.fireModeEl, '[2] 950 RPM AP COAX MG (FLAT AIM AT +) • [1] CANNON');
+          this._setText(
+            this.fireModeEl,
+            '[2] COAX 7.62MM MG (+20° MANTLET LIMIT) • [F3] COMMANDER .50 CAL RWS (+60° ELEV)'
+          );
         } else {
           this._setText(
             this.ammoClipEl,
@@ -1831,10 +1860,13 @@ export const HudRenderer = {
               ? `${tankShells}`
               : 'RDY'
           );
-          this._setText(this.ammoReserveEl, tankShells !== null ? '/24 APHE' : 'APHE');
+          this._setText(
+            this.ammoReserveEl,
+            tankShells !== null ? `/${maxTankShells} APHE` : 'APHE'
+          );
           this._setText(
             this.fireModeEl,
-            '[1] MAIN CANNON [LMB] • COAX MG [SPACE / 2] • [F1–F3] CREW SEATS'
+            '[1] MAIN CANNON [LMB] • COAX MG [SPACE / 2] • [F3] ROOF .50 CAL RWS (+60°)'
           );
         }
       } else if (activeVeh.weaponType === 'autocannon') {
@@ -1854,9 +1886,10 @@ export const HudRenderer = {
             : '[1] 330 RPM 30MM HE [LMB] • COAX MG [SPACE / 2] • [F1–F4] SEATS'
         );
       } else {
-        this._setText(this.ammoClipEl, '50BMG');
-        this._setText(this.ammoReserveEl, 'AP-I');
-        this._setText(this.fireModeEl, 'ROOF .50 CAL M2HB RWS (720 RPM AP-I • FLAT AIM AT +)');
+        const hmgRds = activeVeh.ordnancePools?.slot0 ?? 400;
+        this._setText(this.ammoClipEl, `${hmgRds}`);
+        this._setText(this.ammoReserveEl, '.50 AP-I');
+        this._setText(this.fireModeEl, 'ROOF .50 CAL M2HB RWS (720 RPM AP-I • +60° ELEVATION)');
       }
       if (this.magBarsRowEl) this.magBarsRowEl.innerHTML = '';
     } else if (cur) {
@@ -2499,16 +2532,23 @@ export const HudRenderer = {
     const vsiStr = `${vsiMs >= 0 ? '+' : ''}${vsiMs}M/S`;
 
     const adiFooterEl = this.el('air-adi-footer');
+    const ceilM = v.serviceCeilingM || 15000;
     if (adiFooterEl) {
-      adiFooterEl.textContent = `ALT ${altAgl}M • VSI ${vsiStr}`;
+      adiFooterEl.textContent =
+        altAgl >= 2500
+          ? `ALT ${(altAgl / 1000).toFixed(2)}KM / CEIL ${(ceilM / 1000).toFixed(1)}KM • ${vsiStr}`
+          : `ALT ${altAgl}M • VSI ${vsiStr}`;
     }
     const altFillEl = this.el('air-alt-fill');
     if (altFillEl) {
-      const altPct = Math.max(4, Math.min(100, Math.round((altAgl / 350) * 100)));
+      const barRefM = altAgl > 1000 ? ceilM : 1000;
+      const altPct = Math.max(4, Math.min(100, Math.round((altAgl / Math.max(350, barRefM)) * 100)));
       altFillEl.style.height = `${altPct}%`;
     }
     const altValEl = this.el('air-alt-val');
-    if (altValEl) altValEl.textContent = `${altAgl}M`;
+    if (altValEl) {
+      altValEl.textContent = altAgl >= 10000 ? `${(altAgl / 1000).toFixed(1)}KM` : `${altAgl}M`;
+    }
     const vsiValEl = this.el('air-vsi-val');
     if (vsiValEl) {
       vsiValEl.textContent = altAgl < 28 ? '🦇 MASK' : vsiStr;
@@ -3035,7 +3075,7 @@ export const HudRenderer = {
    * Renders crisp FLIR RS-32 Rifle Scope scanlines & Friendly IFF IR Strobes
    * (3D soldiers & vehicles already glow White-Hot in the live WebGL viewport inside the scope!).
    */
-  renderFlirThermalLens() {
+  renderFlirThermalLens(opticType = 'flir') {
     const canvas = this.el('flir-thermal-canvas');
     if (!canvas || !this.player?.camera) return;
     const ctx = canvas.getContext('2d');
@@ -3044,7 +3084,18 @@ export const HudRenderer = {
     const ch = canvas.height;
     ctx.clearRect(0, 0, cw, ch);
 
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+    const isBhot = this.player.scopeThermalPolarity === 'BHOT';
+    const isSniperIr = opticType === 'sniperFlir';
+    const sniperReadoutEl = this.el('sniper-flir-readout');
+    if (isSniperIr && sniperReadoutEl) {
+      const steadyTxt = this.player.isHoldingBreath ? ' • STEADY LOCK' : '';
+      this._setText(
+        sniperReadoutEl,
+        `AN/PAS-13G • ${isBhot ? 'BHOT' : 'WHOT'} IR [N]${steadyTxt}`
+      );
+    }
+
+    ctx.fillStyle = isBhot ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.03)';
     for (let y = 0; y < ch; y += 4) {
       ctx.fillRect(0, y, cw, 1);
     }
@@ -3054,13 +3105,16 @@ export const HudRenderer = {
     const cam = this.player.camera;
     const vw = window.innerWidth || 1280;
     const vh = window.innerHeight || 720;
-    const lensScaleX = cw / Math.max(1, vw * 0.34);
-    const lensScaleY = ch / Math.max(1, vh * 0.42);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.lineWidth = 1.1;
+    const lensW = isSniperIr ? vh * 0.56 : vw * 0.34;
+    const lensH = isSniperIr ? vh * 0.56 : vh * 0.42;
+    const lensScaleX = cw / Math.max(1, lensW);
+    const lensScaleY = ch / Math.max(1, lensH);
+    const maxIffDist = isSniperIr ? 1150 : 560;
+    ctx.strokeStyle = isBhot ? 'rgba(12, 16, 20, 0.92)' : 'rgba(255, 255, 255, 0.92)';
+    ctx.lineWidth = 1.15;
     for (const b of this.botManager.bots) {
       if (!b || b.dead || b.team !== this.player.team) continue;
-      if (this.player.pos.distanceTo(b.pos) > 520) continue;
+      if (this.player.pos.distanceTo(b.pos) > maxIffDist) continue;
       const scr = this.projectWorldToScreen(b.pos, 1.85, cam, vw, vh);
       if (!scr || scr.behind) continue;
       const lx = cw * 0.5 + (scr.x - vw * 0.5) * lensScaleX;

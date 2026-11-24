@@ -1,18 +1,23 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { ECONOMY, VEHICLE_STATS } from '../src/config.js?v=121';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=121';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=121';
+import { ECONOMY, VEHICLE_STATS } from '../src/config.js?v=122';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=122';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=122';
 import {
   VehicleManager,
+  PITCH_LIMITS_CAR,
+  PITCH_LIMITS_COMMANDER_RWS,
   classifyWeaponBallistics,
   getVehicleSeatLayout,
   initVehicleOrdnance
-} from '../src/vehicles.js?v=121';
-import { BotManager, evaluateCatastrophicKill } from '../src/bots.js?v=121';
-import { NetworkManager } from '../src/network.js?v=121';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=121';
+} from '../src/vehicles.js?v=122';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=122';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=122';
+import { sound } from '../src/audio/SoundManager.js?v=122';
+import { BotManager, evaluateCatastrophicKill } from '../src/bots.js?v=122';
+import { NetworkManager } from '../src/network.js?v=122';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=122';
 
 function createEconomyPlayerHarness(overrides = {}) {
   const storage = new Map();
@@ -666,5 +671,63 @@ describe('Squad Caliber Penetration, Optics/Sensor Crits, Avionics FCS & Beyond-
     guestNet.applyRemotePlayerRevive({ targetId: 'c_guest', hp: 100, reviverName: 'MEDIC_BRO' });
     assert.equal(guestPlayer.downed, false, 'Human-to-human revive restores downed ally into live combat');
     assert.equal(guestPlayer.hp, 100);
+  });
+
+  test('Stock vehicle ordnance ready-racks, ~2x Armory ammo rack upgrades, +60° RWS elevation, >6km aircraft ceilings, ground engine audio & CoD thermal sniping', () => {
+    // 1. Real-world stock vehicle ordnance baselines (Ready-Rack / Standard Sortie)
+    const tank = { type: 'tank', isAircraft: false };
+    initVehicleOrdnance(tank);
+    assert.equal(tank.ordnancePools.slot0, 24, 'M1A2/T-90M stock 24 ready-rack shells');
+    assert.equal(tank.ordnancePools.slot1, 1200);
+
+    const f15 = { type: 'plane', isAircraft: true, aircraftRole: 'fighter' };
+    initVehicleOrdnance(f15);
+    assert.equal(f15.ordnancePools.slot0, 500, 'F-15EX stock 500-rd 20mm M61 Vulcan');
+    assert.equal(f15.ordnancePools.slot1, 6, '6x AIM-120D AMRAAM missiles');
+    assert.equal(f15.ordnancePools.slot2, 4);
+
+    // 2. ~2x Ordnance Rack Upgrades in [L] Armory (heavy_hull_stowage & amber_heavy_racks)
+    const { player } = createEconomyPlayerHarness({ role: 'armor' });
+    player.loadGunsmithState();
+    player.equippedVehicleUpgrades.armorAmmoRack = 'heavy_hull_stowage';
+    player.equippedVehicleUpgrades.airAmmoRack = 'amber_heavy_racks';
+    player.applyPlayerRideCustomizations(tank);
+    player.applyPlayerRideCustomizations(f15);
+    assert.equal(tank.maxOrdnancePools.slot0, 42, 'Full Hull Stowage expands MBT shells to 42');
+    assert.equal(tank.maxOrdnancePools.slot1, 2400, 'Full Hull Stowage doubles MG ammo to 2,400');
+    assert.equal(f15.maxOrdnancePools.slot0, 940, 'AMBER heavy racks expand cannon to 940');
+    assert.equal(f15.maxOrdnancePools.slot1, 12, 'AMBER heavy racks double fighter missiles to 12');
+    assert.equal(f15.maxOrdnancePools.slot2, 8, 'AMBER heavy racks double fighter bombs to 8');
+
+    // 3. +60° (1.05 rad) Elevation on Humvee / HMG Emplacement & Tank Seat [F3] Commander RWS
+    assert.ok(PITCH_LIMITS_CAR.max >= 1.04, 'Humvee .50 cal roof RWS elevates to +60°');
+    assert.ok(PITCH_LIMITS_COMMANDER_RWS.max >= 1.04, 'Tank Commander [F3] .50 cal RWS elevates to +60°');
+    assert.ok(VEHICLE_STATS.HUMVEE.maxPitchRad >= 1.04);
+
+    // 4. Realistic Per-Aircraft High-Altitude Service Ceilings (> 6,000m)
+    const ceilings = VEHICLE_STATS.SERVICE_CEILINGS;
+    assert.equal(ceilings.wright_flyer, 2400);
+    assert.equal(ceilings.gunship, 9100);
+    assert.equal(ceilings.cas, 13700);
+    assert.equal(ceilings.b2_spirit, 15240);
+    assert.equal(ceilings.bomber, 18300);
+    assert.equal(ceilings.fighter, 19800);
+    assert.ok(VEHICLE_STATS.AIRSPACE_MAX_ALT >= 19800);
+
+    // 5. Continuous Ground Vehicle & Motorcycle Engine Audio method exists & runs safely headless
+    assert.equal(typeof sound.updateGroundVehicleEngineAudio, 'function');
+    sound.updateGroundVehicleEngineAudio(
+      [{ type: 'bike', isAircraft: false, dead: false, forwardSpeed: 18, pos: new THREE.Vector3(5, 0, 0) }],
+      { type: 'bike', isAircraft: false, dead: false, forwardSpeed: 22 },
+      new THREE.Vector3(0, 0, 0),
+      0
+    );
+
+    // 6. Sniper Thermal IR Scope (AN/PAS-13G 6x-12x) & CoD Snappy Bolt-Action Upper-Chest OSK
+    const sniperIr = ATTACHMENT_CATALOG.optic.find((o) => o.id === 'an_pas13_sniper_ir');
+    assert.ok(sniperIr && sniperIr.opticType === 'sniperFlir' && sniperIr.isThermal === true);
+    assert.ok(WEAPON_DEFS.sv98.adsSpeed >= 22 && WEAPON_DEFS.sv98.chestMult >= 1.5);
+    assert.ok(WEAPON_DEFS.awm.adsSpeed >= 21 && WEAPON_DEFS.awm.chestMult >= 1.6);
+    assert.ok(WEAPON_DEFS.sv98.damage * WEAPON_DEFS.sv98.chestMult >= 160, 'SV-98 upper-chest One-Shot-Kill');
   });
 });
