@@ -1,13 +1,13 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=120';
-import { sound } from './audio.js?v=120';
-import { NETWORK } from './config.js?v=120';
-import { events, makeEventBridge } from './events.js?v=120';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=121';
+import { sound } from './audio.js?v=121';
+import { NETWORK } from './config.js?v=121';
+import { events, makeEventBridge } from './events.js?v=121';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=120';
-import { WebRtcTransport } from './network/WebRtcTransport.js?v=120';
+} from './core/StateMachines.js?v=121';
+import { WebRtcTransport } from './network/WebRtcTransport.js?v=121';
 
 function safeStorageGet(key) {
   try {
@@ -393,8 +393,18 @@ export class NetworkManager {
     if (!vm || !Array.isArray(vm.vehicles)) return;
     for (let i = 0; i < vm.vehicles.length; i++) {
       const v = vm.vehicles[i];
-      if (v && v.remoteDriverId === rpId) {
-        v.remoteDriverId = null;
+      if (!v) continue;
+      if (v.remoteDriverId === rpId) v.remoteDriverId = null;
+      if (v.remoteGunnerId === rpId) v.remoteGunnerId = null;
+      if (Array.isArray(v.remotePassengers)) {
+        v.remotePassengers = v.remotePassengers.filter((id) => id !== rpId);
+      }
+      if (Array.isArray(v.crewSeats)) {
+        for (let si = 0; si < v.crewSeats.length; si++) {
+          if (v.crewSeats[si] && v.crewSeats[si].id === rpId) {
+            v.crewSeats[si] = null;
+          }
+        }
       }
     }
   }
@@ -860,6 +870,18 @@ export class NetworkManager {
       case 'match_reset':
         this.applyRemoteMatchReset(msg);
         break;
+      case 'bot_sync':
+        this.applyRemoteBotSync(msg);
+        break;
+      case 'bot_event':
+        this.applyRemoteBotEvent(msg);
+        break;
+      case 'ally_drag':
+        this.applyRemoteAllyDrag(msg);
+        break;
+      case 'player_revive':
+        this.applyRemotePlayerRevive(msg);
+        break;
       case 'order_sync': {
         if (msg.team === this.player?.team && this.botManager) {
           this.botManager.issueStrategicOrder(this.player, {
@@ -1007,6 +1029,130 @@ export class NetworkManager {
     }
   }
 
+  findNearestDownedRemoteAlly(pos, team, maxDist = 4.2) {
+    if (this.gameMode !== 'MULTIPLAYER' || !pos) return null;
+    let best = null;
+    let bestDist = maxDist;
+    for (const rp of this.remotePlayers.values()) {
+      if (!rp || rp.dead || !rp.downed || rp.team !== team) continue;
+      const d = rp.pos.distanceTo(pos);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = rp;
+      }
+    }
+    return best;
+  }
+
+  applyRemoteAllyDrag(msg) {
+    if (!msg || msg.targetId !== this.clientId || !this.player) return;
+    if (this.player.downed && !this.player.dead && Array.isArray(msg.pos) && msg.pos.length >= 3) {
+      this.player.pos.set(msg.pos[0], msg.pos[1], msg.pos[2]);
+      this.player.beingDraggedByAllyTimer = 0.65;
+    }
+  }
+
+  applyRemotePlayerRevive(msg) {
+    if (!msg || msg.targetId !== this.clientId || !this.player) return;
+    if (!this.player.downed && !this.player.dead) return;
+    const restoredHp = Math.min(100, Math.max(30, Math.round(msg.hp || 100)));
+    this.player.dead = false;
+    this.player.downed = false;
+    this.player.bleeding = false;
+    this.player.downedTimer = 0;
+    this.player.giveUpProgress = 0;
+    this.player.hp = restoredHp;
+    if (this.player.viewModelGroup) this.player.viewModelGroup.visible = true;
+    const ui = this.gameRef?.ui;
+    if (ui) {
+      if (ui.downedOverlayEl) ui.downedOverlayEl.classList.add('hidden');
+      if (ui.deployScreenEl) ui.deployScreenEl.classList.add('hidden');
+      if (ui.hudEl) ui.hudEl.classList.remove('hidden');
+    }
+    if (this.player.onAwardXp) {
+      this.player.onAwardXp(
+        0,
+        `🩹 REVIVED BY TEAMMATE ${msg.reviverName || 'ALLY'} (${restoredHp} HP)!`
+      );
+    }
+  }
+
+  buildCoopBotSyncPacket() {
+    const bm = this.botManager;
+    if (!bm || !Array.isArray(bm.bots) || bm.bots.length === 0) return null;
+    const bots = bm.bots;
+    const total = bots.length;
+    const batchSize = Math.min(48, total);
+    let cursor = this._botSyncCursor || 0;
+    if (cursor >= total) cursor = 0;
+    const slice = [];
+    for (let k = 0; k < batchSize; k++) {
+      const idx = (cursor + k) % total;
+      const b = bots[idx];
+      if (!b) continue;
+      const stateCode = b.dead ? 2 : b.downed ? 1 : 0;
+      slice.push([
+        idx,
+        Math.round(b.pos.x * 10) / 10,
+        Math.round(b.pos.y * 10) / 10,
+        Math.round(b.pos.z * 10) / 10,
+        Number((b.yaw || 0).toFixed(2)),
+        Math.ceil(b.hp || 0),
+        stateCode
+      ]);
+    }
+    this._botSyncCursor = (cursor + batchSize) % total;
+    return {
+      type: 'bot_sync',
+      bots: slice
+    };
+  }
+
+  applyRemoteBotSync(msg) {
+    if (this.isRoomAuthority()) return;
+    const bm = this.botManager;
+    if (!bm || !Array.isArray(bm.bots) || !Array.isArray(msg?.bots)) return;
+    for (let i = 0; i < msg.bots.length; i++) {
+      const row = msg.bots[i];
+      if (!Array.isArray(row) || row.length < 7) continue;
+      const [idx, x, y, z, yaw, hp, stateCode] = row;
+      const b = bm.bots[idx];
+      if (!b) continue;
+      b.pos.set(x, y, z);
+      b.yaw = yaw;
+      b.hp = hp;
+      b.dead = stateCode === 2;
+      b.downed = stateCode === 1;
+      if (b.mesh) {
+        b.mesh.position.set(x, y, z);
+        b.mesh.rotation.x = b.downed ? -Math.PI / 2 : 0;
+        b.mesh.rotation.y = yaw;
+        b.mesh.visible = !b.dead && !b.drivingVehicle && !b.ridingVehicle;
+      }
+    }
+  }
+
+  applyRemoteBotEvent(msg) {
+    const bm = this.botManager;
+    if (!bm || !Array.isArray(bm.bots) || !msg?.botId) return;
+    const bot = bm.bots.find((b) => b && b.id === msg.botId);
+    if (!bot) return;
+    if (msg.action === 'revive' && bot.downed && !bot.dead) {
+      bm.reviveBot?.(bot, Boolean(msg.isMedic));
+      if (typeof msg.hp === 'number') bot.hp = msg.hp;
+    } else if (msg.action === 'damage' && !bot.dead) {
+      bm.damageBot?.(
+        bot,
+        msg.damage || 30,
+        msg.attackerName || 'ALLY',
+        msg.attackerTeam || 'US',
+        msg.weapon || 'RIFLE',
+        Boolean(msg.isHs),
+        this.player?.onKillEvent || null
+      );
+    }
+  }
+
   _applyRemoteVehicleState(rp, vehState) {
     const vm = this.vehicleManager || this.world?.vehicleManager;
     if (!vm || !Array.isArray(vm.vehicles)) return;
@@ -1025,7 +1171,43 @@ export class NetworkManager {
     rp._lastVehicleId = vehState.id;
 
     const v = vm.vehicles.find((cand) => cand.id === vehState.id);
-    if (!v || (this.player && this.player.activeVehicle === v)) return;
+    if (!v) return;
+
+    const seatIdx = typeof vehState.seatIndex === 'number' ? vehState.seatIndex : 0;
+    if (Array.isArray(v.crewSeats) && seatIdx >= 0 && seatIdx < v.crewSeats.length) {
+      for (let si = 0; si < v.crewSeats.length; si++) {
+        if (si !== seatIdx && v.crewSeats[si] && v.crewSeats[si].id === rp.id) {
+          v.crewSeats[si] = null;
+        }
+      }
+      if (!v.crewSeats[seatIdx] || v.crewSeats[seatIdx].id === rp.id) {
+        v.crewSeats[seatIdx] = rp;
+      }
+    }
+
+    if (seatIdx === 1) {
+      // Multi-Crew Seat [F2] Gunner: Rotates turret / gunship aim even when Local Player is Driving Seat [F1]!
+      if (v.remoteDriverId === rp.id) v.remoteDriverId = null;
+      v.remoteGunnerId = rp.id;
+      if (typeof vehState.turretYaw === 'number') v.turretYaw = vehState.turretYaw;
+      if (typeof vehState.turretPitch === 'number') v.turretPitch = vehState.turretPitch;
+      return;
+    }
+
+    if (seatIdx >= 2) {
+      if (v.remoteDriverId === rp.id) v.remoteDriverId = null;
+      if (v.remoteGunnerId === rp.id) v.remoteGunnerId = null;
+      if (!Array.isArray(v.remotePassengers)) v.remotePassengers = [];
+      if (!v.remotePassengers.includes(rp.id)) v.remotePassengers.push(rp.id);
+      return;
+    }
+
+    // Seat [F1] Driver / Pilot
+    if (v.remoteGunnerId === rp.id) v.remoteGunnerId = null;
+    const localIsDrivingThis = Boolean(
+      this.player && this.player.activeVehicle === v && (this.player.vehicleSeatIndex || 0) === 0
+    );
+    if (localIsDrivingThis) return;
 
     if (v.npcDriver) {
       v.npcDriver.drivingVehicle = null;
@@ -1045,8 +1227,13 @@ export class NetworkManager {
     if (typeof vehState.yaw === 'number') v._remoteTargetYaw = vehState.yaw;
     if (typeof vehState.pitch === 'number') v._remoteTargetPitch = vehState.pitch;
     if (typeof vehState.roll === 'number') v._remoteTargetRoll = vehState.roll;
-    if (typeof vehState.turretYaw === 'number') v.turretYaw = vehState.turretYaw;
-    if (typeof vehState.turretPitch === 'number') v.turretPitch = vehState.turretPitch;
+    const localIsGunningThis = Boolean(
+      this.player && this.player.activeVehicle === v && this.player.vehicleSeatIndex === 1
+    );
+    if (!localIsGunningThis) {
+      if (typeof vehState.turretYaw === 'number') v.turretYaw = vehState.turretYaw;
+      if (typeof vehState.turretPitch === 'number') v.turretPitch = vehState.turretPitch;
+    }
     if (typeof vehState.forwardSpeed === 'number') v.forwardSpeed = vehState.forwardSpeed;
     if (typeof vehState.hp === 'number') v.hp = vehState.hp;
     if (typeof vehState.flareActiveTimer === 'number') v.flareActiveTimer = vehState.flareActiveTimer;
@@ -1247,6 +1434,7 @@ export class NetworkManager {
         ? {
             id: av.id,
             type: av.type,
+            seatIndex: this.player.vehicleSeatIndex || 0,
             aircraftRole: av.aircraftRole || null,
             pos: [
               Number(av.pos.x.toFixed(2)),
@@ -1493,13 +1681,19 @@ export class NetworkManager {
       this.send(this.buildLocalStatePacket());
     }
 
-    // Room Host broadcasts 2 Hz Conquest ticket/clock/flag sync when human peers are connected
+    // Room Host broadcasts 2 Hz Conquest ticket/clock/flag sync & 4 Hz Co-Op AI Bot sync when human peers are connected
     if (this.remotePlayers.size > 0 && this.isRoomAuthority()) {
       this.conquestSyncTimer += dt;
       if (this.conquestSyncTimer >= 0.5) {
         this.conquestSyncTimer = 0;
         const cqPkt = this.buildConquestSyncPacket();
         if (cqPkt) this.send(cqPkt);
+      }
+      this._coopBotSyncTimer = (this._coopBotSyncTimer || 0) + dt;
+      if (this._coopBotSyncTimer >= 0.25) {
+        this._coopBotSyncTimer = 0;
+        const botPkt = this.buildCoopBotSyncPacket();
+        if (botPkt) this.send(botPkt);
       }
     }
 

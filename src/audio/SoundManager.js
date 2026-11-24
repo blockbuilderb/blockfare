@@ -4,8 +4,8 @@
 // panning, distance air-absorption filtering, and procedural sub-bass layers.
 // ============================================================================
 
-import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=120';
-import { AUDIO } from '../config.js?v=120';
+import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=121';
+import { AUDIO } from '../config.js?v=121';
 
 const AUDIO_STORAGE_KEY = 'bb_audio_settings_v1';
 
@@ -1082,6 +1082,112 @@ export class SoundManager {
     this._bindOneShotCleanup(osc, gain, false);
     osc.start(now);
     osc.stop(now + 0.23);
+  }
+
+  /**
+   * Realistic Speed-of-Sound Delayed A-10C GAU-8 Avenger "BRRRT!" Acoustic Roar:
+   * - Bullets impact first; `distance / 343` seconds later, the iconic 65 Hz / 130 Hz rotary sawtooth
+   *   cannon buzz rolls across the battlefield!
+   */
+  playDelayedA10Brrrt(distance = 0, pan = 0) {
+    this.init();
+    if (!this.ctx || !this.masterBus) return;
+    const catMult = this.getCategoryMult('weapons');
+    if (catMult <= 0.001 || distance > 1800) return;
+
+    const nowPerf = performance.now();
+    if (nowPerf - (this._lastBrrrtQueuedAt || 0) < 380) return;
+    this._lastBrrrtQueuedAt = nowPerf;
+
+    const speedOfSoundDelaySec = Math.min(3.2, Math.max(0, distance / 343));
+    const startAt = this.ctx.currentTime + speedOfSoundDelaySec;
+    const atten = Math.max(0.08, Math.pow(Math.max(0, 1 - distance / 1850), 1.25));
+    const dur = 0.44;
+
+    const oscLow = this.ctx.createOscillator();
+    const oscHarm = this.ctx.createOscillator();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+
+    oscLow.type = 'sawtooth';
+    oscLow.frequency.setValueAtTime(65, startAt); // 3,900 RPM = 65 Hz fundamental "BRRRT!"
+    oscLow.frequency.linearRampToValueAtTime(61, startAt + dur);
+
+    oscHarm.type = 'square';
+    oscHarm.frequency.setValueAtTime(130, startAt);
+    oscHarm.frequency.linearRampToValueAtTime(122, startAt + dur);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(Math.max(220, 720 - distance * 0.25), startAt);
+    filter.Q.value = 1.6;
+
+    const peakGain = Math.min(0.42, 0.34 * atten * catMult);
+    gain.gain.setValueAtTime(0.001, startAt);
+    gain.gain.linearRampToValueAtTime(peakGain, startAt + 0.04);
+    gain.gain.setValueAtTime(peakGain * 0.92, startAt + dur - 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.001, startAt + dur);
+
+    oscLow.connect(filter);
+    oscHarm.connect(filter);
+    filter.connect(gain);
+
+    if (typeof this.ctx.createStereoPanner === 'function' && Math.abs(pan) > 0.02) {
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), startAt);
+      gain.connect(panner);
+      panner.connect(this.masterBus);
+    } else {
+      gain.connect(this.masterBus);
+    }
+
+    this._bindOneShotCleanup(oscLow, gain, false);
+    oscLow.start(startAt);
+    oscHarm.start(startAt);
+    oscLow.stop(startAt + dur + 0.02);
+    oscHarm.stop(startAt + dur + 0.02);
+  }
+
+  /**
+   * Cockpit Radar Warning Receiver (`RWR`) Audio:
+   * - `'track'`: Steady 880 Hz radar lock-acquisition ping when painted by enemy radar/seeker.
+   * - `'missile_inbound'`: Urgent alternating 1,480 Hz / 1,960 Hz high-tempo missile launch alarm!
+   */
+  playRwrTone(mode = 'track') {
+    this.init();
+    if (!this.ctx || !this.masterBus) return;
+    const catMult = this.getCategoryMult('radio');
+    if (catMult <= 0.001) return;
+
+    const isInbound = mode === 'missile_inbound';
+    const minIntervalMs = isInbound ? 160 : 560;
+    const nowPerf = performance.now();
+    if (nowPerf - (this._lastRwrToneAt || 0) < minIntervalMs) return;
+    this._lastRwrToneAt = nowPerf;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = isInbound ? 'square' : 'sine';
+    if (isInbound) {
+      this._rwrToggle = !this._rwrToggle;
+      osc.frequency.setValueAtTime(this._rwrToggle ? 1960 : 1480, now);
+      gain.gain.setValueAtTime(0.095 * catMult, now);
+      gain.gain.exponentialRampToValueAtTime(0.002, now + 0.11);
+      osc.connect(gain);
+      gain.connect(this.masterBus);
+      this._bindOneShotCleanup(osc, gain, false);
+      osc.start(now);
+      osc.stop(now + 0.12);
+    } else {
+      osc.frequency.setValueAtTime(880, now);
+      gain.gain.setValueAtTime(0.055 * catMult, now);
+      gain.gain.exponentialRampToValueAtTime(0.002, now + 0.09);
+      osc.connect(gain);
+      gain.connect(this.masterBus);
+      this._bindOneShotCleanup(osc, gain, false);
+      osc.start(now);
+      osc.stop(now + 0.1);
+    }
   }
 
   playObjectiveCaptured(isFriendly = true) {

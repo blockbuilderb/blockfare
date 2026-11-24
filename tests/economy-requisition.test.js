@@ -1,12 +1,18 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { ECONOMY, VEHICLE_STATS } from '../src/config.js?v=120';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=120';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=120';
-import { VehicleManager, classifyWeaponBallistics } from '../src/vehicles.js?v=120';
-import { BotManager, evaluateCatastrophicKill } from '../src/bots.js?v=120';
-import { NetworkManager } from '../src/network.js?v=120';
+import { ECONOMY, VEHICLE_STATS } from '../src/config.js?v=121';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=121';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=121';
+import {
+  VehicleManager,
+  classifyWeaponBallistics,
+  getVehicleSeatLayout,
+  initVehicleOrdnance
+} from '../src/vehicles.js?v=121';
+import { BotManager, evaluateCatastrophicKill } from '../src/bots.js?v=121';
+import { NetworkManager } from '../src/network.js?v=121';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=121';
 
 function createEconomyPlayerHarness(overrides = {}) {
   const storage = new Map();
@@ -545,5 +551,120 @@ describe('Squad Caliber Penetration, Optics/Sensor Crits, Avionics FCS & Beyond-
     };
     assert.ok(endedNetStub.buildConquestSyncPacket() !== null, 'First matchEnded sync packet is emitted');
     assert.equal(endedNetStub.buildConquestSyncPacket(), null, 'Subsequent matchEnded sync spam is suppressed');
+  });
+
+  test('Roadmap 1-4: Multi-Crew [F1-F4] seats, Co-op AI/Revive sync, Finite Vehicle Ordnance + <45m HQ Rearm, and 20s Burning Wrecks', () => {
+    // 1. Multi-Crew Seat Layouts & [F1-F4] In-Vehicle Shortcut Switching
+    assert.deepEqual(getVehicleSeatLayout({ type: 'tank' }), ['DRIVER', 'GUNNER', 'COMMANDER']);
+    assert.deepEqual(getVehicleSeatLayout({ isAircraft: true, aircraftRole: 'gunship' }), [
+      'PILOT',
+      'TV_GUNNER',
+      'HOWITZER_FCO',
+      'LOADMASTER'
+    ]);
+    assert.equal(
+      resolveGlobalCommandShortcut({ code: 'F1' }, { inVehicle: false })?.type,
+      'TOGGLE_MANUAL',
+      'F1 on foot still toggles Manual overlay'
+    );
+    assert.deepEqual(
+      resolveGlobalCommandShortcut({ code: 'F2' }, { inVehicle: true }),
+      { type: 'SWITCH_VEHICLE_SEAT', seatIndex: 1 },
+      'F2 inside vehicle switches to Seat [F2] Gunner'
+    );
+
+    const { player } = createEconomyPlayerHarness({ role: 'pilot' });
+    const ac130 = {
+      id: 'us_ac130_mc',
+      name: 'AC-130J GHOSTRIDER',
+      type: 'plane',
+      isAircraft: true,
+      aircraftRole: 'gunship',
+      team: 'US',
+      dead: false,
+      pos: new THREE.Vector3(-1350, 260, 0),
+      gunshipManualFlight: true,
+      ac130AllowBellyCam: true,
+      seatNames: getVehicleSeatLayout({ isAircraft: true, aircraftRole: 'gunship' }),
+      crewSeats: [null, null, null, null]
+    };
+    initVehicleOrdnance(ac130);
+    assert.equal(ac130.ordnancePools.slot2, 20, 'AC-130 starts with 20× 105mm shells');
+    player.activeVehicle = ac130;
+    player.vehicleSeatIndex = 0;
+    ac130.crewSeats[0] = player;
+
+    assert.equal(player.switchVehicleSeat(2), true, 'Switches cleanly to [F3] HOWITZER_FCO');
+    assert.equal(player.vehicleSeatIndex, 2);
+    assert.equal(ac130.gunshipManualFlight, false, 'Switching to Gunner/FCO engages Orbit Autopilot');
+    assert.equal(ac130.activeWeaponSlot, 2, 'HOWITZER_FCO selects Slot [3] 105mm');
+
+    // 2. Finite Ordnance Consumption & <45m HQ Runway Low-Pass Rearm
+    ac130.ordnancePools.slot2 = 1;
+    assert.equal(player.consumeVehicleOrdnance(ac130, 'slot2', 1, '105MM'), true);
+    assert.equal(ac130.ordnancePools.slot2, 0);
+    assert.equal(player.consumeVehicleOrdnance(ac130, 'slot2', 1, '105MM'), false, 'Blocks firing at 0 rounds');
+
+    const vmStub = {
+      scene: new THREE.Scene(),
+      world: { getGroundHeightAt: () => 0, spawnDebris: () => {} },
+      vehicles: [ac130],
+      activeWrecks: [],
+      refreshTeamVehicleLists: () => {},
+      rearmVehicleOrdnance: VehicleManager.prototype.rearmVehicleOrdnance,
+      spawnVehicleWreck: VehicleManager.prototype.spawnVehicleWreck,
+      raycastWreckCover: VehicleManager.prototype.raycastWreckCover
+    };
+    vmStub.rearmVehicleOrdnance(ac130);
+    assert.equal(ac130.ordnancePools.slot2, 20, 'HQ Runway / FOB Rearm restores 20/20 105mm shells');
+
+    // 3. Persistent 20s Burning 3D Vehicle Wreck Cover Raycast
+    const destroyedTank = {
+      id: 'ru_t90_wreck',
+      type: 'tank',
+      isAircraft: false,
+      pos: new THREE.Vector3(20, 0, 0),
+      yaw: 0
+    };
+    const wreck = vmStub.spawnVehicleWreck(destroyedTank);
+    assert.ok(wreck && wreck.life === 20.0, 'Destroyed tank spawns a 20s burning 3D wreck');
+    const coverHit = vmStub.raycastWreckCover(
+      new THREE.Vector3(0, 1.0, 0),
+      new THREE.Vector3(1, 0, 0),
+      40
+    );
+    assert.equal(coverHit, wreck, 'Burning 3D tank wreck blocks sightline raycasts for infantry cover');
+
+    // 4. Co-op AI Bot Sync & Human-to-Human Drag / Revive
+    const botA = { id: 'US_bot_0', pos: new THREE.Vector3(12, 0, -8), yaw: 1.2, hp: 74, dead: false, downed: true, mesh: new THREE.Group() };
+    const hostNet = {
+      botManager: { bots: [botA] },
+      buildCoopBotSyncPacket: NetworkManager.prototype.buildCoopBotSyncPacket
+    };
+    const syncPkt = hostNet.buildCoopBotSyncPacket();
+    assert.equal(syncPkt.type, 'bot_sync');
+
+    const guestBotA = { id: 'US_bot_0', pos: new THREE.Vector3(0, 0, 0), yaw: 0, hp: 100, dead: false, downed: false, mesh: new THREE.Group() };
+    const guestPlayer = { dead: false, downed: true, bleeding: true, downedTimer: 45, giveUpProgress: 0.4, hp: 0, pos: new THREE.Vector3() };
+    const guestNet = {
+      clientId: 'c_guest',
+      player: guestPlayer,
+      botManager: { bots: [guestBotA] },
+      isRoomAuthority: () => false,
+      applyRemoteBotSync: NetworkManager.prototype.applyRemoteBotSync,
+      applyRemoteAllyDrag: NetworkManager.prototype.applyRemoteAllyDrag,
+      applyRemotePlayerRevive: NetworkManager.prototype.applyRemotePlayerRevive
+    };
+    guestNet.applyRemoteBotSync(syncPkt);
+    assert.equal(guestBotA.downed, true);
+    assert.equal(guestBotA.hp, 74);
+
+    guestNet.applyRemoteAllyDrag({ targetId: 'c_guest', pos: [5, 0, 10] });
+    assert.equal(guestPlayer.pos.x, 5);
+    assert.ok(guestPlayer.beingDraggedByAllyTimer > 0, 'Ally drag pauses downed bleedout timer');
+
+    guestNet.applyRemotePlayerRevive({ targetId: 'c_guest', hp: 100, reviverName: 'MEDIC_BRO' });
+    assert.equal(guestPlayer.downed, false, 'Human-to-human revive restores downed ally into live combat');
+    assert.equal(guestPlayer.hp, 100);
   });
 });

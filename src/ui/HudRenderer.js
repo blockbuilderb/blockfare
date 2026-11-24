@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=120';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=120';
+import { UI, getEraRoles } from '../config.js?v=121';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=121';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -1814,6 +1814,10 @@ export const HudRenderer = {
             : '9MM HANDLEBAR SMG [LMB] • [SPACE] WHEELIE / BOOST • [A/D] LEAN'
         );
       } else if (activeVeh.weaponType === 'tank_cannon') {
+        const tankShells =
+          activeVeh.ordnancePools && typeof activeVeh.ordnancePools.slot0 === 'number'
+            ? activeVeh.ordnancePools.slot0
+            : null;
         if (activeSlot === 1) {
           this._setText(this.ammoClipEl, activeVeh.coaxOverheated ? 'HOT' : 'INF');
           this._setText(this.ammoReserveEl, '7.62 AP');
@@ -1821,22 +1825,33 @@ export const HudRenderer = {
         } else {
           this._setText(
             this.ammoClipEl,
-            activeVeh.fireCooldown > 0 ? `${activeVeh.fireCooldown.toFixed(1)}s` : 'RDY'
+            activeVeh.fireCooldown > 0
+              ? `${activeVeh.fireCooldown.toFixed(1)}s`
+              : tankShells !== null
+              ? `${tankShells}`
+              : 'RDY'
           );
-          this._setText(this.ammoReserveEl, 'APHE');
+          this._setText(this.ammoReserveEl, tankShells !== null ? '/24 APHE' : 'APHE');
           this._setText(
             this.fireModeEl,
-            '[1] MAIN CANNON [LMB] (ARC >135M) • COAX MG [SPACE / 2] (FLAT)'
+            '[1] MAIN CANNON [LMB] • COAX MG [SPACE / 2] • [F1–F3] CREW SEATS'
           );
         }
       } else if (activeVeh.weaponType === 'autocannon') {
-        this._setText(this.ammoClipEl, activeSlot === 1 ? 'COAX' : '30MM');
-        this._setText(this.ammoReserveEl, 'BELT');
+        const acShells =
+          activeVeh.ordnancePools && typeof activeVeh.ordnancePools.slot0 === 'number'
+            ? activeVeh.ordnancePools.slot0
+            : null;
+        this._setText(
+          this.ammoClipEl,
+          activeSlot === 1 ? 'COAX' : acShells !== null ? `${acShells}` : '30MM'
+        );
+        this._setText(this.ammoReserveEl, activeSlot === 1 ? 'BELT' : '30MM HE');
         this._setText(
           this.fireModeEl,
           activeSlot === 1
-            ? '[2] 950 RPM 7.62MM AP COAX [LMB / SPACE] (FLAT) • [1] 30MM'
-            : '[1] 330 RPM 30MM HE [LMB] • COAX MG [SPACE / 2] (FLAT)'
+            ? '[2] 950 RPM 7.62MM AP COAX [LMB / SPACE] • [1] 30MM • [F1–F4] SEATS'
+            : '[1] 330 RPM 30MM HE [LMB] • COAX MG [SPACE / 2] • [F1–F4] SEATS'
         );
       } else {
         this._setText(this.ammoClipEl, '50BMG');
@@ -2701,22 +2716,32 @@ export const HudRenderer = {
       const iconNode = this.el(`air-pylon-${i + 1}-icon`);
       const lblNode = this.el(`air-pylon-${i + 1}-lbl`);
       const barNode = this.el(`air-pylon-${i + 1}-bar`);
+      const slotKey = `slot${i}`;
+      const ammoCur = v.ordnancePools && typeof v.ordnancePools[slotKey] === 'number' ? v.ordnancePools[slotKey] : null;
+      const ammoMax = v.maxOrdnancePools && typeof v.maxOrdnancePools[slotKey] === 'number' ? v.maxOrdnancePools[slotKey] : null;
+      const ammoTag = ammoCur !== null ? ` (${ammoCur})` : '';
       if (slotCard) slotCard.classList.toggle('active', activeSlot === i);
       if (iconNode) iconNode.textContent = pylonDefs[i].icon;
-      if (lblNode) lblNode.textContent = pylonDefs[i].lbl;
+      if (lblNode) lblNode.textContent = `${pylonDefs[i].lbl}${ammoTag}`;
       if (barNode) {
-        if (i === 0) {
+        if (ammoCur !== null && ammoCur <= 0) {
+          barNode.style.width = '100%';
+          barNode.style.background = '#e74c3c';
+          if (lblNode) lblNode.textContent = `${pylonDefs[i].lbl} (REARM)`;
+        } else if (i === 0) {
           const priCd = v.fireCooldown || 0;
-          const priPct = priCd > 0.12 ? Math.max(15, Math.min(100, (1 - priCd / 0.85) * 100)) : 100;
-          barNode.style.width = `${priPct}%`;
+          const ammoPct = ammoCur !== null && ammoMax ? (ammoCur / ammoMax) * 100 : 100;
+          const priPct = priCd > 0.12 ? Math.max(15, Math.min(100, (1 - priCd / 0.85) * 100)) : ammoPct;
+          barNode.style.width = `${Math.max(8, priPct)}%`;
           barNode.style.background = priCd > 0.12 ? '#f39c12' : '#2ecc71';
         } else if (i === 1 && aRole === 'fighter' && this.player?.aircraftLockTarget) {
           const lockPct = Math.round((this.player.aircraftLockProgress || 0) * 100);
           barNode.style.width = `${Math.max(25, lockPct)}%`;
           barNode.style.background = lockPct >= 100 ? '#ff4757' : '#f1c40f';
-          if (lblNode) lblNode.textContent = lockPct >= 100 ? '🔒 LOCKED' : `SEEK ${lockPct}%`;
+          if (lblNode) lblNode.textContent = lockPct >= 100 ? `🔒 LOCKED${ammoTag}` : `SEEK ${lockPct}%`;
         } else {
-          barNode.style.width = `${secReadyPct}%`;
+          const ammoPct = ammoCur !== null && ammoMax ? (ammoCur / ammoMax) * 100 : secReadyPct;
+          barNode.style.width = `${secCd > 0.04 ? secReadyPct : Math.max(8, ammoPct)}%`;
           barNode.style.background = secCd > 0.04 ? '#f39c12' : '#2ecc71';
         }
       }

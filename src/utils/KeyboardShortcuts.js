@@ -136,11 +136,22 @@ export function resolveGlobalCommandShortcut(e, ctx = {}) {
   const isMac = typeof ctx.isMac === 'boolean' ? ctx.isMac : isMacPlatform();
   const isPointerLocked = Boolean(ctx.isPointerLocked);
   const inGunship = Boolean(ctx.inGunship);
+  const inVehicle = Boolean(ctx.inVehicle);
   const cmdMod = isCommandOrderModifier(e, isMac, isPointerLocked);
   const anyMod = hasAnyModifier(e);
 
   // Never hijack browser/OS Command (`⌘`) or Windows/Linux `Ctrl+R/W/T/L` shortcuts
   if (e.metaKey && !cmdMod) return null;
+
+  // 0. Multi-Crew Vehicle Seat Switching ([F1–F4] when inside any vehicle; Shift+?/Alt+P/Alt+`/Shift+L still open overlays!)
+  if (
+    inVehicle &&
+    !anyMod &&
+    !e.shiftKey &&
+    (e.code === 'F1' || e.code === 'F2' || e.code === 'F3' || e.code === 'F4')
+  ) {
+    return { type: 'SWITCH_VEHICLE_SEAT', seatIndex: Number(e.code.slice(1)) - 1 };
+  }
 
   // 1. Utility Overlays (F1-F4 + MacBook `fn`-free chords)
   if ((!anyMod && e.code === 'F1') || (!anyMod && e.shiftKey && e.code === 'Slash')) {

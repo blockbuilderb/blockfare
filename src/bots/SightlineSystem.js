@@ -1,5 +1,5 @@
-import { BOT } from '../config.js?v=120';
-import { tmpVec3 } from '../utils/VectorPool.js?v=120';
+import { BOT } from '../config.js?v=121';
+import { tmpVec3 } from '../utils/VectorPool.js?v=121';
 
 /**
  * Multi-Ray "Vision Tube" Sightline Check:
@@ -51,6 +51,20 @@ export function hasClearSightline(bot, targetPos, checkFov = true) {
           return false;
         }
       }
+    }
+  }
+
+  // 2B. Persistent 3D Burning Vehicle Wreck physical cover occlusion check (20s post-destruction hull cover!)
+  const vmRef =
+    this.vehicleManager ||
+    this.world?.vehicleManager ||
+    (typeof window !== 'undefined' ? window.game?.vehicleManager : null);
+  if (vmRef && typeof vmRef.raycastWreckCover === 'function') {
+    const dirNormX = dx / dist;
+    const dirNormY = dy / dist;
+    const dirNormZ = dz / dist;
+    if (vmRef.raycastWreckCover(eyePos, tmpVec3(dirNormX, dirNormY, dirNormZ), Math.max(0.5, dist - 0.55))) {
+      return false;
     }
   }
 

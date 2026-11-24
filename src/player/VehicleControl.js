@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=120';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=120';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=120';
-import { events } from '../events.js?v=120';
+import { sound } from '../audio.js?v=121';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=121';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=121';
+import { events } from '../events.js?v=121';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +11,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=120';
+} from '../core/StateMachines.js?v=121';
 
 function markShared(asset) {
   if (asset) {
@@ -115,6 +115,129 @@ const _axisZ = new THREE.Vector3(0, 0, 1);
 
 export const VehicleControlMethods = {
   /**
+   * Consumes finite vehicle ordnance from `v.ordnancePools[slotKey]`.
+   * Gracefully returns `true` when `v.ordnancePools` is null/undefined (e.g. bikes, mounts, omega, or test stubs).
+   */
+  consumeVehicleOrdnance(v, slotKey = 'slot0', cost = 1, weaponLabel = 'ORDNANCE') {
+    if (!v || !v.ordnancePools || typeof v.ordnancePools[slotKey] !== 'number') {
+      return true;
+    }
+    if (v.ordnancePools[slotKey] < cost) {
+      sound.playEmptyClick?.();
+      v.fireCooldown = Math.max(v.fireCooldown || 0, 0.32);
+      v.coaxCooldown = Math.max(v.coaxCooldown || 0, 0.32);
+      const nowMs = performance.now();
+      if (nowMs - (v._lastEmptyOrdnanceHintMs || 0) > 2200 && this.onAwardXp) {
+        v._lastEmptyOrdnanceHintMs = nowMs;
+        const rearmHint = v.isAircraft
+          ? 'FLY LOW (<45M) OVER FRIENDLY HQ RUNWAY TO REARM!'
+          : 'DRIVE TO HQ MOTOR POOL OR FRIENDLY FOB SUPPLY STATION TO REARM!';
+        this.onAwardXp(0, `⚠️ ${weaponLabel} WINCHESTER (0 LEFT) — ${rearmHint}`);
+      }
+      return false;
+    }
+    v.ordnancePools[slotKey] = Math.max(0, v.ordnancePools[slotKey] - cost);
+    return true;
+  },
+
+  /**
+   * `[F1–F4]` Multi-Crew Seat Switching inside Tanks, IFVs/APCs, AC-130, Humvees & ATVs/Bikes:
+   * - Solo players in `[F1]` retain 100% driving + weapons control!
+   * - Switching to `[F2]` (`GUNNER` / `TV_GUNNER`) engages Orbit Autopilot on AC-130 or Stabilized Turret Optic on Armor.
+   * - Co-op Human MP Peers & AI Squadmates can simultaneously occupy `[F1]` Driver + `[F2]` Gunner + `[F3–F4]` Passengers!
+   */
+  switchVehicleSeat(seatIndex = 0) {
+    const v = this.activeVehicle;
+    if (!v || v.dead) return false;
+    const seatNames =
+      Array.isArray(v.seatNames) && v.seatNames.length > 0
+        ? v.seatNames
+        : v.isAircraft
+        ? v.aircraftRole === 'gunship'
+          ? ['PILOT', 'TV_GUNNER', 'HOWITZER_FCO', 'LOADMASTER']
+          : ['PILOT']
+        : v.type === 'bike' || v.type === 'atv' || v.type === 'warhorse'
+        ? ['DRIVER', 'PILLION']
+        : v.type === 'tank' || v.type === 'aa'
+        ? ['DRIVER', 'GUNNER', 'COMMANDER']
+        : ['DRIVER', 'GUNNER', 'PASSENGER_1', 'PASSENGER_2'];
+    v.seatNames = seatNames;
+    if (!Array.isArray(v.crewSeats) || v.crewSeats.length !== seatNames.length) {
+      v.crewSeats = new Array(seatNames.length).fill(null);
+    }
+    if (seatIndex < 0 || seatIndex >= seatNames.length) {
+      sound.playEmptyClick?.();
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          `⚠️ ${v.name.split(' (')[0]} HAS ${seatNames.length} SEAT${seatNames.length === 1 ? '' : 'S'} ([F1${
+            seatNames.length > 1 ? `–F${seatNames.length}` : ''
+          }])!`
+        );
+      }
+      return false;
+    }
+
+    if (seatIndex === 0 && v.remoteDriverId) {
+      sound.playEmptyClick?.();
+      if (this.onAwardXp) {
+        this.onAwardXp(0, '🔒 SEAT [F1] DRIVER/PILOT IS OCCUPIED BY ALLY TEAMMATE!');
+      }
+      return false;
+    }
+    if (seatIndex === 1 && v.remoteGunnerId) {
+      sound.playEmptyClick?.();
+      if (this.onAwardXp) {
+        this.onAwardXp(0, '🔒 SEAT [F2] GUNNER IS OCCUPIED BY ALLY TEAMMATE!');
+      }
+      return false;
+    }
+
+    const prevSeat = this.vehicleSeatIndex || 0;
+    if (v.crewSeats[prevSeat] === this) {
+      v.crewSeats[prevSeat] = null;
+    }
+    this.vehicleSeatIndex = seatIndex;
+    v.crewSeats[seatIndex] = this;
+    if (seatIndex === 0 && !v.remoteDriverId) {
+      v.driver = this;
+    }
+
+    const seatRole = seatNames[seatIndex];
+    if (v.isAircraft && v.aircraftRole === 'gunship') {
+      const gH = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
+      if ((seatIndex === 1 || seatIndex === 2) && v.pos.y - gH > 18.0) {
+        v.gunshipManualFlight = false;
+        this.vehicleCameraMode = v.ac130AllowBellyCam ? 'OPTIC_NOSE' : 'COCKPIT_1P';
+        this.thirdPersonVehicle = false;
+        if (seatIndex === 2) {
+          v.activeWeaponSlot = 2; // Howitzer Fire-Control Officer station!
+        }
+      } else if (seatIndex === 0 && v.gunshipManualFlight) {
+        this.vehicleCameraMode = 'CHASE_3P';
+        this.thirdPersonVehicle = true;
+      }
+    } else if (!v.isAircraft) {
+      if (seatIndex === 1 && (v.type === 'tank' || v.type === 'apc' || v.type === 'aa' || v.type === 'humvee')) {
+        this.vehicleCameraMode = 'OPTIC_NOSE';
+        this.thirdPersonVehicle = false;
+      } else if (seatIndex >= 2 || seatRole === 'PILLION') {
+        this.vehicleCameraMode = 'CHASE_3P';
+        this.thirdPersonVehicle = true;
+      }
+    }
+
+    sound.playWeaponSwitch?.();
+    if (this.onAwardXp) {
+      this.onAwardXp(
+        0,
+        `💺 SWITCHED TO SEAT [F${seatIndex + 1}]: ${seatRole.replace('_', ' ')} (${v.name.split(' (')[0]})`
+      );
+    }
+    return true;
+  },
+
+  /**
    * [E] Key Handler:
    * 1. Exit current Vehicle (Tank, APC/IFV, Humvee/Tigr, or Eject with Parachute from Aircraft!)
    * 2. Toggle Dragging a downed friendly soldier to cover ([E] grab / [E] release)
@@ -137,7 +260,30 @@ export const VehicleControlMethods = {
           if (p) p.visible = true;
         }
       }
-      v.driver = null;
+      if (Array.isArray(v.crewSeats)) {
+        for (let si = 0; si < v.crewSeats.length; si++) {
+          if (v.crewSeats[si] === this) v.crewSeats[si] = null;
+        }
+      }
+      if (v.driver === this) {
+        v.driver = null;
+      }
+      if (!v.driver && !v.remoteDriverId && Array.isArray(v.aiPassengers) && v.aiPassengers.length > 0) {
+        for (let pi = 0; pi < v.aiPassengers.length; pi++) {
+          const pax = v.aiPassengers[pi];
+          if (pax) {
+            pax.ridingVehicle = null;
+            const ang = (pi / Math.max(1, v.aiPassengers.length)) * Math.PI * 2;
+            pax.pos.set(v.pos.x + Math.cos(ang) * 3.8, groundH, v.pos.z + Math.sin(ang) * 3.8);
+            if (pax.mesh) {
+              pax.mesh.position.copy(pax.pos);
+              pax.mesh.visible = !pax.dead;
+            }
+          }
+        }
+        v.aiPassengers.length = 0;
+      }
+      this.vehicleSeatIndex = 0;
       this.activeVehicle = null;
       this.sensorMode = 'OFF';
       this.nvgActive = false;
@@ -162,13 +308,37 @@ export const VehicleControlMethods = {
       return;
     }
 
-    // 2. Toggle Dragging a downed friendly soldier ([E] to grab, [E] again to drop in cover)
+    // 2. Toggle Dragging a downed friendly soldier or Human MP Ally ([E] to grab, [E] again to drop in cover)
+    if (this.draggedRemoteAlly && this.draggedRemoteAlly.downed && !this.draggedRemoteAlly.dead) {
+      const droppedAllyName = this.draggedRemoteAlly.name;
+      this.draggedRemoteAlly = null;
+      this.isDraggingAlly = false;
+      if (this.onAwardXp) {
+        this.onAwardXp(0, `DROPPED ${droppedAllyName} IN COVER — HOLD [F] TO REVIVE`);
+      }
+      return;
+    }
     if (this.draggedBot && this.draggedBot.downed && !this.draggedBot.dead) {
       const droppedName = this.draggedBot.name;
       this.draggedBot = null;
       this.isDraggingAlly = false;
       if (this.onAwardXp) {
         this.onAwardXp(0, `DROPPED ${droppedName} IN COVER — HOLD [F] TO REVIVE`);
+      }
+      return;
+    }
+
+    const netRef = (typeof window !== 'undefined' && window.game?.network) || this.network || null;
+    const nearDownedAlly = netRef?.findNearestDownedRemoteAlly
+      ? netRef.findNearestDownedRemoteAlly(this.pos, this.team, DISTANCES.INTERACT_RANGE)
+      : null;
+    if (nearDownedAlly) {
+      this.draggedRemoteAlly = nearDownedAlly;
+      this.reviveTargetRemoteAlly = nearDownedAlly;
+      this.isDraggingAlly = true;
+      this.dragDistAccum = 0;
+      if (this.onAwardXp) {
+        this.onAwardXp(0, `DRAGGING TEAMMATE ${nearDownedAlly.name} — MOVE TO COVER OR HOLD [F] TO REVIVE`);
       }
       return;
     }
@@ -272,8 +442,29 @@ export const VehicleControlMethods = {
     this.parachuteFSM?.send(PLAYER_PARACHUTE_EVENTS.BOARD_VEHICLE);
     if (this.parachuteMesh) this.parachuteMesh.visible = false;
     this.activeVehicle = nearVehicle;
-    nearVehicle.driver = this;
-    nearVehicle.aiPilotActive = false;
+    const boardingRemoteDriven = Boolean(nearVehicle.remoteDriverId);
+    const seatNames = Array.isArray(nearVehicle.seatNames) && nearVehicle.seatNames.length > 0
+      ? nearVehicle.seatNames
+      : ['DRIVER'];
+    if (!Array.isArray(nearVehicle.crewSeats) || nearVehicle.crewSeats.length !== seatNames.length) {
+      nearVehicle.crewSeats = new Array(seatNames.length).fill(null);
+    }
+    if (boardingRemoteDriven) {
+      const assignedSeat = !nearVehicle.remoteGunnerId && seatNames.length > 1 ? 1 : Math.min(seatNames.length - 1, 2);
+      this.vehicleSeatIndex = assignedSeat;
+      nearVehicle.crewSeats[assignedSeat] = this;
+      if (!silent && this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          `💺 BOARDED ALLY ${nearVehicle.name.split(' (')[0]} AS [F${assignedSeat + 1}] ${seatNames[assignedSeat]}!`
+        );
+      }
+    } else {
+      this.vehicleSeatIndex = 0;
+      nearVehicle.crewSeats[0] = this;
+      nearVehicle.driver = this;
+      nearVehicle.aiPilotActive = false;
+    }
     if (nearVehicle.isAircraft) {
       const gH = this.world ? this.world.getGroundHeightAt(nearVehicle.pos.x, nearVehicle.pos.z) : 0;
       syncAircraftFlightFSM(nearVehicle, { onRunway: nearVehicle.pos.y - gH < 3.6 });
@@ -1683,8 +1874,18 @@ export const VehicleControlMethods = {
       v.weaponType === 'trebuchet_boulder';
     if (!isMortar && this.ccipMarkerMesh) this.ccipMarkerMesh.visible = false;
 
-    const accel = v.isEmplacement ? 0 : (this.keys['KeyW'] ? 1 : 0) - (this.keys['KeyS'] ? 1 : 0);
-    const steer = v.isEmplacement ? 0 : (this.keys['KeyA'] ? 1 : 0) - (this.keys['KeyD'] ? 1 : 0);
+    const seatIdx = this.vehicleSeatIndex || 0;
+    const isHullDriver = seatIdx === 0 && !v.remoteDriverId;
+    const canControlTurret = (seatIdx === 0 && !v.remoteGunnerId) || seatIdx === 1;
+
+    const accel =
+      v.isEmplacement || !isHullDriver
+        ? 0
+        : (this.keys['KeyW'] ? 1 : 0) - (this.keys['KeyS'] ? 1 : 0);
+    const steer =
+      v.isEmplacement || !isHullDriver
+        ? 0
+        : (this.keys['KeyA'] ? 1 : 0) - (this.keys['KeyD'] ? 1 : 0);
 
     const isMotoOrAtv =
       v.type === 'bike' ||
@@ -2050,16 +2251,18 @@ export const VehicleControlMethods = {
         : { min: -0.21, max: 0.61 };
     this.pitch = THREE.MathUtils.clamp(this.pitch, pitchLimits.min, pitchLimits.max);
 
-    if (turretDamaged && (v.type === 'tank' || v.type === 'apc')) {
-      let tDiff = this.yaw - (v.turretYaw ?? this.yaw);
-      while (tDiff > Math.PI) tDiff -= Math.PI * 2;
-      while (tDiff < -Math.PI) tDiff += Math.PI * 2;
-      const maxSlew = 1.45 * dt;
-      v.turretYaw = (v.turretYaw ?? this.yaw) + THREE.MathUtils.clamp(tDiff, -maxSlew, maxSlew);
-    } else {
-      v.turretYaw = this.yaw;
+    if (canControlTurret) {
+      if (turretDamaged && (v.type === 'tank' || v.type === 'apc')) {
+        let tDiff = this.yaw - (v.turretYaw ?? this.yaw);
+        while (tDiff > Math.PI) tDiff -= Math.PI * 2;
+        while (tDiff < -Math.PI) tDiff += Math.PI * 2;
+        const maxSlew = 1.45 * dt;
+        v.turretYaw = (v.turretYaw ?? this.yaw) + THREE.MathUtils.clamp(tDiff, -maxSlew, maxSlew);
+      } else {
+        v.turretYaw = this.yaw;
+      }
+      v.turretPitch = this.pitch;
     }
-    v.turretPitch = this.pitch;
     this.pos.copy(v.pos);
 
     // Position camera in 3-Mode Vehicle Camera ('CHASE_3P' | 'COCKPIT_1P' | 'OPTIC_NOSE')
@@ -2264,11 +2467,12 @@ export const VehicleControlMethods = {
     // =========================================================================
     const activeSlot = v.activeWeaponSlot || 0;
     const hasCoax = v.type === 'tank' || v.type === 'apc';
-    const wantFirePrimary = this.isFiring && activeSlot === 0;
+    const wantFirePrimary = canControlTurret && this.isFiring && activeSlot === 0;
     const wantFireSecondaryOrCoax =
-      Boolean(this.keys['Space']) ||
-      Boolean(this.keys['KeyF']) ||
-      (this.isFiring && activeSlot === 1);
+      canControlTurret &&
+      (Boolean(this.keys['Space']) ||
+        Boolean(this.keys['KeyF']) ||
+        (this.isFiring && activeSlot === 1));
     const wantFireCoax = hasCoax && !v.coaxOverheated && wantFireSecondaryOrCoax;
 
     const muzzleOrigin = v.pos
@@ -2498,6 +2702,9 @@ export const VehicleControlMethods = {
           });
         }
       } else if (v.weaponType === 'tank_cannon') {
+        if (!this.consumeVehicleOrdnance(v, 'slot0', 1, '120MM MAIN CANNON')) {
+          return;
+        }
         v.barrelRecoil = 1.0;
         this.recoilOffsetPitch += 0.022;
         this.addShake(0.42);
@@ -2535,6 +2742,9 @@ export const VehicleControlMethods = {
           owner: this
         });
       } else if (v.weaponType === 'autocannon') {
+        if (!this.consumeVehicleOrdnance(v, 'slot0', 1, '30MM AUTOCANNON')) {
+          return;
+        }
         this.recoilOffsetPitch += 0.0035;
         this.addShake(0.12);
         sound.playGunshot('autocannon', 0);
@@ -2598,6 +2808,9 @@ export const VehicleControlMethods = {
 
     // Separate Tank / APC Coaxial 7.62mm MG, Mobile AA Homing SAM Pod, or 81mm Mortar 3-Round Barrage ([SPACE] / [F] or Slot [2] + [LMB])
     if (isAaVehicle && wantFireSecondaryOrCoax && v.coaxCooldown <= 0) {
+      if (!this.consumeVehicleOrdnance(v, 'slot1', 1, 'ANTI-AIR SAM')) {
+        return;
+      }
       v.coaxCooldown = 1.65;
       this.addShake(0.22);
       sound.playRocketLaunch?.(0);
@@ -4189,6 +4402,51 @@ export const VehicleControlMethods = {
     // ~1.15s Radar/IR Seeker Lock-On required before launching Shoot-and-Forget A2A Missiles!
     updateTargetLockScanner(this, bestAirTarget, dt, 0.88);
 
+    // Cockpit RWR (Radar Warning Receiver) Tracking vs. Missile-Inbound Audio!
+    let rwrMissileInbound = false;
+    let rwrRadarTracked = false;
+    if (this.world && Array.isArray(this.world.projectiles)) {
+      for (let pi = 0; pi < this.world.projectiles.length; pi++) {
+        const pr = this.world.projectiles[pi];
+        if (pr && pr.type === 'a2a_missile' && pr.targetVehicle === v) {
+          rwrMissileInbound = true;
+          break;
+        }
+      }
+    }
+    if (!rwrMissileInbound && myAltAglForRadar >= 24.0 && !(v.flareActiveTimer > 0) && this.vehicleManager?.vehicles) {
+      for (let oi = 0; oi < this.vehicleManager.vehicles.length; oi++) {
+        const ov = this.vehicleManager.vehicles[oi];
+        if (!ov || ov.dead || ov.team === v.team) continue;
+        if (!(ov.isAircraft || ov.type === 'aa' || ov.type === 'emplace_aa')) continue;
+        if (!ov.driver && !ov.npcDriver && !ov.aiPilotActive && !ov.remoteDriverId) continue;
+        const dSq = ov.pos.distanceToSquared(v.pos);
+        if (dSq > 1350 * 1350) continue;
+        const lookYaw = ov.isAircraft ? ov.yaw || 0 : ov.turretYaw ?? ov.yaw ?? 0;
+        const fwdX = -Math.sin(lookYaw);
+        const fwdZ = -Math.cos(lookYaw);
+        const dx = v.pos.x - ov.pos.x;
+        const dz = v.pos.z - ov.pos.z;
+        const hLen = Math.hypot(dx, dz) || 1;
+        if ((dx * fwdX + dz * fwdZ) / hLen >= 0.82) {
+          rwrRadarTracked = true;
+          break;
+        }
+      }
+    }
+    v.rwrMissileInbound = rwrMissileInbound;
+    v.rwrRadarTracked = rwrRadarTracked;
+    if (rwrMissileInbound) {
+      sound.playRwrTone?.('missile_inbound');
+      const nowMs = performance.now();
+      if (nowMs - (v._lastRwrWarnBannerMs || 0) > 3800 && this.onAwardXp) {
+        v._lastRwrWarnBannerMs = nowMs;
+        this.onAwardXp(0, '🚨 RWR MISSILE LAUNCH INBOUND — DEPLOY [X] ECM FLARES OR DIVE <24M!');
+      }
+    } else if (rwrRadarTracked) {
+      sound.playRwrTone?.('track');
+    }
+
     // 7. Aircraft Weapons Firing:
     //    - CAS (A-10C / Su-25):
     //      * [1] LMB: 30mm GAU-8/A Avenger ("BRRRT!" 1,320 RPM AP-HEI)
@@ -4296,7 +4554,10 @@ export const VehicleControlMethods = {
         v.fireCooldown = v.maxFireCooldown;
         v.coaxCooldown = 0;
       } else if (isB2Spirit && activeSlot === 0) {
-        // Northrop B-2A Spirit [1]: 80× Mk-82 Rotary Carpet Bomb Bay (Drops a 5-bomb lateral & longitudinal wave every 0.22s!)
+        // Northrop B-2A Spirit [1]: 80× Mk-82 Rotary Carpet Bomb Bay (2 full carpet passes = 16× 5-bomb waves!)
+        if (!this.consumeVehicleOrdnance(v, 'slot0', 1, 'B-2 MK-82 CARPET BAY')) {
+          return;
+        }
         v.maxFireCooldown = 0.22;
         v.fireCooldown = v.maxFireCooldown;
         this.addShake(0.14);
@@ -4354,7 +4615,10 @@ export const VehicleControlMethods = {
         v.fireCooldown = v.maxFireCooldown;
         v.coaxCooldown = 0;
       } else if (v.aircraftRole === 'cas' && activeSlot === 0) {
-        // A-10C / Su-25 30mm GAU-8/A Avenger Rotary Cannon ("BRRRT!")
+        // A-10C / Su-25 30mm GAU-8/A Avenger Rotary Cannon ("BRRRT!" + Speed-of-Sound Delayed Roar!)
+        if (!this.consumeVehicleOrdnance(v, 'slot0', 1, '30MM GAU-8 AVENGER')) {
+          return;
+        }
         const gauRpm = 1320;
         v.maxFireCooldown = 60 / gauRpm;
         v.fireCooldown = v.maxFireCooldown;
@@ -4362,6 +4626,7 @@ export const VehicleControlMethods = {
         this.recoilOffsetPitch += 0.0009;
         this.addShake(0.045);
         sound.playGunshot('autocannon', 0);
+        sound.playDelayedA10Brrrt?.(Math.max(85, myAltAglForRadar * 1.15), 0);
 
         const spread = 0.0032;
         const rawGauDir = camDir
@@ -4409,6 +4674,9 @@ export const VehicleControlMethods = {
         v.coaxCooldown = 0;
       } else if (v.aircraftRole === 'cas' && activeSlot === 2) {
         // A-10C / Su-25 [3] LMB: AGM-65G Maverick (RU: Kh-29T) Electro-Optical TV-Guided Anti-Tank Missile!
+        if (!this.consumeVehicleOrdnance(v, 'slot2', 1, 'AGM-65G MAVERICK')) {
+          return;
+        }
         v.maxFireCooldown = 1.55;
         v.fireCooldown = v.maxFireCooldown;
         this.addShake(0.24);
@@ -4491,6 +4759,9 @@ export const VehicleControlMethods = {
         };
         if (activeSlot === 0) {
           // AC-130J [1]: 25mm GAU-12/U Equalizer Gatling (1,600 RPM AP-HEI — high-velocity 860 m/s straight tracer stream!)
+          if (!this.consumeVehicleOrdnance(v, 'slot0', 1, '25MM GAU-12')) {
+            return;
+          }
           v.maxFireCooldown = 60 / 1600;
           v.fireCooldown = v.maxFireCooldown;
           v.coaxHeat = Math.min(1.0, (v.coaxHeat || 0) + 0.011);
@@ -4561,6 +4832,9 @@ export const VehicleControlMethods = {
           );
         } else if (activeSlot === 1) {
           // AC-130J [2]: 40mm L/60 Bofors Rapid-Fire HE Autocannon (120 RPM + Fire-Control Gravity Drop Solver up to 1.5km!)
+          if (!this.consumeVehicleOrdnance(v, 'slot1', 1, '40MM BOFORS')) {
+            return;
+          }
           v.maxFireCooldown = 0.48;
           v.fireCooldown = v.maxFireCooldown;
           this.recoilOffsetPitch += 0.008;
@@ -4612,6 +4886,9 @@ export const VehicleControlMethods = {
           }
         } else {
           // AC-130J [3]: 105mm M102 Heavy Howitzer (Fire-Control Ballistic Drop Solver hits reticle up to 1.6km Slant Range!)
+          if (!this.consumeVehicleOrdnance(v, 'slot2', 1, '105MM M102 HOWITZER')) {
+            return;
+          }
           v.maxFireCooldown = 2.4;
           v.fireCooldown = v.maxFireCooldown;
           this.recoilOffsetPitch += 0.025;
@@ -4662,6 +4939,9 @@ export const VehicleControlMethods = {
         }
       } else if ((v.aircraftRole === 'fighter' && activeSlot === 2) || v.aircraftRole === 'bomber') {
         // Combined Strike Fighter/Bomber [3]: 500lb JDAM Precision Bomb Drop onto CCIP Reticle
+        if (!this.consumeVehicleOrdnance(v, 'slot2', 1, '500LB JDAM')) {
+          return;
+        }
         v.maxFireCooldown = 0.85;
         v.fireCooldown = v.maxFireCooldown;
         this.addShake(0.18);
@@ -4777,6 +5057,9 @@ export const VehicleControlMethods = {
         }
       } else if (isB2Spirit && activeSlot === 0 && wantSpaceOrdnance) {
         // B-2 Spirit [SPACE] while in Slot [1] Carpet Mode: Drop an instant 5-bomb Carpet Wave!
+        if (!this.consumeVehicleOrdnance(v, 'slot0', 1, 'B-2 MK-82 CARPET BAY')) {
+          return;
+        }
         v.coaxCooldown = 0.24;
         const rightVec = new THREE.Vector3(Math.cos(v.yaw), 0, -Math.sin(v.yaw)).normalize();
         const latOffsets = [-10.0, -5.0, 0, 5.0, 10.0];
@@ -4816,6 +5099,9 @@ export const VehicleControlMethods = {
         }
       } else if (isB2Spirit && activeSlot === 1) {
         // B-2 Spirit [2]: Twin GBU-57A/B MOP (30,000lb Massive Ordnance Penetrator Bunker-Buster)
+        if (!this.consumeVehicleOrdnance(v, 'slot1', 1, 'GBU-57 MOP')) {
+          return;
+        }
         v.coaxCooldown = 2.4;
         this.addShake(0.42);
         sound.playTankCannon?.(0, 0);
@@ -4848,6 +5134,9 @@ export const VehicleControlMethods = {
         }
       } else if (v.aircraftRole === 'cas' && activeSlot === 2 && wantSpaceOrdnance) {
         // A-10C / Su-25 [3] + [SPACE]: 500lb Mk-82 / FAB-250 CCIP Precision Bomb Drop!
+        if (!this.consumeVehicleOrdnance(v, 'slot2', 1, '500LB MK-82 BOMB')) {
+          return;
+        }
         v.coaxCooldown = 0.85;
         this.addShake(0.22);
         sound.playRocketLaunch?.(0);
@@ -4875,6 +5164,9 @@ export const VehicleControlMethods = {
         }
       } else if (v.aircraftRole === 'cas') {
         // Hydra-70 / S-8 Unguided Rocket Pod Salvo
+        if (!this.consumeVehicleOrdnance(v, 'slot1', 1, 'HYDRA-70 ROCKET')) {
+          return;
+        }
         v.coaxCooldown = 0.34;
         this.addShake(0.16);
         sound.playRocketLaunch?.(0);
@@ -4907,6 +5199,9 @@ export const VehicleControlMethods = {
           }
         } else {
           // AC-130J [SPACE]: Fires the 105mm M102 Heavy Howitzer anytime from the aft-port (-X, z=+2.35) embrasure!
+          if (!this.consumeVehicleOrdnance(v, 'slot2', 1, '105MM M102 HOWITZER')) {
+            return;
+          }
           const portMuzzle105 = getGunshipPortMuzzle(2);
           v.coaxCooldown = 2.4;
           this.recoilOffsetPitch += 0.025;
@@ -4967,6 +5262,9 @@ export const VehicleControlMethods = {
         }
       } else if (v.aircraftRole === 'bomber' || (v.aircraftRole === 'fighter' && activeSlot === 2)) {
         // Combined Strike Fighter Slot [3] (or Bomber): 2,000lb GBU-28 Bunker Buster Heavy Demolition Bomb onto CCIP Reticle!
+        if (!this.consumeVehicleOrdnance(v, 'slot2', 1, '2,000LB GBU-28')) {
+          return;
+        }
         v.coaxCooldown = 2.2 * (v.customCooldownMult || 1.0);
         this.addShake(0.32);
         sound.playRocketLaunch?.(0);
@@ -5007,6 +5305,9 @@ export const VehicleControlMethods = {
             );
           }
         } else {
+          if (!this.consumeVehicleOrdnance(v, 'slot1', 1, 'AIM-120D AMRAAM')) {
+            return;
+          }
           const missileTarget = this.aircraftLockTarget;
           v.coaxCooldown = 1.35 * (v.customCooldownMult || 1.0);
           this.addShake(0.22);

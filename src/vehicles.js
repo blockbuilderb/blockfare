@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=120';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=120';
+import { sound } from './audio.js?v=121';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=121';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=120';
-import { createVehicleMesh } from './models/vehicle-model.js?v=120';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=120';
-import { events, makeEventBridge } from './events.js?v=120';
+} from './assets/vehicle-defs.js?v=121';
+import { createVehicleMesh } from './models/vehicle-model.js?v=121';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=121';
+import { events, makeEventBridge } from './events.js?v=121';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,11 +21,99 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=120';
+} from './core/StateMachines.js?v=121';
 
 function markShared(item) {
   item.userData.shared = true;
   return item;
+}
+
+const SHARED_WRECK_HULL_GEO = markShared(new THREE.BoxGeometry(3.4, 1.55, 6.2));
+const SHARED_WRECK_TURRET_GEO = markShared(new THREE.BoxGeometry(2.3, 0.85, 2.7));
+const SHARED_WRECK_FIRE_GEO = markShared(new THREE.BoxGeometry(1.45, 1.25, 1.45));
+const SHARED_WRECK_HULL_MAT = markShared(
+  new THREE.MeshLambertMaterial({ color: 0x1b1d20, flatShading: true })
+);
+const SHARED_WRECK_CHAR_MAT = markShared(
+  new THREE.MeshLambertMaterial({ color: 0x26292d, flatShading: true })
+);
+const SHARED_WRECK_FIRE_MAT = markShared(
+  new THREE.MeshBasicMaterial({ color: 0xff6b1a, transparent: true, opacity: 0.78 })
+);
+
+/**
+ * Multi-Crew Seat Layout (`[F1–F4]`):
+ * - Tanks / SPAAG AA: `['DRIVER', 'GUNNER', 'COMMANDER']` (3 seats)
+ * - IFVs / APCs / Humvees: `['DRIVER', 'GUNNER', 'PASSENGER_1', 'PASSENGER_2']` (4 seats)
+ * - AC-130 Gunship: `['PILOT', 'TV_GUNNER', 'HOWITZER_FCO', 'LOADMASTER']` (4 seats)
+ * - Bikes / ATVs / Mounts: `['DRIVER', 'PILLION']` (2 seats)
+ * - Single-seat Jets & Emplacements: `['PILOT']` / `['GUNNER']` (1 seat)
+ */
+export function getVehicleSeatLayout(v) {
+  if (!v) return ['DRIVER'];
+  if (v.isAircraft) {
+    if (v.aircraftRole === 'gunship') {
+      return ['PILOT', 'TV_GUNNER', 'HOWITZER_FCO', 'LOADMASTER'];
+    }
+    return ['PILOT'];
+  }
+  if (v.isEmplacement || v.type === 'trebuchet') {
+    return ['GUNNER'];
+  }
+  if (
+    v.type === 'bike' ||
+    v.type === 'atv' ||
+    v.type === 'warhorse' ||
+    v.type === 'raptor_mount'
+  ) {
+    return ['DRIVER', 'PILLION'];
+  }
+  if (v.type === 'tank' || v.type === 'aa' || v.type === 'trex_mount') {
+    return ['DRIVER', 'GUNNER', 'COMMANDER'];
+  }
+  return ['DRIVER', 'GUNNER', 'PASSENGER_1', 'PASSENGER_2'];
+}
+
+/**
+ * Initializes realistic finite vehicle ordnance pools (replenished via `<45m` HQ Runway Low-Pass,
+ * HQ Motor Pool, or Friendly FOB Supply Stations!).
+ */
+export function initVehicleOrdnance(v) {
+  if (!v) return null;
+  if (v.isSecretOmegaFlyer) {
+    v.ordnancePools = null;
+    v.maxOrdnancePools = null;
+    return null;
+  }
+  let maxPools = null;
+  if (v.isAircraft) {
+    const role = v.aircraftRole || 'cas';
+    if (role === 'gunship') {
+      maxPools = { slot0: 1800, slot1: 80, slot2: 20 }; // 1800× 25mm, 80× 40mm, 20× 105mm
+    } else if (role === 'cas') {
+      maxPools = { slot0: 1150, slot1: 14, slot2: 4 }; // 1150× 30mm GAU-8, 14× Hydra, 4× Maverick/Mk-82
+    } else if (role === 'b2_spirit') {
+      maxPools = { slot0: 16, slot1: 2, slot2: 4 }; // 2 Carpet Passes (16×5 = 80 Mk-82), 2× GBU-57 MOP, 4× AIM-9X
+    } else if (role === 'wright_flyer') {
+      maxPools = { slot0: 600, slot1: 8, slot2: 4 };
+    } else {
+      maxPools = { slot0: 500, slot1: 6, slot2: 4 }; // 500× 20mm Vulcan, 6× AIM-120D, 4× JDAM/GBU-28
+    }
+  } else if (v.type === 'tank') {
+    maxPools = { slot0: 24, slot1: 600 }; // 24× 120mm/125mm Shells, 600× Coax MG
+  } else if (v.type === 'apc') {
+    maxPools = { slot0: 180, slot1: 600 }; // 180× 30mm Autocannon, 600× Coax MG
+  } else if (v.type === 'aa' || v.type === 'emplace_aa') {
+    maxPools = { slot0: 400, slot1: 8 }; // 400× Radar AA Bursts, 8× SAMs
+  } else if (v.type === 'emplace_mortar') {
+    maxPools = { slot0: 24, slot1: 6 };
+  } else if (v.type === 'humvee' || v.type === 'emplace_hmg') {
+    maxPools = { slot0: 500, slot1: 500 };
+  }
+
+  v.maxOrdnancePools = maxPools ? { ...maxPools } : null;
+  v.ordnancePools = maxPools ? { ...maxPools } : null;
+  return v.ordnancePools;
 }
 
 /**
@@ -648,6 +736,11 @@ export class VehicleManager {
       createGroundVehicleFSM(vehicle);
     }
     createVehicleSubsystemsFSM(vehicle);
+    const seatNames = getVehicleSeatLayout(vehicle);
+    vehicle.seatNames = seatNames;
+    vehicle.crewSeats = new Array(seatNames.length).fill(null);
+    vehicle.aiPassengers = [];
+    initVehicleOrdnance(vehicle);
 
     const vehHitMeshes = [];
     vehicle.hitMeshes = vehHitMeshes;
@@ -944,7 +1037,17 @@ export class VehicleManager {
     let best = null;
     let bestDist = maxDist;
     for (const v of this.vehicles) {
-      if (v.dead || v.driver || v.remoteDriverId) continue;
+      if (v.dead) continue;
+      const seatCount = v.seatNames ? v.seatNames.length : getVehicleSeatLayout(v).length;
+      const hasRemoteDriver = Boolean(v.remoteDriverId);
+      if (v.driver) continue;
+      // Allow boarding a friendly human-driven multi-crew vehicle into an open Gunner/Passenger seat!
+      if (hasRemoteDriver) {
+        if (!playerTeam || v.team !== playerTeam || seatCount <= 1) continue;
+        const remoteOccupied =
+          1 + (v.remoteGunnerId ? 1 : 0) + (Array.isArray(v.remotePassengers) ? v.remotePassengers.length : 0);
+        if (remoteOccupied >= seatCount) continue;
+      }
       // Allow player to enter any unoccupied vehicle OR commandeer a friendly NPC-driven vehicle!
       if (v.npcDriver && playerTeam && v.team !== playerTeam) continue;
       if (v.isAircraft && v.aiPilotActive && playerTeam && v.team !== playerTeam) continue;
@@ -956,6 +1059,141 @@ export class VehicleManager {
       }
     }
     return best;
+  }
+
+  /**
+   * Replenishes 100% of finite vehicle ordnance pools + ERA blocks + countermeasures.
+   */
+  rearmVehicleOrdnance(v) {
+    if (!v) return false;
+    let rearmed = false;
+    if (!v.maxOrdnancePools && !v.isSecretOmegaFlyer) {
+      initVehicleOrdnance(v);
+    }
+    if (v.maxOrdnancePools && v.ordnancePools) {
+      for (const k of Object.keys(v.maxOrdnancePools)) {
+        if ((v.ordnancePools[k] ?? 0) < v.maxOrdnancePools[k]) {
+          v.ordnancePools[k] = v.maxOrdnancePools[k];
+          rearmed = true;
+        }
+      }
+    }
+    if ((v.eraBlocksIntact ?? 0) < (v.maxEraBlocks || 0)) {
+      v.eraBlocksIntact = v.maxEraBlocks || 0;
+      rearmed = true;
+    }
+    if ((v.flareCooldown || 0) > 0) {
+      v.flareCooldown = 0;
+      rearmed = true;
+    }
+    v.coaxHeat = 0;
+    v.coaxOverheated = false;
+    if (v.subsystems) {
+      v.subsystems.tracks = 'OK';
+      v.subsystems.turret = 'OK';
+      v.subsystems.engine = 'OK';
+      v.subsystems.optics = 'OK';
+    }
+    v.opticsGlitchTimer = 0;
+    v.sensorGlitchTimer = 0;
+    return rearmed;
+  }
+
+  /**
+   * Spawns a persistent 20-second burning 3D Vehicle Wreck at `vehicle.pos` providing real LOS/ballistic cover!
+   */
+  spawnVehicleWreck(vehicle) {
+    if (
+      !vehicle ||
+      !this.scene ||
+      vehicle.isWarehouseBike ||
+      vehicle.type === 'bike' ||
+      vehicle.type === 'atv' ||
+      vehicle.type === 'warhorse' ||
+      vehicle.type === 'raptor_mount' ||
+      vehicle.type === 'trex_mount' ||
+      vehicle.isSecretOmegaFlyer
+    ) {
+      return null;
+    }
+    if (!this.activeWrecks) this.activeWrecks = [];
+    if (this.activeWrecks.length >= 14) {
+      const oldest = this.activeWrecks.shift();
+      if (oldest?.mesh) this.scene.remove(oldest.mesh);
+    }
+    const gY = this.world ? this.world.getGroundHeightAt(vehicle.pos.x, vehicle.pos.z) : vehicle.pos.y;
+    const grp = new THREE.Group();
+    const hull = new THREE.Mesh(SHARED_WRECK_HULL_GEO, SHARED_WRECK_HULL_MAT);
+    hull.position.set(0, 0.78, 0);
+    const scaleX = vehicle.isAircraft ? 1.25 : vehicle.type === 'tank' ? 1.05 : 0.88;
+    const scaleZ = vehicle.isAircraft ? 1.35 : vehicle.type === 'tank' ? 1.05 : 0.9;
+    hull.scale.set(scaleX, 1.0, scaleZ);
+    grp.add(hull);
+
+    const turret = new THREE.Mesh(SHARED_WRECK_TURRET_GEO, SHARED_WRECK_CHAR_MAT);
+    turret.position.set(0.15, 1.65, -0.2);
+    turret.rotation.set(0.14, 0.38, -0.18); // Tilted blown-off turret / crumpled fuselage
+    grp.add(turret);
+
+    const fireGlow = new THREE.Mesh(SHARED_WRECK_FIRE_GEO, SHARED_WRECK_FIRE_MAT);
+    fireGlow.position.set(0, 1.45, 0.35);
+    grp.add(fireGlow);
+
+    grp.position.set(vehicle.pos.x, gY, vehicle.pos.z);
+    grp.rotation.set(0.05, vehicle.yaw || 0, -0.06);
+    this.scene.add(grp);
+
+    const wreck = {
+      id: `wreck_${vehicle.id}_${Date.now()}`,
+      mesh: grp,
+      fireMesh: fireGlow,
+      pos: new THREE.Vector3(vehicle.pos.x, gY, vehicle.pos.z),
+      radius: vehicle.isAircraft ? 3.8 : vehicle.type === 'tank' ? 3.2 : 2.7,
+      height: 2.35,
+      life: 20.0,
+      maxLife: 20.0,
+      smokeTimer: 0
+    };
+    this.activeWrecks.push(wreck);
+    return wreck;
+  }
+
+  clearAllWrecks() {
+    if (!Array.isArray(this.activeWrecks)) return;
+    for (const w of this.activeWrecks) {
+      if (w?.mesh && this.scene) {
+        this.scene.remove(w.mesh);
+      }
+    }
+    this.activeWrecks.length = 0;
+  }
+
+  /**
+   * Fast 3D Cylinder/AABB Raycast against active 20s Burning Vehicle Wrecks for infantry tactical cover!
+   */
+  raycastWreckCover(origin, dir, maxDist = 120) {
+    if (!Array.isArray(this.activeWrecks) || this.activeWrecks.length === 0 || !origin || !dir) {
+      return null;
+    }
+    let bestHit = null;
+    let bestT = maxDist;
+    for (let i = 0; i < this.activeWrecks.length; i++) {
+      const w = this.activeWrecks[i];
+      if (!w || w.life <= 0) continue;
+      const wx = w.pos.x - origin.x;
+      const wy = w.pos.y + w.height * 0.5 - origin.y;
+      const wz = w.pos.z - origin.z;
+      const proj = wx * dir.x + wy * dir.y + wz * dir.z;
+      if (proj < 0.6 || proj > bestT) continue;
+      const cx = origin.x + dir.x * proj - w.pos.x;
+      const cy = origin.y + dir.y * proj - w.pos.y;
+      const cz = origin.z + dir.z * proj - w.pos.z;
+      if (cy >= -0.2 && cy <= w.height && cx * cx + cz * cz <= w.radius * w.radius) {
+        bestT = proj;
+        bestHit = w;
+      }
+    }
+    return bestHit;
   }
 
   /**
@@ -1792,6 +2030,7 @@ export class VehicleManager {
       tmpVec3(vehicle.pos.x, vehicle.pos.y + 1.8, vehicle.pos.z),
       10.5
     );
+    this.spawnVehicleWreck(vehicle);
 
     // If the pilot stayed inside the burning plane and failed to press [E] to eject before hitting the ground, they die on impact!
     if (vehicle.driver) {
@@ -2325,6 +2564,29 @@ export class VehicleManager {
       vehicle.replacementFundsPaid = false;
       vehicle.mesh.visible = false;
       vehicle.aiPilotActive = false;
+      if (Array.isArray(vehicle.aiPassengers) && vehicle.aiPassengers.length > 0) {
+        for (const pax of vehicle.aiPassengers) {
+          if (pax) {
+            pax.ridingVehicle = null;
+            if (!pax.dead) {
+              pax.pos.set(
+                vehicle.pos.x + (Math.random() - 0.5) * 4.5,
+                groundH,
+                vehicle.pos.z + (Math.random() - 0.5) * 4.5
+              );
+              if (pax.mesh) {
+                pax.mesh.position.copy(pax.pos);
+                pax.mesh.visible = true;
+              }
+            }
+          }
+        }
+        vehicle.aiPassengers.length = 0;
+      }
+      if (Array.isArray(vehicle.crewSeats)) {
+        vehicle.crewSeats.fill(null);
+      }
+      this.spawnVehicleWreck(vehicle);
       if (vehicle.flightFSM) {
         vehicle.flightFSM.send(AIRCRAFT_FLIGHT_EVENTS.DESTROY_GROUND);
       }
@@ -2544,6 +2806,35 @@ export class VehicleManager {
   update(dt, player = null, botManager = null, onDeployMenu = false) {
     if (player) this.lastPlayer = player;
     this.refreshTeamVehicleLists();
+
+    // Update persistent 20s Burning 3D Vehicle Wrecks (fire flicker + smoke column + clean expiry)
+    if (Array.isArray(this.activeWrecks) && this.activeWrecks.length > 0) {
+      for (let wi = this.activeWrecks.length - 1; wi >= 0; wi--) {
+        const w = this.activeWrecks[wi];
+        w.life -= dt;
+        if (w.life <= 0) {
+          if (w.mesh && this.scene) this.scene.remove(w.mesh);
+          this.activeWrecks.splice(wi, 1);
+          continue;
+        }
+        if (w.fireMesh) {
+          const fade = Math.min(1, w.life / 4.0);
+          w.fireMesh.visible = w.life > 2.5;
+          const pulse = 0.85 + Math.sin(w.life * 14.0) * 0.22;
+          w.fireMesh.scale.set(pulse, pulse * fade, pulse);
+        }
+        w.smokeTimer = (w.smokeTimer || 0) + dt;
+        if (w.smokeTimer >= 0.42 && this.world?.spawnDebris) {
+          w.smokeTimer = 0;
+          this.world.spawnDebris(
+            tmpVec3(w.pos.x, w.pos.y + 1.85, w.pos.z),
+            w.life > 8 ? COLOR_FIRE_ORANGE : new THREE.Color(0x2d3436),
+            2
+          );
+        }
+      }
+    }
+
     for (const v of this.vehicles) {
       if (v.dead) {
         if (onDeployMenu) continue;
@@ -2649,6 +2940,9 @@ export class VehicleManager {
           v.turretYaw = respawnYaw;
           v.forwardSpeed = 0;
           v.barrelRecoil = 0;
+          this.rearmVehicleOrdnance(v);
+          if (Array.isArray(v.crewSeats)) v.crewSeats.fill(null);
+          if (Array.isArray(v.aiPassengers)) v.aiPassengers.length = 0;
           v.mesh.position.copy(safeRespawn);
           v.mesh.rotation.set(0, respawnYaw, 0, 'YXZ');
           v.mesh.visible = true;
@@ -2697,6 +2991,121 @@ export class VehicleManager {
       }
       if (v.barrelGroup && v.type === 'tank') {
         v.barrelGroup.position.z = 1.35 - v.barrelRecoil * 0.55;
+      }
+
+      // HQ Runway Low-Pass (< 45m AGL) + HQ Motor Pool + Friendly FOB Supply Station Rearm & Repair!
+      if (v.driver || v.npcDriver || v.aiPilotActive) {
+        const gHere = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
+        let inSupplyZone = false;
+        let supplyLabel = '';
+        let repairMult = 1.0;
+        if (v.isAircraft) {
+          const isUsPlane = v.team !== 'RU';
+          const overFriendlyAirfield =
+            (isUsPlane ? v.pos.x < -1220 : v.pos.x > 1220) && Math.abs(v.pos.z) < 280;
+          if (overFriendlyAirfield && v.pos.y - gHere <= 45.0) {
+            inSupplyZone = true;
+            supplyLabel =
+              v.pos.y - gHere <= 5.0 ? 'HQ RUNWAY PIT-STOP' : 'HQ RUNWAY LOW-PASS (<45M)';
+            repairMult = 1.8;
+          }
+        } else {
+          const hqBase =
+            v.team === 'RU'
+              ? this.world?.spawns?.RU_BASE || { x: 1520, z: 0 }
+              : this.world?.spawns?.US_BASE || { x: -1520, z: 0 };
+          if (Math.hypot(v.pos.x - hqBase.x, v.pos.z - hqBase.z) <= 56) {
+            inSupplyZone = true;
+            supplyLabel = 'HQ MOTOR POOL DEPOT';
+            repairMult = 1.4;
+          } else if (Array.isArray(this.world?.flags)) {
+            for (let fi = 0; fi < this.world.flags.length; fi++) {
+              const fl = this.world.flags[fi];
+              if (fl && fl.owner === v.team && Math.hypot(v.pos.x - fl.pos.x, v.pos.z - fl.pos.z) <= 32) {
+                inSupplyZone = true;
+                const hasEngStation = (fl.defenseStage || 0) >= 1;
+                supplyLabel = hasEngStation
+                  ? `OBJ ${fl.id} ENGINEER VEHICLE SUPPLY STATION`
+                  : `OBJ ${fl.id} FORWARD BASE DEPOT`;
+                repairMult = hasEngStation ? 1.65 : 1.0;
+                break;
+              }
+            }
+          }
+        }
+        v.inRearmZone = inSupplyZone;
+        if (inSupplyZone) {
+          const prevHp = v.hp;
+          if (v.hp < v.maxHp) {
+            v.hp = Math.min(v.maxHp, v.hp + 110 * repairMult * dt);
+            v.hullIntegrityPct = Math.round((v.hp / Math.max(1, v.maxHp)) * 100);
+          }
+          v._rearmTick = (v._rearmTick || 0) + dt * repairMult;
+          if (v._rearmTick >= 1.1) {
+            v._rearmTick = 0;
+            const didRearm = this.rearmVehicleOrdnance(v);
+            if ((didRearm || (prevHp < v.maxHp * 0.95 && v.hp >= v.maxHp)) && v.driver?.onAwardXp) {
+              const nowMs = performance.now();
+              if (nowMs - (v._lastRearmBannerMs || 0) > 6500) {
+                v._lastRearmBannerMs = nowMs;
+                v.driver.onAwardXp(
+                  20,
+                  `🛠️⛽ ${supplyLabel}: 100% ORDNANCE REARMED & HULL REPAIRED!`
+                );
+              }
+            }
+          }
+        } else {
+          v._rearmTick = 0;
+        }
+      }
+
+      // Multi-Crew AI Squadmate Passenger Boarding when Player drives a multi-seat ground vehicle
+      if (
+        !v.isAircraft &&
+        !v.isEmplacement &&
+        v.driver === player &&
+        botManager &&
+        Array.isArray(botManager.bots)
+      ) {
+        if (!Array.isArray(v.aiPassengers)) v.aiPassengers = [];
+        for (let pi = v.aiPassengers.length - 1; pi >= 0; pi--) {
+          const pax = v.aiPassengers[pi];
+          if (!pax || pax.dead || pax.downed || pax.ridingVehicle !== v) {
+            if (pax && pax.ridingVehicle === v) pax.ridingVehicle = null;
+            v.aiPassengers.splice(pi, 1);
+          } else {
+            pax.pos.copy(v.pos);
+            if (pax.mesh) pax.mesh.visible = false;
+          }
+        }
+        const maxAiPax = Math.max(0, (v.seatNames ? v.seatNames.length : 1) - 1);
+        if (v.aiPassengers.length < maxAiPax && Math.abs(v.forwardSpeed || 0) < 11.0) {
+          v._paxScanTimer = (v._paxScanTimer || 0) - dt;
+          if (v._paxScanTimer <= 0) {
+            v._paxScanTimer = 0.75;
+            for (let bi = 0; bi < botManager.bots.length && v.aiPassengers.length < maxAiPax; bi++) {
+              const b = botManager.bots[bi];
+              if (
+                !b ||
+                b.dead ||
+                b.downed ||
+                b.drivingVehicle ||
+                b.ridingVehicle ||
+                b.team !== player.team ||
+                b.squad !== player.squad ||
+                b.rescueTarget
+              ) {
+                continue;
+              }
+              if (b.pos.distanceToSquared(v.pos) <= 10.5 * 10.5) {
+                b.ridingVehicle = v;
+                if (b.mesh) b.mesh.visible = false;
+                v.aiPassengers.push(b);
+              }
+            }
+          }
+        }
       }
 
       // Dedicated 3D Flight & AI Dogfight / CAS Loop for Combat Aircraft

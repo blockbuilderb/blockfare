@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=120';
-import { VehicleManager } from './vehicles.js?v=120';
-import { BotManager } from './bots.js?v=120';
-import { PlayerController } from './player.js?v=120';
-import { NetworkManager } from './network.js?v=120';
-import { UIManager } from './ui.js?v=120';
-import { TelemetryLogger } from './telemetry.js?v=120';
-import { sound } from './audio.js?v=120';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=120';
-import { events, makeEventBridge } from './events.js?v=120';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=120';
+import { VoxelWorld } from './world.js?v=121';
+import { VehicleManager } from './vehicles.js?v=121';
+import { BotManager } from './bots.js?v=121';
+import { PlayerController } from './player.js?v=121';
+import { NetworkManager } from './network.js?v=121';
+import { UIManager } from './ui.js?v=121';
+import { TelemetryLogger } from './telemetry.js?v=121';
+import { sound } from './audio.js?v=121';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=121';
+import { events, makeEventBridge } from './events.js?v=121';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=121';
 
 class BattleBitGame {
   constructor() {
@@ -2076,11 +2076,15 @@ class BattleBitGame {
       }
     }
 
-    // 3. Return all Vehicles to their clean HQ Motor Pool & Airbase Apron bays at 100% HP
+    // 3. Return all Vehicles to their clean HQ Motor Pool & Airbase Apron bays at 100% HP & 100% Ordnance
+    this.vehicleManager?.clearAllWrecks?.();
     if (this.vehicleManager?.vehicles) {
       for (const v of this.vehicleManager.vehicles) {
         if (!v) continue;
         if (v.driver) v.driver = null;
+        if (Array.isArray(v.crewSeats)) v.crewSeats.fill(null);
+        if (Array.isArray(v.aiPassengers)) v.aiPassengers.length = 0;
+        this.vehicleManager.rearmVehicleOrdnance?.(v);
         v.paidByPlayer = null;
         v._paidAsStock = false;
         if (v.npcDriver) {
@@ -2128,6 +2132,7 @@ class BattleBitGame {
       b.captures = 0;
       b.score = 0;
       b.drivingVehicle = null;
+      b.ridingVehicle = null;
       b.downed = false;
       b.dead = false;
       b.hp = b.maxHp || 100;

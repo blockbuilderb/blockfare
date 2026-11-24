@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=120';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=120';
-import { events } from '../events.js?v=120';
+import { SQUAD_DEFS } from '../bots.js?v=121';
+import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=121';
+import { events } from '../events.js?v=121';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=120';
+} from '../core/StateMachines.js?v=121';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=120';
+} from '../utils/KeyboardShortcuts.js?v=121';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -630,12 +630,16 @@ export const DeployScreen = {
         // Cross-Platform Global Utility & Commander/Squad Order Shortcuts (Mac ⌥/⌃/⌘+G & Windows/Linux Alt+...)
         const globalShortcut = resolveGlobalCommandShortcut(e, {
           isPointerLocked: Boolean(document.pointerLockElement),
-          inGunship: Boolean(this.player?.activeVehicle?.aircraftRole === 'gunship')
+          inGunship: Boolean(this.player?.activeVehicle?.aircraftRole === 'gunship'),
+          inVehicle: Boolean(this.player?.activeVehicle && !this.player.dead)
         });
         if (globalShortcut) {
           e.preventDefault();
           if (!e.repeat) {
             switch (globalShortcut.type) {
+              case 'SWITCH_VEHICLE_SEAT':
+                this.player?.switchVehicleSeat?.(globalShortcut.seatIndex);
+                break;
               case 'TOGGLE_MANUAL':
                 this.toggleControlsOverlay();
                 break;
@@ -834,6 +838,43 @@ export const DeployScreen = {
               .join(', ')}</span>`
           : ' &bull; <span style="color:#95a5a6">SHARE INVITE LINK WITH FRIENDS ANYWHERE!</span>';
       statusEl.innerHTML = `<span style="color:#7bed9f;font-weight:900;">${transportInfo.label}</span> &bull; ROOM <strong style="color:#f1c40f">${this.network.roomCode}</strong> &bull; INVITE: <code style="color:#74b9ff;background:rgba(0,0,0,0.45);padding:2px 5px;border-radius:2px;">${lanUrl}</code>${peerNames}`;
+    }
+
+    // 1-Click Live Active Rooms Pill Strip on Deploy Screen (`/api/mp/rooms` live discovery!)
+    const roomsPillWrap = this.el('mp-active-rooms-pills');
+    if (roomsPillWrap) {
+      const liveRooms = (this.network.availableRooms || []).filter(
+        (rm) => rm && rm.room && (rm.players || rm.count || 0) > 0
+      );
+      if (liveRooms.length === 0) {
+        roomsPillWrap.innerHTML = `<span style="font-size:9.5px;color:#7f8c8d;padding:1px 6px;border:1px dashed rgba(255,255,255,0.16);border-radius:10px;">📡 Live Rooms: ${this.network.roomCode} (1P)</span>`;
+      } else {
+        roomsPillWrap.innerHTML = liveRooms
+          .slice(0, 5)
+          .map((rm) => {
+            const code = String(rm.room).toUpperCase();
+            const cnt = rm.players || rm.count || 1;
+            const isCur = code === String(this.network.roomCode || '').toUpperCase();
+            return `<button type="button" class="mp-quick-room-pill" data-room="${code}" style="background:${
+              isCur ? 'rgba(46,204,113,0.28)' : 'rgba(241,196,15,0.2)'
+            };color:${isCur ? '#7bed9f' : '#ffeaa7'};border:1px solid ${
+              isCur ? '#2ecc71' : '#f1c40f'
+            };border-radius:10px;padding:2px 8px;font-size:9.5px;font-weight:900;cursor:pointer;" title="1-Click Join Live Room ${code}">${
+              isCur ? '🟢' : '⚡'
+            } ${code} (${cnt}P)${isCur ? '' : ' • JOIN'}</button>`;
+          })
+          .join('');
+        roomsPillWrap.querySelectorAll('.mp-quick-room-pill').forEach((pill) => {
+          pill.addEventListener('click', () => {
+            const targetRoom = pill.dataset.room;
+            if (!targetRoom) return;
+            this.network.setGameMode('MULTIPLAYER');
+            this.network.setRoom(targetRoom);
+            this.updateMultiplayerLobbyUI();
+            this.addXpNotification(0, `🌐 SWITCHED TO LIVE ROOM: ${this.network.roomCode}`);
+          });
+        });
+      }
     }
 
     const modalBody = this.el('mp-modal-dynamic-body');

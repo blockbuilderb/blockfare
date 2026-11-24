@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=120';
-import { sound } from '../audio.js?v=120';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=120';
+import { VOXEL_SIZE } from '../world.js?v=121';
+import { sound } from '../audio.js?v=121';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=121';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=120';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=120';
-import { events, makeEventBridge } from '../events.js?v=120';
-import { GunsmithMethods } from './GunsmithState.js?v=120';
-import { FortificationMethods } from './FortificationBuilder.js?v=120';
-import { CommanderMethods } from './CommanderAbilities.js?v=120';
-import { VehicleControlMethods } from './VehicleControl.js?v=120';
-import { CombatMethods } from './PlayerCombat.js?v=120';
+} from '../utils/KeyboardShortcuts.js?v=121';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=121';
+import { events, makeEventBridge } from '../events.js?v=121';
+import { GunsmithMethods } from './GunsmithState.js?v=121';
+import { FortificationMethods } from './FortificationBuilder.js?v=121';
+import { CommanderMethods } from './CommanderAbilities.js?v=121';
+import { VehicleControlMethods } from './VehicleControl.js?v=121';
+import { CombatMethods } from './PlayerCombat.js?v=121';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=120';
+} from '../core/StateMachines.js?v=121';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -1483,9 +1483,13 @@ export class PlayerController {
       }
     }
 
-    // Handle Downed / Incapacitated State (awaiting friendly Medic revive or Hold [Space] to Give Up)
+    // Handle Downed / Incapacitated State (awaiting friendly Medic/Human revive or Hold [Space] to Give Up)
     if (this.downed) {
-      this.downedTimer -= dt;
+      if ((this.beingDraggedByAllyTimer || 0) > 0) {
+        this.beingDraggedByAllyTimer = Math.max(0, this.beingDraggedByAllyTimer - dt);
+      } else {
+        this.downedTimer -= dt;
+      }
       if (this.keys['Space']) {
         this.giveUpProgress += dt / PLAYER.GIVE_UP_RATE;
       } else {
@@ -1638,12 +1642,28 @@ export class PlayerController {
       this.bandageProgress = 0;
     }
 
-    // Separate [E] Drag & [F] Revive Downed Friendly Teammates:
+    // Separate [E] Drag & [F] Revive Downed Friendly Teammates (Both AI Squadmates AND Human MP Peers!):
     // - Press [E] to toggle DRAGGING a fallen soldier to cover
     // - Hold [F] to wrap a bandage and REVIVE them!
     if (this.draggedBot && (this.draggedBot.dead || !this.draggedBot.downed)) {
       this.draggedBot = null;
       this.isDraggingAlly = false;
+    }
+    if (this.draggedRemoteAlly && (this.draggedRemoteAlly.dead || !this.draggedRemoteAlly.downed)) {
+      this.draggedRemoteAlly = null;
+      this.isDraggingAlly = Boolean(this.draggedBot);
+    }
+
+    const netRef = (typeof window !== 'undefined' && window.game?.network) || this.network || null;
+    let nearDownedRemoteAlly = null;
+    if (this.draggedRemoteAlly) {
+      nearDownedRemoteAlly = this.draggedRemoteAlly;
+    } else if (netRef && typeof netRef.findNearestDownedRemoteAlly === 'function') {
+      nearDownedRemoteAlly = netRef.findNearestDownedRemoteAlly(
+        this.pos,
+        this.team,
+        DISTANCES.INTERACT_RANGE
+      );
     }
 
     let nearDownedBot = null;
@@ -1660,16 +1680,39 @@ export class PlayerController {
       nearDownedBot = this.botManager.findNearestDownedFriendly(this.pos, this.team, DISTANCES.INTERACT_RANGE);
     }
     this.reviveTargetBot = nearDownedBot;
-    this.isDraggingAlly = Boolean(this.draggedBot);
+    this.reviveTargetRemoteAlly = nearDownedRemoteAlly;
+    this.isDraggingAlly = Boolean(this.draggedBot || this.draggedRemoteAlly);
 
     const wantMove = Boolean(
       this.keys['KeyW'] || this.keys['KeyS'] || this.keys['KeyA'] || this.keys['KeyD']
     );
-    if (this.draggedBot && wantMove) {
+    if ((this.draggedBot || this.draggedRemoteAlly) && wantMove) {
       this.dragDistAccum = (this.dragDistAccum || 0) + 4.8 * dt;
     }
+    if (this.draggedRemoteAlly && netRef) {
+      const behindX = this.pos.x + Math.sin(this.yaw || 0) * 1.15;
+      const behindZ = this.pos.z + Math.cos(this.yaw || 0) * 1.15;
+      const behindY = this.world ? this.world.getGroundHeightAt(behindX, behindZ) : this.pos.y;
+      this.draggedRemoteAlly.pos.set(behindX, behindY, behindZ);
+      if (this.draggedRemoteAlly.targetPos) {
+        this.draggedRemoteAlly.targetPos.set(behindX, behindY, behindZ);
+      }
+      if (this.draggedRemoteAlly.mesh) {
+        this.draggedRemoteAlly.mesh.position.set(behindX, behindY, behindZ);
+      }
+      this._allyDragSyncTick = (this._allyDragSyncTick || 0) + dt;
+      if (this._allyDragSyncTick >= 0.08) {
+        this._allyDragSyncTick = 0;
+        netRef.send?.({
+          type: 'ally_drag',
+          targetId: this.draggedRemoteAlly.id,
+          pos: [Number(behindX.toFixed(2)), Number(behindY.toFixed(2)), Number(behindZ.toFixed(2))]
+        });
+      }
+    }
 
-    if (nearDownedBot && this.keys['KeyF'] && (this.bandages || 0) > 0) {
+    const activeReviveUnit = nearDownedRemoteAlly || nearDownedBot;
+    if (activeReviveUnit && this.keys['KeyF'] && (this.bandages || 0) > 0) {
       this._fUsedForFriendlyAction = true;
       this._pendingEnemyLootPack = null;
       this.keyFHoldTime = 0;
@@ -1686,21 +1729,47 @@ export class PlayerController {
         this.reviveProgress = 0;
         this.dragDistAccum = 0;
         this.draggedBot = null;
+        this.draggedRemoteAlly = null;
         this.isDraggingAlly = false;
         // Squad rule: Every revive consumes 1 Field Dressing!
         this.bandages = Math.max(0, (this.bandages || 1) - 1);
-        this.botManager.reviveBot(nearDownedBot, isMedicRole);
-        if (isMedicRole) {
-          // Medic Specialty: Revives teammates in 1.8s directly to 100 HP!
-          if ((this.medicBagSupply ?? 600) > 0) {
-            const needed = Math.max(0, 100 - nearDownedBot.hp);
-            const healAmt = Math.min(needed, this.medicBagSupply ?? 600);
-            this.medicBagSupply = Math.max(0, (this.medicBagSupply ?? 600) - healAmt);
+        const restoredHp = isMedicRole
+          ? 100
+          : this.squadDoctrineEnabled !== false
+          ? PLAYER.REVIVE_HP_DOCTRINE || 30
+          : 50;
+
+        if (nearDownedRemoteAlly) {
+          nearDownedRemoteAlly.downed = false;
+          nearDownedRemoteAlly.hp = restoredHp;
+          if (nearDownedRemoteAlly.mesh) nearDownedRemoteAlly.mesh.rotation.x = 0;
+          netRef?.send?.({
+            type: 'player_revive',
+            targetId: nearDownedRemoteAlly.id,
+            hp: restoredHp,
+            reviverName: this.name || 'ALLY MEDIC'
+          });
+          this.reviveTargetRemoteAlly = null;
+        } else {
+          this.botManager.reviveBot(nearDownedBot, isMedicRole);
+          if (isMedicRole) {
+            if ((this.medicBagSupply ?? 600) > 0) {
+              const needed = Math.max(0, 100 - nearDownedBot.hp);
+              const healAmt = Math.min(needed, this.medicBagSupply ?? 600);
+              this.medicBagSupply = Math.max(0, (this.medicBagSupply ?? 600) - healAmt);
+            }
+            nearDownedBot.hp = 100;
+          } else if (this.squadDoctrineEnabled !== false) {
+            nearDownedBot.hp = PLAYER.REVIVE_HP_DOCTRINE || 30;
           }
-          nearDownedBot.hp = 100;
-        } else if (this.squadDoctrineEnabled !== false) {
-          // Non-Medic Emergency Stabilization under Squad Doctrine: 3.8s revive to 30 HP!
-          nearDownedBot.hp = PLAYER.REVIVE_HP_DOCTRINE || 30;
+          netRef?.send?.({
+            type: 'bot_event',
+            action: 'revive',
+            botId: nearDownedBot.id,
+            isMedic: isMedicRole,
+            hp: nearDownedBot.hp
+          });
+          this.reviveTargetBot = null;
         }
         this.revives = (this.revives || 0) + 1;
         const baseRevXp = draggedFar ? PLAYER.REVIVE_DRAG_XP : PLAYER.REVIVE_XP;
@@ -1708,25 +1777,24 @@ export class PlayerController {
         this.score += xpPts;
         if (this.onAwardXp) {
           const maxD = this.maxBandages || (isMedicRole ? 9 : 2);
-          const hpRestored = Math.round(nearDownedBot.hp);
+          const hpRestored = Math.round(nearDownedRemoteAlly ? restoredHp : nearDownedBot.hp);
           this.onAwardXp(
             xpPts,
             draggedFar
-              ? `🩹 DRAGGED & REVIVED ${nearDownedBot.name} TO ${hpRestored} HP (-1 DRESSING • ${this.bandages}/${maxD} LEFT)`
-              : `🩹 REVIVED ${nearDownedBot.name} TO ${hpRestored} HP (-1 FIELD DRESSING • ${this.bandages}/${maxD} LEFT)`
+              ? `🩹 DRAGGED & REVIVED ${activeReviveUnit.name} TO ${hpRestored} HP (-1 DRESSING • ${this.bandages}/${maxD} LEFT)`
+              : `🩹 REVIVED ${activeReviveUnit.name} TO ${hpRestored} HP (-1 FIELD DRESSING • ${this.bandages}/${maxD} LEFT)`
           );
         }
         if (this.onKillEvent) {
           this.onKillEvent(
             this.name,
             this.team,
-            nearDownedBot.name,
-            nearDownedBot.team,
+            activeReviveUnit.name,
+            activeReviveUnit.team,
             'REVIVED',
             false
           );
         }
-        this.reviveTargetBot = null;
       }
     } else {
       this.reviveProgress = 0;

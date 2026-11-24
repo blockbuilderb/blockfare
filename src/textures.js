@@ -3,4 +3,4 @@
 // Re-exports TEXTURES from src/assets/textures.js
 // ============================================================================
 
-export { TEXTURES } from './assets/textures.js?v=120';
+export { TEXTURES } from './assets/textures.js?v=121';

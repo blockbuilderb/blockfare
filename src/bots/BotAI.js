@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=120';
-import { BOT } from '../config.js?v=120';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=120';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=120';
-import { events } from '../events.js?v=120';
+import { sound } from '../audio.js?v=121';
+import { BOT } from '../config.js?v=121';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=121';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=121';
+import { events } from '../events.js?v=121';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -571,6 +571,22 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.mesh.visible = true;
       } else {
         bot.pos.copy(bot.drivingVehicle.pos);
+        bot.mesh.visible = false;
+        continue;
+      }
+    }
+    if (bot.ridingVehicle) {
+      if (
+        bot.ridingVehicle.dead ||
+        !bot.ridingVehicle.driver ||
+        !Array.isArray(bot.ridingVehicle.aiPassengers) ||
+        !bot.ridingVehicle.aiPassengers.includes(bot)
+      ) {
+        bot.ridingVehicle = null;
+        bot.mesh._culledOffFrustum = false;
+        bot.mesh.visible = true;
+      } else {
+        bot.pos.copy(bot.ridingVehicle.pos);
         bot.mesh.visible = false;
         continue;
       }
