@@ -1,11 +1,11 @@
 import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { sound } from '../src/audio.js?v=119';
-import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=119';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=119';
-import { VehicleManager } from '../src/vehicles.js?v=119';
-import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=119';
+import { sound } from '../src/audio.js?v=120';
+import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=120';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=120';
+import { VehicleManager } from '../src/vehicles.js?v=120';
+import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=120';
 
 let createdWindowShim = false;
 let prevMuted = false;
@@ -936,5 +936,191 @@ describe('3. Aircraft Ordnance Registration Invariant & ProjectileManager downwa
     assert.equal(pilot.sensorMode, 'OFF');
     assert.equal(pilot.nvgActive, false);
     assert.equal(canopyPart.visible, true);
+  });
+
+  test('AC-130 Left-Window 1P & Belly Optic views never self-occlude with own wing/nacelle, while 3P & exit show full airframe', () => {
+    const { vehicle, pilot } = createPilotOrdnanceHarness({
+      aircraftRole: 'gunship',
+      activeWeaponSlot: 0,
+      pos: new THREE.Vector3(240, 260, 0),
+      gunshipOrbit: true
+    });
+    vehicle.roll = 0.65; // ~37° left pylon bank
+
+    pilot.vehicleCameraMode = 'COCKPIT_1P';
+    pilot.updateAircraftControl(1 / 60, vehicle);
+    assert.equal(vehicle.mesh.visible, false, 'COCKPIT_1P left-window HUD must hide own AC-130 wing/nacelles');
+    assert.equal(pilot._gunshipOrbitVisGroup.userData.bullMesh.visible, false, 'Orbit mode must hide giant center bullseye mesh over targets');
+    assert.equal(pilot._gunshipOrbitVisGroup.userData.crossX.visible, false, 'Orbit mode must hide 28m center X cross over targets');
+
+    pilot.vehicleCameraMode = 'OPTIC_NOSE';
+    pilot.updateAircraftControl(1 / 60, vehicle);
+    assert.equal(vehicle.mesh.visible, false, 'OPTIC_NOSE belly pod must hide own AC-130 airframe');
+
+    pilot.vehicleCameraMode = 'CHASE_3P';
+    pilot.updateAircraftControl(1 / 60, vehicle);
+    assert.equal(vehicle.mesh.visible, true, 'CHASE_3P overwatch must render full 3D AC-130 airframe');
+
+    // Switch back to COCKPIT_1P and verify exiting [E] restores mesh visibility
+    pilot.vehicleCameraMode = 'COCKPIT_1P';
+    pilot.updateAircraftControl(1 / 60, vehicle);
+    assert.equal(vehicle.mesh.visible, false);
+    pilot.vel = new THREE.Vector3();
+    pilot.activateParachuteEject = () => {};
+    pilot.handleVehicleAndDragKey();
+    assert.equal(vehicle.mesh.visible, true, 'Exiting AC-130 must restore external airframe mesh visibility');
+  });
+
+  test('AC-130 25mm/40mm/105mm fire from physical -X port gun barrels with zero 3P camera-to-muzzle tracer kink', () => {
+    const { world, vehicle, pilot } = createPilotOrdnanceHarness({
+      aircraftRole: 'gunship',
+      activeWeaponSlot: 0,
+      pos: new THREE.Vector3(220, 260, 0),
+      yaw: 0,
+      gunshipOrbit: true
+    });
+    vehicle.roll = 0;
+    vehicle.pitch = 0;
+    pilot.vehicleCameraMode = 'CHASE_3P';
+
+    let capturedRay = null;
+    pilot.fireBallisticRay = (origin, dir, dmg, hs, range, name, pen, opts, pellets, muzzleWorldPos) => {
+      capturedRay = { origin: origin.clone(), dir: dir.clone(), name, muzzleWorldPos: muzzleWorldPos.clone() };
+    };
+
+    pilot.isFiring = true;
+    vehicle.fireCooldown = 0;
+    pilot.updateAircraftControl(1 / 60, vehicle);
+
+    assert.ok(capturedRay, '25mm Gatling must invoke fireBallisticRay');
+    assert.equal(
+      capturedRay.origin.distanceTo(capturedRay.muzzleWorldPos),
+      0,
+      '25mm origin must equal port muzzle tip so 3P tracers have zero backward camera-blend bend'
+    );
+    assert.ok(
+      capturedRay.origin.x < vehicle.pos.x - 2.4,
+      `25mm must originate from port (-X) barrel tip (got dx=${(capturedRay.origin.x - vehicle.pos.x).toFixed(2)})`
+    );
+    assert.ok(capturedRay.dir.y <= -0.05, 'AC-130 port gun must fire downward toward ground targets');
+
+    // Slot 1: 40mm Bofors mid-port barrel
+    vehicle.activeWeaponSlot = 1;
+    vehicle.fireCooldown = 0;
+    pilot.updateAircraftControl(1 / 60, vehicle);
+    assert.equal(world.projectiles.length, 1);
+    assert.ok(world.projectiles[0].mesh.position.x < vehicle.pos.x - 2.8, '40mm shell must spawn at mid-port (-X) barrel');
+  });
+
+  test('AC-130 in Transit Mode descends smoothly below 180m/34m/12m all the way to 0m runway landing with Auto-GCAS ON', () => {
+    const { vehicle, pilot } = createPilotOrdnanceHarness({
+      aircraftRole: 'gunship',
+      activeWeaponSlot: 0,
+      pos: new THREE.Vector3(-1350, 220, 0),
+      yaw: Math.PI / 2,
+      pitch: -0.22,
+      forwardSpeed: 48,
+      gunshipOrbit: false
+    });
+    pilot.aircraftCollisionAvoidance = true;
+    pilot.getAircraftObstacleHeightAt = () => 0;
+    vehicle.gunshipManualFlight = true;
+    pilot.keys.KeyS = true;
+    pilot.keys.KeyZ = true;
+    pilot.pitch = -0.22;
+
+    for (let i = 0; i < 650; i++) {
+      pilot.updateAircraftControl(0.05, vehicle);
+      if (vehicle.pos.y <= 0.25 && vehicle.forwardSpeed <= 0.1) break;
+    }
+
+    assert.equal(vehicle.dead, false, 'AC-130 must not crash during controlled landing');
+    assert.ok(
+      vehicle.pos.y <= 0.5,
+      `AC-130 must touch down on the runway instead of floating above Auto-GCAS floor (got y=${vehicle.pos.y.toFixed(2)}m)`
+    );
+    assert.ok(
+      vehicle.forwardSpeed <= 0.5,
+      `AC-130 must brake to a full stop on rollout (got speed=${vehicle.forwardSpeed.toFixed(2)} m/s)`
+    );
+  });
+
+  test('A-10C Warthog (cas) supports all 3 weapon slots ([1] GAU-8, [2] Hydra-70, [3] AGM-65G Maverick LMB + 500lb Mk-82 Space)', () => {
+    const { scene, world, vehicle, pilot } = createPilotOrdnanceHarness({
+      aircraftRole: 'cas',
+      activeWeaponSlot: 0,
+      pos: new THREE.Vector3(0, 220, 0),
+      yaw: 0,
+      pitch: -0.18,
+      forwardSpeed: 72,
+      gunshipOrbit: false
+    });
+    const enemyTank = {
+      id: 'ru_t90_target',
+      name: 'T-90M PRORYV (MBT)',
+      type: 'tank',
+      team: 'RU',
+      dead: false,
+      pos: new THREE.Vector3(0, 0, -480),
+      yaw: 0,
+      forwardSpeed: 12
+    };
+    pilot.vehicleManager.vehicles.push(enemyTank);
+
+    // Switch to Slot 2 ([3] AGM/BOMB) via switchVehicleWeaponSlot
+    pilot.switchVehicleWeaponSlot(2);
+    assert.equal(vehicle.activeWeaponSlot, 2, 'A-10C must switch cleanly to Slot [3] (index 2)');
+
+    // Fire [3] LMB -> AGM-65G Maverick ATGM locked onto enemy tank
+    pilot.camera.position.set(0, 220, 0);
+    pilot.camera.lookAt(enemyTank.pos);
+    pilot.camera.updateMatrixWorld(true);
+    pilot.isFiring = true;
+    pilot.keys.Space = false;
+    vehicle.fireCooldown = 0;
+    pilot.updateAircraftControl(1 / 60, vehicle);
+
+    assert.equal(world.projectiles.length, 1, 'A-10C Slot [3] LMB must launch 1 AGM-65G Maverick');
+    const mav = world.projectiles[0];
+    assert.equal(mav.type, 'air_rocket');
+    assert.match(mav.weaponName, /MAVERICK/i);
+    assert.equal(mav.targetVehicle, enemyTank, 'AGM-65G Maverick must lock onto enemy tank in seeker cone');
+    assert.ok(mav.turnRate > 0 && mav.blastDamage >= 550);
+
+    // Step Maverick homing toward moving tank
+    const distBefore = mav.mesh.position.distanceTo(enemyTank.pos);
+    world.updateProjectiles(0.1, [], null, null, [enemyTank]);
+    const distAfter = mav.mesh.position.distanceTo(enemyTank.pos);
+    assert.ok(distAfter < distBefore, 'AGM-65G Maverick must home toward locked ground armor');
+
+    // Clear projectile and test [3] SPACE -> 500lb Mk-82 CCIP Bomb
+    scene.remove(mav.mesh);
+    world.projectiles.length = 0;
+    pilot.isFiring = false;
+    pilot.keys.Space = true;
+    vehicle.coaxCooldown = 0;
+    pilot.updateAircraftControl(1 / 60, vehicle);
+
+    assert.equal(world.projectiles.length, 1, 'A-10C Slot [3] SPACE must release 1× 500lb Mk-82 CCIP Bomb');
+    assert.equal(world.projectiles[0].type, 'jdam_bomb');
+    assert.match(world.projectiles[0].weaponName, /MK-82/i);
+
+    // Also verify Slot [2] (index 1) LMB fires Hydra-70 rocket WITHOUT firing 20mm Vulcan A2A
+    scene.remove(world.projectiles[0].mesh);
+    world.projectiles.length = 0;
+    pilot.switchVehicleWeaponSlot(1);
+    assert.equal(vehicle.activeWeaponSlot, 1);
+    let vulcanRayFired = false;
+    pilot.fireBallisticRay = () => {
+      vulcanRayFired = true;
+    };
+    pilot.isFiring = true;
+    pilot.keys.Space = false;
+    vehicle.fireCooldown = 0;
+    vehicle.coaxCooldown = 0;
+    pilot.updateAircraftControl(1 / 60, vehicle);
+    assert.equal(vulcanRayFired, false, 'A-10C Slot [2] LMB must NOT fall through to 20mm Vulcan cannon');
+    assert.equal(world.projectiles.length, 1, 'A-10C Slot [2] LMB must fire Hydra-70 rocket');
+    assert.match(world.projectiles[0].weaponName, /HYDRA/i);
   });
 });

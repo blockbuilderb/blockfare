@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=119';
-import { TERRAIN } from '../config.js?v=119';
-import { events } from '../events.js?v=119';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=119';
+import { sound } from '../audio.js?v=120';
+import { TERRAIN } from '../config.js?v=120';
+import { events } from '../events.js?v=120';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=120';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;
@@ -1396,18 +1396,19 @@ export const ProjectileManager = {
         }
       }
       if (
-        proj.type === 'a2a_missile' &&
+        (proj.type === 'a2a_missile' || (proj.type === 'air_rocket' && (proj.turnRate || 0) > 0)) &&
         proj.targetVehicle &&
         !proj.targetVehicle.dead &&
-        !(proj.targetVehicle.flareActiveTimer > 0)
+        !(proj.type === 'a2a_missile' && proj.targetVehicle.flareActiveTimer > 0)
       ) {
-        const curSpeed = Math.max(220, proj.vel.length());
+        const minHomingSpd = proj.type === 'air_rocket' ? 165 : 220;
+        const curSpeed = Math.max(minHomingSpd, proj.vel.length());
         const tgt = proj.targetVehicle;
         const rawDist = proj.mesh.position.distanceTo(tgt.pos);
-        const leadTime = Math.min(1.6, rawDist / Math.max(220, curSpeed * 1.15));
-        const leadVx = tgt.velVector ? tgt.velVector.x : -Math.sin(tgt.yaw || 0) * (tgt.forwardSpeed || 60);
+        const leadTime = Math.min(1.6, rawDist / Math.max(minHomingSpd, curSpeed * 1.15));
+        const leadVx = tgt.velVector ? tgt.velVector.x : -Math.sin(tgt.yaw || 0) * (tgt.forwardSpeed || 0);
         const leadVy = tgt.velVector ? tgt.velVector.y : 0;
-        const leadVz = tgt.velVector ? tgt.velVector.z : -Math.cos(tgt.yaw || 0) * (tgt.forwardSpeed || 60);
+        const leadVz = tgt.velVector ? tgt.velVector.z : -Math.cos(tgt.yaw || 0) * (tgt.forwardSpeed || 0);
         _projToTarget.set(
           tgt.pos.x + leadVx * leadTime - proj.mesh.position.x,
           tgt.pos.y + 1.4 + leadVy * leadTime - proj.mesh.position.y,
@@ -1653,7 +1654,7 @@ export const ProjectileManager = {
               : pType === 'air_rocket'
               ? 5.6
               : pType === 'rpg'
-              ? 5.0
+              ? 3.2
               : 2.8);
           const dmg =
             proj.blastDamage ||
@@ -1672,7 +1673,7 @@ export const ProjectileManager = {
               : pType === 'ac130_40mm' || pType === 'air_rocket'
               ? 240
               : pType === 'rpg'
-              ? 235
+              ? 220
               : 95);
           const aud = getListenerAudio(hitPos);
           const soundScale =
@@ -1780,6 +1781,10 @@ export const ProjectileManager = {
           }
           if (typeof u.grenades === 'number' && u.grenades < 2) {
             u.grenades = Math.min(2, u.grenades + 1);
+            gaveAmmo = true;
+          }
+          if (u.role === 'ENGINEER' && typeof u.rpgRocketsLeft === 'number' && u.rpgRocketsLeft < 2) {
+            u.rpgRocketsLeft = 2;
             gaveAmmo = true;
           }
           const maxDressings = u.maxBandages || (u.role === 'medic' ? 9 : 3);

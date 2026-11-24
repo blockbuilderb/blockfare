@@ -7,11 +7,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=119';
-import { sound } from '../audio.js?v=119';
-import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=119';
-import { events } from '../events.js?v=119';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=119';
+} from '../weapons.js?v=120';
+import { sound } from '../audio.js?v=120';
+import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=120';
+import { events } from '../events.js?v=120';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=120';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',
@@ -2008,7 +2008,17 @@ export const GunsmithMethods = {
     return this.sellExtractedLootItem(uid);
   },
 
-  settleMatchToWarehouse(winnerTeam) {
+  settleMatchToWarehouse(winnerTeam, roundEpoch = null) {
+    if (
+      roundEpoch !== null &&
+      this._lastSettledRoundEpoch === roundEpoch &&
+      this.lastMatchExtraction
+    ) {
+      return this.lastMatchExtraction;
+    }
+    if (roundEpoch !== null) {
+      this._lastSettledRoundEpoch = roundEpoch;
+    }
     this.ensureWarehouseStructures();
     this.syncTotalCash();
     const matchCashLeft = Math.max(0, Math.round(this.matchCash || 0));

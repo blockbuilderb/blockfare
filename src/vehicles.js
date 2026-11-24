@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=119';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=119';
+import { sound } from './audio.js?v=120';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=120';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=119';
-import { createVehicleMesh } from './models/vehicle-model.js?v=119';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=119';
-import { events, makeEventBridge } from './events.js?v=119';
+} from './assets/vehicle-defs.js?v=120';
+import { createVehicleMesh } from './models/vehicle-model.js?v=120';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=120';
+import { events, makeEventBridge } from './events.js?v=120';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=119';
+} from './core/StateMachines.js?v=120';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -2015,24 +2015,45 @@ export class VehicleManager {
           const frontDot = (dx * fwdX + dz * fwdZ) / horiz;
           const rightDot = (dx * rightX + dz * rightZ) / horiz;
 
+          const wUpArmor = String(weaponName || '').toUpperCase();
+          const isStandardRpg =
+            /RPG/.test(wUpArmor) && !/TANDEM|MAVERICK|AGM|KH-29/.test(wUpArmor);
+
           if (frontDot >= 0.55) {
             hitZone = 'FRONT';
             if (vehicle.type === 'tank') {
-              // Heavy sloped Chobham / Composite Front Glacis deflects 35% of incoming fire
-              let mult = 0.65;
-              if ((vehicle.eraBlocksIntact || 0) > 0 && amount >= 65) {
-                vehicle.eraBlocksIntact--;
-                mult = 0.48;
-                armorNote = `FRONT ERA REACTIVE BLOCK DETONATED (-52% DMG • ${vehicle.eraBlocksIntact} ERA LEFT)`;
-                this.world?.spawnDebris?.(
-                  tmpVec3(vehicle.pos.x + fwdX * 2.6, vehicle.pos.y + 1.5, vehicle.pos.z + fwdZ * 2.6),
-                  new THREE.Color(0xff9f1a),
-                  5
-                );
+              if (isStandardRpg) {
+                // Squad / Real-Life MBT Chobham & Relikt Frontal Composite Glacis:
+                // Defeats single-stage PG-7V 85mm HEAT warhead (~86% defeated; requires Side/Rear flanking!)
+                if ((vehicle.eraBlocksIntact || 0) > 0) {
+                  vehicle.eraBlocksIntact--;
+                  this.world?.spawnDebris?.(
+                    tmpVec3(vehicle.pos.x + fwdX * 2.6, vehicle.pos.y + 1.5, vehicle.pos.z + fwdZ * 2.6),
+                    new THREE.Color(0xff9f1a),
+                    5
+                  );
+                }
+                vehicle.lastArmorRicochet = true;
+                amount = Math.max(8, Math.round(amount * 0.14));
+                armorNote =
+                  '🛡️ MBT FRONT COMPOSITE DEFEATED RPG-7 HEAT — FLANK SIDES OR REAR ENGINE DECK!';
               } else {
-                armorNote = 'FRONT COMPOSITE GLACIS DEFLECTION (-35% DMG)';
+                // Heavy sloped Chobham / Composite Front Glacis deflects 35% of heavy APFSDS/ATGM fire
+                let mult = 0.65;
+                if ((vehicle.eraBlocksIntact || 0) > 0 && amount >= 65) {
+                  vehicle.eraBlocksIntact--;
+                  mult = 0.48;
+                  armorNote = `FRONT ERA REACTIVE BLOCK DETONATED (-52% DMG • ${vehicle.eraBlocksIntact} ERA LEFT)`;
+                  this.world?.spawnDebris?.(
+                    tmpVec3(vehicle.pos.x + fwdX * 2.6, vehicle.pos.y + 1.5, vehicle.pos.z + fwdZ * 2.6),
+                    new THREE.Color(0xff9f1a),
+                    5
+                  );
+                } else {
+                  armorNote = 'FRONT COMPOSITE GLACIS DEFLECTION (-35% DMG)';
+                }
+                amount = Math.max(1, Math.round(amount * mult));
               }
-              amount = Math.max(1, Math.round(amount * mult));
             } else {
               amount = Math.max(1, Math.round(amount * 0.82));
               armorNote = 'FRONTAL ARMOR PLATE (-18% DMG)';
@@ -2043,9 +2064,13 @@ export class VehicleManager {
             );
           } else if (frontDot <= -0.55) {
             hitZone = 'REAR';
-            // Vulnerable Rear Engine Louver Deck takes 1.45x Critical Armor Penetration!
-            amount = Math.max(1, Math.round(amount * (vehicle.type === 'tank' ? 1.45 : 1.3)));
-            armorNote = 'CRITICAL REAR ENGINE DECK PENETRATION (1.45× DMG!)';
+            // Vulnerable Rear Engine Louver Deck: 2.15× critical penetration vs RPG-7 HEAT (3–4 rear hits), 1.45× vs shells!
+            const rearMult =
+              vehicle.type === 'tank' ? (isStandardRpg ? 2.15 : 1.45) : isStandardRpg ? 1.55 : 1.3;
+            amount = Math.max(1, Math.round(amount * rearMult));
+            armorNote = isStandardRpg
+              ? '🔥 CRITICAL REAR ENGINE DECK RPG PENETRATION (ENGINE HIT!)'
+              : 'CRITICAL REAR ENGINE DECK PENETRATION (1.45× DMG!)';
             vehicle.armorZones.rear = Math.max(
               0,
               Math.round((vehicle.armorZones.rear ?? 100) - (amount / Math.max(1, vehicle.maxHp)) * 165)
@@ -2057,10 +2082,14 @@ export class VehicleManager {
           } else {
             hitZone = rightDot >= 0 ? 'RIGHT' : 'LEFT';
             const sideKey = rightDot >= 0 ? 'right' : 'left';
+            if (vehicle.type === 'tank' && isStandardRpg) {
+              // Squad-calibrated Side Hull / Track Skirt RPG-7 hit (~5–6 side hits + immediate track mobility damage)
+              amount = Math.max(1, Math.round(amount * 1.45));
+            }
             if ((vehicle.eraBlocksIntact || 0) > 0 && amount >= 95) {
               vehicle.eraBlocksIntact--;
-              amount = Math.max(1, Math.round(amount * 0.72));
-              armorNote = `${hitZone} SKIRT ERA BLOCK DETONATED (-28% DMG • ${vehicle.eraBlocksIntact} ERA LEFT)`;
+              amount = Math.max(1, Math.round(amount * 0.78));
+              armorNote = `${hitZone} SKIRT ERA BLOCK DETONATED (-22% DMG • ${vehicle.eraBlocksIntact} ERA LEFT)`;
             } else {
               armorNote = `${hitZone} HULL / TRACK SKIRT HIT`;
             }

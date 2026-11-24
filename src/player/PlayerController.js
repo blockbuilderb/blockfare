@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=119';
-import { sound } from '../audio.js?v=119';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=119';
+import { VOXEL_SIZE } from '../world.js?v=120';
+import { sound } from '../audio.js?v=120';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=120';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=119';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=119';
-import { events, makeEventBridge } from '../events.js?v=119';
-import { GunsmithMethods } from './GunsmithState.js?v=119';
-import { FortificationMethods } from './FortificationBuilder.js?v=119';
-import { CommanderMethods } from './CommanderAbilities.js?v=119';
-import { VehicleControlMethods } from './VehicleControl.js?v=119';
-import { CombatMethods } from './PlayerCombat.js?v=119';
+} from '../utils/KeyboardShortcuts.js?v=120';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=120';
+import { events, makeEventBridge } from '../events.js?v=120';
+import { GunsmithMethods } from './GunsmithState.js?v=120';
+import { FortificationMethods } from './FortificationBuilder.js?v=120';
+import { CommanderMethods } from './CommanderAbilities.js?v=120';
+import { VehicleControlMethods } from './VehicleControl.js?v=120';
+import { CombatMethods } from './PlayerCombat.js?v=120';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=119';
+} from '../core/StateMachines.js?v=120';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -776,10 +776,7 @@ export class PlayerController {
         if (this.activeVehicle && this.activeVehicle.isAircraft && this.activeVehicle.aircraftRole === 'gunship') {
           // In AC-130 Gunship, [Q] = Climb UP & [Z] = Descend DOWN (Weapons use [1], [2], [3])!
         } else if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
-          const maxSlots =
-            this.activeVehicle.isAircraft && this.activeVehicle.aircraftRole === 'fighter'
-              ? 3
-              : 2;
+          const maxSlots = this.activeVehicle.isAircraft ? 3 : 2;
           const nextSlot = ((this.activeVehicle.activeWeaponSlot || 0) + 1) % maxSlots;
           this.switchVehicleWeaponSlot(nextSlot);
         } else {

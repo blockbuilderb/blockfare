@@ -4,8 +4,8 @@
 // panning, distance air-absorption filtering, and procedural sub-bass layers.
 // ============================================================================
 
-import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=119';
-import { AUDIO } from '../config.js?v=119';
+import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=120';
+import { AUDIO } from '../config.js?v=120';
 
 const AUDIO_STORAGE_KEY = 'bb_audio_settings_v1';
 
@@ -117,6 +117,7 @@ export class SoundManager {
   }
 
   init() {
+    if (typeof window === 'undefined') return;
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (AudioCtx) {

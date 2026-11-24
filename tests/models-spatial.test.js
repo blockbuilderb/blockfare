@@ -7,8 +7,8 @@ import {
   createSoldierMesh,
   updateSoldierEquippedWeapon
 } from '../src/models/soldier-model.js';
-import { createWeaponViewModel } from '../src/models/weapon-model.js?v=119';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=119';
+import { createWeaponViewModel } from '../src/models/weapon-model.js?v=120';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=120';
 import { SpatialGrid2D } from '../src/utils/SpatialGrid2D.js';
 
 /**

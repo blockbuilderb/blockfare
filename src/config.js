@@ -758,10 +758,10 @@ export const BOT = {
   BLEEDOUT_TIMER: 95.0,
   RESPAWN_TIMER: 3.5,
 
-  // Engage ranges
+  // Engage ranges (Squad-calibrated LAT RPG-7 effective anti-armor range < 100m)
   ENGAGE_RANGE_INFANTRY: 115,
-  ENGAGE_RANGE_RPG_CHECK: 135,
-  ENGAGE_RANGE_RPG_TOGGLE: 130,
+  ENGAGE_RANGE_RPG_CHECK: 98,
+  ENGAGE_RANGE_RPG_TOGGLE: 92,
   COMBAT_RANGE_INFANTRY: 68,
   COMBAT_RANGE_VEHICLE: 65,
 
@@ -813,12 +813,13 @@ export const BOT = {
   GRAVITY: 24.0,
   VAULT_JUMP_SPEED: 7.6,
 
-  // Shoot cooldowns
+  // Shoot cooldowns (Squad LAT RPG-7 single-tube manual reload: 7.5–10.0s, 2 HEAT rockets per spawn)
   BURST_PAUSE_BASE: 0.48,
   BURST_PAUSE_RAND: 0.4,
   BURST_SHOT_INTERVAL: 0.11,
-  RPG_COOLDOWN_BASE: 3.6,
-  RPG_COOLDOWN_RAND: 1.4,
+  RPG_COOLDOWN_BASE: 7.5,
+  RPG_COOLDOWN_RAND: 2.5,
+  RPG_ROCKETS_PER_SPAWN: 2,
 
   // AI think
   RETHINK_TIMER_BASE: 3.5,

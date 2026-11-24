@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=119';
-import { BOT } from '../config.js?v=119';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=119';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=119';
-import { events } from '../events.js?v=119';
+import { sound } from '../audio.js?v=120';
+import { BOT } from '../config.js?v=120';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=120';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=120';
+import { events } from '../events.js?v=120';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -528,6 +528,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.lootPack = null;
         bot.fieldDressings = bot.maxFieldDressings || (bot.role === 'MEDIC' ? 9 : 2);
         bot.medicBagSupply = bot.maxMedicBagSupply || (bot.role === 'MEDIC' ? 600 : 0);
+        bot.rpgRocketsLeft = bot.role === 'ENGINEER' ? (bot.maxRpgRockets || BOT.RPG_ROCKETS_PER_SPAWN || 2) : 0;
         bot.postReviveTimer = 0;
         bot.standUpProgress = 1.0;
         bot.weaponReadyTimer = 0;
@@ -1052,6 +1053,13 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     if (bot.rpgCooldown > 0) {
       bot.rpgCooldown -= dt;
     }
+    if (bot.role === 'ENGINEER' && bot.inFriendlyForwardBase && (bot.rpgRocketsLeft ?? 2) < 2) {
+      bot._fobRpgResupplyTimer = (bot._fobRpgResupplyTimer || 0) + dt;
+      if (bot._fobRpgResupplyTimer >= 16.0) {
+        bot._fobRpgResupplyTimer = 0;
+        bot.rpgRocketsLeft = Math.min(2, (bot.rpgRocketsLeft ?? 0) + 1);
+      }
+    }
 
     bot._raycastsThisFrame = 0;
     bot._armorScanTimer = (bot._armorScanTimer || 0) - dt;
@@ -1154,10 +1162,15 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     }
 
     // Toggle shoulder-mounted RPG-7 / Stinger launcher mesh when hunting enemy armor or aircraft
+    const hasGroundRpgAmmo = (bot.rpgRocketsLeft ?? 2) > 0;
+    if (nearestArmor && !nearestArmor.isAircraft && !hasGroundRpgAmmo) {
+      nearestArmor = null;
+    }
     const shouldUseRpg = Boolean(
       nearestArmor &&
         (nearestArmor.isAircraft ||
-          nearestArmorDistSq < BOT.ENGAGE_RANGE_RPG_TOGGLE * BOT.ENGAGE_RANGE_RPG_TOGGLE)
+          (hasGroundRpgAmmo &&
+            nearestArmorDistSq < BOT.ENGAGE_RANGE_RPG_TOGGLE * BOT.ENGAGE_RANGE_RPG_TOGGLE))
     );
     if (bot.usingRpg !== shouldUseRpg) {
       bot.usingRpg = shouldUseRpg;
@@ -2150,7 +2163,12 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         remainingDiff < BOT.AIM_OFF_TARGET_THRESHOLD;
 
       const isModernEra = (this.world?.era || 'modern') === 'modern';
-      if (nearestEnemy.isVehicle && bot.role === 'ENGINEER' && isModernEra) {
+      if (
+        nearestEnemy.isVehicle &&
+        bot.role === 'ENGINEER' &&
+        isModernEra &&
+        (nearestEnemy.unit?.isAircraft || (bot.rpgRocketsLeft ?? 2) > 0)
+      ) {
         if (canFireWeapon && bot.rpgCooldown <= 0 && horizDist > 10) {
           bot.rpgCooldown = BOT.RPG_COOLDOWN_BASE + Math.random() * BOT.RPG_COOLDOWN_RAND;
           this.botFireRpgAt(bot, nearestEnemy.unit, player);
@@ -2488,6 +2506,9 @@ export function botFireRpgAt(bot, targetVehicle, player) {
     });
     return;
   }
+
+  if ((bot.rpgRocketsLeft ?? 2) <= 0) return;
+  bot.rpgRocketsLeft = Math.max(0, (bot.rpgRocketsLeft ?? 2) - 1);
 
   const dist = start.distanceTo(targetCenter);
   const rocketSpeed = 66;

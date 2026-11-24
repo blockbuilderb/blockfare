@@ -1,13 +1,13 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=119';
-import { sound } from './audio.js?v=119';
-import { NETWORK } from './config.js?v=119';
-import { events, makeEventBridge } from './events.js?v=119';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=120';
+import { sound } from './audio.js?v=120';
+import { NETWORK } from './config.js?v=120';
+import { events, makeEventBridge } from './events.js?v=120';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=119';
-import { WebRtcTransport } from './network/WebRtcTransport.js?v=119';
+} from './core/StateMachines.js?v=120';
+import { WebRtcTransport } from './network/WebRtcTransport.js?v=120';
 
 function safeStorageGet(key) {
   try {
@@ -857,6 +857,9 @@ export class NetworkManager {
       case 'conquest_sync':
         this.applyRemoteConquestSync(msg);
         break;
+      case 'match_reset':
+        this.applyRemoteMatchReset(msg);
+        break;
       case 'order_sync': {
         if (msg.team === this.player?.team && this.botManager) {
           this.botManager.issueStrategicOrder(this.player, {
@@ -930,8 +933,15 @@ export class NetworkManager {
   buildConquestSyncPacket() {
     const g = this.gameRef;
     if (!g || !this.world?.flags) return null;
+    const roundEpoch = g.roundEpoch || 1;
+    if (g.matchEnded) {
+      if (this._sentMatchEndedEpoch === roundEpoch) return null;
+      this._sentMatchEndedEpoch = roundEpoch;
+    }
     return {
       type: 'conquest_sync',
+      roundEpoch,
+      matchEnded: Boolean(g.matchEnded),
       ticketsUS: Math.round(g.ticketsUS ?? 400),
       ticketsRU: Math.round(g.ticketsRU ?? 400),
       matchTimeRemaining: Number((g.matchTimeRemaining ?? 900).toFixed(1)),
@@ -943,10 +953,40 @@ export class NetworkManager {
     };
   }
 
-  applyRemoteConquestSync(msg) {
-    if (this.isRoomAuthority()) return;
+  applyRemoteMatchReset(msg) {
     const g = this.gameRef;
+    if (!g) return;
+    const incomingEpoch = typeof msg?.roundEpoch === 'number' ? msg.roundEpoch : 1;
+    if (incomingEpoch > (g.roundEpoch || 1)) {
+      g.roundEpoch = incomingEpoch;
+      if (typeof g.resetMatch === 'function') {
+        g.resetMatch(true);
+      }
+    }
+  }
+
+  applyRemoteConquestSync(msg) {
+    const g = this.gameRef;
+    const msgEpoch = typeof msg?.roundEpoch === 'number' ? msg.roundEpoch : 1;
+    const localEpoch = g?.roundEpoch || 1;
+    // Ignore stale conquest_sync packets from peers still on an older round or sitting on Victory Screen!
+    if (msgEpoch < localEpoch) return;
+    if (g && msgEpoch > localEpoch) {
+      g.roundEpoch = msgEpoch;
+      if (g.matchEnded && !msg.matchEnded && typeof g.resetMatch === 'function') {
+        g.resetMatch(true);
+      }
+    }
+    if (this.isRoomAuthority()) return;
     if (g) {
+      const incomingEnded =
+        Boolean(msg.matchEnded) ||
+        (typeof msg.ticketsUS === 'number' && msg.ticketsUS <= 0) ||
+        (typeof msg.ticketsRU === 'number' && msg.ticketsRU <= 0) ||
+        (typeof msg.matchTimeRemaining === 'number' && msg.matchTimeRemaining <= 0);
+      if (!g.matchEnded && incomingEnded && performance.now() < (g._matchResetGraceUntil || 0)) {
+        return;
+      }
       if (typeof msg.ticketsUS === 'number') g.ticketsUS = msg.ticketsUS;
       if (typeof msg.ticketsRU === 'number') g.ticketsRU = msg.ticketsRU;
       if (typeof msg.matchTimeRemaining === 'number') {

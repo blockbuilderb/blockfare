@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=119';
-import { VehicleManager } from './vehicles.js?v=119';
-import { BotManager } from './bots.js?v=119';
-import { PlayerController } from './player.js?v=119';
-import { NetworkManager } from './network.js?v=119';
-import { UIManager } from './ui.js?v=119';
-import { TelemetryLogger } from './telemetry.js?v=119';
-import { sound } from './audio.js?v=119';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=119';
-import { events, makeEventBridge } from './events.js?v=119';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=119';
+import { VoxelWorld } from './world.js?v=120';
+import { VehicleManager } from './vehicles.js?v=120';
+import { BotManager } from './bots.js?v=120';
+import { PlayerController } from './player.js?v=120';
+import { NetworkManager } from './network.js?v=120';
+import { UIManager } from './ui.js?v=120';
+import { TelemetryLogger } from './telemetry.js?v=120';
+import { sound } from './audio.js?v=120';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=120';
+import { events, makeEventBridge } from './events.js?v=120';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=120';
 
 class BattleBitGame {
   constructor() {
@@ -74,6 +74,8 @@ class BattleBitGame {
     this.bleedPopupTimer = MATCH.BLEED_POPUP_INTERVAL;
     this.matchTimeRemaining = MATCH.DURATION;
     this.matchEnded = false;
+    this.roundEpoch = 1;
+    this._matchResetGraceUntil = 0;
     this.orbitAngle = 0;
     this._allUnits = [];
 
@@ -727,10 +729,7 @@ class BattleBitGame {
         this.ticketsRU <= 0 ||
         this.matchTimeRemaining <= 0
       ) {
-        this.ticketsUS = 400;
-        this.ticketsRU = 400;
-        this.matchTimeRemaining = MATCH.DURATION;
-        this.matchEnded = false;
+        this.resetMatch();
       }
     });
 
@@ -780,7 +779,7 @@ class BattleBitGame {
       // Tickets are deducted upon RESPAWN (-1 per soldier respawn), so if a Medic revives a downed soldier,
       // no ticket is lost!
       setTimeout(() => {
-        if (this.player.dead) {
+        if (this.player.dead && !this.matchEnded) {
           this.ui.showDeployScreen();
         }
       }, 1600);
@@ -1384,17 +1383,39 @@ class BattleBitGame {
       }
     }
 
-    // Damage enemy armored vehicles & tanks in blast radius (Airstrike/GBU top-attack penetrates roof armor!)
+    // Damage enemy armored vehicles & tanks in blast radius:
+    // - Shaped-charge RPG-7 HEAT requires a direct/near-direct hull impact (`<= 4.2m`, NOT 10.75m dirt splash!)
+    //   and delegates front/side/rear Chobham composite penetration to `damageVehicle`.
+    // - AGM-65G Maverick / Kh-29T ATGM & Heavy Bombs penetrate roof/hull armor directly!
+    const isRpgHeat = /RPG/i.test(weaponLabel) && !/TANDEM|MAVERICK|AGM|KH-29/i.test(weaponLabel);
+    const isAtgmMissile = /MAVERICK|AGM-65|KH-29/i.test(weaponLabel);
     for (const v of this.vehicleManager.vehicles) {
       if (v.dead) continue;
       const dist = Math.hypot(v.pos.x - blastPos.x, v.pos.z - blastPos.z);
-      const maxArmorBlast = radius * (isHeavyBarrage ? 2.0 : 1.75) + (v.type === 'tank' ? 2.0 : 1.0);
+      const maxArmorBlast = isRpgHeat
+        ? v.type === 'tank'
+          ? 4.2
+          : 3.6
+        : radius * (isHeavyBarrage ? 2.0 : 1.75) + (v.type === 'tank' ? 2.0 : 1.0);
       if (dist <= maxArmorBlast) {
-        const falloff =
-          dist <= radius * 0.65
+        const falloff = isRpgHeat
+          ? dist <= 3.6
             ? 1.0
-            : Math.max(0.38, 1 - dist / (maxArmorBlast + 1.5));
-        const armorMult = isHeavyBarrage
+            : 0.72
+          : dist <= radius * 0.65
+          ? 1.0
+          : Math.max(0.38, 1 - dist / (maxArmorBlast + 1.5));
+        const armorMult = isAtgmMissile
+          ? v.type === 'tank'
+            ? 1.25
+            : 1.4
+          : isRpgHeat
+          ? v.type === 'tank'
+            ? 1.0
+            : v.type === 'apc' || v.type === 'aa'
+            ? 0.95
+            : 1.45
+          : isHeavyBarrage
           ? v.type === 'tank'
             ? 0.95
             : 1.15
@@ -1977,7 +1998,7 @@ class BattleBitGame {
     }
     const extraction =
       this.player && typeof this.player.settleMatchToWarehouse === 'function'
-        ? this.player.settleMatchToWarehouse(winnerTeam)
+        ? this.player.settleMatchToWarehouse(winnerTeam, this.roundEpoch || 1)
         : null;
     events.emit('round:ended', {
       winnerTeam,
@@ -1988,7 +2009,11 @@ class BattleBitGame {
     });
   }
 
-  resetMatch() {
+  resetMatch(fromRemote = false) {
+    if (!fromRemote) {
+      this.roundEpoch = (this.roundEpoch || 1) + 1;
+    }
+    this._matchResetGraceUntil = performance.now() + 12000;
     this.syncMatchTicketsForArmyScale(this.botManager?.currentBotsPerTeam || 250, true);
     this.ticketsUS = this.ticketEconomy.START_TICKETS;
     this.ticketsRU = this.ticketEconomy.START_TICKETS;
@@ -1996,6 +2021,9 @@ class BattleBitGame {
     this.ticketStats.RU = { gainedCapture: 0, gainedPassive: 0, lostFlags: 0, lostBleed: 0, spentSoldiers: 0, spentCars: 0, spentArmor: 0, spentPlanes: 0 };
     this.matchTimeRemaining = MATCH.DURATION;
     this.matchEnded = false;
+    if (this.player) {
+      this.player.lastMatchExtraction = null;
+    }
 
     // Reset AC-130 / Aircraft Infrared (WHOT / BHOT) & Night Vision back to normal daylight view for the new round!
     if (this.player) {
@@ -2105,6 +2133,7 @@ class BattleBitGame {
       b.hp = b.maxHp || 100;
       b.bleedOutTimer = 0;
       b.respawnTimer = 0;
+      b.rpgRocketsLeft = b.role === 'ENGINEER' ? 2 : 0;
       b._losCache?.clear();
       b._seekingVehicleRef = null;
       b._defendedFlagRef = null;
@@ -2140,6 +2169,15 @@ class BattleBitGame {
     }
     this.ui.hideVictoryScreen();
     this.ui.showDeployScreen();
+    if (!fromRemote && this.network?.isMultiplayer?.()) {
+      this.network.send({
+        type: 'match_reset',
+        roundEpoch: this.roundEpoch,
+        ticketsUS: this.ticketsUS,
+        ticketsRU: this.ticketsRU,
+        matchTimeRemaining: this.matchTimeRemaining
+      });
+    }
   }
 }
 

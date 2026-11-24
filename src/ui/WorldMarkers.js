@@ -649,8 +649,19 @@ export const WorldMarkers = {
               Math.abs(dAltM) >= 12 ? ` ${dAltM > 0 ? `▲+${dAltM}m` : `▼${dAltM}m`}` : ' =ALT';
 
             // 360° Off-Boresight Dogfight Directional Turn Indicator Arrow (when enemy plane is behind/above/below/off-screen!)
+            // Suppressed inside AC-130 Pylon Orbit Gunner Sight so air-to-air dogfight clutter never floats over ground targets!
+            const inGunshipOrbitHud = Boolean(
+              activeAircraft &&
+                activeAircraft.aircraftRole === 'gunship' &&
+                !activeAircraft.gunshipManualFlight
+            );
             if (isOffScreenOrBehind) {
-              if (isEnemy && (activeAircraft || isAaGround || holdingStinger) && vDist < 1950) {
+              if (
+                isEnemy &&
+                !inGunshipOrbitHud &&
+                (activeAircraft || isAaGround || holdingStinger) &&
+                vDist < 1950
+              ) {
                 const invCamQ = (this._invCamQuat || (this._invCamQuat = new THREE.Quaternion()))
                   .copy(cam.quaternion)
                   .invert();

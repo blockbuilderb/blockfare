@@ -1,11 +1,12 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { ECONOMY, VEHICLE_STATS } from '../src/config.js?v=119';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=119';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=119';
-import { VehicleManager, classifyWeaponBallistics } from '../src/vehicles.js?v=119';
-import { BotManager, evaluateCatastrophicKill } from '../src/bots.js?v=119';
+import { ECONOMY, VEHICLE_STATS } from '../src/config.js?v=120';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=120';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=120';
+import { VehicleManager, classifyWeaponBallistics } from '../src/vehicles.js?v=120';
+import { BotManager, evaluateCatastrophicKill } from '../src/bots.js?v=120';
+import { NetworkManager } from '../src/network.js?v=120';
 
 function createEconomyPlayerHarness(overrides = {}) {
   const storage = new Map();
@@ -432,5 +433,117 @@ describe('Squad Caliber Penetration, Optics/Sensor Crits, Avionics FCS & Beyond-
     assert.equal(howitzerVictim.ragdollVelX > 12, true, 'Body is blown outward away from blast origin');
     assert.equal(howitzerVictim.ragdollVelY > 6, true, 'Body is launched upward into ragdoll arc');
     assert.equal(howitzerVictim.mesh.visible, true, 'Corpse stays visible in flight during ragdoll tumble');
+  });
+
+  test('Squad-calibrated RPG-7 PG-7V HEAT: defeated by MBT front composite, ~5-6 side hits + track crit, 3-4 rear hits + engine crit', () => {
+    const vm = {
+      world: { getGroundHeightAt: () => 0, spawnDebris: () => {} },
+      damageVehicle: VehicleManager.prototype.damageVehicle
+    };
+    const makeTank = () => ({
+      id: 'us_m1a2_test',
+      type: 'tank',
+      isAircraft: false,
+      dead: false,
+      hp: 1600,
+      maxHp: 1600,
+      yaw: 0, // nose faces -Z, rear faces +Z, right faces +X
+      eraBlocksIntact: 2,
+      pos: new THREE.Vector3(0, 0, 0)
+    });
+
+    // 1. Frontal RPG-7 hit (from -Z ahead of nose): defeated by Chobham composite (< 45 chip dmg)
+    const frontTank = makeTank();
+    vm.damageVehicle(frontTank, 220, 'LAT_RU', 'RU', 'RPG-7 HEAT', null, null, new THREE.Vector3(0, 1, -40));
+    assert.equal(frontTank.lastArmorRicochet, true, 'MBT frontal composite must defeat single-stage RPG-7 HEAT');
+    assert.ok(frontTank.lastAppliedDamage <= 45, `Expected <=45 frontal chip dmg, got ${frontTank.lastAppliedDamage}`);
+    assert.ok(frontTank.hp > 1550);
+
+    // 2. Side RPG-7 hit (from +X flank): penetrates side skirt (~245-320 dmg -> 5-6 hits to destroy + track mobility crit)
+    const sideTank = makeTank();
+    sideTank.eraBlocksIntact = 0;
+    vm.damageVehicle(sideTank, 220, 'LAT_RU', 'RU', 'RPG-7 HEAT', null, null, new THREE.Vector3(35, 1, 0));
+    assert.ok(
+      sideTank.lastAppliedDamage >= 280 && sideTank.lastAppliedDamage <= 350,
+      `Expected ~319 side RPG dmg (~5 hits on 1600 HP MBT), got ${sideTank.lastAppliedDamage}`
+    );
+    assert.equal(sideTank.subsystems.tracks, 'DAMAGED', 'Side RPG-7 hit degrades track mobility');
+
+    // 3. Rear Engine Deck RPG-7 hit (from +Z behind hull): 3-4 hits to destroy (~473 dmg + engine smoking/critical)
+    const rearTank = makeTank();
+    vm.damageVehicle(rearTank, 220, 'LAT_RU', 'RU', 'RPG-7 HEAT', null, null, new THREE.Vector3(0, 1, 35));
+    assert.ok(
+      rearTank.lastAppliedDamage >= 440 && rearTank.lastAppliedDamage <= 510,
+      `Expected ~473 rear engine-deck RPG dmg (3-4 hits on 1600 HP MBT), got ${rearTank.lastAppliedDamage}`
+    );
+    assert.ok(rearTank.subsystems.engine === 'SMOKING' || rearTank.subsystems.engine === 'CRITICAL');
+  });
+
+  test('prevents Sell-All-Loot <-> Deploy-Next-Round infinite loop from stale MP conquest_sync packets or duplicate round settlement', () => {
+    const { player } = createEconomyPlayerHarness();
+    player.matchCash = 300;
+    player.kills = 4;
+
+    // 1. Round 1 ends -> settleMatchToWarehouse(US, roundEpoch=1) populates fallback loot once
+    const ext1 = player.settleMatchToWarehouse('US', 1);
+    assert.equal(player.extractedRoundLoot.length, 3);
+    const cashAfterSettle = player.warehouseCash;
+
+    // 2. User clicks "Sell All Loot" -> extractedRoundLoot becomes [] and Vault Cash increases
+    const soldRes = player.sellAllExtractedLoot();
+    assert.equal(soldRes.ok, true);
+    assert.equal(player.extractedRoundLoot.length, 0);
+    const cashAfterSellAll = player.warehouseCash;
+    assert.ok(cashAfterSellAll > cashAfterSettle);
+
+    // 3. Calling settleMatchToWarehouse AGAIN for the same roundEpoch=1 is idempotent (never conjures 3 new loot items!)
+    const ext1Dup = player.settleMatchToWarehouse('US', 1);
+    assert.equal(ext1Dup, ext1);
+    assert.equal(player.extractedRoundLoot.length, 0, 'Same roundEpoch must never re-generate fallback loot after selling');
+    assert.equal(player.warehouseCash, cashAfterSellAll);
+
+    // 4. User clicks "Deploy to Next Round" -> roundEpoch advances to 2, tickets reset to 1200
+    const gameStub = {
+      roundEpoch: 2,
+      _matchResetGraceUntil: performance.now() + 12000,
+      matchEnded: false,
+      ticketsUS: 1200,
+      ticketsRU: 1200,
+      matchTimeRemaining: 900
+    };
+    const netStub = {
+      gameRef: gameStub,
+      world: { flags: [] },
+      isRoomAuthority: () => false,
+      applyRemoteConquestSync: NetworkManager.prototype.applyRemoteConquestSync,
+      buildConquestSyncPacket: NetworkManager.prototype.buildConquestSyncPacket
+    };
+
+    // Stale peer still sitting on Round 1 Victory Screen (or legacy ?v=119 peer without roundEpoch) sends ticketsRU: 0
+    netStub.applyRemoteConquestSync({
+      type: 'conquest_sync',
+      ticketsUS: 640,
+      ticketsRU: 0,
+      matchTimeRemaining: 0,
+      flags: []
+    });
+    assert.equal(gameStub.ticketsRU, 1200, 'Stale Round 1 conquest_sync must NOT overwrite Round 2 tickets back to 0');
+    assert.equal(gameStub.matchTimeRemaining, 900);
+
+    // Peer sitting on matchEnded === true only emits conquest_sync once per roundEpoch (no Victory Screen spam)
+    const endedGameStub = {
+      roundEpoch: 1,
+      matchEnded: true,
+      ticketsUS: 500,
+      ticketsRU: 0,
+      matchTimeRemaining: 120
+    };
+    const endedNetStub = {
+      gameRef: endedGameStub,
+      world: { flags: [] },
+      buildConquestSyncPacket: NetworkManager.prototype.buildConquestSyncPacket
+    };
+    assert.ok(endedNetStub.buildConquestSyncPacket() !== null, 'First matchEnded sync packet is emitted');
+    assert.equal(endedNetStub.buildConquestSyncPacket(), null, 'Subsequent matchEnded sync spam is suppressed');
   });
 });

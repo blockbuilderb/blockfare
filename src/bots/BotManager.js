@@ -1,17 +1,17 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT, FORMATION } from '../config.js?v=119';
-import { sound } from '../audio.js?v=119';
-import { tmpVec3 } from '../utils/VectorPool.js?v=119';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=119';
-import { events, makeEventBridge } from '../events.js?v=119';
-import { createSoldierMesh } from './SoldierMeshFactory.js?v=119';
-import { SightlineMethods } from './SightlineSystem.js?v=119';
-import { MedicAIMethods } from './MedicAI.js?v=119';
-import { BotAIMethods } from './BotAI.js?v=119';
+import { BOT, FORMATION } from '../config.js?v=120';
+import { sound } from '../audio.js?v=120';
+import { tmpVec3 } from '../utils/VectorPool.js?v=120';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=120';
+import { events, makeEventBridge } from '../events.js?v=120';
+import { createSoldierMesh } from './SoldierMeshFactory.js?v=120';
+import { SightlineMethods } from './SightlineSystem.js?v=120';
+import { MedicAIMethods } from './MedicAI.js?v=120';
+import { BotAIMethods } from './BotAI.js?v=120';
 import {
   createBaseProtectionFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=119';
+} from '../core/StateMachines.js?v=120';
 
 const BOT_NAMES_US = [
   'SgtOkiDoki', 'WakistanVet', 'VoxelMedic', 'EagleOne', 'BlockBuster',
@@ -1253,6 +1253,8 @@ export class BotManager {
       hasMedicBag: role === 'MEDIC',
       medicBagSupply: role === 'MEDIC' ? (BOT.MEDIC_BAG_MAX_SUPPLY || 600) : 0,
       maxMedicBagSupply: role === 'MEDIC' ? (BOT.MEDIC_BAG_MAX_SUPPLY || 600) : 0,
+      rpgRocketsLeft: role === 'ENGINEER' ? (BOT.RPG_ROCKETS_PER_SPAWN || 2) : 0,
+      maxRpgRockets: role === 'ENGINEER' ? (BOT.RPG_ROCKETS_PER_SPAWN || 2) : 0,
       medicKills: 0,
       planesDestroyed: 0,
       tanksDestroyed: 0,

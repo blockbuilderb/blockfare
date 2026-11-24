@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MODERN BLOCKFARE — Multi-Era Voxel Combined Arms FPS</title>
-  <link rel="stylesheet" href="./style.css?v=119" />
+  <link rel="stylesheet" href="./style.css?v=120" />
   <script type="importmap">
     {
       "imports": {
@@ -70,6 +70,13 @@
             document.getElementById('settings-modal') ||
             document.getElementById('mp-invite-modal')
           ) {
+            return;
+          }
+          var vs = document.getElementById('victory-screen');
+          if (vs && !vs.classList.contains('hidden')) {
+            e.preventDefault();
+            var nrb = document.getElementById('next-round-btn');
+            if (nrb) nrb.click();
             return;
           }
           var ds = document.getElementById('deploy-screen');
@@ -1610,6 +1617,6 @@
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=119"></script>
+  <script type="module" src="./src/main.js?v=120"></script>
 </body>
 </html>
