@@ -7,11 +7,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=124';
-import { sound } from '../audio.js?v=124';
-import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=124';
-import { events } from '../events.js?v=124';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=124';
+} from '../weapons.js?v=126';
+import { sound } from '../audio.js?v=126';
+import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=126';
+import { events } from '../events.js?v=126';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=126';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',
@@ -791,6 +791,12 @@ export const GunsmithMethods = {
         (this.team === 'RU' ? this.world?.ruBase : this.world?.usBase);
       if (basePos && Math.hypot(this.pos.x - basePos.x, this.pos.z - basePos.z) <= 225) {
         return { allowed: true, locationLabel: 'MAIN BASE HQ ARMORY' };
+      }
+      const onFriendlyRearAirbase =
+        (this.team === 'RU' ? this.pos.x >= 2475 : this.pos.x <= -2475) &&
+        Math.abs(this.pos.z) <= 300;
+      if (onFriendlyRearAirbase) {
+        return { allowed: true, locationLabel: 'STRATEGIC REAR AIRBASE HANGAR' };
       }
       if (this.world && Array.isArray(this.world.flags)) {
         for (const flag of this.world.flags) {

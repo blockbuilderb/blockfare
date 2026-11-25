@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=124';
-import { sound } from '../audio.js?v=124';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=124';
+import { VOXEL_SIZE } from '../world.js?v=126';
+import { sound } from '../audio.js?v=126';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=126';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=124';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=124';
-import { events, makeEventBridge } from '../events.js?v=124';
-import { GunsmithMethods } from './GunsmithState.js?v=124';
-import { FortificationMethods } from './FortificationBuilder.js?v=124';
-import { CommanderMethods } from './CommanderAbilities.js?v=124';
-import { VehicleControlMethods } from './VehicleControl.js?v=124';
-import { CombatMethods } from './PlayerCombat.js?v=124';
+} from '../utils/KeyboardShortcuts.js?v=126';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=126';
+import { events, makeEventBridge } from '../events.js?v=126';
+import { GunsmithMethods } from './GunsmithState.js?v=126';
+import { FortificationMethods } from './FortificationBuilder.js?v=126';
+import { CommanderMethods } from './CommanderAbilities.js?v=126';
+import { VehicleControlMethods } from './VehicleControl.js?v=126';
+import { CombatMethods } from './PlayerCombat.js?v=126';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=124';
+} from '../core/StateMachines.js?v=126';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -425,7 +425,7 @@ export class PlayerController {
   _closePopoutModals() {
     this._modalCacheTime = 0;
     const uiCache = window.game?.ui?._domCache;
-    for (const id of ['command-modal', 'mp-invite-modal']) {
+    for (const id of ['command-modal', 'mp-invite-modal', 'controls-overlay']) {
       const el = document.getElementById(id);
       if (el) el.remove();
       if (uiCache) uiCache.delete(id);
@@ -452,6 +452,7 @@ export class PlayerController {
       'mp-invite-modal',
       'multiplayer-modal',
       'settings-modal',
+      'controls-overlay',
       'deploy-screen',
       'victory-screen'
     ];
@@ -475,7 +476,8 @@ export class PlayerController {
       'command-modal',
       'mp-invite-modal',
       'multiplayer-modal',
-      'settings-modal'
+      'settings-modal',
+      'controls-overlay'
     ];
     for (let i = 0; i < ids.length; i++) {
       const el = this._getModalEl(ids[i]);
@@ -541,6 +543,18 @@ export class PlayerController {
 
     window.addEventListener('keydown', (e) => {
       this._modalCacheTime = 0;
+      const activeTag = document.activeElement ? document.activeElement.tagName : '';
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') {
+        return;
+      }
+      if (e.code === 'Escape') {
+        const ctrlOverlay = document.getElementById('controls-overlay');
+        if (ctrlOverlay) {
+          ctrlOverlay.remove();
+          if (window.game?.ui?._domCache) window.game.ui._domCache.delete('controls-overlay');
+          return;
+        }
+      }
       if (e.code === 'AltLeft' || e.code === 'AltRight') {
         this.keys[e.code] = true;
         if (this.activeVehicle && this.activeVehicle.isAircraft) {
@@ -790,8 +804,8 @@ export class PlayerController {
             this.onAwardXp(
               0,
               avoidOn
-                ? '🛡️ COLLISION AVOIDANCE: AUTO ON (AUTO PULL-UP OVER GROUND, MOUNTAINS & BUILDINGS)'
-                : '💥 COLLISION AVOIDANCE: OFF (REALISTIC MODE — PLANE WILL CRASH & EXPLODE ON GROUND/BUILDING IMPACT!)'
+                ? '🛡️ FLIGHT ASSIST [G]: AUTO ON (UPRIGHT BANK LIMITER + TERRAIN PULL-UP — EASY FLIGHT)'
+                : '🔥 FLIGHT ASSIST [G]: OFF (ADVANCED AEROBATICS — 360° BARREL ROLLS, LOOPS, UPSIDE-DOWN FLIGHT & REALISTIC CRASH!)'
             );
           }
         } else if (!this.activeVehicle) {
@@ -851,10 +865,14 @@ export class PlayerController {
       }
       if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit4' && !this.activeVehicle) this.switchSlot(3);
       if (!hasAnyModifier(e) && e.code === 'KeyR' && !e.repeat) {
-        if (this.activeVehicle && this.activeVehicle.aircraftRole === 'gunship') {
-          this.toggleGunshipFlightMode?.();
-        } else if (this.activeVehicle && this.activeVehicle.isAircraft) {
-          this.toggleAircraftLevelAutopilot?.();
+        if (this.activeVehicle && this.activeVehicle.isAircraft) {
+          if (typeof this.handleAircraftRKey === 'function') {
+            this.handleAircraftRKey();
+          } else if (this.activeVehicle.aircraftRole === 'gunship') {
+            this.toggleGunshipFlightMode?.();
+          } else {
+            this.toggleAircraftLevelAutopilot?.();
+          }
         } else if (this.activeVehicle) {
           this.vehicleManager?.triggerManualVehicleRearm?.(this.activeVehicle);
         } else {
@@ -1215,6 +1233,7 @@ export class PlayerController {
       const inAerobaticPlane = Boolean(
         av &&
           av.isAircraft &&
+          this.aircraftCollisionAvoidance === false &&
           av.aircraftRole !== 'gunship' &&
           av.aircraftRole !== 'b2_spirit'
       );
@@ -1224,9 +1243,9 @@ export class PlayerController {
         av.freeLookYaw = THREE.MathUtils.clamp((av.freeLookYaw || 0) - dx, -2.35, 2.35);
         av.freeLookPitch = THREE.MathUtils.clamp((av.freeLookPitch || 0) - dy, -1.48, 1.35);
       } else if (inAerobaticPlane) {
-        // Invert screen-to-world pitch/yaw naturally when flying upside-down via 180° roll or 360° vertical loop!
+        // Advanced Aerobatic Mode (`[G]` OFF): Invert screen-to-world pitch/yaw naturally when flying upside-down via 180° roll or 360° loop!
         const loopInverted = Math.cos(av.pitch || 0) < -0.05;
-        const rollInverted = Math.cos(av.roll || 0) < -0.15;
+        const rollInverted = Math.cos(av.roll || 0) < -0.2;
         const yawSign = (loopInverted ? -1 : 1) * (rollInverted ? -1 : 1);
         const pitchSign = rollInverted ? -1 : 1;
         this.yaw -= dx * yawSign;
@@ -1236,7 +1255,9 @@ export class PlayerController {
       } else {
         this.yaw -= dx;
         this.pitch -= dy;
-        const maxPitch = Math.PI / 2 - PLAYER.MAX_PITCH_OFFSET;
+        const maxPitch = av && av.isAircraft && av.aircraftRole !== 'gunship'
+          ? 1.08
+          : Math.PI / 2 - PLAYER.MAX_PITCH_OFFSET;
         this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch));
       }
 
@@ -1260,7 +1281,7 @@ export class PlayerController {
         e.target &&
         typeof e.target.closest === 'function' &&
         e.target.closest(
-          '#gunsmith-modal, #command-modal, #mp-invite-modal, #multiplayer-modal, #settings-modal, #deploy-screen, #victory-screen, button, input, select, label, .hud-clickable'
+          '#gunsmith-modal, #command-modal, #mp-invite-modal, #multiplayer-modal, #settings-modal, #controls-overlay, #deploy-screen, #victory-screen, button, input, select, label, .hud-clickable'
         );
 
       // Never steal pointer lock or fire weapon when clicking inside any UI modal or button!

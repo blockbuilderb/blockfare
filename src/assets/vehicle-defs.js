@@ -4,7 +4,7 @@
 // Positions stored as arrays [x, y, z] — y is computed at runtime via getGroundHeightAt.
 // =========================================================================
 
-import { VEHICLE_STATS } from '../config.js?v=124';
+import { VEHICLE_STATS } from '../config.js?v=126';
 
 export const VEHICLE_DEFS = [
   // ===================== US FLEET (Open Motor Pool Apron aligned with 28m Main Gate at x = -904..-884, z = -10..+10) =====================
@@ -352,7 +352,7 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'cas',
     team: 'US',
-    spawnPos: [-1480, 0, -138],
+    spawnPos: [-2780, 0, -138],
     spawnYaw: -Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_CAS.maxHp,
     speed: VEHICLE_STATS.PLANE_CAS.speed,
@@ -375,7 +375,7 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'fighter',
     team: 'US',
-    spawnPos: [-1436, 0, -138],
+    spawnPos: [-2736, 0, -138],
     spawnYaw: -Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_FIGHTER.maxHp,
     speed: VEHICLE_STATS.PLANE_FIGHTER.speed,
@@ -398,7 +398,7 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'gunship',
     team: 'US',
-    spawnPos: [-1576, 0, -138],
+    spawnPos: [-2876, 0, -138],
     spawnYaw: -Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_GUNSHIP.maxHp,
     speed: VEHICLE_STATS.PLANE_GUNSHIP.speed,
@@ -421,7 +421,7 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'cas',
     team: 'RU',
-    spawnPos: [1480, 0, 138],
+    spawnPos: [2780, 0, 138],
     spawnYaw: Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_CAS.maxHp,
     speed: VEHICLE_STATS.PLANE_CAS.speed,
@@ -444,7 +444,7 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'fighter',
     team: 'RU',
-    spawnPos: [1436, 0, 138],
+    spawnPos: [2736, 0, 138],
     spawnYaw: Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_FIGHTER.maxHp,
     speed: VEHICLE_STATS.PLANE_FIGHTER.speed,
@@ -467,7 +467,7 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     aircraftRole: 'gunship',
     team: 'RU',
-    spawnPos: [1576, 0, 138],
+    spawnPos: [2876, 0, 138],
     spawnYaw: Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_GUNSHIP.maxHp,
     speed: VEHICLE_STATS.PLANE_GUNSHIP.speed,
@@ -493,7 +493,7 @@ export const VEHICLE_DEFS = [
     stealthFactor: 0.12,
     aircraftRole: 'b2_spirit',
     team: 'US',
-    spawnPos: [-1528, 0, -138],
+    spawnPos: [-2828, 0, -138],
     spawnYaw: -Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_B2_SPIRIT.maxHp,
     speed: VEHICLE_STATS.PLANE_B2_SPIRIT.speed,
@@ -518,7 +518,7 @@ export const VEHICLE_DEFS = [
     stealthFactor: 0.12,
     aircraftRole: 'b2_spirit',
     team: 'RU',
-    spawnPos: [1528, 0, 138],
+    spawnPos: [2828, 0, 138],
     spawnYaw: Math.PI / 2 - 0.32,
     maxHp: VEHICLE_STATS.PLANE_B2_SPIRIT.maxHp,
     speed: VEHICLE_STATS.PLANE_B2_SPIRIT.speed,
@@ -533,6 +533,68 @@ export const VEHICLE_DEFS = [
       [-660, 495, -280],
       [-320, 505, 320]
     ]
+  },
+  // ── Permanent Hardened HQ Strategic Airbase C-RAM Phalanx CIWS & Patriot / S-400 SAM Batteries ──
+  // Prevents enemy jets from landing on or strafing parked aircraft on the opposing team's rear runway!
+  {
+    id: 'us_airbase_ciws_front',
+    name: 'CENTURION C-RAM PHALANX & PATRIOT PAC-3 AIRBASE DEFENSE',
+    type: 'emplace_aa',
+    isEmplacement: true,
+    isAirbaseDefenseBattery: true,
+    team: 'US',
+    spawnPos: [-2518, 0, -138],
+    spawnYaw: -Math.PI / 2,
+    maxHp: 3200,
+    speed: 0,
+    weaponType: 'aa_autocannon',
+    rpm: 900,
+    patrolPoints: [[-2518, 0, -138]]
+  },
+  {
+    id: 'us_airbase_ciws_rear',
+    name: 'CENTURION C-RAM PHALANX & PATRIOT PAC-3 AIRBASE DEFENSE',
+    type: 'emplace_aa',
+    isEmplacement: true,
+    isAirbaseDefenseBattery: true,
+    team: 'US',
+    spawnPos: [-2948, 0, 138],
+    spawnYaw: -Math.PI / 2,
+    maxHp: 3200,
+    speed: 0,
+    weaponType: 'aa_autocannon',
+    rpm: 900,
+    patrolPoints: [[-2948, 0, 138]]
+  },
+  {
+    id: 'ru_airbase_ciws_front',
+    name: 'PANTSIR-S1M CIWS & S-400 TRIUMF AIRBASE DEFENSE',
+    type: 'emplace_aa',
+    isEmplacement: true,
+    isAirbaseDefenseBattery: true,
+    team: 'RU',
+    spawnPos: [2518, 0, 138],
+    spawnYaw: Math.PI / 2,
+    maxHp: 3200,
+    speed: 0,
+    weaponType: 'aa_autocannon',
+    rpm: 900,
+    patrolPoints: [[2518, 0, 138]]
+  },
+  {
+    id: 'ru_airbase_ciws_rear',
+    name: 'PANTSIR-S1M CIWS & S-400 TRIUMF AIRBASE DEFENSE',
+    type: 'emplace_aa',
+    isEmplacement: true,
+    isAirbaseDefenseBattery: true,
+    team: 'RU',
+    spawnPos: [2948, 0, -138],
+    spawnYaw: Math.PI / 2,
+    maxHp: 3200,
+    speed: 0,
+    weaponType: 'aa_autocannon',
+    rpm: 900,
+    patrolPoints: [[2948, 0, -138]]
   }
 ];
 
@@ -777,7 +839,7 @@ export const AIRCRAFT_SPEED_RESEARCH = [
     gameMinSpeed: '108 km/h (30 m/s)',
     gameCruiseSpeed: '158 km/h (44 m/s)',
     gameMaxSpeed: '223 km/h (62 m/s)',
-    location: 'Outer Side Apron Bay 1 — Back (x = ∓1006, z = ∓138)'
+    location: 'Rear Strategic Airbase Bay 1 — Back (x = ∓2876, z = ∓138 • C-RAM Protected)'
   },
   {
     role: 'cas',
@@ -788,7 +850,7 @@ export const AIRCRAFT_SPEED_RESEARCH = [
     gameMinSpeed: '115 km/h (32 m/s)',
     gameCruiseSpeed: '209 km/h (58 m/s)',
     gameMaxSpeed: '302 km/h (84 m/s)',
-    location: 'Outer Side Apron Bay 3 — Mid-Front (x = ∓910, z = ∓138)'
+    location: 'Rear Strategic Airbase Bay 3 — Mid-Front (x = ∓2780, z = ∓138 • C-RAM Protected)'
   },
   {
     role: 'fighter',
@@ -799,7 +861,7 @@ export const AIRCRAFT_SPEED_RESEARCH = [
     gameMinSpeed: '151 km/h (42 m/s)',
     gameCruiseSpeed: '281 km/h (78 m/s)',
     gameMaxSpeed: '414 km/h (115 m/s)',
-    location: 'Outer Side Apron Bay 4 — Front (x = ∓866, z = ∓138)'
+    location: 'Rear Strategic Airbase Bay 4 — Front (x = ∓2736, z = ∓138 • C-RAM Protected)'
   },
   {
     role: 'b2_spirit',
@@ -810,7 +872,7 @@ export const AIRCRAFT_SPEED_RESEARCH = [
     gameMinSpeed: '173 km/h (48 m/s)',
     gameCruiseSpeed: '450 km/h (125 m/s)',
     gameMaxSpeed: '666 km/h (185 m/s Overdrive)',
-    location: 'Outer Side Stealth Canopy Bay 2 — Back-Mid (x = ∓958, z = ∓138)'
+    location: 'Rear Strategic Stealth Canopy Bay 2 — Back-Mid (x = ∓2828, z = ∓138 • C-RAM Protected)'
   }
 ];
 
@@ -971,10 +1033,10 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     spawnPos: [-1512, 0, 14],
     spawnYaw: -Math.PI / 2,
     maxHp: 340,
-    speed: 12.5,
-    accelRate: 1.85,
+    speed: 13.5,
+    accelRate: 1.95,
     brakeRate: 4.5,
-    turnRate: 2.8,
+    turnRate: 1.85,
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
@@ -992,10 +1054,10 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     spawnPos: [-1502, 0, 14],
     spawnYaw: -Math.PI / 2,
     maxHp: 340,
-    speed: 12.5,
-    accelRate: 1.85,
+    speed: 13.5,
+    accelRate: 1.95,
     brakeRate: 4.5,
-    turnRate: 2.8,
+    turnRate: 1.85,
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
@@ -1013,10 +1075,10 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     spawnPos: [-646, 0, -264],
     spawnYaw: -Math.PI / 2,
     maxHp: 340,
-    speed: 12.5,
-    accelRate: 1.85,
+    speed: 13.5,
+    accelRate: 1.95,
     brakeRate: 4.5,
-    turnRate: 2.8,
+    turnRate: 1.85,
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
@@ -1033,10 +1095,10 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     spawnPos: [1512, 0, -14],
     spawnYaw: Math.PI / 2,
     maxHp: 340,
-    speed: 12.5,
-    accelRate: 1.85,
+    speed: 13.5,
+    accelRate: 1.95,
     brakeRate: 4.5,
-    turnRate: 2.8,
+    turnRate: 1.85,
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
@@ -1054,10 +1116,10 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     spawnPos: [1502, 0, -14],
     spawnYaw: Math.PI / 2,
     maxHp: 340,
-    speed: 12.5,
-    accelRate: 1.85,
+    speed: 13.5,
+    accelRate: 1.95,
     brakeRate: 4.5,
-    turnRate: 2.8,
+    turnRate: 1.85,
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
@@ -1075,10 +1137,10 @@ export const MEDIEVAL_VEHICLE_DEFS = [
     spawnPos: [646, 0, 264],
     spawnYaw: Math.PI / 2,
     maxHp: 340,
-    speed: 12.5,
-    accelRate: 1.85,
+    speed: 13.5,
+    accelRate: 1.95,
     brakeRate: 4.5,
-    turnRate: 2.8,
+    turnRate: 1.85,
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
@@ -1103,10 +1165,10 @@ export const JURASSIC_VEHICLE_DEFS = [
     spawnPos: [-1482, 0, 12],
     spawnYaw: -Math.PI / 2,
     maxHp: 380,
-    speed: 12.5,
-    accelRate: 1.85,
+    speed: 13.5,
+    accelRate: 1.95,
     brakeRate: 4.5,
-    turnRate: 2.8,
+    turnRate: 1.85,
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
@@ -1125,10 +1187,10 @@ export const JURASSIC_VEHICLE_DEFS = [
     spawnPos: [-1498, 0, -10],
     spawnYaw: -Math.PI / 2,
     maxHp: 380,
-    speed: 12.5,
-    accelRate: 1.85,
+    speed: 13.5,
+    accelRate: 1.95,
     brakeRate: 4.5,
-    turnRate: 2.8,
+    turnRate: 1.85,
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
@@ -1147,10 +1209,10 @@ export const JURASSIC_VEHICLE_DEFS = [
     spawnPos: [-645, 0, -268],
     spawnYaw: -Math.PI / 2,
     maxHp: 380,
-    speed: 12.5,
-    accelRate: 1.85,
+    speed: 13.5,
+    accelRate: 1.95,
     brakeRate: 4.5,
-    turnRate: 2.8,
+    turnRate: 1.85,
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
@@ -1169,10 +1231,10 @@ export const JURASSIC_VEHICLE_DEFS = [
     spawnPos: [1482, 0, 12],
     spawnYaw: Math.PI / 2,
     maxHp: 380,
-    speed: 12.5,
-    accelRate: 1.85,
+    speed: 13.5,
+    accelRate: 1.95,
     brakeRate: 4.5,
-    turnRate: 2.8,
+    turnRate: 1.85,
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
@@ -1191,10 +1253,10 @@ export const JURASSIC_VEHICLE_DEFS = [
     spawnPos: [1498, 0, -10],
     spawnYaw: Math.PI / 2,
     maxHp: 380,
-    speed: 12.5,
-    accelRate: 1.85,
+    speed: 13.5,
+    accelRate: 1.95,
     brakeRate: 4.5,
-    turnRate: 2.8,
+    turnRate: 1.85,
     weaponType: 'mounted_warbow',
     rpm: 95,
     patrolPoints: [
@@ -1214,10 +1276,10 @@ export const JURASSIC_VEHICLE_DEFS = [
     spawnPos: [0, 0, -510],
     spawnYaw: 0,
     maxHp: 1350,
-    speed: 20.5,
+    speed: 14.0,
     accelRate: 1.45,
     brakeRate: 4.0,
-    turnRate: 2.1,
+    turnRate: 1.15,
     weaponType: 'trex_roar_bite',
     rpm: 65,
     patrolPoints: [
@@ -1236,10 +1298,10 @@ export const JURASSIC_VEHICLE_DEFS = [
     spawnPos: [317, 0, -307],
     spawnYaw: Math.PI / 2,
     maxHp: 1350,
-    speed: 20.5,
+    speed: 14.0,
     accelRate: 1.45,
     brakeRate: 4.0,
-    turnRate: 2.1,
+    turnRate: 1.15,
     weaponType: 'trex_roar_bite',
     rpm: 65,
     patrolPoints: [
@@ -1257,10 +1319,10 @@ export const JURASSIC_VEHICLE_DEFS = [
     spawnPos: [-270, 0, 460],
     spawnYaw: Math.PI,
     maxHp: 620,
-    speed: 27.5,
+    speed: 18.5,
     accelRate: 2.1,
     brakeRate: 5.0,
-    turnRate: 3.1,
+    turnRate: 2.15,
     weaponType: 'mounted_warbow',
     rpm: 135,
     patrolPoints: [

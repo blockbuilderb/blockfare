@@ -1,11 +1,14 @@
 import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { sound } from '../src/audio.js?v=124';
-import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=124';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=124';
-import { VehicleManager } from '../src/vehicles.js?v=124';
-import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=124';
+import { sound } from '../src/audio.js?v=126';
+import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=126';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=126';
+import { VehicleManager } from '../src/vehicles.js?v=126';
+import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=126';
+import { createVehicleMesh } from '../src/models/vehicle-model.js?v=126';
+import { BotManager, SQUAD_DEFS } from '../src/bots/BotManager.js?v=126';
+import { SQUAD_KIT_CAPS } from '../src/config.js?v=126';
 
 let createdWindowShim = false;
 let prevMuted = false;
@@ -24,9 +27,6 @@ before(() => {
 after(() => {
   if (sound.volumes) {
     sound.volumes.muted = prevMuted;
-  }
-  if (createdWindowShim) {
-    delete globalThis.window;
   }
 });
 
@@ -1123,4 +1123,414 @@ describe('3. Aircraft Ordnance Registration Invariant & ProjectileManager downwa
     assert.equal(world.projectiles.length, 1, 'A-10C Slot [2] LMB must fire Hydra-70 rocket');
     assert.match(world.projectiles[0].weaponName, /HYDRA/i);
   });
+
+  test('[G] Flight Assist ON caps fighter roll upright; [G] OFF unlocks 360° inverted flight; Runway <=35% throttle stays in Taxi Mode & Pit-Stop repairs damaged airframe parts', () => {
+    // 1. Verify F-15EX fighter wing sweeps BACKWARD (+Z aft at wingtips > root leading edge)
+    const { group: f15Mesh } = createVehicleMesh({
+      type: 'plane',
+      isAircraft: true,
+      aircraftRole: 'fighter',
+      team: 'US'
+    });
+    const wingMesh = f15Mesh.children.find(
+      (c) => c.isMesh && c.geometry?.type === 'ExtrudeGeometry' && Math.abs(c.position.y - 1.44) < 0.05
+    );
+    assert.ok(wingMesh, 'F-15EX must have sculpted ExtrudeGeometry cropped-delta main wing');
+    const posAttr = wingMesh.geometry.attributes.position;
+    let tipMaxZ = -Infinity;
+    let rootMinZ = Infinity;
+    for (let i = 0; i < posAttr.count; i++) {
+      const vx = Math.abs(posAttr.getX(i));
+      const vz = posAttr.getZ(i);
+      if (vx > 5.0 && vz > tipMaxZ) tipMaxZ = vz;
+      if (vx < 1.3 && vz < rootMinZ) rootMinZ = vz;
+    }
+    assert.ok(tipMaxZ > 1.5 && rootMinZ < -1.5, 'F-15EX wingtips must sweep BACKWARD (+Z) relative to forward wing root (-Z)');
+
+    // 2. [G] AUTO ON (default): holding [A] for 2.5s turns smoothly & NEVER flips upside-down (|roll| <= 1.06 rad)
+    const { pilot, vehicle } = createPilotOrdnanceHarness({
+      aircraftRole: 'fighter',
+      pos: new THREE.Vector3(0, 260, 0),
+      forwardSpeed: 75
+    });
+    pilot.aircraftCollisionAvoidance = true;
+    pilot.keys.KeyA = true;
+    for (let step = 0; step < 150; step++) {
+      pilot.updateAircraftControl(1 / 60, vehicle);
+    }
+    assert.ok(
+      Math.abs(vehicle.roll) <= 1.06,
+      `[G] AUTO ON must keep fighter upright in banked turns (got roll=${vehicle.roll.toFixed(3)} rad)`
+    );
+
+    // 3. [G] OFF (Advanced Aerobatics): holding [A] rolls past >2.1 rad into sustained upside-down flight!
+    pilot.toggleAircraftCollisionAvoidance(false);
+    vehicle.roll = 0;
+    for (let step = 0; step < 65; step++) {
+      pilot.updateAircraftControl(1 / 60, vehicle);
+    }
+    pilot.keys.KeyA = false;
+    for (let step = 0; step < 25; step++) {
+      pilot.updateAircraftControl(1 / 60, vehicle);
+    }
+    assert.ok(
+      Math.abs(vehicle.roll) > 2.4,
+      `[G] OFF must allow rolling into sustained ±180° inverted flight (got roll=${vehicle.roll.toFixed(3)} rad)`
+    );
+
+    // 4. Runway <=35% Taxi Detent stays on wheels (< liftoffSpeed), and HQ Runway Pit-Stop repairs damaged wings/engines!
+    pilot.toggleAircraftCollisionAvoidance(true);
+    pilot.pitch = 0;
+    vehicle.pos.set(-2736, 0, -138);
+    vehicle.roll = 0;
+    vehicle.pitch = 0;
+    vehicle.throttle = 0.28; // Inside <=35% Taxi Detent
+    vehicle.forwardSpeed = 0;
+    vehicle.hasLeftRunwayOnce = false;
+    for (let step = 0; step < 120; step++) {
+      pilot.updateAircraftControl(1 / 60, vehicle);
+    }
+    assert.ok(vehicle.forwardSpeed > 4 && vehicle.forwardSpeed <= 20.5, 'Runway <=35% throttle must cruise at ground taxi speed');
+    assert.ok(vehicle.pos.y < 0.05, 'Aircraft in <=35% Runway Taxi Detent must remain on the tarmac without auto-launching');
+
+    const airDefWorld = {
+      era: 'modern',
+      projectiles: [],
+      getGroundHeightAt: () => 0,
+      flags: []
+    };
+    const vm = new VehicleManager(new THREE.Scene(), airDefWorld);
+    const hqJet = vm.vehicles.find((v) => v.isAircraft && v.team === 'US' && v.aircraftRole === 'fighter');
+    const ruJet = vm.vehicles.find((v) => v.isAircraft && v.team === 'RU' && v.aircraftRole === 'fighter');
+    assert.ok(hqJet && ruJet, 'US and RU HQ fighters exist');
+    assert.ok(
+      Math.abs(ruJet.spawnPos.x - hqJet.spawnPos.x) >= 5400,
+      'US & RU Strategic Rear Airbases must be separated by >= 5,400m'
+    );
+    hqJet.pos.set(-2736, 0, -138);
+    hqJet.forwardSpeed = 0;
+    hqJet.hp = 820;
+    hqJet.airframeParts = {
+      avionics: 40,
+      cockpit: 75,
+      leftWing: 18,
+      rightWing: 22,
+      engines: 15,
+      tail: 45
+    };
+    for (let i = 0; i < 45; i++) {
+      vm.update(0.1, null, null, false);
+    }
+    assert.equal(Math.round(hqJet.airframeParts.leftWing), 100, 'Parked HQ Runway Pit-Stop must repair red leftWing to 100%');
+    assert.equal(Math.round(hqJet.airframeParts.engines), 100, 'Parked HQ Runway Pit-Stop must repair red engines to 100%');
+
+    // 5. Verify Hardened Revetment Spawn Protection (85% DR on own runway) & HQ Airbase C-RAM CIWS engaging enemy planes trying to land on RU runway!
+    const preCampHp = ruJet.hp;
+    vm.damageVehicle(ruJet, 200, 'SPAWN_CAMPER', 'US', '20MM VULCAN');
+    assert.equal(preCampHp - ruJet.hp, 30, 'Parked aircraft on own HQ Airbase must receive 85% Revetment Spawn Protection');
+
+    hqJet.driver = pilot;
+    hqJet.pos.set(2620, 2.0, 68); // US jet trying to land at 2m AGL on the RU Rear Runway!
+    for (let i = 0; i < 15; i++) {
+      vm.update(0.1, pilot, null, false);
+    }
+    assert.ok(
+      airDefWorld.projectiles.some((p) => /CIWS|AIRBASE SAM/i.test(p.weaponName || '')),
+      'RU Airbase C-RAM / S-400 Defense Battery must engage enemy aircraft attempting to land on the RU runway'
+    );
+  });
 });
+
+
+// ============================================================================
+// v125: AC-130 Top-Attack vs MBT + Tank BDA Logging, 1P Cockpit Airframe Lock,
+//       Unfenced Tangent Orbit Entry, [R] Auto-Takeoff/Land & Specialized Squads
+// ============================================================================
+test('v125.1 Real-World Doctrine: AC-130 105mm HE immobilizes MBT (~4-5 hits) & logs Tank BDA, while A-10C Maverick/GAU-8 is a true 2-hit Tank-Buster', () => {
+    const scene = new THREE.Scene();
+    const world = {
+      era: 'modern',
+      projectiles: [],
+      getGroundHeightAt: () => 0,
+      spawnDebris: () => {},
+      spawnExplosionVisual: () => {},
+      flags: []
+    };
+    const vm = new VehicleManager(scene, world);
+    const mbt =
+      vm.vehicles.find((v) => v.type === 'tank' && v.team === 'RU') ||
+      vm.spawnVehicle({
+        id: 'ru_t90m_bda_test',
+        name: 'T-90M PRORYV MBT',
+        type: 'tank',
+        team: 'RU',
+        spawnPos: new THREE.Vector3(0, 0, 0),
+        spawnYaw: 0,
+        maxHp: 2100,
+        speed: 16,
+        weaponType: 'tank_cannon'
+      });
+    assert.ok(mbt, 'RU Main Battle Tank exists');
+    mbt.hp = 2100;
+    mbt.maxHp = 2100;
+    mbt.eraBlocksIntact = 4;
+    mbt.pos.set(0, 0, 0);
+    mbt.yaw = 0; // Facing North (-Z)
+
+    const bdaLogs = [];
+    const onXp = (_xp, msg) => bdaLogs.push(msg);
+    const gunshipPos = new THREE.Vector3(0, 320, -280);
+
+    // 1. AC-130 25mm GAU-12 ricochets off MBT hull armor (<6 DMG) and marks ricochet in BDA
+    vm.damageVehicle(mbt, 82, 'VIPER_1', 'US', '25MM GAU-12 EQUALIZER', null, onXp, gunshipPos);
+    assert.equal(mbt.lastArmorRicochet, true);
+    assert.ok(mbt.lastAppliedDamage <= 6, `25mm should ricochet (<6 DMG), got ${mbt.lastAppliedDamage}`);
+    assert.equal(mbt.lastBdaSummary.hitsToGo, null, '25mm ricochet reports null/infinite hitsToGo');
+
+    // 2. AC-130 105mm M102 HE Howitzer (`620 * 0.78 = 484` raw): strikes TOP ROOF (bypassing ERA),
+    //    inflicts Track Mobility Kill on Hit #1, and logs ~4 hits to go (~5 total hits vs 2100 HP MBT)!
+    mbt.hp = 2100;
+    mbt.eraBlocksIntact = 4;
+    mbt._lastBdaHudLogMs = -9999;
+    const raw105He = Math.round(620 * 0.78);
+    vm.damageVehicle(mbt, raw105He, 'VIPER_1', 'US', '105MM M102 HOWITZER', null, onXp, gunshipPos);
+    assert.equal(mbt.lastHitZone, 'TOP ROOF');
+    assert.equal(mbt.subsystems.tracks, 'DAMAGED', 'AC-130 105mm HE inflicts Track Mobility Kill');
+    assert.equal(mbt.lastBdaSummary.hitNum, 1);
+    assert.equal(mbt.lastBdaSummary.hitsToGo, 4, 'AC-130 105mm HE accurately logs ~4 more hits to destroy 2100 HP MBT');
+    assert.ok(
+      bdaLogs.some((m) => m.includes('[TANK BDA]') && m.includes('HIT #1') && m.includes('4 HITS TO GO')),
+      `Expected live [TANK BDA] log with HIT #1 & 4 HITS TO GO, got: ${bdaLogs.join(' | ')}`
+    );
+
+    // 3. Dedicated Tank-Buster A-10C Warthog: AGM-65G Maverick (`580 * 1.85 = 1073` raw -> ~1202 shaped-charge DMG)
+    //    destroys a full 2100 HP MBT in 2 hits!
+    mbt.hp = 2100;
+    mbt.eraBlocksIntact = 4;
+    mbt._lastBdaHudLogMs = -9999;
+    const rawMaverick = Math.round(580 * 1.85);
+    assert.equal(
+      vm.damageVehicle(mbt, rawMaverick, 'HOG_1', 'US', 'AGM-65G MAVERICK ATGM', null, onXp, gunshipPos),
+      false
+    );
+    assert.equal(mbt.lastBdaSummary.hitsToGo, 1, '1st AGM-65G Maverick leaves 1 hit to go');
+    mbt._lastBdaHudLogMs = -9999;
+    assert.equal(
+      vm.damageVehicle(mbt, rawMaverick, 'HOG_1', 'US', 'AGM-65G MAVERICK ATGM', null, onXp, gunshipPos),
+      true,
+      '2nd AGM-65G Maverick destroys full 2100 HP MBT'
+    );
+  });
+
+  test('AC-130 orbit ring hides on runway, has zero geo-fence aloft & draws exact geometric right-hand tangent', () => {
+    const { pilot: ctrl, vehicle: v } = createPilotOrdnanceHarness({
+      aircraftRole: 'gunship',
+      pos: new THREE.Vector3(-2780, 2.0, -138),
+      forwardSpeed: 0
+    });
+    v.gunshipManualFlight = true;
+    v.orbitRadius = 220;
+
+    // 1. On the runway (altAgl < 32m): Orbit ring must be hidden!
+    ctrl.updateGunshipOrbitVisualizer(v);
+    assert.ok(!ctrl._gunshipOrbitVisGroup || ctrl._gunshipOrbitVisGroup.visible === false);
+
+    // 2. Airborne far outside old [-1850, 1850] boundary (e.g. x = -2650, z = -1600): ZERO geo-fence!
+    v.pos.set(-2650, 280, -1600);
+    v.forwardSpeed = 52;
+    v.yaw = 0; // Flying due North (-Z)
+    ctrl.yaw = 0;
+    ctrl.pitch = -0.35;
+    ctrl.camera.position.set(-2650, 282, -1600);
+    ctrl.camera.quaternion.setFromEuler(new THREE.Euler(-0.35, 0, 0, 'YXZ'));
+
+    const predicted = ctrl.computePredictedGunshipOrbit(v);
+    assert.ok(predicted.x < -2000 && predicted.z < -1700, `Orbit must NOT be geo-fenced to [-1850,-1250], got (${predicted.x}, ${predicted.z})`);
+
+    ctrl.updateGunshipOrbitVisualizer(v);
+    assert.equal(ctrl._gunshipOrbitVisGroup.visible, true);
+
+    // Verify endpoint of 28-segment curved entryLine sits at the exact 90° geometric right-hand tangent!
+    const { entryLine, entrySegs } = ctrl._gunshipOrbitVisGroup.userData;
+    const arr = entryLine.geometry.attributes.position.array;
+    const endIdx = entrySegs * 3;
+    const tx = arr[endIdx];
+    const tz = arr[endIdx + 2];
+    const rVecX = tx - predicted.x;
+    const rVecZ = tz - predicted.z;
+    const rLen = Math.hypot(rVecX, rVecZ);
+    assert.ok(Math.abs(rLen - v.orbitRadius) < 1.0, 'Entry curve terminates on orbit perimeter');
+
+    // Straight line from aircraft `P` to tangent endpoint `T` must be perpendicular to radius `(T - C)`:
+    const chordX = tx - v.pos.x;
+    const chordZ = tz - v.pos.z;
+    const cosAngle =
+      (chordX * rVecX + chordZ * rVecZ) / (Math.hypot(chordX, chordZ) * rLen);
+    assert.ok(Math.abs(cosAngle) < 0.02, `Expected 90° geometric tangent (cos≈0), got cos=${cosAngle.toFixed(4)}`);
+  });
+
+  test('1P Cockpit camera stays locked 1:1 to airframe attitude & [R] triggers Auto-Takeoff on runway / ILS Auto-Land on approach', () => {
+    const { pilot: ctrl, vehicle: v } = createPilotOrdnanceHarness({
+      aircraftRole: 'fighter',
+      pos: new THREE.Vector3(0, 260, 0),
+      forwardSpeed: 82
+    });
+    ctrl.vehicleCameraMode = 'COCKPIT_1P';
+    ctrl.thirdPersonVehicle = false;
+
+    // 1. Place jet airborne banking/turning: mouse `ctrl.yaw` leads `v.yaw` by 0.65 rad (~37°),
+    //    yet `camera.quaternion` in `COCKPIT_1P` must match `v.yaw` (the physical airframe), NEVER jumping ahead!
+    v.yaw = 0.2;
+    v.pitch = 0.05;
+    v.roll = 0.35;
+    ctrl.yaw = 0.85; // Mouse pulled 37° left
+    ctrl.pitch = 0.32;
+    ctrl.updateAircraftControl(0.016, v);
+
+    const camEuler = new THREE.Euler().setFromQuaternion(ctrl.camera.quaternion, 'YXZ');
+    assert.ok(
+      Math.abs(camEuler.y - v.yaw) < 0.02,
+      `1P Cockpit yaw (${camEuler.y.toFixed(3)}) must match airframe v.yaw (${v.yaw.toFixed(3)}), NOT mouse ctrl.yaw (${ctrl.yaw.toFixed(3)})`
+    );
+
+    // 2. On friendly HQ Runway: pressing [R] engages Auto-Takeoff + 3D Takeoff Trail!
+    v.pos.set(-2780, 1.8, -138);
+    v.forwardSpeed = 0;
+    v.throttle = 0;
+    const modeTakeoff = ctrl.handleAircraftRKey();
+    assert.equal(modeTakeoff, 'TAKEOFF');
+    assert.equal(v.autoFlightMode, 'TAKEOFF');
+    ctrl.updateRunwayFlightDirector(v);
+    assert.equal(ctrl._runwayAssistVisGroup.visible, true);
+
+    // Upon lifting off the runway (altAgl >= 11.5m & pastVr), BOTH green (TAKEOFF) AND orange (LANDING) guide lines vanish immediately!
+    v.pos.set(-2560, 14.5, -68);
+    v.forwardSpeed = 52;
+    ctrl.updateAircraftControl(0.016, v);
+    ctrl.updateRunwayFlightDirector(v);
+    assert.equal(v.autoFlightMode, null, '[R] Auto-Takeoff completes immediately upon liftoff');
+    assert.equal(
+      ctrl._runwayAssistVisGroup.visible,
+      false,
+      'Both green takeoff and orange landing guide lines must immediately disappear upon liftoff'
+    );
+
+    // 3. After flying clear of the airport (>950m) and returning at low height (110m AGL), ILS Auto-Land is eligible
+    //    AND aligns the 3D Flight-Director Trail dead-center onto the paved US Runway (z = -68, NOT grass z = 0)!
+    v.pos.set(-1500, 180, 0);
+    ctrl.getRunwayAssistEligibility(v); // Clears post-takeoff departure suppression once >950m away
+    v.pos.set(-1950, 112, 35);
+    v.forwardSpeed = 62;
+    const modeLand = ctrl.handleAircraftRKey();
+    assert.equal(modeLand, 'LANDING');
+    assert.equal(v.autoFlightMode, 'LANDING');
+    ctrl.updateRunwayFlightDirector(v);
+    const trailLine = ctrl._runwayAssistVisGroup.children.find((c) => c.isLine);
+    assert.ok(trailLine, '3D ILS Landing Trail line exists');
+    const trailPosAttr = trailLine.geometry.attributes.position;
+    const touchdownZ = trailPosAttr.getZ(trailPosAttr.count - 1);
+    assert.ok(
+      Math.abs(touchdownZ - -68) < 1.5,
+      `ILS Landing Trail touchdown Z (${touchdownZ.toFixed(1)}) must sit on US paved runway centerline (z = -68)`
+    );
+  });
+
+  test('Specialized Squad Types (Infantry 9P, Armor 4P, Air Wing 4P, Recon 6P), 12-Squad Roster & Custom Squad Creator', () => {
+    assert.ok(SQUAD_DEFS.length >= 12, `Expected >=12 specialized squads, got ${SQUAD_DEFS.length}`);
+    assert.equal(SQUAD_KIT_CAPS.SQUAD_TYPES.INFANTRY.maxSize, 9);
+    assert.equal(SQUAD_KIT_CAPS.SQUAD_TYPES.ARMOR.maxSize, 4);
+    assert.equal(SQUAD_KIT_CAPS.SQUAD_TYPES.AIR.maxSize, 4);
+    assert.equal(SQUAD_KIT_CAPS.SQUAD_TYPES.RECON.maxSize, 6);
+    assert.equal(SQUAD_KIT_CAPS.SQUAD_TYPES.INFANTRY.roleCaps.pilot, 0, 'Infantry squads separate from Pilots');
+    assert.equal(SQUAD_KIT_CAPS.SQUAD_TYPES.AIR.roleCaps.pilot, 4, 'Air Wing squads hold up to 4 Pilots');
+
+    const bm = new BotManager(new THREE.Scene(), {
+      era: 'modern',
+      flags: [{ id: 'A', owner: 'NEUTRAL', pos: new THREE.Vector3(0, 0, 0), radius: 34 }],
+      spawns: { US_BASE: new THREE.Vector3(-1520, 0, 0), RU_BASE: new THREE.Vector3(1520, 0, 0) },
+      getGroundHeightAt: () => 0
+    });
+    bm.bots = Array.from({ length: 16 }, (_, i) => ({
+      id: `us_b_${i}`,
+      team: 'US',
+      squad: 'ALPHA',
+      squadShort: 'ALP',
+      role: 'ASSAULT',
+      squadMemberIndex: i + 1
+    }));
+
+    const openRes = bm.createCustomSquad({ callsign: 'SHADOW', squadType: 'RECON', locked: false, team: 'US' });
+    assert.equal(openRes.squad.id, 'SHADOW');
+    assert.equal(openRes.squad.maxSize, 6);
+    assert.equal(openRes.recruitedAi, 5, 'Open 6-man Recon custom squad recruits 5 AI teammates for the player SL');
+
+    const lockedAir = bm.createCustomSquad({ callsign: 'SOLO-JET', squadType: 'AIR', locked: true, team: 'US' });
+    assert.equal(lockedAir.squad.isAirSquad, true);
+    assert.equal(lockedAir.squad.locked, true);
+    assert.equal(lockedAir.recruitedAi, 0, 'Locked Air Wing custom squad stays solo without AI fill');
+  });
+
+  test('Realistic Vehicle & Aircraft Speed + Turn-Radius Physics Audit (Ground Ackermann/Pivot/Grip & Aircraft Load-Factor)', () => {
+    const { VEHICLE_STATS } = { VEHICLE_STATS: null };
+    const vm = new VehicleManager(new THREE.Scene(), {
+      era: 'modern',
+      projectiles: [],
+      getGroundHeightAt: () => 0,
+      flags: []
+    });
+    const tank = vm.vehicles.find((v) => v.type === 'tank');
+    const apc = vm.vehicles.find((v) => v.type === 'apc');
+    const humvee = vm.vehicles.find((v) => v.type === 'humvee');
+    const bike = vm.vehicles.find((v) => v.type === 'bike');
+    const atv = vm.vehicles.find((v) => v.type === 'atv');
+    const fighter = vm.vehicles.find((v) => v.isAircraft && v.aircraftRole === 'fighter');
+    const cas = vm.vehicles.find((v) => v.isAircraft && v.aircraftRole === 'cas');
+    const b2 = vm.vehicles.find((v) => v.isAircraft && v.aircraftRole === 'b2_spirit');
+    const gunship = vm.vehicles.find((v) => v.isAircraft && v.aircraftRole === 'gunship');
+
+    // 1. Tank neutral pivots at 0 km/h (omega > 0.65 rad/s => R = 0m!), whereas wheeled Humvee & APC have omega = 0 at 0 km/h!
+    assert.ok(VehicleControlMethods.computeGroundVehicleMaxYawRate(tank, 0) >= 0.68, 'MBT neutral-pivots in place at 0 km/h');
+    assert.equal(VehicleControlMethods.computeGroundVehicleMaxYawRate(humvee, 0), 0, 'Wheeled Humvee cannot spin in place at 0 km/h');
+    assert.equal(VehicleControlMethods.computeGroundVehicleMaxYawRate(apc, 0), 0, 'Wheeled 8x8 APC cannot spin in place at 0 km/h');
+
+    // 2. Low-speed Ackermann minimum turning radii (5 m/s = 18 km/h) vs High-speed lateral tire/track grip radii!
+    const humveeLowR = 5.0 / VehicleControlMethods.computeGroundVehicleMaxYawRate(humvee, 5.0);
+    const apcLowR = 5.0 / VehicleControlMethods.computeGroundVehicleMaxYawRate(apc, 5.0);
+    const bikeLowR = 5.0 / VehicleControlMethods.computeGroundVehicleMaxYawRate(bike, 5.0);
+    const atvLowR = 5.0 / VehicleControlMethods.computeGroundVehicleMaxYawRate(atv, 5.0);
+    assert.ok(Math.abs(humveeLowR - 7.5) < 0.2, `Humvee low-speed R_min should be ~7.5m (24.6 ft), got ${humveeLowR.toFixed(2)}m`);
+    assert.ok(Math.abs(apcLowR - 8.8) < 0.2, `8x8 APC low-speed R_min should be ~8.8m, got ${apcLowR.toFixed(2)}m`);
+    assert.ok(bikeLowR >= 2.4 && bikeLowR <= 4.2, `Recon Bike low-speed R_min should be ~2.9–3.9m, got ${bikeLowR.toFixed(2)}m`);
+    assert.ok(atvLowR >= 3.5 && atvLowR <= 4.5, `4x4 Quad ATV low-speed R_min should be ~3.8–4.2m, got ${atvLowR.toFixed(2)}m`);
+
+    const tankTopR = tank.speed / VehicleControlMethods.computeGroundVehicleMaxYawRate(tank, tank.speed);
+    const humveeTopR = humvee.speed / VehicleControlMethods.computeGroundVehicleMaxYawRate(humvee, humvee.speed);
+    const bikeTopR = bike.speed / VehicleControlMethods.computeGroundVehicleMaxYawRate(bike, bike.speed);
+    assert.ok(tankTopR >= 35 && tankTopR <= 50, `Tank top-speed (68 km/h) turn radius should be ~42m, got ${tankTopR.toFixed(1)}m`);
+    assert.ok(humveeTopR >= 58 && humveeTopR <= 82, `Humvee top-speed (99 km/h) turn radius should be ~70m (<1.15G), got ${humveeTopR.toFixed(1)}m`);
+    assert.ok(bikeTopR >= 65 && bikeTopR <= 95, `Recon Bike top-speed (115 km/h) turn radius should be ~80m, got ${bikeTopR.toFixed(1)}m`);
+
+    // 3. Aircraft Aerodynamic Load-Factor & Speed-Squared Turn Radii (`R ∝ V^2`):
+    //    - Slowing down with [S] airbrake from 215 m/s (774 km/h) to 52 m/s (187 km/h) shrinks F-15 turn radius >10x (~570m -> ~40m)!
+    //    - A-10C CAS turns tighter than F-15EX at cruise, and B-2A Spirit carves wide ~650m bomber arcs!
+    const f15SlowDogfightR = 52 / VehicleControlMethods.computeAircraftBankedTurnRate(fighter, 52, 1.05, 0, 1, false);
+    const f15CornerR = fighter.speed / VehicleControlMethods.computeAircraftBankedTurnRate(fighter, fighter.speed, 1.05, 0, 1, false);
+    const f15AfterburnerR = fighter.maxSpeed / VehicleControlMethods.computeAircraftBankedTurnRate(fighter, fighter.maxSpeed, 1.05, 0, 1, false);
+    const casSlowR = 42 / VehicleControlMethods.computeAircraftBankedTurnRate(cas, 42, 0.94, 0, 1, false);
+    const casCruiseR = cas.speed / VehicleControlMethods.computeAircraftBankedTurnRate(cas, cas.speed, 0.94, 0, 1, false);
+    const b2CruiseR = b2.speed / VehicleControlMethods.computeAircraftBankedTurnRate(b2, b2.speed, 0.62, 0, 1, false);
+    const gunshipTransitR = gunship.speed / VehicleControlMethods.computeAircraftBankedTurnRate(gunship, gunship.speed, 0.52, 0, 1, false);
+
+    assert.ok(f15SlowDogfightR >= 28 && f15SlowDogfightR <= 52, `F-15EX slow high-alpha dogfight radius should be ~38–42m, got ${f15SlowDogfightR.toFixed(1)}m`);
+    assert.ok(f15CornerR >= 165 && f15CornerR <= 235, `F-15EX corner turn radius should be ~188m, got ${f15CornerR.toFixed(1)}m`);
+    assert.ok(f15AfterburnerR >= 500 && f15AfterburnerR <= 660, `F-15EX afterburner turn radius should widen to ~578m, got ${f15AfterburnerR.toFixed(1)}m`);
+    assert.ok(casSlowR >= 22 && casSlowR <= 38, `A-10C slow valley turn radius should be ~29m, got ${casSlowR.toFixed(1)}m`);
+    assert.ok(casCruiseR >= 70 && casCruiseR <= 135, `A-10C CAS cruise turn radius should be ~78–95m, got ${casCruiseR.toFixed(1)}m`);
+    assert.ok(b2CruiseR >= 550 && b2CruiseR <= 800, `B-2A Spirit cruise turn radius should be ~678m, got ${b2CruiseR.toFixed(1)}m`);
+    assert.ok(gunshipTransitR >= 165 && gunshipTransitR <= 240, `AC-130 transit turn radius should be ~188m, got ${gunshipTransitR.toFixed(1)}m`);
+    assert.ok(
+      f15SlowDogfightR * 10 < f15AfterburnerR,
+      'Chopping throttle from 774 km/h afterburner to 187 km/h merge speed must shrink F-15 turn radius by >10x!'
+    );
+    assert.ok(casCruiseR < f15CornerR && f15CornerR < f15AfterburnerR && f15CornerR < b2CruiseR);
+  });

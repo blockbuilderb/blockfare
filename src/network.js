@@ -1,13 +1,13 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=124';
-import { sound } from './audio.js?v=124';
-import { NETWORK } from './config.js?v=124';
-import { events, makeEventBridge } from './events.js?v=124';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=126';
+import { sound } from './audio.js?v=126';
+import { NETWORK } from './config.js?v=126';
+import { events, makeEventBridge } from './events.js?v=126';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=124';
-import { WebRtcTransport } from './network/WebRtcTransport.js?v=124';
+} from './core/StateMachines.js?v=126';
+import { WebRtcTransport } from './network/WebRtcTransport.js?v=126';
 
 function safeStorageGet(key) {
   try {
@@ -737,6 +737,7 @@ export class NetworkManager {
     // 1. Browser BroadcastChannel for instant 0ms multi-tab local testing
     if (typeof BroadcastChannel !== 'undefined') {
       this.broadcastChannel = new BroadcastChannel('battlebit_clone_net_v1');
+      this.broadcastChannel.unref?.();
       this.broadcastChannel.onmessage = (ev) => {
         if (
           this.gameMode === 'MULTIPLAYER' &&

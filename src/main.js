@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=124';
-import { VehicleManager } from './vehicles.js?v=124';
-import { BotManager } from './bots.js?v=124';
-import { PlayerController } from './player.js?v=124';
-import { NetworkManager } from './network.js?v=124';
-import { UIManager } from './ui.js?v=124';
-import { TelemetryLogger } from './telemetry.js?v=124';
-import { sound } from './audio.js?v=124';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=124';
-import { events, makeEventBridge } from './events.js?v=124';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=124';
+import { VoxelWorld } from './world.js?v=126';
+import { VehicleManager } from './vehicles.js?v=126';
+import { BotManager } from './bots.js?v=126';
+import { PlayerController } from './player.js?v=126';
+import { NetworkManager } from './network.js?v=126';
+import { UIManager } from './ui.js?v=126';
+import { TelemetryLogger } from './telemetry.js?v=126';
+import { sound } from './audio.js?v=126';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=126';
+import { events, makeEventBridge } from './events.js?v=126';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=126';
 
 class BattleBitGame {
   constructor() {
@@ -1389,9 +1389,15 @@ class BattleBitGame {
     // Damage enemy armored vehicles & tanks in blast radius:
     // - Shaped-charge RPG-7 HEAT requires a direct/near-direct hull impact (`<= 4.2m`, NOT 10.75m dirt splash!)
     //   and delegates front/side/rear Chobham composite penetration to `damageVehicle`.
-    // - AGM-65G Maverick / Kh-29T ATGM & Heavy Bombs penetrate roof/hull armor directly!
+    // - A-10C / Su-25 AGM-65G Maverick / Kh-29T ATGM & Heavy Bombs are true Anti-Armor Tank-Busters (2-hit MBT kill)!
+    // - AC-130 105mm M102 / 40mm Bofors fire HE artillery/frag shells: devastating vs infantry, buildings, cars & APCs,
+    //   while against 65-ton MBTs they inflict Track Mobility Kills + HE concussion (~4–5 direct 105mm hits solo)!
     const isRpgHeat = /RPG/i.test(weaponLabel) && !/TANDEM|MAVERICK|AGM|KH-29/i.test(weaponLabel);
-    const isAtgmMissile = /MAVERICK|AGM-65|KH-29/i.test(weaponLabel);
+    const isAtgmMissile = /MAVERICK|AGM-65|KH-29|HELLFIRE|GRIFFIN|TOW|KORNET|REFLEKS|LAHAT/i.test(weaponLabel);
+    const isHydraRocket = /HYDRA|S-8|POD/i.test(weaponLabel);
+    const isAc130Howitzer = /105MM|HOWITZER/i.test(weaponLabel);
+    const isAc130Bofors = /40MM|BOFORS/i.test(weaponLabel);
+    const isHeavyAerialBomb = /JDAM|GBU|CARPET|MK-82|FAB-250|MOP|FOAB|AIRSTRIKE/i.test(weaponLabel);
     for (const v of this.vehicleManager.vehicles) {
       if (v.dead) continue;
       const dist = Math.hypot(v.pos.x - blastPos.x, v.pos.z - blastPos.z);
@@ -1410,8 +1416,24 @@ class BattleBitGame {
           : Math.max(0.38, 1 - dist / (maxArmorBlast + 1.5));
         const armorMult = isAtgmMissile
           ? v.type === 'tank'
-            ? 1.25
-            : 1.4
+            ? 1.85
+            : 1.95
+          : isHeavyAerialBomb
+          ? v.type === 'tank'
+            ? 1.45
+            : 1.65
+          : isHydraRocket
+          ? v.type === 'tank'
+            ? 0.85
+            : 1.15
+          : isAc130Howitzer
+          ? v.type === 'tank'
+            ? 0.78
+            : 1.85
+          : isAc130Bofors
+          ? v.type === 'tank'
+            ? 0.38
+            : 1.15
           : isRpgHeat
           ? v.type === 'tank'
             ? 1.0
@@ -1429,9 +1451,6 @@ class BattleBitGame {
           : 0.9;
         const dmg = Math.round(maxDamage * armorMult * falloff);
         if (dmg > 0 && v.team !== ownerTeam) {
-          if (isPlayerOwner) {
-            this.ui.showHitmarker('armor', `${v.type === 'tank' ? 'TANK' : 'VEHICLE'} HIT`);
-          }
           const destroyed = this.vehicleManager.damageVehicle(
             v,
             dmg,
@@ -1442,6 +1461,14 @@ class BattleBitGame {
             isPlayerOwner ? this.player.onAwardXp : null,
             shooterPos
           );
+          if (isPlayerOwner) {
+            const bdaTag =
+              v.lastBdaHitmarker ||
+              (destroyed
+                ? `${v.type === 'tank' ? 'TANK' : 'VEHICLE'} DESTROYED`
+                : `${v.type === 'tank' ? 'TANK' : 'VEHICLE'} HIT`);
+            this.ui.showHitmarker(destroyed ? 'kill' : 'armor', bdaTag);
+          }
           if (destroyed && !isPlayerOwner && owner && typeof owner.kills === 'number') {
             owner.kills++;
           }

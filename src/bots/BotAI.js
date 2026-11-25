@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=124';
-import { BOT } from '../config.js?v=124';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=124';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=124';
-import { events } from '../events.js?v=124';
+import { sound } from '../audio.js?v=126';
+import { BOT } from '../config.js?v=126';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=126';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=126';
+import { events } from '../events.js?v=126';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 

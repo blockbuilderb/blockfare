@@ -1,4 +1,4 @@
-import { sound } from '../audio.js?v=124';
+import { sound } from '../audio.js?v=126';
 
 export const SettingsModal = {
   bindSettingsEvents() {
@@ -168,7 +168,10 @@ export const SettingsModal = {
           <div style="font-size:18px;font-weight:900;color:#f1c40f;letter-spacing:1px;">🔊 TACTICAL AUDIO &amp; WORLD SETTINGS</div>
           <div style="font-size:11px;color:#81ecec;font-weight:700;">FINE-TUNE MASTER GAIN (0–100), CHANNELS &amp; BUILDING DESTRUCTION • AUTO-SAVED</div>
         </div>
-        <button type="button" id="settings-close-top-btn" style="background:rgba(231,76,60,0.2);border:1px solid #e74c3c;color:#ff7675;border-radius:4px;padding:5px 12px;font-size:12px;font-weight:900;cursor:pointer;">✕ CLOSE</button>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button type="button" id="settings-open-manual-btn" style="background:rgba(0,210,211,0.18);border:1px solid #00d2d3;color:#81ecec;border-radius:4px;padding:5px 10px;font-size:11.5px;font-weight:900;cursor:pointer;">📖 CONTROLS [? / F1]</button>
+          <button type="button" id="settings-close-top-btn" style="background:rgba(231,76,60,0.2);border:1px solid #e74c3c;color:#ff7675;border-radius:4px;padding:5px 12px;font-size:12px;font-weight:900;cursor:pointer;">✕ CLOSE</button>
+        </div>
       </div>
 
       <!-- MASTER VOLUME SECTION -->
@@ -393,8 +396,8 @@ export const SettingsModal = {
       <div style="background:rgba(16,26,36,0.88);border:1px solid rgba(0,210,211,0.45);border-left:4px solid #00d2d3;border-radius:6px;padding:10px 14px;margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
           <div>
-            <span style="font-size:13px;font-weight:900;color:#00d2d3;">8. AIRCRAFT COLLISION AVOIDANCE (DEFAULT: AUTO ON • HOTKEY [G] IN FLIGHT)</span>
-            <div style="font-size:10px;color:#bdc3c7;">When set to <b>AUTO ON</b> (default), planes automatically pull up over ground, mountains &amp; buildings for easier flight control. Turn <b>OFF (REALISTIC CRASH MODE)</b> so planes can crash into buildings, mountains, or the ground and explode!</div>
+            <span style="font-size:13px;font-weight:900;color:#00d2d3;">8. AIRCRAFT FLIGHT ASSIST &amp; COLLISION AVOIDANCE (DEFAULT: AUTO ON • HOTKEY [G] IN FLIGHT)</span>
+            <div style="font-size:10px;color:#bdc3c7;">When <b>AUTO ON</b> (default, Easy Flight), planes auto pull-up over terrain/buildings AND keep turns upright (cannot flip upside-down). Turn <b>OFF (ADVANCED AEROBATICS)</b> to unlock full <b>360° Barrel Rolls, Vertical Loops &amp; Upside-Down Flight</b> plus realistic ground/building crashes!</div>
           </div>
           <button
             type="button"
@@ -405,7 +408,7 @@ export const SettingsModal = {
               airAvoidEnabled ? '#7bed9f' : '#ff7675'
             };border-radius:4px;padding:6px 12px;font-size:11.5px;font-weight:900;cursor:pointer;white-space:nowrap;"
           >
-            ${airAvoidEnabled ? '🛡️ AUTO ON (EASY FLIGHT)' : '💥 OFF (REALISTIC CRASH)'}
+            ${airAvoidEnabled ? '🛡️ AUTO ON (EASY UPRIGHT)' : '🔥 OFF (360° AEROBATICS)'}
           </button>
         </div>
       </div>
@@ -689,6 +692,16 @@ export const SettingsModal = {
         this.renderSettingsModalContent(modal);
         this.updateAudioSettingsHud();
         sound.playRadioBeep(true);
+      });
+    }
+
+    const openManualBtn = modal.querySelector('#settings-open-manual-btn');
+    if (openManualBtn) {
+      openManualBtn.addEventListener('click', () => {
+        this.toggleSettingsModal(false);
+        if (typeof this.toggleControlsOverlay === 'function') {
+          this.toggleControlsOverlay();
+        }
       });
     }
 

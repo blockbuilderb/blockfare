@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=124';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=124';
+import { sound } from './audio.js?v=126';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=126';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=124';
-import { createVehicleMesh } from './models/vehicle-model.js?v=124';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=124';
-import { events, makeEventBridge } from './events.js?v=124';
+} from './assets/vehicle-defs.js?v=126';
+import { createVehicleMesh } from './models/vehicle-model.js?v=126';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=126';
+import { events, makeEventBridge } from './events.js?v=126';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=124';
+} from './core/StateMachines.js?v=126';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -760,6 +760,10 @@ export class VehicleManager {
       ? VEHICLE_STATS.AA_VEHICLE
       : cfg.type === 'apc'
       ? VEHICLE_STATS.APC
+      : cfg.type === 'atv'
+      ? VEHICLE_STATS.ATV_QUAD
+      : cfg.type === 'bike'
+      ? VEHICLE_STATS.BIKE_250CC_2T
       : VEHICLE_STATS.HUMVEE;
     const turnRate =
       cfg.turnRate ?? statBlock.turnRate ?? (cfg.type === 'tank' ? 0.95 : cfg.type === 'apc' ? 1.22 : 1.45);
@@ -825,6 +829,10 @@ export class VehicleManager {
       turnRate,
       accelRate,
       brakeRate,
+      minTurnRadiusM: cfg.minTurnRadiusM ?? statBlock.minTurnRadiusM ?? null,
+      maxLatAccelMs2: cfg.maxLatAccelMs2 ?? statBlock.maxLatAccelMs2 ?? null,
+      canNeutralPivot: Boolean(cfg.canNeutralPivot ?? statBlock.canNeutralPivot ?? false),
+      maxTurnAccelMs2: cfg.maxTurnAccelMs2 ?? statBlock.maxTurnAccelMs2 ?? null,
       hullHalfWidth,
       hullHalfLength,
       massTonnes,
@@ -872,7 +880,7 @@ export class VehicleManager {
       coaxOverheated: false,
       barrelRecoil: 0,
       patrolIndex: 0,
-      aiFireTimer: 1.5 + Math.random() * 2.5,
+      aiFireTimer: cfg.isAirbaseDefenseBattery ? 0.12 : 1.5 + Math.random() * 2.5,
       setupState: cfg.type === 'trebuchet' ? 'UNSET' : 'READY_FIRING',
       setupProgress: cfg.type === 'trebuchet' ? 0 : 1.0,
       crewCalled: false,
@@ -974,10 +982,10 @@ export class VehicleManager {
       spawnPos,
       spawnYaw: yaw,
       maxHp: 340,
-      speed: 12.5,
-      accelRate: 1.85,
+      speed: 13.5,
+      accelRate: 1.95,
       brakeRate: 4.5,
-      turnRate: 2.8,
+      turnRate: 1.85,
       weaponType: 'mounted_warbow',
       rpm: 95,
       patrolPoints: [spawnPos.clone()]
@@ -1279,7 +1287,47 @@ export class VehicleManager {
   triggerManualVehicleRearm(v) {
     if (!v || v.dead || v.isAircraft) return false;
     const drv = v.driver;
-    if (v.inRearmZone) {
+    let inZone = Boolean(v.inRearmZone);
+    if (!inZone) {
+      const hqBase =
+        v.team === 'RU'
+          ? this.world?.spawns?.RU_BASE || { x: 1520, z: 0 }
+          : this.world?.spawns?.US_BASE || { x: -1520, z: 0 };
+      if (Math.hypot(v.pos.x - hqBase.x, v.pos.z - hqBase.z) <= 145) {
+        inZone = true;
+        v.activeSupplyLabel = 'HQ MOTOR POOL DEPOT';
+      } else if (Array.isArray(this.world?.flags)) {
+        for (let fi = 0; fi < this.world.flags.length; fi++) {
+          const fl = this.world.flags[fi];
+          if (
+            fl &&
+            fl.owner === v.team &&
+            Math.hypot(v.pos.x - fl.pos.x, v.pos.z - fl.pos.z) <= (fl.radius || 34) + 10
+          ) {
+            inZone = true;
+            v.activeSupplyLabel = `OBJ ${fl.id} FORWARD BASE DEPOT`;
+            break;
+          }
+        }
+      }
+      if (!inZone && Array.isArray(this.world?.ammoCrates)) {
+        for (let ci = 0; ci < this.world.ammoCrates.length; ci++) {
+          const crate = this.world.ammoCrates[ci];
+          if (
+            crate &&
+            (!crate.team || crate.team === v.team) &&
+            crate.pos &&
+            Math.hypot(v.pos.x - crate.pos.x, v.pos.z - crate.pos.z) <= 16.0
+          ) {
+            inZone = true;
+            v.activeSupplyLabel = 'FIELD AMMO & VEHICLE LOGISTICS STASH [7]';
+            break;
+          }
+        }
+      }
+      if (inZone) v.inRearmZone = true;
+    }
+    if (inZone) {
       const didRearm = this.rearmVehicleOrdnance(v);
       let didHeal = false;
       if (v.hp < v.maxHp) {
@@ -1656,6 +1704,8 @@ export class VehicleManager {
     }
     if (plane && preferredRole === 'wright_flyer' && allowSecretBypass) {
       plane.isSecretOmegaFlyer = true;
+      plane.speed = 145.0;
+      plane.maxSpeed = 235.0;
       plane.maxHp = 99999;
       plane.hp = 99999;
     }
@@ -1788,19 +1838,19 @@ export class VehicleManager {
       const apronX =
         normRole === 'gunship'
           ? isRU
-            ? 1576
-            : -1576
+            ? 2876
+            : -2876
           : normRole === 'b2_spirit'
           ? isRU
-            ? 1528
-            : -1528
+            ? 2828
+            : -2828
           : normRole === 'cas'
           ? isRU
-            ? 1480
-            : -1480
+            ? 2780
+            : -2780
           : isRU
-          ? 1436
-          : -1436;
+          ? 2736
+          : -2736;
       const gH = this.world ? this.world.getGroundHeightAt(apronX, apronZ) : 0;
       const nameByRole = {
         cas: isRU
@@ -1934,19 +1984,19 @@ export class VehicleManager {
         ? plane.spawnPos.x
         : normRole === 'gunship'
         ? isRU
-          ? 1576
-          : -1576
+          ? 2876
+          : -2876
         : normRole === 'b2_spirit'
         ? isRU
-          ? 1528
-          : -1528
+          ? 2828
+          : -2828
         : normRole === 'cas'
         ? isRU
-          ? 1480
-          : -1480
+          ? 2780
+          : -2780
         : isRU
-        ? 1436
-        : -1436;
+        ? 2736
+        : -2736;
       const groundY = this.world ? this.world.getGroundHeightAt(apronX, apronZ) : 0;
       plane.pos.set(apronX, groundY, apronZ);
       plane.yaw = plane.spawnYaw ?? (isRU ? Math.PI / 2 - 0.32 : -Math.PI / 2 - 0.32);
@@ -2624,7 +2674,34 @@ export class VehicleManager {
       if (!vehicle.subsystems) {
         vehicle.subsystems = { tracks: 'OK', turret: 'OK', engine: 'OK', optics: 'OK' };
       }
+      const wUpArmor = String(weaponName || '').toUpperCase();
+      const isStandardRpg =
+        /RPG/.test(wUpArmor) && !/TANDEM|MAVERICK|AGM|KH-29/.test(wUpArmor);
+      let elevSinFromAttacker = 0;
       if (attackerPos) {
+        const dyElev = attackerPos.y - vehicle.pos.y;
+        const dist3DElev = Math.max(1, Math.hypot(attackerPos.x - vehicle.pos.x, dyElev, attackerPos.z - vehicle.pos.z));
+        elevSinFromAttacker = dyElev / dist3DElev;
+      }
+      // Steep overhead top-attack (>=20° above horizon OR aerial howitzer/bomb/mortar) strikes thin 25-35mm turret roof
+      // & rear engine louvers, completely bypassing horizontal Chobham frontal glacis & frontal ERA blocks!
+      const isOverheadTopAttack =
+        !isStandardRpg &&
+        !isA10Gau8 &&
+        !isAc13025mm &&
+        (elevSinFromAttacker >= 0.34 ||
+          isAc130105mm ||
+          isAc13040mm ||
+          /JDAM|GBU|MORTAR|CARPET|MK-82|FAB-250|MOP|FOAB|HELLFIRE|GRIFFIN/.test(wUpArmor));
+
+      if (isOverheadTopAttack) {
+        hitZone = 'TOP ROOF';
+        armorNote = 'OVERHEAD TOP-ROOF / ENGINE-DECK STRIKE (BYPASSED FRONT GLACIS!)';
+        vehicle.armorZones.rear = Math.max(
+          0,
+          Math.round((vehicle.armorZones.rear ?? 100) - (amount / Math.max(1, vehicle.maxHp)) * 145)
+        );
+      } else if (attackerPos) {
         const dx = attackerPos.x - vehicle.pos.x;
         const dz = attackerPos.z - vehicle.pos.z;
         const horiz = Math.hypot(dx, dz);
@@ -2635,10 +2712,6 @@ export class VehicleManager {
           const rightZ = -Math.sin(vehicle.yaw || 0);
           const frontDot = (dx * fwdX + dz * fwdZ) / horiz;
           const rightDot = (dx * rightX + dz * rightZ) / horiz;
-
-          const wUpArmor = String(weaponName || '').toUpperCase();
-          const isStandardRpg =
-            /RPG/.test(wUpArmor) && !/TANDEM|MAVERICK|AGM|KH-29/.test(wUpArmor);
 
           if (frontDot >= 0.55) {
             hitZone = 'FRONT';
@@ -2751,26 +2824,61 @@ export class VehicleManager {
     }
 
     // =========================================================================
-    // REALISTIC AUTOCANNON / HOWITZER PENETRATION VS. MAIN BATTLE TANKS (MBT)
-    // - AC-130 25mm Gatling bounces off heavy MBT armor (use [3] 105mm M102 Howitzer!)
-    // - AC-130 40mm Bofors deals light concussion/track damage to MBTs; 105mm penetrates top deck!
-    // - A-10 30mm GAU-8 bounces off MBT frontal glacis, requiring steep >=25° top-deck dives,
-    //   rear-engine-deck attacks, or Slot [3] AGM/GBU heavy ordnance!
+    // REAL-WORLD AIRFRAME DOCTRINE: AC-130 (SOFT/LIGHT/INFANTRY CAS) VS. A-10C WARTHOG (TANK-BUSTER!)
+    // - AC-130 is an infantry/truck/compound gunship (NOT a dedicated tank killer):
+    //     * [1] 25mm GAU-12: Ricochets off MBT hull (0 pen), cracks external Optics.
+    //     * [2] 40mm Bofors: Light HE concussion + Track damage vs MBTs (~30+ hits solo).
+    //     * [3] 105mm M102 Howitzer (HE artillery shell): Inflicts Track Mobility Kill + ~485 HE roof concussion
+    //           (~4–5 direct 105mm hits to destroy a 2,100 HP MBT; immobilizes it for friendly A-10s / Engineers!).
+    // - A-10C Warthog / Su-25SM Frogfoot IS the dedicated Anti-Armor Tank-Buster:
+    //     * [3] AGM-65G Maverick / Kh-29T Shaped-Charge ATGM: ~1,200 DMG top-attack -> 2 hits destroy any MBT!
+    //     * [1] 30mm GAU-8 Depleted-Uranium "BRRRT!": Steep >=20° roof dive or rear pass shreds an MBT in ~1.0s!
     // =========================================================================
     if (vehicle.type === 'tank') {
-      if (isAc13025mm) {
+      const isDedicatedAtgm = /MAVERICK|AGM-65|KH-29|HELLFIRE|GRIFFIN/.test(
+        String(weaponName || '').toUpperCase()
+      );
+      if (isDedicatedAtgm) {
+        amount = Math.round(amount * 1.12);
+        if (vehicle.subsystems) {
+          vehicle.subsystems.tracks = 'DAMAGED';
+          vehicle.subsystems.engine = 'CRITICAL';
+        }
+        armorNote = '🎯 AGM-65 / KH-29 SHAPED-CHARGE TANK-BUSTER PENETRATION (CRITICAL!)';
+        vehicle.lastHitDesc = armorNote;
+      } else if (isAc13025mm) {
         amount = Math.max(1, Math.round(amount * 0.06));
         vehicle.lastArmorRicochet = true;
-        armorNote = 'RICOCHET: 25MM CANNOT PENETRATE MBT ARMOR — USE [3] 105MM HOWITZER!';
+        if (critRng < 0.25 && vehicle.subsystems) {
+          vehicle.subsystems.optics = 'DAMAGED';
+          vehicle.opticsGlitchTimer = 12.0;
+          vehicle.lastSubsystemCrit = 'OPTICS';
+          armorNote = '🔭 25MM SHATTERED TANK OPTICS (RICOCHET — USE A-10 CAS / ATGM VS TANKS!)';
+        } else {
+          armorNote = 'RICOCHET: 25MM CANNOT PENETRATE MBT — USE [3] 105MM TO TRACK OR CALL A-10 TANK-BUSTER!';
+        }
         vehicle.lastHitDesc = armorNote;
       } else if (isAc13040mm) {
-        amount = Math.max(4, Math.round(amount * 0.35));
-        if (vehicle.subsystems) vehicle.subsystems.tracks = 'DAMAGED';
-        armorNote = '40MM HE TOP CONCUSSION (-65% VS MBT • TRACKS DAMAGED)';
+        amount = Math.max(10, Math.round(amount * 0.62));
+        if (vehicle.subsystems) {
+          vehicle.subsystems.tracks = 'DAMAGED';
+        }
+        armorNote = '💥 40MM HE CONCUSSION (TRACK MOBILITY KILL — LOW HULL PEN VS HEAVY MBT)';
         vehicle.lastHitDesc = armorNote;
       } else if (isAc130105mm) {
-        amount = Math.round(amount * 1.15);
-        armorNote = '105MM M102 TOP-DECK ARMOR PENETRATION (+15% CRITICAL!)';
+        // Real 105mm M102 fires HE artillery shells (not APFSDS/HEAT): immobilizes tracks & deals ~485 roof concussion (4–5 direct hits!)
+        amount = Math.max(40, Math.round(amount * 1.0));
+        if (vehicle.subsystems) {
+          if (amount >= 220) {
+            vehicle.subsystems.tracks = 'DAMAGED';
+          }
+          if (vehicle.hp - amount < vehicle.maxHp * 0.45) {
+            vehicle.subsystems.engine = 'CRITICAL';
+          } else if (amount >= 350 && vehicle.subsystems.engine === 'OK') {
+            vehicle.subsystems.engine = 'SMOKING';
+          }
+        }
+        armorNote = '💥 105MM HE ROOF CONCUSSION (MOBILITY KILL — A-10 WARTHOG / AT RECOMMENDED VS MBT!)';
         vehicle.lastHitDesc = armorNote;
       } else if (isA10Gau8) {
         let elevSin = 0;
@@ -2779,20 +2887,25 @@ export class VehicleManager {
           const dist3D = Math.max(1, attackerPos.distanceTo(vehicle.pos));
           elevSin = dy / dist3D;
         }
-        const isSteepTopAttack = elevSin >= 0.42; // >= ~25° dive onto thin top roof/engine deck
+        const isSteepTopAttack = elevSin >= 0.34; // >= ~20° dive onto thin top roof/engine deck
         if (isSteepTopAttack || hitZone === 'REAR') {
-          amount = Math.max(4, Math.round(amount * 0.62));
+          amount = Math.max(12, Math.round(amount * 1.05));
+          if (vehicle.subsystems) {
+            vehicle.subsystems.engine =
+              vehicle.hp - amount < vehicle.maxHp * 0.5 ? 'CRITICAL' : 'SMOKING';
+            vehicle.subsystems.tracks = 'DAMAGED';
+          }
           armorNote = isSteepTopAttack
-            ? '30MM GAU-8 STEEP TOP-ROOF PENETRATION!'
-            : '30MM GAU-8 REAR ENGINE LOUVER PENETRATION!';
+            ? '🔥 30MM DU GAU-8 TANK-BUSTER TOP-ROOF PENETRATION!'
+            : '🔥 30MM DU GAU-8 REAR ENGINE DECK PENETRATION!';
         } else if (hitZone === 'FRONT') {
           amount = Math.max(1, Math.round(amount * 0.08));
           vehicle.lastArmorRicochet = true;
-          armorNote = 'RICOCHET: 30MM BOUNCED OFF MBT FRONT GLACIS — DIVE ON TOP/REAR OR USE [3] AGM/GBU!';
+          armorNote = 'RICOCHET: 30MM BOUNCED OFF MBT FRONT GLACIS — DIVE >=20° ON TOP/REAR OR FIRE [3] AGM-65 MAVERICK!';
         } else {
-          amount = Math.max(2, Math.round(amount * 0.2));
+          amount = Math.max(6, Math.round(amount * 0.38));
           if (vehicle.subsystems) vehicle.subsystems.tracks = 'DAMAGED';
-          armorNote = '30MM GAU-8 SKIRT DEFLECTION (-80% • TRACKS DAMAGED)';
+          armorNote = '30MM GAU-8 SIDE SKIRT PENETRATION (TRACKS SHREDDED)';
         }
         vehicle.lastHitDesc = armorNote;
       }
@@ -2811,6 +2924,21 @@ export class VehicleManager {
           avionics: 100,
           cockpit: 100
         };
+      }
+      // Hardened Rear Airbase Revetment & CIWS Spawn-Protection Shield:
+      // Friendly aircraft parked on their own HQ Airbase or rolling for takeoff (< 18m AGL) take 85% less damage
+      // so enemies can NEVER spawn-camp planes on the runway before they lift off!
+      if (vehicle.pos && attackerTeam && attackerTeam !== vehicle.team) {
+        const isUsAir = vehicle.team !== 'RU';
+        const onOwnRearAirbase =
+          (isUsAir ? vehicle.pos.x <= -2475 : vehicle.pos.x >= 2475) &&
+          Math.abs(vehicle.pos.z) <= 300;
+        if (onOwnRearAirbase) {
+          const gY = this.world ? this.world.getGroundHeightAt(vehicle.pos.x, vehicle.pos.z) : 0;
+          if (vehicle.pos.y - gY < 18.0) {
+            amount = Math.max(1, Math.round(amount * 0.15));
+          }
+        }
       }
       const refPt = hitPoint || attackerPos;
       let partKey = 'engines';
@@ -2901,6 +3029,11 @@ export class VehicleManager {
       }
     }
 
+    const prevVehicleHp = vehicle.hp;
+    if (prevVehicleHp >= (vehicle.maxHp || 1) * 0.98) {
+      vehicle._bdaHitCount = 0;
+      vehicle._bdaRicochetCount = 0;
+    }
     vehicle.lastAppliedDamage = amount;
     vehicle.hp = Math.max(0, vehicle.hp - amount);
     vehicle.hullIntegrityPct = Math.max(
@@ -2915,6 +3048,116 @@ export class VehicleManager {
       }
       if (vehicle.hullIntegrityPct < 45 && amount >= 85) {
         vehicle.subsystems.tracks = 'DAMAGED';
+      }
+    }
+
+    // =========================================================================
+    // LIVE ARMOR BATTLE-DAMAGE ASSESSMENT (BDA) & "HITS TO GO" TELEMETRY LOGGING
+    // Tracks penetrating hit count, exact HP remaining, and estimated hits left to destroy!
+    // =========================================================================
+    if (isArmoredGround) {
+      const isRicochet = Boolean(vehicle.lastArmorRicochet || amount <= 6);
+      if (isRicochet) {
+        vehicle._bdaRicochetCount = (vehicle._bdaRicochetCount || 0) + 1;
+      } else if (amount > 0) {
+        vehicle._bdaHitCount = (vehicle._bdaHitCount || 0) + 1;
+      }
+      const hitNum = vehicle._bdaHitCount || 0;
+      const hpLeft = Math.ceil(vehicle.hp);
+      const maxHpVal = Math.round(vehicle.maxHp || 2100);
+      const hitsToGo =
+        vehicle.hp <= 0 ? 0 : isRicochet ? null : Math.ceil(vehicle.hp / Math.max(1, amount));
+      const shortVehName = String(vehicle.name || vehicle.type || 'TANK').split(' (')[0];
+      const shortWpn = String(weaponName || 'ANTI-ARMOR').trim();
+      const mobKill = vehicle.subsystems?.tracks === 'DAMAGED';
+      const engCrit = vehicle.subsystems?.engine === 'CRITICAL';
+      const critBadge =
+        mobKill && engCrit
+          ? ' • MOBILITY+ENG CRIT'
+          : mobKill
+          ? ' • MOBILITY KILL'
+          : engCrit
+          ? ' • ENGINE CRIT'
+          : '';
+
+      vehicle.lastBdaSummary = {
+        hitNum,
+        ricochetCount: vehicle._bdaRicochetCount || 0,
+        dmg: amount,
+        hpLeft,
+        maxHp: maxHpVal,
+        hpPct: vehicle.hullIntegrityPct,
+        hitsToGo,
+        zone: hitZone,
+        weapon: shortWpn,
+        mobKill,
+        engCrit,
+        ricochet: isRicochet,
+        destroyed: vehicle.hp <= 0
+      };
+
+      if (vehicle.hp <= 0) {
+        vehicle.lastBdaHitmarker = `💥 ${
+          vehicle.type === 'tank' ? 'TANK' : 'ARMOR'
+        } DESTROYED IN ${Math.max(1, hitNum)} HIT${Math.max(1, hitNum) === 1 ? '' : 'S'}! (-${amount} HP)`;
+      } else if (isRicochet) {
+        vehicle.lastBdaHitmarker = `🛡️ RICOCHET (-${amount} HP) • USE [3] 105MM / AT!`;
+      } else {
+        const toGoTxt = `${hitsToGo} HIT${hitsToGo === 1 ? '' : 'S'} TO GO`;
+        vehicle.lastBdaHitmarker = `🎯 HIT #${hitNum} (-${amount} HP) • ~${toGoTxt} [${vehicle.hullIntegrityPct}% HP${critBadge}]`;
+      }
+
+      // Emit live HUD combat-feed log & browser console telemetry when local player hits enemy armor!
+      const isLocalPlayerAttacker = Boolean(
+        onAwardXp || (this.lastPlayer && attackerName === this.lastPlayer.name)
+      );
+      if (isLocalPlayerAttacker) {
+        const nowBdaMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const isRapidAutocannon = isAc13025mm || isA10Gau8 || /VULCAN|GATLING|COAX|MG/.test(shortWpn.toUpperCase());
+        const hudCooldownMs = vehicle.hp <= 0 ? 0 : isRapidAutocannon ? 1150 : isAc13040mm ? 520 : 80;
+        const consoleCooldownMs = vehicle.hp <= 0 ? 0 : isRapidAutocannon ? 400 : 0;
+
+        if (this.lastPlayer?.ui?.showHitmarker) {
+          this.lastPlayer.ui.showHitmarker(
+            vehicle.hp <= 0 ? 'kill' : 'armor',
+            vehicle.lastBdaHitmarker
+          );
+        }
+
+        if (onAwardXp && nowBdaMs - (vehicle._lastBdaHudLogMs || 0) >= hudCooldownMs) {
+          vehicle._lastBdaHudLogMs = nowBdaMs;
+          const bdaFeedLine =
+            vehicle.hp <= 0
+              ? `💥 [TANK BDA] ${shortVehName} DESTROYED IN ${Math.max(1, hitNum)} HIT${
+                  Math.max(1, hitNum) === 1 ? '' : 'S'
+                } (${shortWpn} • FINAL -${amount} DMG)!`
+              : isRicochet
+              ? `🛡️ [TANK BDA] ${shortWpn} RICOCHETED OFF ${shortVehName} (${hitZone}: -${amount} DMG → ${hpLeft}/${maxHpVal} HP • USE [2] 40MM OR [3] 105MM)!`
+              : `📊 [TANK BDA] HIT #${hitNum} (${shortWpn} • ${hitZone}): -${amount} DMG → ${hpLeft}/${maxHpVal} HP (${vehicle.hullIntegrityPct}%) • ~${hitsToGo} HIT${
+                  hitsToGo === 1 ? '' : 'S'
+                } TO GO!${critBadge ? ` [${critBadge.slice(3)}]` : ''}`;
+          onAwardXp(0, bdaFeedLine);
+        }
+
+        const inNodeTest =
+          typeof process !== 'undefined' && Boolean(process.env && process.env.NODE_TEST_CONTEXT);
+        if (!inNodeTest && nowBdaMs - (vehicle._lastBdaConsoleMs || 0) >= consoleCooldownMs) {
+          vehicle._lastBdaConsoleMs = nowBdaMs;
+          const subTxt = vehicle.subsystems
+            ? `TRACKS=${vehicle.subsystems.tracks}, ENG=${vehicle.subsystems.engine}, OPTICS=${vehicle.subsystems.optics}`
+            : 'N/A';
+          console.info(
+            `[TANK BDA] ${shortVehName} | ${
+              vehicle.hp <= 0
+                ? `DESTROYED ON HIT #${Math.max(1, hitNum)}`
+                : isRicochet
+                ? `RICOCHET #${vehicle._bdaRicochetCount}`
+                : `Hit #${hitNum}`
+            } via ${shortWpn} [${hitZone}] | -${amount} DMG | HP: ${hpLeft}/${maxHpVal} (${
+              vehicle.hullIntegrityPct
+            }%) | Hits To Go: ${hitsToGo === null ? '∞ (RICOCHET)' : hitsToGo} | ${subTxt}`
+          );
+        }
       }
     }
 
@@ -3479,21 +3722,29 @@ export class VehicleManager {
         v.barrelGroup.position.z = 1.35 - v.barrelRecoil * 0.55;
       }
 
-      // HQ Runway Low-Pass (< 45m AGL) + HQ Motor Pool + Friendly FOB Supply Station Rearm & Repair!
-      if (v.driver || v.npcDriver || v.aiPilotActive) {
+      // HQ Runway Parked Pit-Stop + Low-Pass (< 45m AGL) + HQ Motor Pool + Friendly FOB Supply Station Rearm & Subsystem Repair!
+      const isParkedHqPlane =
+        v.isAircraft &&
+        !v.isShotDown &&
+        ((v.team !== 'RU' ? v.pos.x <= -2475 : v.pos.x >= 2475) && Math.abs(v.pos.z) <= 300);
+      if (v.driver || v.npcDriver || v.aiPilotActive || isParkedHqPlane) {
         const gHere = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
         let inSupplyZone = false;
+        let isRunwayParkedPitStop = false;
         let supplyLabel = '';
         let repairMult = 1.0;
         if (v.isAircraft) {
           const isUsPlane = v.team !== 'RU';
           const overFriendlyAirfield =
-            (isUsPlane ? v.pos.x < -1220 : v.pos.x > 1220) && Math.abs(v.pos.z) < 280;
-          if (overFriendlyAirfield && v.pos.y - gHere <= 45.0) {
+            (isUsPlane ? v.pos.x <= -2475 : v.pos.x >= 2475) && Math.abs(v.pos.z) <= 300;
+          const altAglHere = v.pos.y - gHere;
+          if (overFriendlyAirfield && altAglHere <= 45.0 && !v.isShotDown) {
             inSupplyZone = true;
-            supplyLabel =
-              v.pos.y - gHere <= 5.0 ? 'HQ RUNWAY PIT-STOP' : 'HQ RUNWAY LOW-PASS (<45M)';
-            repairMult = 1.8;
+            isRunwayParkedPitStop = altAglHere <= 5.5 && Math.abs(v.forwardSpeed || 0) < 26.0;
+            supplyLabel = isRunwayParkedPitStop
+              ? 'HQ RUNWAY GROUND CREW PIT-STOP'
+              : 'HQ RUNWAY LOW-PASS (<45M)';
+            repairMult = isRunwayParkedPitStop ? 2.2 : 1.35;
           }
         } else {
           const hqBase =
@@ -3544,17 +3795,68 @@ export class VehicleManager {
             v.hp = Math.min(v.maxHp, v.hp + 110 * repairMult * dt);
             v.hullIntegrityPct = Math.round((v.hp / Math.max(1, v.maxHp)) * 100);
           }
+
+          // Progressive Modular Airframe Subsystem Repair & Part Replacement on HQ Runway!
+          // - Parked / Taxiing on Runway (`isRunwayParkedPitStop`): Full Ground Crew replaces damaged Wings, Engines,
+          //   Tail, Avionics/Radar & Cockpit Canopy at +26%/sec (~3.8s from 0% -> 100%)!
+          // - Airborne Low-Pass (<45m): Light field patch at +7.5%/sec.
+          let completedAirframeOverhaul = false;
+          if (v.isAircraft && v.airframeParts) {
+            const partKeys = ['avionics', 'cockpit', 'leftWing', 'rightWing', 'engines', 'tail'];
+            let hadDamagedPart = false;
+            let allRestoredNow = true;
+            const partRate = isRunwayParkedPitStop ? 26.0 : 7.5;
+            for (let pkIdx = 0; pkIdx < partKeys.length; pkIdx++) {
+              const pk = partKeys[pkIdx];
+              const curPct = v.airframeParts[pk] ?? 100;
+              if (curPct < 99.9) {
+                if (curPct < 88) v._hadSignificantPartDmg = true;
+                hadDamagedPart = true;
+                const nextPct = Math.min(100, curPct + partRate * dt);
+                v.airframeParts[pk] = nextPct;
+                if (nextPct < 99.9) allRestoredNow = false;
+              }
+            }
+            if (isRunwayParkedPitStop) {
+              v.sensorGlitchTimer = 0;
+              v.opticsGlitchTimer = 0;
+            }
+            if (hadDamagedPart && allRestoredNow && v._hadSignificantPartDmg) {
+              v._hadSignificantPartDmg = false;
+              completedAirframeOverhaul = true;
+            }
+          } else if (!v.isAircraft) {
+            if (v.armorZones) {
+              const zStep = 18.0 * repairMult * dt;
+              v.armorZones.front = Math.min(100, (v.armorZones.front ?? 100) + zStep);
+              v.armorZones.left = Math.min(100, (v.armorZones.left ?? 100) + zStep);
+              v.armorZones.right = Math.min(100, (v.armorZones.right ?? 100) + zStep);
+              v.armorZones.rear = Math.min(100, (v.armorZones.rear ?? 100) + zStep);
+            }
+            if (v.subsystems && v.hullIntegrityPct >= 75) {
+              v.subsystems.tracks = 'OK';
+              v.subsystems.turret = 'OK';
+              v.subsystems.engine = 'OK';
+              v.subsystems.optics = 'OK';
+            }
+          }
+
           v._rearmTick = (v._rearmTick || 0) + dt * repairMult;
-          if (v._rearmTick >= 1.1) {
-            v._rearmTick = 0;
+          if (v._rearmTick >= 1.1 || completedAirframeOverhaul) {
+            if (v._rearmTick >= 1.1) v._rearmTick = 0;
             const didRearm = this.rearmVehicleOrdnance(v);
-            if ((didRearm || (prevHp < v.maxHp * 0.95 && v.hp >= v.maxHp)) && v.driver?.onAwardXp) {
+            if (
+              (completedAirframeOverhaul || didRearm || (prevHp < v.maxHp * 0.95 && v.hp >= v.maxHp)) &&
+              v.driver?.onAwardXp
+            ) {
               const nowMs = performance.now();
-              if (nowMs - (v._lastRearmBannerMs || 0) > 6500) {
+              if (completedAirframeOverhaul || nowMs - (v._lastRearmBannerMs || 0) > 6500) {
                 v._lastRearmBannerMs = nowMs;
                 v.driver.onAwardXp(
                   20,
-                  `🛠️⛽ ${supplyLabel}: 100% ORDNANCE REARMED & HULL REPAIRED!`
+                  completedAirframeOverhaul
+                    ? `🛠️✈️ ${supplyLabel}: ALL DAMAGED AIRFRAME PARTS REPLACED & 100% ORDNANCE REARMED!`
+                    : `🛠️⛽ ${supplyLabel}: 100% ORDNANCE REARMED & HULL REPAIRED!`
                 );
               }
             }
@@ -3903,9 +4205,30 @@ export class VehicleManager {
           let yawDiff = desiredYaw - v.yaw;
           while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
           while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-          const aiTurnStep = (v.turnRate || 1.15) * 0.85 * dt;
+          const tracksDmg = v.subsystems?.tracks === 'DAMAGED';
+          const engState = v.subsystems?.engine || 'OK';
+          const aiMobMult =
+            (tracksDmg ? 0.22 : 1.0) *
+            (engState === 'CRITICAL' ? 0.35 : engState === 'SMOKING' ? 0.75 : 1.0);
+          const aiSpdAbs = Math.abs(v.forwardSpeed || 0);
+          const minTurnR =
+            v.minTurnRadiusM ||
+            (v.type === 'apc' ? 8.8 : v.type === 'humvee' ? 7.5 : v.type === 'tank' ? 5.5 : 3.5);
+          const maxLatAcc =
+            v.maxLatAccelMs2 ||
+            (v.type === 'tank' ? 8.6 : v.type === 'apc' || v.type === 'aa' ? 9.5 : 10.8);
+          const canPivot = Boolean(
+            v.canNeutralPivot || v.type === 'tank' || v.type === 'aa' || v.type === 'warhorse'
+          );
+          const geomRate = canPivot
+            ? Math.max(v.turnRate || 0.75, aiSpdAbs / minTurnR)
+            : Math.max(0.28, aiSpdAbs / minTurnR);
+          const gripRate = aiSpdAbs > 3.0 ? maxLatAcc / aiSpdAbs : geomRate;
+          const physAiTurnRate = Math.min(geomRate, gripRate);
+          const aiTurnStep = physAiTurnRate * (tracksDmg ? 0.42 : 0.92) * dt;
           v.yaw += THREE.MathUtils.clamp(yawDiff, -aiTurnStep, aiTurnStep);
-          const targetSpeed = Math.abs(yawDiff) < 0.65 ? v.speed * 0.72 : v.speed * 0.34;
+          const rawTargetSpeed = Math.abs(yawDiff) < 0.65 ? v.speed * 0.72 : v.speed * 0.34;
+          const targetSpeed = rawTargetSpeed * aiMobMult;
           // Progressive mass-inertia drivetrain acceleration for AI vehicles (never jumps to top speed)
           v.engineSpool = Math.min(1.0, (v.engineSpool || 0) + dt * (v.type === 'tank' ? 0.48 : 0.68));
           const spdRatio = Math.min(1.1, Math.abs(v.forwardSpeed || 0) / Math.max(1, v.speed || 15));
@@ -4129,7 +4452,10 @@ export class VehicleManager {
           let tDiff = desiredTurretYaw - v.turretYaw;
           while (tDiff > Math.PI) tDiff -= Math.PI * 2;
           while (tDiff < -Math.PI) tDiff += Math.PI * 2;
-          v.turretYaw += THREE.MathUtils.clamp(tDiff, -1.8 * dt, 1.8 * dt);
+          const slewDegraded =
+            v.subsystems?.turret === 'DAMAGED' || v.subsystems?.optics === 'DAMAGED';
+          const aiSlewRate = slewDegraded ? 0.78 : 1.8;
+          v.turretYaw += THREE.MathUtils.clamp(tDiff, -aiSlewRate * dt, aiSlewRate * dt);
 
           v.aiFireTimer -= dt;
           if (v.aiFireTimer <= 0 && Math.abs(tDiff) < 0.35) {
@@ -4151,41 +4477,86 @@ export class VehicleManager {
         // Unoccupied vehicle sits stationary at the Motor Pool (or wherever parked)
         v.forwardSpeed *= Math.pow(0.05, dt);
 
-        // Autonomous Base Air-Defense Sentry for constructed ZU-23-2 / C-RAM AA Emplacements (owned by US or RU only)
+        // Autonomous Base Air-Defense Sentry for constructed ZU-23-2 & Permanent HQ Airbase C-RAM Phalanx / Patriot-S400 Batteries!
         if (v.type === 'emplace_aa' && (v.team === 'US' || v.team === 'RU')) {
+          const isAirbaseCiws = Boolean(v.isAirbaseDefenseBattery);
+          if (isAirbaseCiws && v.hp < v.maxHp) {
+            v.hp = Math.min(v.maxHp, v.hp + 120 * dt);
+          }
+          const engageRadius = isAirbaseCiws ? 860 : VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT;
           let airTarget = null;
-          let bestAirSq = VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT * VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT;
+          let groundIntruderPos = null;
+          let bestAirSq = engageRadius * engageRadius;
           const enemyTeam = v.team === 'US' ? 'RU' : 'US';
-          const enemyPlanes = this.activeAircraftByTeam?.[enemyTeam] || this.vehicles;
+          const enemyPlanes = isAirbaseCiws
+            ? this.vehicles
+            : this.activeAircraftByTeam?.[enemyTeam] || this.vehicles;
           for (let ai = 0; ai < enemyPlanes.length; ai++) {
             const airV = enemyPlanes[ai];
             if (!airV.isAircraft || airV.dead || airV.team === v.team) continue;
-            if (!airV.driver && !airV.aiPilotActive) continue;
+            // Airbase C-RAM engages ANY enemy aircraft inside the airbase zone — even at 0m on the runway tarmac!
+            const onEnemyTarmac =
+              isAirbaseCiws &&
+              (v.team === 'US' ? airV.pos.x <= -2350 : airV.pos.x >= 2350);
+            if (!airV.driver && !airV.aiPilotActive && !onEnemyTarmac) continue;
             const isStealthB2 = airV.aircraftRole === 'b2_spirit' || airV.isStealthAircraft;
-            if (isStealthB2 && (airV.flareActiveTimer || 0) > 0) continue;
-            const stealthMult = isStealthB2 ? airV.stealthFactor || 0.12 : 1.0;
-            const maxSq =
-              VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT *
-              stealthMult *
-              (VEHICLE_STATS.ENGAGE_RANGE_AIRCRAFT * stealthMult);
+            if (!isAirbaseCiws && isStealthB2 && (airV.flareActiveTimer || 0) > 0) continue;
+            const stealthMult = isAirbaseCiws
+              ? isStealthB2
+                ? 0.55
+                : 1.0
+              : isStealthB2
+              ? airV.stealthFactor || 0.12
+              : 1.0;
+            const maxR = engageRadius * stealthMult;
             const dSq = v.pos.distanceToSquared(airV.pos);
-            if (dSq < maxSq && dSq < bestAirSq) {
+            if (dSq < maxR * maxR && dSq < bestAirSq) {
               bestAirSq = dSq;
               airTarget = airV;
             }
           }
-          if (airTarget) {
-            const tdx = airTarget.pos.x - v.pos.x;
-            const tdz = airTarget.pos.z - v.pos.z;
+          // If an enemy pilot/soldier or ground vehicle tries to camp the runway on foot/wheels within 360m, C-RAM engages them too!
+          if (!airTarget && isAirbaseCiws && player && !player.dead && !player.downed && player.team !== v.team) {
+            const pSq = v.pos.distanceToSquared(player.pos);
+            if (pSq < 360 * 360) {
+              groundIntruderPos = tmpVec3(player.pos.x, player.pos.y + 1.1, player.pos.z);
+            }
+          }
+
+          const engagePos = airTarget ? airTarget.pos : groundIntruderPos;
+          if (engagePos) {
+            if (
+              isAirbaseCiws &&
+              airTarget &&
+              airTarget.driver === player &&
+              player?.onAwardXp
+            ) {
+              const nowWarn = performance.now();
+              if (nowWarn - (airTarget._lastCiwsWarnMs || 0) > 5500) {
+                airTarget._lastCiwsWarnMs = nowWarn;
+                player.onAwardXp(
+                  0,
+                  `🚨 RESTRICTED ENEMY AIRBASE AIRSPACE — ${
+                    v.team === 'US' ? 'C-RAM PHALANX & PATRIOT PAC-3' : 'PANTSIR-S1M & S-400 SAM'
+                  } ENGAGING! TURN BACK!`
+                );
+              }
+            }
+            const tdx = engagePos.x - v.pos.x;
+            const tdz = engagePos.z - v.pos.z;
             const desiredYaw = Math.atan2(-tdx, -tdz);
             let tDiff = desiredYaw - v.turretYaw;
             while (tDiff > Math.PI) tDiff -= Math.PI * 2;
             while (tDiff < -Math.PI) tDiff += Math.PI * 2;
-            v.turretYaw += THREE.MathUtils.clamp(tDiff, -2.5 * dt, 2.5 * dt);
-            v.aiFireTimer -= dt;
-            if (v.aiFireTimer <= 0 && Math.abs(tDiff) < 0.4) {
-              v.aiFireTimer = 0.65 + Math.random() * 0.55;
-              this.fireAiVehicleWeapon(v, airTarget.pos, player, airTarget);
+            v.turretYaw += THREE.MathUtils.clamp(
+              tDiff,
+              (isAirbaseCiws ? -9.5 : -2.5) * dt,
+              (isAirbaseCiws ? 9.5 : 2.5) * dt
+            );
+            v.aiFireTimer = (v.aiFireTimer || 0) - dt;
+            if (v.aiFireTimer <= 0 && Math.abs(tDiff) < (isAirbaseCiws ? 0.85 : 0.4)) {
+              v.aiFireTimer = isAirbaseCiws ? 0.22 : 0.65 + Math.random() * 0.55;
+              this.fireAiVehicleWeapon(v, engagePos, player, airTarget);
             }
           }
         }
@@ -5019,8 +5390,10 @@ export class VehicleManager {
       const vx = -Math.sin(v.yaw) * cosP * v.forwardSpeed;
       const vy = Math.sin(v.pitch) * v.forwardSpeed - 18.0;
       const vz = -Math.cos(v.yaw) * cosP * v.forwardSpeed;
-      v.pos.x = THREE.MathUtils.clamp(v.pos.x + vx * dt, -2350, 2350);
-      v.pos.z = THREE.MathUtils.clamp(v.pos.z + vz * dt, -1600, 1600);
+      const maxAiAirX = VEHICLE_STATS.AIRSPACE_MAX_X || 4600;
+      const maxAiAirZ = VEHICLE_STATS.AIRSPACE_MAX_Z || 3400;
+      v.pos.x = THREE.MathUtils.clamp(v.pos.x + vx * dt, -maxAiAirX, maxAiAirX);
+      v.pos.z = THREE.MathUtils.clamp(v.pos.z + vz * dt, -maxAiAirZ, maxAiAirZ);
       v.pos.y += vy * dt;
 
       const groundH = this.world.getGroundHeightAt(v.pos.x, v.pos.z);
@@ -5161,14 +5534,18 @@ export class VehicleManager {
         targetX = THREE.MathUtils.clamp(falconAnchorPos.x + Math.cos(v._falconOrbitAngle) * orbitR, -1950, 1950);
         targetZ = THREE.MathUtils.clamp(falconAnchorPos.z + Math.sin(v._falconOrbitAngle) * orbitR, -1350, 1350);
         targetY = v.aircraftRole === 'gunship' ? 162 : v.aircraftRole === 'fighter' ? 152 : 118;
-      } else if (rawWpDist < 165 && !dogfightTarget) {
-        // Blend smoothly toward the next waypoint before switching so the aircraft flies wide, sweeping curves
-        const blend = THREE.MathUtils.clamp(1.0 - (rawWpDist - 85) / 80, 0, 1);
-        targetX = THREE.MathUtils.lerp(curWp.x, nextWp.x, blend);
-        targetY = THREE.MathUtils.lerp(curWp.y || 145, nextWp.y || 145, blend);
-        targetZ = THREE.MathUtils.lerp(curWp.z, nextWp.z, blend);
-        if (rawWpDist < 90) {
-          v.patrolIndex = (v.patrolIndex + 1) % wpCount;
+      } else if (!dogfightTarget) {
+        const switchR = Math.max(115, (v.speed || 85) * 1.45);
+        const blendStartR = switchR * 1.75;
+        if (rawWpDist < blendStartR) {
+          // Blend smoothly toward the next waypoint before switching so the aircraft flies wide, sweeping curves
+          const blend = THREE.MathUtils.clamp(1.0 - (rawWpDist - switchR) / Math.max(40, blendStartR - switchR), 0, 1);
+          targetX = THREE.MathUtils.lerp(curWp.x, nextWp.x, blend);
+          targetY = THREE.MathUtils.lerp(curWp.y || 145, nextWp.y || 145, blend);
+          targetZ = THREE.MathUtils.lerp(curWp.z, nextWp.z, blend);
+          if (rawWpDist < switchR) {
+            v.patrolIndex = (v.patrolIndex + 1) % wpCount;
+          }
         }
       }
 
@@ -5231,10 +5608,23 @@ export class VehicleManager {
         : THREE.MathUtils.clamp(yawDiff * 1.25, -maxBank, maxBank);
       v.roll = THREE.MathUtils.lerp(v.roll || 0, targetRoll, Math.min(1, dt * 3.2));
 
-      const fineRudder = THREE.MathUtils.clamp(yawDiff, -0.18, 0.18) * 0.45;
+      const fineRudder = THREE.MathUtils.clamp(yawDiff, -0.1, 0.1) * 0.22;
+      const effAirSpd = Math.max(v.minSpeed || 32, Math.abs(v.forwardSpeed || 60));
+      const maxTurnAcc =
+        v.maxTurnAccelMs2 ||
+        (v.aircraftRole === 'fighter'
+          ? 64.0
+          : v.aircraftRole === 'cas'
+          ? 46.0
+          : v.aircraftRole === 'b2_spirit'
+          ? 19.5
+          : v.aircraftRole === 'gunship'
+          ? 15.5
+          : 48.0);
+      const bankNorm = THREE.MathUtils.clamp(Math.sin(v.roll) / Math.max(0.25, Math.sin(maxBank)), -1, 1);
       const bankedYawRate = inTakeoffRoll
         ? THREE.MathUtils.clamp(yawDiff * 1.5, -0.4, 0.4)
-        : Math.sin(v.roll) * (v.turnRate || 1.25) * 0.92 + fineRudder;
+        : (bankNorm * maxTurnAcc) / effAirSpd + fineRudder;
       v.yaw += bankedYawRate * dt;
 
       // Smooth pitch control with Runway Rotation & Terrain Avoidance Pull-Up (never slides flat with nose down!)
@@ -5273,8 +5663,10 @@ export class VehicleManager {
       if (!v.velVector) v.velVector = new THREE.Vector3();
       v.velVector.set(vx, vy, vz);
 
-      v.pos.x = THREE.MathUtils.clamp(v.pos.x + vx * dt, -2350, 2350);
-      v.pos.z = THREE.MathUtils.clamp(v.pos.z + vz * dt, -1600, 1600);
+      const maxAiAirX = VEHICLE_STATS.AIRSPACE_MAX_X || 4600;
+      const maxAiAirZ = VEHICLE_STATS.AIRSPACE_MAX_Z || 3400;
+      v.pos.x = THREE.MathUtils.clamp(v.pos.x + vx * dt, -maxAiAirX, maxAiAirX);
+      v.pos.z = THREE.MathUtils.clamp(v.pos.z + vz * dt, -maxAiAirZ, maxAiAirZ);
       const groundH = this.world.getGroundHeightAt(v.pos.x, v.pos.z);
       const nextY = v.pos.y + vy * dt;
       const minSafeAlt = inTakeoffRoll ? groundH : groundH + 22;
@@ -5391,25 +5783,33 @@ export class VehicleManager {
     };
 
     if (v.weaponType === 'aa_autocannon') {
-      if (distToPlayer < 240) sound.playGunshot('autocannon', distToPlayer, pan);
-      // Launch Homing SAM periodically when tracking an enemy aircraft
+      const isAirbaseCiws = Boolean(v.isAirbaseDefenseBattery);
+      if (distToPlayer < (isAirbaseCiws ? 450 : 240)) sound.playGunshot('autocannon', distToPlayer, pan);
+      // Launch Homing SAM periodically when tracking an enemy aircraft (Patriot PAC-3 / S-400 on Airbase CIWS!)
       if (airTarget && v.coaxCooldown <= 0) {
-        v.coaxCooldown = 15.5;
+        v.coaxCooldown = isAirbaseCiws ? 4.2 : 15.5;
         const samMesh = new THREE.Mesh(SHARED_AI_SAM_GEO, SHARED_AI_SAM_MAT);
         samMesh.position.copy(muzzleOrigin).addScaledVector(dir, 2.8);
         samMesh.lookAt(targetPos);
         this.scene.add(samMesh);
         this.world.projectiles.push({
           type: 'a2a_missile',
+          isPitbullActiveSeeker: isAirbaseCiws,
           mesh: samMesh,
-          vel: dir.clone().multiplyScalar(PROJECTILES.STINGER_SAM?.speed || 255),
+          vel: dir.clone().multiplyScalar(isAirbaseCiws ? 340 : PROJECTILES.STINGER_SAM?.speed || 255),
           gravity: 0,
-          life: 6.5,
-          turnRate: 4.2,
+          life: isAirbaseCiws ? 7.5 : 6.5,
+          turnRate: isAirbaseCiws ? 7.2 : 4.2,
           targetVehicle: airTarget,
-          blastRadius: 9.5,
-          blastDamage: airTarget.driver ? 145 : 280,
-          weaponName: v.team === 'US' ? 'FIM-92 STINGER SAM' : '9M311 / IGLA SAM',
+          blastRadius: isAirbaseCiws ? 12.5 : 9.5,
+          blastDamage: isAirbaseCiws ? 420 : airTarget.driver ? 145 : 280,
+          weaponName: isAirbaseCiws
+            ? v.team === 'US'
+              ? 'PATRIOT PAC-3 AIRBASE SAM'
+              : 'S-400 TRIUMF AIRBASE SAM'
+            : v.team === 'US'
+            ? 'FIM-92 STINGER SAM'
+            : '9M311 / IGLA SAM',
           owner: ownerObj
         });
         return;
@@ -5419,13 +5819,20 @@ export class VehicleManager {
       this.scene.add(shellMesh);
       this.world.projectiles.push({
         type: 'autocannon',
+        isAaProximity: isAirbaseCiws,
         mesh: shellMesh,
-        vel: dir.clone().multiplyScalar(155),
-        gravity: 0.65,
-        life: 3.5,
-        blastRadius: 6.5,
-        blastDamage: airTarget?.driver ? 28 : 65,
-        weaponName: v.team === 'US' ? '25MM GAU-12 AA' : '30MM 2A38M AA',
+        vel: dir.clone().multiplyScalar(isAirbaseCiws ? 310 : 155),
+        gravity: isAirbaseCiws ? 0.25 : 0.65,
+        life: 3.8,
+        blastRadius: isAirbaseCiws ? 8.5 : 6.5,
+        blastDamage: isAirbaseCiws ? 72 : airTarget?.driver ? 28 : 65,
+        weaponName: isAirbaseCiws
+          ? v.team === 'US'
+            ? '20MM C-RAM PHALANX CIWS'
+            : '30MM PANTSIR-S1M CIWS'
+          : v.team === 'US'
+          ? '25MM GAU-12 AA'
+          : '30MM 2A38M AA',
         owner: ownerObj
       });
     } else if (v.weaponType === 'tank_cannon') {

@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=124';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=124';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=124';
-import { events } from '../events.js?v=124';
+import { sound } from '../audio.js?v=126';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=126';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=126';
+import { events } from '../events.js?v=126';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +11,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=124';
+} from '../core/StateMachines.js?v=126';
 
 function markShared(asset) {
   if (asset) {
@@ -297,6 +297,8 @@ export const VehicleControlMethods = {
       }
       if (this.ccipMarkerMesh) this.ccipMarkerMesh.visible = false;
       if (this._gunshipOrbitVisGroup) this._gunshipOrbitVisGroup.visible = false;
+      if (this._runwayAssistVisGroup) this._runwayAssistVisGroup.visible = false;
+      v.autoFlightMode = null;
       if (this.viewModelGroup) this.viewModelGroup.visible = true;
       events.emit('player:exited-vehicle', { vehicle: v, reason: isAirbornePlane ? 'ejected' : 'manual' });
 
@@ -853,8 +855,8 @@ export const VehicleControlMethods = {
       candX = v.pos.x + fwdX * fwdDist;
       candZ = v.pos.z + fwdZ * fwdDist;
     }
-    candX = THREE.MathUtils.clamp(candX, -1850, 1850);
-    candZ = THREE.MathUtils.clamp(candZ, -1250, 1250);
+    candX = THREE.MathUtils.clamp(candX, -6500, 6500);
+    candZ = THREE.MathUtils.clamp(candZ, -6500, 6500);
 
     let snappedFlag = null;
     if (this.world?.flags) {
@@ -910,6 +912,20 @@ export const VehicleControlMethods = {
       if (this._gunshipOrbitVisGroup) this._gunshipOrbitVisGroup.visible = false;
       return;
     }
+    const gndHere = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
+    const altAglHere = (v.pos?.y || 0) - gndHere;
+    const airSpdHere = Math.abs(v.forwardSpeed || 0);
+    // Hide the 3D Pylon Orbit marker & circle ONLY during takeoff/landing (<32m AGL or <24 m/s slow roll, or Auto-Flight);
+    // once airborne at cruise speed, the AC-130 can preview & orbit ANYWHERE on the map with zero geo-fencing!
+    if (
+      altAglHere < 32.0 ||
+      (v.gunshipManualFlight && airSpdHere < 24.0) ||
+      v.autoFlightMode === 'TAKEOFF' ||
+      v.autoFlightMode === 'LANDING'
+    ) {
+      if (this._gunshipOrbitVisGroup) this._gunshipOrbitVisGroup.visible = false;
+      return;
+    }
     this.syncGunshipPylonGeometry(v);
 
     if (!this._gunshipOrbitVisGroup) {
@@ -958,20 +974,32 @@ export const VehicleControlMethods = {
       const beaconMesh = new THREE.Mesh(beaconGeo, beaconMat);
       grp.add(beaconMesh);
 
-      // Tangent Entry Guide Line (connects AC-130 ground track -> Counter-Clockwise Tangent Entry Point!)
-      const entryPts = new Float32Array(6);
+      // Curved Tangent Entry Flight Path (28 segments smoothly curving from AC-130 nose into the exact Counter-Clockwise Tangent Point!)
+      const entrySegs = 28;
+      const entryPts = new Float32Array((entrySegs + 1) * 3);
       const entryGeo = new THREE.BufferGeometry();
       entryGeo.setAttribute('position', new THREE.BufferAttribute(entryPts, 3));
       const entryMat = new THREE.LineBasicMaterial({
         color: 0xffd32a,
         transparent: true,
-        opacity: 0.85
+        opacity: 0.9
       });
       const entryLine = new THREE.Line(entryGeo, entryMat);
       entryLine.frustumCulled = false;
       grp.add(entryLine);
 
-      grp.userData = { ringLine, ringMat, bullMesh, bullMat, crossX, crossZ, beaconMesh, beaconMat, entryLine };
+      grp.userData = {
+        ringLine,
+        ringMat,
+        bullMesh,
+        bullMat,
+        crossX,
+        crossZ,
+        beaconMesh,
+        beaconMat,
+        entryLine,
+        entrySegs
+      };
       this.scene.add(grp);
       this._gunshipOrbitVisGroup = grp;
     }
@@ -991,7 +1019,8 @@ export const VehicleControlMethods = {
     const centerGroundY = (this.world ? this.world.getGroundHeightAt(cx, cz) : 1.25) + 1.8;
     const colHex = isTransit ? 0x00d2d3 : 0x2ecc71;
 
-    const { ringLine, ringMat, bullMesh, bullMat, crossX, crossZ, beaconMesh, beaconMat, entryLine } = grp.userData;
+    const { ringLine, ringMat, bullMesh, bullMat, crossX, crossZ, beaconMesh, beaconMat, entryLine, entrySegs = 28 } =
+      grp.userData;
     ringMat.color.setHex(colHex);
     ringMat.opacity = isTransit ? 0.88 : 0.34;
     bullMat.color.setHex(colHex);
@@ -1038,26 +1067,59 @@ export const VehicleControlMethods = {
       ringLine.geometry.attributes.position.needsUpdate = true;
     }
 
-    // Show golden Entry Guide Line when in Transit Mode (or >25m off the orbit perimeter)
+    // Show Curved Tangent Entry Flight Path when in Transit Mode (or >25m off the orbit perimeter)
     const dx = v.pos.x - cx;
     const dz = v.pos.z - cz;
     const dist = Math.hypot(dx, dz) || 1;
     const showEntry = isTransit || Math.abs(dist - radius) > 26;
     entryLine.visible = showEntry;
     if (showEntry) {
-      // Nearest point + counter-clockwise lead on the orbit ring so pilot sees exact entry point!
-      const baseAng = Math.atan2(dz, dx) - 0.38;
-      const tx = cx + Math.cos(baseAng) * radius;
-      const tz = cz + Math.sin(baseAng) * radius;
-      const ty = (this.world ? this.world.getGroundHeightAt(tx, tz) : 1.25) + 3.5;
-      const py = (this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 1.25) + 4.5;
+      // Exact Geometric Right-Hand Tangent Point `T` for a Counter-Clockwise (Left-Pylon, Port-Side Guns) Orbit:
+      // For `dist > radius`, `alpha = phi - arccos(radius / dist)` satisfies `(T - P) · (T - C) = 0` (exact 90° tangent!)
+      // AND `(T - P)` points in the exact orbit flow direction `v_orb = (+sin(alpha), -cos(alpha))`!
+      const phi = Math.atan2(dz, dx);
+      const alpha =
+        dist > radius * 1.01
+          ? phi - Math.acos(THREE.MathUtils.clamp(radius / dist, -1, 1))
+          : phi - 0.92;
+      const tx = cx + Math.cos(alpha) * radius;
+      const tz = cz + Math.sin(alpha) * radius;
+      const tanDirX = Math.sin(alpha);
+      const tanDirZ = -Math.cos(alpha);
+      const chordLen = Math.hypot(tx - v.pos.x, tz - v.pos.z);
+      const handleLen = Math.min(chordLen * 0.45, Math.max(45, radius * 0.65));
+      const noseDirX = -Math.sin(v.yaw || 0);
+      const noseDirZ = -Math.cos(v.yaw || 0);
+
+      // Blend start tangent between current nose heading and direct tangent chord so even straight-in approaches
+      // curve gracefully out to the right-side tangent point and merge seamlessly into the circle!
+      const dirToTx = chordLen > 1 ? (tx - v.pos.x) / chordLen : noseDirX;
+      const dirToTz = chordLen > 1 ? (tz - v.pos.z) / chordLen : noseDirZ;
+      const startTanX = noseDirX * 0.55 + dirToTx * 0.45;
+      const startTanZ = noseDirZ * 0.55 + dirToTz * 0.45;
+      const sNorm = Math.hypot(startTanX, startTanZ) || 1;
+      const m0x = (startTanX / sNorm) * handleLen;
+      const m0z = (startTanZ / sNorm) * handleLen;
+      const m1x = tanDirX * handleLen;
+      const m1z = tanDirZ * handleLen;
+
       const eArr = entryLine.geometry.attributes.position.array;
-      eArr[0] = v.pos.x;
-      eArr[1] = py;
-      eArr[2] = v.pos.z;
-      eArr[3] = tx;
-      eArr[4] = ty;
-      eArr[5] = tz;
+      for (let s = 0; s <= entrySegs; s++) {
+        const u = s / entrySegs;
+        const u2 = u * u;
+        const u3 = u2 * u;
+        const h00 = 2 * u3 - 3 * u2 + 1;
+        const h10 = u3 - 2 * u2 + u;
+        const h01 = -2 * u3 + 3 * u2;
+        const h11 = u3 - u2;
+        const px = h00 * v.pos.x + h10 * m0x + h01 * tx + h11 * m1x;
+        const pz = h00 * v.pos.z + h10 * m0z + h01 * tz + h11 * m1z;
+        const py = (this.world ? this.world.getGroundHeightAt(px, pz) : 1.25) + THREE.MathUtils.lerp(4.5, 3.4, u);
+        const idx = s * 3;
+        eArr[idx] = px;
+        eArr[idx + 1] = py;
+        eArr[idx + 2] = pz;
+      }
       entryLine.geometry.attributes.position.needsUpdate = true;
     }
   },
@@ -1079,8 +1141,8 @@ export const VehicleControlMethods = {
     } else {
       hitPt = new THREE.Vector3(v.pos.x, 0, v.pos.z);
     }
-    hitPt.x = THREE.MathUtils.clamp(hitPt.x, -1850, 1850);
-    hitPt.z = THREE.MathUtils.clamp(hitPt.z, -1250, 1250);
+    hitPt.x = THREE.MathUtils.clamp(hitPt.x, -6500, 6500);
+    hitPt.z = THREE.MathUtils.clamp(hitPt.z, -6500, 6500);
 
     let snappedFlag = null;
     if (this.world?.flags) {
@@ -1154,9 +1216,9 @@ export const VehicleControlMethods = {
         const fwdZ = -Math.cos(v.yaw || 0);
         const radius = v.orbitRadius || 185;
         v.orbitCenter.set(
-          THREE.MathUtils.clamp(v.pos.x - fwdZ * radius, -1850, 1850),
+          THREE.MathUtils.clamp(v.pos.x - fwdZ * radius, -6500, 6500),
           0,
-          THREE.MathUtils.clamp(v.pos.z + fwdX * radius, -1250, 1250)
+          THREE.MathUtils.clamp(v.pos.z + fwdX * radius, -6500, 6500)
         );
         v.orbitAnchorLabel = 'PORT PYLON';
       }
@@ -1829,6 +1891,8 @@ export const VehicleControlMethods = {
     if (!v || v.dead) {
       this.activeVehicle = null;
       if (this.ccipMarkerMesh) this.ccipMarkerMesh.visible = false;
+      if (this._gunshipOrbitVisGroup) this._gunshipOrbitVisGroup.visible = false;
+      if (this._runwayAssistVisGroup) this._runwayAssistVisGroup.visible = false;
       this.viewModelGroup.visible = true;
       return;
     }
@@ -2153,23 +2217,23 @@ export const VehicleControlMethods = {
 
     const isWarhorse = v.type === 'warhorse';
     const isDinoMount = v.type === 'trex_mount' || v.type === 'raptor_mount';
+    const absGroundSpd = Math.abs(v.forwardSpeed || 0);
+    const canStandstillPivot =
+      v.type === 'tank' ||
+      v.type === 'aa' ||
+      Boolean(v.canNeutralPivot) ||
+      isMotoOrAtv ||
+      isWarhorse;
 
-    if (!v.isEmplacement && (Math.abs(v.forwardSpeed) > 0.25 || ((isMotoOrAtv || isWarhorse) && steer !== 0))) {
-      // Tracked MBTs, Warhorses & Bikes/ATVs can pivot at low speed and turn smoothly at high speed.
-      // IMPORTANT: On a Warhorse (`isWarhorse`), WASD (`steer`) controls the horse's body heading (`v.yaw`)
-      // like a Tank hull, while the mouse cursor (`this.yaw`) aims the bow/lance independently in 360°!
-      const speedFactor =
-        v.type === 'tank'
-          ? THREE.MathUtils.clamp(Math.abs(v.forwardSpeed) / 4.5, 0.45, 1.0)
-          : isWarhorse
-          ? THREE.MathUtils.clamp(Math.abs(v.forwardSpeed) / 5.0, 0.72, 1.1)
-          : isMotoOrAtv
-          ? THREE.MathUtils.clamp(Math.abs(v.forwardSpeed) / 5.5, 0.55, 1.05)
-          : THREE.MathUtils.clamp(Math.abs(v.forwardSpeed) / 6.5, 0.35, 1.0);
-      const dirSign = v.forwardSpeed < -0.25 ? -1 : 1;
-      v.yaw += steer * dt * turnRate * speedFactor * dirSign;
-      if (isMotoOrAtv && !isWarhorse) {
-        this.yaw += steer * dt * turnRate * speedFactor * dirSign * 0.55;
+    if (!v.isEmplacement && (absGroundSpd > 0.18 || (canStandstillPivot && steer !== 0))) {
+      // Realistic Ackermann / Tracked Skid-Steer + High-Speed Tire/Track Lateral Grip Envelope:
+      // - Tanks & SPAAGs can neutral-pivot on the spot (R = 0m at 0 km/h) via cross-drive tracks!
+      // - Wheeled APCs (R_min = 8.8m) & Humvees/Tigrs (R_min = 7.5m) require rolling motion and obey lateral G-limits at top speed!
+      const maxYawRate = this.computeGroundVehicleMaxYawRate(v, absGroundSpd, subsystemTurnMult);
+      const dirSign = v.forwardSpeed < -0.18 ? -1 : 1;
+      v.yaw += steer * dt * maxYawRate * dirSign;
+      if (isMotoOrAtv && !isWarhorse && !isDinoMount) {
+        this.yaw += steer * dt * maxYawRate * dirSign * 0.55;
       }
     }
 
@@ -2220,11 +2284,12 @@ export const VehicleControlMethods = {
         );
       }
     } else if (isDinoMount) {
-      // On a Dino Mount, smoothly align the mount's body yaw toward the rider's look yaw
+      // On a Dino Mount, align body yaw toward rider look yaw bounded by theropod stride momentum & lateral traction!
       let yawDiff = this.yaw - v.yaw;
       while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
       while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-      v.yaw += yawDiff * Math.min(1, dt * 6.5);
+      const maxDinoYawStep = this.computeGroundVehicleMaxYawRate(v, absGroundSpd, subsystemTurnMult) * dt;
+      v.yaw += THREE.MathUtils.clamp(yawDiff * Math.min(1, dt * 5.0), -maxDinoYawStep, maxDinoYawStep);
 
       const riderGroup = v.mesh?.userData?.riderGroup;
       if (riderGroup) {
@@ -3324,6 +3389,322 @@ export const VehicleControlMethods = {
   },
 
   /**
+   * Evaluates whether an aircraft `v` is currently eligible for:
+   * - `'TAKEOFF'`: On or taxiing at its friendly HQ Strategic Airbase (`altAgl < 6.5m`)
+   * - `'LANDING'`: Airborne inside the friendly HQ Airbase ILS Approach Corridor (`altAgl <= 340m`, `dist <= 1950m`, low/med speed)
+   */
+  getRunwayAssistEligibility(v) {
+    if (!v || !v.isAircraft || v.dead || v.isShotDown) return null;
+    const isUs = (v.team || this.team) !== 'RU';
+    // Exact paved 3D asphalt runway coordinates matching `TerrainGenerator.js`:
+    //   US West Runway: cx = -2735, cz = -68 (thresholds at x = -2903 & -2567, apron at z = -138)
+    //   RU East Runway: cx = +2735, cz = +68 (thresholds at x = +2567 & +2903, apron at z = +138)
+    const airbaseX = isUs ? -2735 : 2735;
+    const runwayCz = isUs ? -68 : 68;
+    const runwayY = this.world ? this.world.getGroundHeightAt(airbaseX, runwayCz) : 1.25;
+    const gH = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : runwayY;
+    const altAgl = v.pos.y - gH;
+    const distToAirbase = Math.hypot(v.pos.x - airbaseX, v.pos.z - runwayCz);
+    const maxSpd = v.maxSpeed || 96;
+    const spd = Math.abs(v.forwardSpeed || 0);
+
+    const onFriendlyGround =
+      altAgl < 6.5 &&
+      (isUs ? v.pos.x <= -2450 && v.pos.x >= -3020 : v.pos.x >= 2450 && v.pos.x <= 3020) &&
+      Math.abs(v.pos.z - runwayCz) <= 135;
+
+    // Track clean departure after takeoff so the Orange ILS Landing trail NEVER pops up right after lifting off!
+    if (onFriendlyGround || v.autoFlightMode === 'TAKEOFF') {
+      v._suppressLandingGuideUntilClear = true;
+    } else if (v._suppressLandingGuideUntilClear && (distToAirbase > 950 || altAgl > 360)) {
+      v._suppressLandingGuideUntilClear = false;
+    }
+
+    if (v.autoFlightMode === 'TAKEOFF') {
+      // Immediately hide all takeoff guide lines as soon as wheels lift off the runway (`altAgl >= 11.5m`)!
+      if (altAgl >= 11.5) return null;
+      return { mode: 'TAKEOFF', active: true, isUs, airbaseX, runwayCz, runwayY, altAgl, distToAirbase };
+    }
+    if (v.autoFlightMode === 'LANDING') {
+      return { mode: 'LANDING', active: true, isUs, airbaseX, runwayCz, runwayY, altAgl, distToAirbase };
+    }
+    if (onFriendlyGround) {
+      return { mode: 'TAKEOFF', active: false, isUs, airbaseX, runwayCz, runwayY, altAgl, distToAirbase };
+    }
+    // ILS Approach Corridor: only shown when returning to the airport (NEVER during initial climb-out after takeoff!)
+    const inApproachCorridor =
+      !v._suppressLandingGuideUntilClear &&
+      altAgl >= 6.5 &&
+      altAgl <= 340 &&
+      distToAirbase <= 1950 &&
+      spd <= maxSpd * 0.9;
+    if (inApproachCorridor) {
+      return { mode: 'LANDING', active: false, isUs, airbaseX, runwayCz, runwayY, altAgl, distToAirbase };
+    }
+    return null;
+  },
+
+  /**
+   * Universal `[R]` Aircraft Autopilot & Flight-Director Key:
+   * 1. If Auto-Takeoff or ILS Auto-Land is currently active -> cancels back to Manual Control!
+   * 2. If on the friendly HQ Runway / Apron -> engages hands-free 3D Auto-Takeoff & Climb-Out!
+   * 3. If approaching friendly HQ Airport at low height & speed -> engages hands-free 3D ILS Auto-Land & Pit-Stop!
+   * 4. Otherwise in open airspace -> toggles AC-130 Pylon Orbit (`gunship`) or LAAP Level-Hold Autopilot (`jets`).
+   */
+  handleAircraftRKey() {
+    const v = this.activeVehicle;
+    if (!v || !v.isAircraft || v.dead) return false;
+
+    if (v.autoFlightMode === 'TAKEOFF' || v.autoFlightMode === 'LANDING') {
+      const prev = v.autoFlightMode;
+      v.autoFlightMode = null;
+      sound.playRadioBeep?.(false);
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          `🕹️ AUTO-${prev} DISENGAGED — MANUAL FLIGHT CONTROL RESTORED!`
+        );
+      }
+      return false;
+    }
+
+    const elig = this.getRunwayAssistEligibility(v);
+    if (elig && elig.mode === 'TAKEOFF') {
+      v.autoFlightMode = 'TAKEOFF';
+      v.levelAutopilot = false;
+      if (v.aircraftRole === 'gunship') {
+        v.gunshipManualFlight = true;
+      }
+      v.throttle = Math.max(v.throttle || 0, 0.55);
+      sound.playRadioBeep?.(true);
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          '🛫 [R] AUTO-TAKEOFF ENGAGED — ALIGNING RUNWAY CENTERLINE, SPOOLING AFTERBURNER & CLIMBING SKY-GATES! ([R] CANCEL)'
+        );
+      }
+      return 'TAKEOFF';
+    }
+
+    if (elig && elig.mode === 'LANDING') {
+      v.autoFlightMode = 'LANDING';
+      v.levelAutopilot = false;
+      v.spiTargetPos = null;
+      if (v.aircraftRole === 'gunship') {
+        v.gunshipManualFlight = true;
+        if (this.vehicleCameraMode === 'OPTIC_NOSE') {
+          this.vehicleCameraMode = 'CHASE_3P';
+          this.thirdPersonVehicle = true;
+        }
+      }
+      sound.playRadioBeep?.(true);
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          '🛬 [R] ILS AUTO-LANDING ENGAGED — INTERCEPTING GLIDESLOPE CORRIDOR TO HQ RUNWAY PIT-STOP! ([R] CANCEL)'
+        );
+      }
+      return 'LANDING';
+    }
+
+    if (v.aircraftRole === 'gunship') {
+      return this.toggleGunshipFlightMode?.();
+    }
+    return this.toggleAircraftLevelAutopilot?.();
+  },
+
+  /**
+   * Builds & updates the 3D Holographic Takeoff Climb Trail & ILS Landing Glideslope Corridor + Sky-Gates
+   * so pilots see a crystal-clear 3D flight path and can press `[R]` to auto-takeoff or auto-land!
+   */
+  updateRunwayFlightDirector(v) {
+    if (!this.scene) return;
+    const elig = this.getRunwayAssistEligibility(v);
+    if (!elig) {
+      if (this._runwayAssistVisGroup) this._runwayAssistVisGroup.visible = false;
+      return;
+    }
+
+    if (!this._runwayAssistVisGroup) {
+      const grp = new THREE.Group();
+      const pathSegs = 40;
+      const pathGeo = new THREE.BufferGeometry();
+      pathGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array((pathSegs + 1) * 3), 3));
+      const pathMat = new THREE.LineBasicMaterial({
+        color: 0x00ffaa,
+        transparent: true,
+        opacity: 0.92
+      });
+      const pathLine = new THREE.Line(pathGeo, pathMat);
+      pathLine.frustumCulled = false;
+      grp.add(pathLine);
+
+      // 5 Glowing 3D Flight-Director Sky-Gate Rings along the Takeoff / ILS Glideslope Trail
+      const gates = [];
+      const gateGeo = new THREE.RingGeometry(8.5, 10.2, 4);
+      const gateMat = new THREE.MeshBasicMaterial({
+        color: 0x00d2d3,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.78,
+        depthWrite: false
+      });
+      for (let gi = 0; gi < 5; gi++) {
+        const gm = new THREE.Mesh(gateGeo, gateMat);
+        gm.frustumCulled = false;
+        grp.add(gm);
+        gates.push(gm);
+      }
+
+      // Touchdown / Liftoff Target Ring + Crosshair on the Runway Centerline
+      const tdRingGeo = new THREE.RingGeometry(6.5, 9.2, 24);
+      tdRingGeo.rotateX(-Math.PI / 2);
+      const tdMat = new THREE.MeshBasicMaterial({
+        color: 0xffd32a,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.86,
+        depthWrite: false
+      });
+      const tdRing = new THREE.Mesh(tdRingGeo, tdMat);
+      tdRing.frustumCulled = false;
+      grp.add(tdRing);
+
+      grp.userData = { pathLine, pathMat, gates, gateMat, tdRing, tdMat, pathSegs };
+      this.scene.add(grp);
+      this._runwayAssistVisGroup = grp;
+    }
+
+    const grp = this._runwayAssistVisGroup;
+    grp.visible = true;
+    const { pathLine, pathMat, gates, gateMat, tdRing, tdMat, pathSegs } = grp.userData;
+    const { mode, active, isUs, airbaseX, runwayCz, runwayY } = elig;
+    const colHex = active ? 0x2ecc71 : mode === 'TAKEOFF' ? 0x00d2d3 : 0xffbe0b;
+    pathMat.color.setHex(colHex);
+    gateMat.color.setHex(colHex);
+    gateMat.opacity = active ? 0.88 : 0.65;
+    tdMat.color.setHex(active ? 0x2ecc71 : 0xffd32a);
+
+    const posArr = pathLine.geometry.attributes.position.array;
+    const outDirX = isUs ? 1 : -1; // Direction from Rear Airbase out toward Battlefield
+
+    if (mode === 'TAKEOFF') {
+      const rotX = airbaseX + outDirX * 165; // Exact liftoff end of the 360m paved runway (`cz = ∓68`)
+      const climbEndX = airbaseX + outDirX * 860;
+      const climbTopY = runwayY + (v.aircraftRole === 'gunship' ? 210 : 155);
+      tdRing.position.set(rotX, runwayY + 0.55, runwayCz);
+
+      for (let i = 0; i <= pathSegs; i++) {
+        const t = i / pathSegs;
+        let px, py, pz;
+        if (t <= 0.45) {
+          const u = t / 0.45;
+          px = THREE.MathUtils.lerp(v.pos.x, rotX, u);
+          // Smooth S-curve merge from side apron (`z = ±138`) directly onto the paved `z = ±68` runway centerline!
+          const merge = 1 - Math.pow(1 - u, 2.2);
+          pz = THREE.MathUtils.lerp(v.pos.z, runwayCz, merge);
+          py = runwayY + 1.1 + (u > 0.82 ? (u - 0.82) * 18 : 0);
+        } else {
+          const u = (t - 0.45) / 0.55;
+          px = THREE.MathUtils.lerp(rotX, climbEndX, u);
+          pz = runwayCz;
+          py = THREE.MathUtils.lerp(runwayY + 4.3, climbTopY, Math.pow(u, 1.12));
+        }
+        const idx = i * 3;
+        posArr[idx] = px;
+        posArr[idx + 1] = py;
+        posArr[idx + 2] = pz;
+      }
+
+      const gateTs = [0.35, 0.52, 0.68, 0.84, 0.98];
+      for (let gi = 0; gi < gates.length; gi++) {
+        const sIdx = Math.min(pathSegs, Math.round(gateTs[gi] * pathSegs)) * 3;
+        const gm = gates[gi];
+        gm.visible = true;
+        gm.position.set(posArr[sIdx], posArr[sIdx + 1] + 2.2, posArr[sIdx + 2]);
+        gm.rotation.set(0, Math.PI / 2, Math.PI / 4);
+      }
+    } else {
+      // BI-DIRECTIONAL ILS LANDING GLIDESLOPE ONTO THE PAVED ASPHALT RUNWAY (`cx = ∓2735, cz = ∓68`):
+      // Picks whichever runway piano-key threshold (`airbaseX - 156` West or `airbaseX + 156` East) is in front of the approach
+      // so approaching from EITHER side curves smoothly onto the paved centerline with ZERO backward V-turn!
+      if (!active || typeof v._lockedLandDirX !== 'number') {
+        v._lockedLandDirX = v.pos.x < airbaseX ? 1 : -1;
+      }
+      const landDirX = v._lockedLandDirX; // +1 = landing Eastbound, -1 = landing Westbound
+      const threshX = airbaseX - landDirX * 156;
+      const stopX = airbaseX + landDirX * 135;
+      tdRing.position.set(threshX + landDirX * 32, runwayY + 0.55, runwayCz);
+
+      if (!active && this.onAwardXp) {
+        const nowMs = performance.now();
+        if (nowMs - (v._lastIlsHintMs || 0) > 16000) {
+          v._lastIlsHintMs = nowMs;
+          this.onAwardXp(
+            0,
+            '🛬 ILS RUNWAY GLIDESLOPE READY — PRESS [R] FOR AUTOMATIC RUNWAY LANDING & PART REPAIR!'
+          );
+        }
+      }
+
+      // Cubic Hermite S-Curve from aircraft `(v.pos)` arriving dead-aligned (`(landDirX, 0, 0)`) at `(threshX, runwayY + 1.8, runwayCz)`!
+      const beforeThreshDist = (threshX - v.pos.x) * landDirX;
+      const alreadyOverRunway = beforeThreshDist <= 20 && Math.abs(v.pos.z - runwayCz) <= 35;
+      const chordDist = Math.hypot(threshX - v.pos.x, runwayCz - v.pos.z);
+      const handleLen = Math.min(chordDist * 0.48, 280);
+      const noseX = -Math.sin(v.yaw || 0);
+      const noseZ = -Math.cos(v.yaw || 0);
+      const m0x = (noseX * 0.45 + landDirX * 0.55) * handleLen;
+      const m0z = noseZ * 0.45 * handleLen;
+      const m1x = landDirX * handleLen;
+      const m1z = 0;
+
+      for (let i = 0; i <= pathSegs; i++) {
+        const t = i / pathSegs;
+        let px, py, pz;
+        if (alreadyOverRunway) {
+          px = THREE.MathUtils.lerp(v.pos.x, stopX, t);
+          pz = THREE.MathUtils.lerp(v.pos.z, runwayCz, Math.min(1, t * 2.2));
+          py = THREE.MathUtils.lerp(v.pos.y, runwayY + 0.95, Math.min(1, t * 1.8));
+        } else if (t <= 0.72) {
+          const u = t / 0.72;
+          const u2 = u * u;
+          const u3 = u2 * u;
+          const h00 = 2 * u3 - 3 * u2 + 1;
+          const h10 = u3 - 2 * u2 + u;
+          const h01 = -2 * u3 + 3 * u2;
+          const h11 = u3 - u2;
+          px = h00 * v.pos.x + h10 * m0x + h01 * threshX + h11 * m1x;
+          pz = h00 * v.pos.z + h10 * m0z + h01 * runwayCz + h11 * m1z;
+          py = THREE.MathUtils.lerp(v.pos.y, runwayY + 1.8, u);
+        } else {
+          const u = (t - 0.72) / 0.28;
+          px = THREE.MathUtils.lerp(threshX, stopX, u);
+          pz = runwayCz;
+          py = runwayY + 1.0;
+        }
+        const idx = i * 3;
+        posArr[idx] = px;
+        posArr[idx + 1] = py;
+        posArr[idx + 2] = pz;
+      }
+
+      const gateTs = [0.22, 0.42, 0.62, 0.74, 0.88];
+      for (let gi = 0; gi < gates.length; gi++) {
+        const sIdx = Math.min(pathSegs, Math.round(gateTs[gi] * pathSegs)) * 3;
+        const gm = gates[gi];
+        gm.visible = !alreadyOverRunway && gi < 4;
+        gm.position.set(posArr[sIdx], posArr[sIdx + 1] + 2.0, posArr[sIdx + 2]);
+        // Orient each 3D gate perpendicular to the local path tangent!
+        const nextIdx = Math.min(pathSegs * 3, sIdx + 3);
+        const segYaw = Math.atan2(-(posArr[nextIdx] - posArr[sIdx]), -(posArr[nextIdx + 2] - posArr[sIdx + 2]));
+        gm.rotation.set(0, segYaw, Math.PI / 4);
+      }
+    }
+    pathLine.geometry.attributes.position.needsUpdate = true;
+  },
+
+  /**
    * [R] Key on Fixed-Wing Jets / CAS (A-10C, Su-25, F-15EX, Su-57, B-2):
    * Toggles DCS-style LAAP Level-Hold Autopilot so the plane holds altitude & wings-level
    * while the mouse freely looks/slews down (-85°..+77°) to spot & align ground runs!
@@ -3392,15 +3773,18 @@ export const VehicleControlMethods = {
   },
 
   /**
-   * Toggles Aircraft Collision Avoidance between:
-   * - `true` (DEFAULT: AUTO ON — automatic pull-up & ground/building protection for easier flight control)
-   * - `false` (OFF: REALISTIC CRASH MODE — planes crash and explode if flown into the ground, mountains, or buildings!)
+   * Toggles Aircraft Flight Assist & Collision Avoidance (`[G]`):
+   * - `true` (DEFAULT: AUTO ON — Easy Flight: terrain/building auto pull-up + upright bank/pitch limiter, cannot flip upside-down!)
+   * - `false` (OFF: ADVANCED AEROBATICS & REALISTIC CRASH — unlocks full 360° barrel rolls, loops & sustained upside-down flight, plus realistic ground/building crash!)
    */
   toggleAircraftCollisionAvoidance(forceVal) {
     if (typeof forceVal === 'boolean') {
       this.aircraftCollisionAvoidance = forceVal;
     } else {
       this.aircraftCollisionAvoidance = this.aircraftCollisionAvoidance === false;
+    }
+    if (this.aircraftCollisionAvoidance) {
+      this.pitch = THREE.MathUtils.clamp(this.pitch || 0, -1.08, 1.08);
     }
     try {
       localStorage.setItem(
@@ -3494,10 +3878,27 @@ export const VehicleControlMethods = {
     const bankInput = (this.keys['KeyA'] ? 1 : 0) - (this.keys['KeyD'] ? 1 : 0);
     const isGunship = v.aircraftRole === 'gunship';
 
-    // Passive Airframe Self-Repair (Combat Pilot: +25 HP/s, Standard: +8 HP/s) & Auto-DIRCM Missile Spoofing
+    // Passive Airframe Self-Sealing: capped in mid-air by structural subsystem integrity (`v.airframeParts`)
+    // so `v.hp` never falsely climbs to 100% while wings/engines/tail are damaged (full 100% requires HQ Runway Pit-Stop or [X] ECM)!
     const airRegen = v.passiveRegenPerSec || (this.role === 'pilot' ? 25 : 8);
-    if (v.hp < v.maxHp) {
-      v.hp = Math.min(v.maxHp, v.hp + airRegen * dt);
+    let maxFieldRegenHp = v.maxHp;
+    if (v.airframeParts && !v.inRearmZone) {
+      const ap = v.airframeParts;
+      const partsVals = [
+        ap.avionics ?? 100,
+        ap.cockpit ?? 100,
+        ap.leftWing ?? 100,
+        ap.rightWing ?? 100,
+        ap.engines ?? 100,
+        ap.tail ?? 100
+      ];
+      const avgP = partsVals.reduce((s, x) => s + x, 0) / partsVals.length;
+      const minP = Math.min(...partsVals);
+      const structFrac = THREE.MathUtils.clamp((avgP * 0.62 + minP * 0.38) / 100, 0.25, 1.0);
+      maxFieldRegenHp = Math.round(v.maxHp * structFrac);
+    }
+    if (v.hp < maxFieldRegenHp) {
+      v.hp = Math.min(maxFieldRegenHp, v.hp + airRegen * dt);
     }
     if (
       Boolean(v.hasExplicitAutoDircmPod) &&
@@ -3621,7 +4022,11 @@ export const VehicleControlMethods = {
       const wingLeftFrac = ap ? THREE.MathUtils.clamp((ap.leftWing ?? 100) / 100, 0, 1) : 1.0;
       const wingRightFrac = ap ? THREE.MathUtils.clamp((ap.rightWing ?? 100) / 100, 0, 1) : 1.0;
       const wingAvgFrac = (wingLeftFrac + wingRightFrac) * 0.5;
-      const wingAsymRollBias = (wingLeftFrac - wingRightFrac) * 0.52;
+      const wingAsymDamage = Math.abs(wingLeftFrac - wingRightFrac);
+      const wingAsymRollBias =
+        Math.min(wingLeftFrac, wingRightFrac) < 0.45 && wingAsymDamage > 0.25
+          ? (wingLeftFrac - wingRightFrac) * 0.16
+          : 0;
       const tailHealthFrac = ap ? THREE.MathUtils.clamp((ap.tail ?? 100) / 100, 0, 1) : 1.0;
       const avionicsFrac = ap ? THREE.MathUtils.clamp((ap.avionics ?? 100) / 100, 0, 1) : 1.0;
       const maxThrottleCap = engHealthFrac <= 0.05 ? 0.15 : 0.35 + 0.65 * engHealthFrac;
@@ -3638,21 +4043,50 @@ export const VehicleControlMethods = {
         }
       }
 
+      const TAXI_THROTTLE_GATE = 0.35;
       if (throttleInput > 0) {
-        const spoolUpRate = (isWright ? 0.14 : 0.34) * (0.45 + 0.55 * engHealthFrac);
-        v.throttle = Math.min(maxThrottleCap, v.throttle + dt * spoolUpRate);
+        if (onRunway && (v.forwardSpeed || 0) < -0.1) {
+          // Cancel reverse pushback / beta-reverse before spooling forward taxi thrust
+          v.throttle = 0;
+          v._runwayReverseHold = 0;
+        } else {
+          // Finer throttle modulation inside the 0%–35% Ground Taxi Detent on the runway!
+          const inTaxiDetent = onRunway && v.throttle < TAXI_THROTTLE_GATE;
+          const spoolUpRate =
+            (isWright ? 0.14 : inTaxiDetent ? 0.22 : 0.38) * (0.45 + 0.55 * engHealthFrac);
+          v.throttle = Math.min(maxThrottleCap, v.throttle + dt * spoolUpRate);
+        }
       } else if (throttleInput < 0) {
-        const spoolDownRate = onRunway ? 0.75 : 0.48;
+        // Holding [S] aloft deploys dorsal airbrake / split decelerons so pilots can rapidly dump speed to tighten dogfight turn radius!
+        const spoolDownRate = onRunway ? 0.95 : 0.92;
         v.throttle = Math.max(0.0, v.throttle - dt * spoolDownRate);
       } else if (v.throttle > maxThrottleCap) {
         v.throttle = Math.max(maxThrottleCap, v.throttle - dt * 0.35);
       }
 
-      // Target airspeed from current throttle setting (0% throttle can drop below stall speed!)
+      // Runway Two-Stage Power Curve + Realistic Reverse Behavior:
+      // - 0%..35% Throttle on Runway = TAXI MODE (0..19 m/s ground taxi — stays on wheels, never auto-launches!)
+      // - >35%..100% Throttle on Runway = TAKEOFF / AFTERBURNER (accelerates cleanly past rotation speed Vr!)
+      // - Hold [S] at 0 km/h on Runway:
+      //     * AC-130 / Tu-95 Turboprops: Beta Reverse-Pitch Propellers (-7.5 m/s)
+      //     * Tactical Jets / B-2 (no engine thrust reversers in real life): Anti-skid wheel stop first,
+      //       then after 0.38s hold engages a slow Ground Crew Pushback Tug (-4.2 m/s) so you never get wedged!
       const effMaxSpd = maxSpd * (0.52 + 0.48 * engHealthFrac);
       const minThrottleSpd = onRunway ? 0 : isWright ? 3.5 : minSpd * 0.52;
-      const desiredThrottleSpd =
-        onRunway && v.throttle < 0.03 ? 0 : THREE.MathUtils.lerp(minThrottleSpd, effMaxSpd, v.throttle);
+      const maxTaxiSpd = isWright ? 6.5 : Math.min(20.0, (minSpd || 32) * 0.62);
+      let desiredThrottleSpd;
+      if (onRunway) {
+        if (v.throttle < 0.025) {
+          desiredThrottleSpd = 0;
+        } else if (v.throttle <= TAXI_THROTTLE_GATE) {
+          desiredThrottleSpd = (v.throttle / TAXI_THROTTLE_GATE) * maxTaxiSpd;
+        } else {
+          const takeoffFrac = (v.throttle - TAXI_THROTTLE_GATE) / (1.0 - TAXI_THROTTLE_GATE);
+          desiredThrottleSpd = THREE.MathUtils.lerp(maxTaxiSpd, effMaxSpd, takeoffFrac);
+        }
+      } else {
+        desiredThrottleSpd = THREE.MathUtils.lerp(minThrottleSpd, effMaxSpd, v.throttle);
+      }
 
       // Gravity pitch-speed coupling: climbing bleeds airspeed on tactical jets, while turboprop AC-130
       // coupled pylon/altitude-hold uses constant-speed prop governor so it climbs smoothly all the way to 1,800m!
@@ -3661,26 +4095,62 @@ export const VehicleControlMethods = {
           ? 0
           : -Math.sin(v.pitch || 0) * (isWright ? 11.5 : isGunship ? 6.0 : 16.5);
       const curSpd = v.forwardSpeed || 0;
-      const spdDiff = desiredThrottleSpd - curSpd;
 
-      let engineAccelRate;
-      if (spdDiff >= 0) {
-        if (isWright) {
-          // Wright Flyer / Sikorsky Muromets: starts with a slow, vintage 5.8 m/s² acceleration
-          // so it feels slow at first, then progressively spools up to its 235 m/s (846 km/h) top speed!
-          engineAccelRate = curSpd < 18 ? 5.8 : curSpd < 45 ? 9.5 : 16.5 + (curSpd / maxSpd) * 14.0;
+      if (onRunway && throttleInput < 0 && v.throttle <= 0.01 && curSpd <= 0.25) {
+        v._runwayReverseHold = (v._runwayReverseHold || 0) + dt;
+        if (isGunship) {
+          // Real C-130 / AC-130 Turboprop Beta Reverse-Pitch Propellers!
+          v.forwardSpeed = Math.max(-7.5, curSpd - 6.8 * dt);
+        } else if (v._runwayReverseHold >= 0.38) {
+          // Real F-15 / A-10 / B-2 have no reverse gear -> slow Ground Crew Pushback Tug when held at 0 km/h!
+          v.forwardSpeed = Math.max(-4.2, curSpd - 4.5 * dt);
+          const nowMs = performance.now();
+          if (this.onAwardXp && nowMs - (v._lastTugBannerMs || 0) > 9000) {
+            v._lastTugBannerMs = nowMs;
+            this.onAwardXp(
+              0,
+              '🚜 GROUND CREW PUSHBACK TUG ENGAGED (JETS HAVE NO REVERSE THRUST — KEEP ≤35% THROTTLE TO TAXI FORWARD!)'
+            );
+          }
         } else {
-          // Realistic gradual jet turbofan acceleration (not instant!)
-          engineAccelRate = (v.accelRate || 2.8) * 4.4;
+          v.forwardSpeed = Math.max(0, curSpd - 16.0 * dt);
         }
       } else {
-        // Airbrake / aerodynamic drag deceleration when throttling down
-        engineAccelRate = throttleInput < 0 ? (v.brakeRate || 2.8) * 6.2 : 5.5;
+        v._runwayReverseHold = 0;
+        if (onRunway && curSpd < 0 && throttleInput >= 0) {
+          const tugStopStep = 9.5 * dt;
+          v.forwardSpeed = Math.min(0, curSpd + tugStopStep);
+        } else {
+          const spdDiff = desiredThrottleSpd - curSpd;
+          let engineAccelRate;
+          if (spdDiff >= 0) {
+            if (isWright) {
+              engineAccelRate = v.isSecretOmegaFlyer
+                ? curSpd < 18
+                  ? 5.8
+                  : curSpd < 45
+                  ? 9.5
+                  : 16.5 + (curSpd / maxSpd) * 14.0
+                : 4.8;
+            } else if (onRunway && v.throttle <= TAXI_THROTTLE_GATE) {
+              engineAccelRate = 8.5;
+            } else {
+              engineAccelRate = (v.accelRate || 2.8) * 4.4;
+            }
+          } else {
+            // Wheel anti-skid braking on runway (~18.5 m/s²) vs dorsal airbrake aloft (~28 m/s² when holding [S] to enter tight dogfight corner!)
+            engineAccelRate =
+              onRunway && throttleInput < 0
+                ? 18.5
+                : throttleInput < 0
+                ? (v.brakeRate || 3.4) * 8.2
+                : 6.5;
+          }
+          const maxDeltaV = engineAccelRate * dt;
+          const engineStep = THREE.MathUtils.clamp(spdDiff, -maxDeltaV, maxDeltaV);
+          v.forwardSpeed = Math.max(0, Math.min(maxSpd * 1.08, curSpd + engineStep + gravityAccel * dt));
+        }
       }
-
-      const maxDeltaV = engineAccelRate * dt;
-      const engineStep = THREE.MathUtils.clamp(spdDiff, -maxDeltaV, maxDeltaV);
-      v.forwardSpeed = Math.max(0, Math.min(maxSpd * 1.08, curSpd + engineStep + gravityAccel * dt));
 
       // =========================================================================
       // 2. AERODYNAMIC STALL & FALLING TO THE GROUND (When Airspeed Drops Below Stall Threshold)
@@ -3694,14 +4164,20 @@ export const VehicleControlMethods = {
           v.isStalling = true;
           v.flightFSM?.send(AIRCRAFT_FLIGHT_EVENTS.ENTER_STALL);
           v.stallSinkVel = Math.min(-3.5, (v.velVector?.y || 0) - 3.0);
-          sound.playRadioBeep?.(false);
-          if (this.onAwardXp) {
-            this.onAwardXp(
-              0,
-              `⚠️ AERODYNAMIC STALL (${Math.round(v.forwardSpeed * 3.6)} KM/H < ${Math.round(
-                stallSpd * 3.6
-              )} KM/H STALL) — FALLING! HOLD [W] & PUSH NOSE DOWN TO RECOVER!`
-            );
+          const nowStallMs = performance.now();
+          if (nowStallMs - (v._lastStallWarnMs || 0) > 6000) {
+            v._lastStallWarnMs = nowStallMs;
+            sound.playRadioBeep?.(false);
+            if (this.onAwardXp) {
+              const curKmh = Math.floor(v.forwardSpeed * 3.6);
+              const reqKmh = Math.max(curKmh + 1, Math.ceil(stallSpd * 3.6));
+              this.onAwardXp(
+                0,
+                engHealthFrac < 0.45
+                  ? `⚠️ ENGINE THRUST LOSS STALL (${curKmh} < ${reqKmh} KM/H) — LAND & PARK ON HQ RUNWAY TO REPLACE ENGINES!`
+                  : `⚠️ AERODYNAMIC STALL (${curKmh} KM/H < ${reqKmh} KM/H STALL) — HOLD [W] & PUSH NOSE DOWN TO RECOVER!`
+              );
+            }
           }
         }
         const liftFrac = THREE.MathUtils.clamp(v.forwardSpeed / Math.max(1, stallSpd), 0, 1);
@@ -3724,9 +4200,12 @@ export const VehicleControlMethods = {
       }
       syncAircraftFlightFSM(v, { onRunway });
 
-      // 3. Coordinated Bank-to-Turn + 360° Aerobatic Backflip Loop Physics OR AC-130J Pylon-Turn Orbit Autopilot
+      // 3. Two-Tier Flight Envelope (`[G]` Collision Avoidance ON = Easy Upright Banked Turns;
+      //    `[G]` OFF = Advanced 360° Aerobatic Barrel Rolls, Vertical Loops & Sustained Upside-Down Flight!)
+      //    OR AC-130J Pylon-Turn Orbit Autopilot
+      const collisionAvoidEnabled = this.aircraftCollisionAvoidance !== false;
       const canAerobaticLoop =
-        !isGunship && v.aircraftRole !== 'b2_spirit' && !onRunway;
+        !collisionAvoidEnabled && !isGunship && v.aircraftRole !== 'b2_spirit' && !onRunway;
       const arrowPitchInput = (this.keys['ArrowUp'] ? 1 : 0) - (this.keys['ArrowDown'] ? 1 : 0);
       const gunshipClimbKey =
         (this.keys['KeyQ'] || this.keys['ArrowUp'] || this.keys['Equal'] || this.keys['PageUp'] ? 1 : 0) -
@@ -3763,7 +4242,145 @@ export const VehicleControlMethods = {
         this.syncGunshipPylonGeometry(v);
       }
 
-      if (isGunship && !onRunway && !v.gunshipManualFlight) {
+      if (v.autoFlightMode === 'TAKEOFF' || v.autoFlightMode === 'LANDING') {
+        // =========================================================================
+        // [R] HANDS-FREE 3D AUTO-TAKEOFF & ILS AUTO-LANDING CONTROLLER
+        // =========================================================================
+        const isUsAp = (v.team || this.team) !== 'RU';
+        const outDirX = isUsAp ? 1 : -1;
+        const rwyCx = isUsAp ? -2735 : 2735;
+        const rwyCz = isUsAp ? -68 : 68;
+        const runwayY = this.world ? this.world.getGroundHeightAt(rwyCx, rwyCz) : groundH;
+
+        // Allow pilot to override/abort Auto-Land if holding full [W] climb for >0.55s
+        if (v.autoFlightMode === 'LANDING' && throttleInput > 0 && gunshipClimbKey > 0) {
+          v.autoFlightMode = null;
+          v._lockedLandDirX = undefined;
+        } else if (v.autoFlightMode === 'TAKEOFF') {
+          const rotX = rwyCx + outDirX * 165;
+          const targetClimbAlt = isGunship ? 210 : isWright ? 65 : 155;
+          const liftoffSpd = isWright ? 8.2 : Math.max(minSpd * 0.98, 30);
+          v.throttle = Math.min(maxThrottleCap, (v.throttle || 0.5) + dt * 0.65);
+          const targetSpd = THREE.MathUtils.lerp(liftoffSpd * 1.15, effMaxSpd * 0.88, 0.72);
+          v.forwardSpeed = THREE.MathUtils.lerp(v.forwardSpeed || 0, targetSpd, Math.min(1, dt * 2.2));
+
+          // Lookahead point along paved `z = rwyCz` (`-68` US / `+68` RU) runway centerline toward battlefield!
+          const lookAheadX = v.pos.x + outDirX * (onRunway ? 135 : 240);
+          const lookAheadZ = rwyCz;
+          const desiredYaw = Math.atan2(-(lookAheadX - v.pos.x), -(lookAheadZ - v.pos.z));
+          let yErr = desiredYaw - (v.yaw || 0);
+          while (yErr > Math.PI) yErr -= Math.PI * 2;
+          while (yErr < -Math.PI) yErr += Math.PI * 2;
+
+          v.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(yErr * 2.2, -1.35, 1.35) * dt;
+          const targetApRoll = onRunway ? 0 : THREE.MathUtils.clamp(yErr * 1.1, -0.42, 0.42);
+          v.roll = THREE.MathUtils.lerp(v.roll || 0, targetApRoll, Math.min(1, dt * 5.2));
+
+          const pastVr = (v.forwardSpeed || 0) >= liftoffSpd || (v.pos.x - rotX) * outDirX > -25;
+          const altRem = runwayY + targetClimbAlt - v.pos.y;
+          const targetApPitch = !pastVr
+            ? 0
+            : altRem > 22
+            ? isWright
+              ? 0.18
+              : 0.25
+            : THREE.MathUtils.clamp(altRem * 0.012, 0, 0.22);
+          v.pitch = THREE.MathUtils.lerp(v.pitch || 0, targetApPitch, Math.min(1, dt * 3.8));
+          this.yaw = THREE.MathUtils.lerp(this.yaw, v.yaw, Math.min(1, dt * 4.5));
+          this.pitch = THREE.MathUtils.lerp(this.pitch, v.pitch, Math.min(1, dt * 4.5));
+
+          // Complete Auto-Takeoff & immediately remove BOTH green and orange guide lines upon lifting off (`altAgl >= 11.5m`)!
+          if (altAgl >= 11.5 && pastVr) {
+            v.autoFlightMode = null;
+            v._suppressLandingGuideUntilClear = true;
+            if (this._runwayAssistVisGroup) {
+              this._runwayAssistVisGroup.visible = false;
+            }
+            v.throttle = 0.68;
+            v.pitch = isWright ? 0.1 : 0.14;
+            v.roll = 0;
+            this.yaw = v.yaw;
+            this.pitch = v.pitch;
+            sound.playRadioBeep?.(true);
+            if (this.onAwardXp) {
+              this.onAwardXp(
+                0,
+                `✅ AIRBORNE — TAKEOFF COMPLETE! MANUAL FLIGHT ACTIVE ([R] ${
+                  isGunship ? 'PYLON ORBIT' : 'LEVEL AUTOPILOT'
+                })`
+              );
+            }
+          }
+        } else if (v.autoFlightMode === 'LANDING') {
+          if (typeof v._lockedLandDirX !== 'number') {
+            v._lockedLandDirX = v.pos.x < rwyCx ? 1 : -1;
+          }
+          const landDirX = v._lockedLandDirX;
+          const threshX = rwyCx - landDirX * 156;
+          const stopX = rwyCx + landDirX * 135;
+          const approachSpd = isWright ? 11.5 : Math.max((minSpd || 32) * 1.12, stallSpd * 1.15);
+          // Smooth localizer capture onto exact paved asphalt centerline `z = rwyCz` (`-68` US / `+68` RU)!
+          const distBeforeThresh = (threshX - v.pos.x) * landDirX;
+          const aimX =
+            distBeforeThresh > 60
+              ? threshX - landDirX * Math.min(240, distBeforeThresh * 0.32)
+              : stopX + landDirX * 70;
+          const desiredYaw = Math.atan2(-(aimX - v.pos.x), -(rwyCz - v.pos.z));
+          let yErr = desiredYaw - (v.yaw || 0);
+          while (yErr > Math.PI) yErr -= Math.PI * 2;
+          while (yErr < -Math.PI) yErr += Math.PI * 2;
+
+          const turnLimit = onRunway ? 1.5 : 1.25;
+          v.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(yErr * 2.2, -turnLimit, turnLimit) * dt;
+          const targetApRoll =
+            onRunway || altAgl < 9.0 ? 0 : THREE.MathUtils.clamp(yErr * 1.25, -0.52, 0.52);
+          v.roll = THREE.MathUtils.lerp(v.roll || 0, targetApRoll, Math.min(1, dt * 4.8));
+
+          if (onRunway || (altAgl < 3.2 && Math.abs(v.pos.z - rwyCz) < 22 && distBeforeThresh < 85)) {
+            // Touchdown & Anti-Skid Runway Rollout along `z = rwyCz` to Full Stop in Ground Crew Pit-Stop Zone!
+            v.throttle = 0;
+            v.isStalling = false;
+            v.stallSinkVel = 0;
+            v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, Math.min(1, dt * 6.0));
+            v.forwardSpeed = Math.max(0, (v.forwardSpeed || 0) - 19.5 * dt);
+            this.yaw = THREE.MathUtils.lerp(this.yaw, v.yaw, Math.min(1, dt * 5.0));
+            this.pitch = THREE.MathUtils.lerp(this.pitch, 0, Math.min(1, dt * 5.0));
+            if ((v.forwardSpeed || 0) <= 0.6) {
+              v.forwardSpeed = 0;
+              v.autoFlightMode = null;
+              v._lockedLandDirX = undefined;
+              v.pitch = 0;
+              v.roll = 0;
+              sound.playRadioBeep?.(true);
+              if (this.onAwardXp) {
+                this.onAwardXp(
+                  0,
+                  '🛬 AUTO-LANDING COMPLETE ON RUNWAY — GROUND CREW REPLACING DAMAGED PARTS & REARMING! ([R] AUTO-TAKEOFF)'
+                );
+              }
+            }
+          } else {
+            // Airborne ILS Glideslope Descent & Flare onto `z = rwyCz`
+            v.isStalling = false;
+            v.stallSinkVel = 0;
+            v.throttle = 0.34;
+            v.forwardSpeed = THREE.MathUtils.lerp(
+              v.forwardSpeed || approachSpd,
+              approachSpd,
+              Math.min(1, dt * 2.4)
+            );
+            const horizToTouchdown = Math.max(25, Math.hypot(v.pos.x - (threshX + landDirX * 30), v.pos.z - rwyCz));
+            const glideAngle = -Math.atan2(Math.max(0, v.pos.y - (runwayY + 1.1)), horizToTouchdown);
+            const flarePitch =
+              altAgl < 9.5
+                ? THREE.MathUtils.lerp(0.03, glideAngle, altAgl / 9.5)
+                : THREE.MathUtils.clamp(glideAngle, -0.24, 0.08);
+            v.pitch = THREE.MathUtils.lerp(v.pitch || 0, flarePitch, Math.min(1, dt * 3.8));
+            this.yaw = THREE.MathUtils.lerp(this.yaw, v.yaw, Math.min(1, dt * 3.8));
+            this.pitch = THREE.MathUtils.lerp(this.pitch, v.pitch, Math.min(1, dt * 3.8));
+          }
+        }
+      } else if (isGunship && !onRunway && !v.gunshipManualFlight) {
         // AC-130 REAL-LIFE COUPLED PYLON ORBIT CONTROLLER (1968 -> 2024):
         // - Altitude (`v.targetGunshipAlt`, 95m..560m) directly zooms `v.orbitRadius` (`105m..620m`) and Slant Range!
         // - Coordinated turn bank `tan(bank) = V^2 / (g * R)` scales naturally from ~44° steep bank at low altitude
@@ -3781,13 +4398,13 @@ export const VehicleControlMethods = {
           const slideSpd = slideRate * dt;
           v.orbitCenter.x = THREE.MathUtils.clamp(
             v.orbitCenter.x + (lookFwdX * throttleInput - lookRightX * bankInput) * slideSpd,
-            -1850,
-            1850
+            -6500,
+            6500
           );
           v.orbitCenter.z = THREE.MathUtils.clamp(
             v.orbitCenter.z + (lookFwdZ * throttleInput - lookRightZ * bankInput) * slideSpd,
-            -1250,
-            1250
+            -6500,
+            6500
           );
           v.orbitAnchorLabel = `ORBIT (${Math.round(v.orbitCenter.x)}, ${Math.round(v.orbitCenter.z)})`;
         }
@@ -3801,11 +4418,30 @@ export const VehicleControlMethods = {
         const rx = v.pos.x - v.orbitCenter.x;
         const rz = v.pos.z - v.orbitCenter.z;
         const distFromCenter = Math.hypot(rx, rz) || 1;
-        const nx = rx / distFromCenter;
-        const nz = rz / distFromCenter;
-        const radialErr = THREE.MathUtils.clamp((distFromCenter - orbitRadius) / Math.max(82, orbitRadius * 0.42), -0.92, 0.92);
-        const desDirX = nz - nx * radialErr;
-        const desDirZ = -nx - nz * radialErr;
+        let desDirX;
+        let desDirZ;
+        if (distFromCenter > orbitRadius * 1.06) {
+          // Intercept the exact geometric Right-Hand Tangent Point on the Counter-Clockwise Orbit Ring!
+          const phiOrb = Math.atan2(rz, rx);
+          const alphaOrb = phiOrb - Math.acos(THREE.MathUtils.clamp(orbitRadius / distFromCenter, -1, 1));
+          const tanX = v.orbitCenter.x + Math.cos(alphaOrb) * orbitRadius;
+          const tanZ = v.orbitCenter.z + Math.sin(alphaOrb) * orbitRadius;
+          const toTanX = tanX - v.pos.x;
+          const toTanZ = tanZ - v.pos.z;
+          const toTanLen = Math.hypot(toTanX, toTanZ) || 1;
+          desDirX = toTanX / toTanLen;
+          desDirZ = toTanZ / toTanLen;
+        } else {
+          const nx = rx / distFromCenter;
+          const nz = rz / distFromCenter;
+          const radialErr = THREE.MathUtils.clamp(
+            (distFromCenter - orbitRadius) / Math.max(82, orbitRadius * 0.42),
+            -0.92,
+            0.92
+          );
+          desDirX = nz - nx * radialErr;
+          desDirZ = -nx - nz * radialErr;
+        }
         const desiredOrbitYaw = Math.atan2(-desDirX, -desDirZ);
         let orbitYawDiff = desiredOrbitYaw - (v.yaw || 0);
         while (orbitYawDiff > Math.PI) orbitYawDiff -= Math.PI * 2;
@@ -3858,8 +4494,8 @@ export const VehicleControlMethods = {
             1
           );
           const slewStep = (v.ac130HasCoupledAutopilot ? 30 : 18) * excessFrac * dt;
-          v.orbitCenter.x = THREE.MathUtils.clamp(v.orbitCenter.x + slewDirX * slewStep, -1850, 1850);
-          v.orbitCenter.z = THREE.MathUtils.clamp(v.orbitCenter.z + slewDirZ * slewStep, -1250, 1250);
+          v.orbitCenter.x = THREE.MathUtils.clamp(v.orbitCenter.x + slewDirX * slewStep, -6500, 6500);
+          v.orbitCenter.z = THREE.MathUtils.clamp(v.orbitCenter.z + slewDirZ * slewStep, -6500, 6500);
         }
 
         // Visually swivel the 3D Hydraulic Port Gun Barrels within their physical embrasure cone!
@@ -3924,7 +4560,15 @@ export const VehicleControlMethods = {
             );
           }
           if (bankInput !== 0) {
-            v.yaw += bankInput * (v.turnRate || 1.25) * 0.68 * tailAuthority * dt;
+            v.yaw +=
+              this.computeAircraftBankedTurnRate(
+                v,
+                v.forwardSpeed || v.speed || 85,
+                bankInput * 0.48,
+                0,
+                tailAuthority,
+                false
+              ) * dt;
           }
           this.yaw = v.yaw;
           const targetApRoll = bankInput * 0.42 + wingAsymRollBias * 0.5;
@@ -3948,30 +4592,46 @@ export const VehicleControlMethods = {
             while (this.pitch > Math.PI) this.pitch -= Math.PI * 2;
             while (this.pitch <= -Math.PI) this.pitch += Math.PI * 2;
           } else {
-            this.pitch = THREE.MathUtils.clamp(this.pitch, -1.18, 1.15);
+            if (arrowPitchInput !== 0 && !isGunship) {
+              this.pitch += arrowPitchInput * (v.turnRate || 1.35) * 0.85 * tailAuthority * dt;
+            }
+            while (this.pitch > Math.PI) this.pitch -= Math.PI * 2;
+            while (this.pitch <= -Math.PI) this.pitch += Math.PI * 2;
+            this.pitch = THREE.MathUtils.clamp(this.pitch, -1.08, 1.08);
           }
 
-          const isInvertedLoop = Math.cos(v.pitch || 0) < -0.05;
+          const isInvertedLoop = canAerobaticLoop && Math.cos(v.pitch || 0) < -0.05;
+          const maxBankRad =
+            v.aircraftRole === 'fighter'
+              ? 1.05
+              : v.aircraftRole === 'cas'
+              ? 0.94
+              : v.aircraftRole === 'b2_spirit'
+              ? 0.62
+              : isGunship
+              ? 0.52
+              : 0.88;
           if (!canAerobaticLoop && bankInput !== 0) {
-            this.yaw += (isInvertedLoop ? -bankInput : bankInput) * (v.turnRate || 1.35) * 0.88 * tailAuthority * dt;
+            // Easy Upright Flight (`[G]` ON, or B-2 / Manual Gunship): `[A/D]` steers heading at aerodynamic G-limited turn rate!
+            this.yaw +=
+              this.computeAircraftBankedTurnRate(
+                v,
+                v.forwardSpeed || v.speed || 85,
+                bankInput * maxBankRad,
+                0,
+                tailAuthority,
+                false
+              ) * dt;
           }
 
           let yawDiff = this.yaw - v.yaw;
           while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
           while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
 
-          // Role-specific bank & Full 360° Aerobatic Barrel Roll / Sustained Inverted (±180°) Flight!
-          const maxBankRad =
-            v.aircraftRole === 'fighter'
-              ? 1.36
-              : v.aircraftRole === 'cas'
-              ? 1.22
-              : v.aircraftRole === 'b2_spirit'
-              ? 0.68
-              : isGunship
-              ? 0.54
-              : 1.05;
-          const stallBuffetRoll = v.isStalling ? Math.sin(performance.now() * 0.015) * 0.38 : 0;
+          // Role-specific coordinated bank limit:
+          // - In `[G]` ON (Easy Flight), `canAerobaticLoop` is false so bank never exceeds a natural 53°–60° turn!
+          // - In `[G]` OFF (Advanced Flight), `[A/D]` unlocks full 360° barrel rolls & sustained ±180° upside-down flight!
+          const stallBuffetRoll = v.isStalling ? Math.sin(performance.now() * 0.015) * 0.34 : 0;
           const loopLevelFactor = canAerobaticLoop
             ? THREE.MathUtils.clamp((Math.abs(Math.cos(v.pitch || 0)) - 0.12) / 0.35, 0.15, 1.0)
             : 1.0;
@@ -3980,57 +4640,89 @@ export const VehicleControlMethods = {
           if (onRunway) {
             v.roll = THREE.MathUtils.lerp(v.roll || 0, 0, Math.min(1, dt * 8.0));
           } else if (canAerobaticLoop && bankInput !== 0) {
-            // Holding [A] or [D] drives continuous 360° aileron rolls (allowing roll to ±180° inverted!)
+            // Advanced Mode (`[G]` OFF): Holding `[A]` or `[D]` drives smooth 360° aileron rolls (allowing ±180° inverted flight!)
             const aileronRate =
-              (v.aircraftRole === 'fighter' ? 3.1 : v.aircraftRole === 'cas' ? 2.45 : 2.05) *
+              (v.aircraftRole === 'fighter' ? 2.45 : v.aircraftRole === 'cas' ? 2.0 : 1.75) *
               (0.68 + 0.32 * wingAvgFrac);
             v.roll = (v.roll || 0) + (bankInput * aileronRate + wingAsymRollBias) * dt;
             while (v.roll > Math.PI) v.roll -= Math.PI * 2;
             while (v.roll <= -Math.PI) v.roll += Math.PI * 2;
             targetRoll = v.roll;
-            // Gentle coordinated heading turn while banking upright/sideways
-            this.yaw += Math.sin(v.roll) * (v.turnRate || 1.35) * 0.62 * tailAuthority * dt;
-          } else if (canAerobaticLoop && Math.abs(v.roll || 0) > 2.0) {
-            // Pilot rolled >115° into inverted flight and released [A/D] -> stabilize UPSIDE-DOWN (±180°)!
+            // Smooth lift-coupled heading turn (`sin(roll)*cos(roll)` = 0 at 90° knife-edge, never fighting `v.yaw`!)
+            this.yaw +=
+              this.computeAircraftBankedTurnRate(
+                v,
+                v.forwardSpeed || v.speed || 85,
+                v.roll,
+                0,
+                tailAuthority,
+                true
+              ) *
+              (isInvertedLoop ? -1 : 1) *
+              dt;
+          } else if (canAerobaticLoop && Math.abs(v.roll || 0) > 2.05) {
+            // Advanced Mode (`[G]` OFF): Pilot rolled >117° into inverted flight and released `[A/D]` -> hold UPSIDE-DOWN (±180°)!
             const invCenter = (v.roll || 0) >= 0 ? Math.PI : -Math.PI;
             const invBankOffset = THREE.MathUtils.clamp(
-              (-yawDiff * 1.45) * loopLevelFactor + wingAsymRollBias + stallBuffetRoll,
-              -0.85,
-              0.85
+              (-yawDiff * 1.35) * loopLevelFactor + wingAsymRollBias + stallBuffetRoll,
+              -0.8,
+              0.8
             );
             targetRoll = invCenter + invBankOffset;
             let rErr = targetRoll - (v.roll || 0);
             while (rErr > Math.PI) rErr -= Math.PI * 2;
             while (rErr < -Math.PI) rErr += Math.PI * 2;
-            const rollResponse = v.aircraftRole === 'fighter' ? 5.8 : 4.6;
+            const rollResponse = v.aircraftRole === 'fighter' ? 5.6 : 4.5;
             v.roll = (v.roll || 0) + rErr * Math.min(1, dt * rollResponse);
             while (v.roll > Math.PI) v.roll -= Math.PI * 2;
             while (v.roll <= -Math.PI) v.roll += Math.PI * 2;
           } else {
+            // Coordinated Bank-to-Turn (Crisp aileron roll-in so a ~20° mouse pull reaches full combat bank without sluggish lag!):
             targetRoll = THREE.MathUtils.clamp(
-              (yawDiff * 1.95 + bankInput * 0.72) * loopLevelFactor + wingAsymRollBias + stallBuffetRoll,
+              (yawDiff * 2.55 + bankInput * 0.85) * loopLevelFactor + wingAsymRollBias + stallBuffetRoll,
               -maxBankRad,
               maxBankRad
             );
+            let rErr = targetRoll - (v.roll || 0);
+            while (rErr > Math.PI) rErr -= Math.PI * 2;
+            while (rErr < -Math.PI) rErr += Math.PI * 2;
             const rollResponse =
-              v.aircraftRole === 'fighter' ? 6.2 : v.aircraftRole === 'b2_spirit' ? 3.4 : 4.9;
-            v.roll = THREE.MathUtils.lerp(v.roll || 0, targetRoll, Math.min(1, dt * rollResponse));
+              v.aircraftRole === 'fighter' ? 7.4 : v.aircraftRole === 'b2_spirit' ? 3.8 : 6.2;
+            v.roll = (v.roll || 0) + rErr * Math.min(1, dt * rollResponse);
+            while (v.roll > Math.PI) v.roll -= Math.PI * 2;
+            while (v.roll <= -Math.PI) v.roll += Math.PI * 2;
           }
 
-          // Recompute yawDiff after any aileron turn update
+          // Recompute yawDiff after any turn update
           yawDiff = this.yaw - v.yaw;
           while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
           while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
 
-          // Bank-driven coordinated turn rate + gentle rudder alignment for fine aiming (< 8 deg)
-          const isRollInverted = canAerobaticLoop && Math.cos(v.roll || 0) < -0.15;
-          const fineRudderTrim = THREE.MathUtils.clamp(yawDiff, -0.22, 0.22) * 1.25 * tailAuthority;
+          // Aerodynamic Load-Factor Bank-to-Turn (omega = a_lat / V) + Runway Nosewheel Steering (`R_min ≈ 8–11m` on tarmac!)
+          const isRollInverted = canAerobaticLoop && Math.cos(v.roll || 0) < -0.2;
+          const taxiDirSign = onRunway && (v.forwardSpeed || 0) < -0.15 ? -1 : 1;
+          const taxiSpdAbs = Math.abs(v.forwardSpeed || 0);
+          const minTaxiR = isGunship || v.aircraftRole === 'b2_spirit' ? 11.5 : isWright ? 5.0 : 8.2;
+          const maxNwsRate = Math.min(1.15, Math.max(0.22, taxiSpdAbs / minTaxiR));
+          const runwayNwsRate = THREE.MathUtils.clamp(
+            yawDiff * 2.1 + bankInput * maxNwsRate * taxiDirSign,
+            -maxNwsRate,
+            maxNwsRate
+          );
           const bankedTurnRate = onRunway
-            ? yawDiff * 2.8
-            : (Math.sin(v.roll) * (v.turnRate || 1.35) * 1.32 * (isRollInverted ? -0.85 : 1.0) * tailAuthority +
-                fineRudderTrim) *
-              (isInvertedLoop ? -0.65 : 1.0);
+            ? runwayNwsRate
+            : this.computeAircraftBankedTurnRate(
+                v,
+                v.forwardSpeed || v.speed || 85,
+                v.roll || 0,
+                yawDiff,
+                tailAuthority,
+                canAerobaticLoop && bankInput !== 0
+              ) * (isInvertedLoop ? -0.65 : 1.0);
           v.yaw += bankedTurnRate * dt;
+          if (onRunway && bankInput !== 0) {
+            this.yaw = v.yaw;
+          }
 
           const insideSecretCave = isWright && Math.abs(v.pos.x) > 1584;
           const liftoffSpeed = isWright ? 8.2 : Math.max(minSpd * 0.98, 30);
@@ -4094,14 +4786,21 @@ export const VehicleControlMethods = {
               (!onRunway && !isRollInverted && Math.cos(v.pitch || 0) > 0.2 ? Math.abs(Math.sin(v.roll)) * 0.05 : 0);
           }
           if (onRunway && !v.hasLeftRunwayOnce) {
-            desiredPitch = THREE.MathUtils.clamp(desiredPitch, 0, 0.28);
+            // Stay flat on tricycle gear in the ≤35% Taxi Detent; allow nose-up rotation above the Takeoff Gate!
+            desiredPitch = v.throttle <= 0.36 ? 0 : THREE.MathUtils.clamp(desiredPitch, 0, 0.28);
           }
           if (v.isStalling) {
             desiredPitch = -0.45;
             this.pitch = THREE.MathUtils.lerp(this.pitch, -0.38, Math.min(1, dt * 1.8));
           } else if (insideSecretCave) {
             desiredPitch = THREE.MathUtils.clamp(desiredPitch, -0.04, 0.08);
-          } else if (onRunway && v.forwardSpeed > liftoffSpeed && throttleInput >= 0 && desiredPitch > -0.05) {
+          } else if (
+            onRunway &&
+            v.throttle > 0.38 &&
+            v.forwardSpeed > liftoffSpeed &&
+            throttleInput >= 0 &&
+            desiredPitch > -0.05
+          ) {
             desiredPitch = Math.max(desiredPitch, 0.22);
             if (isGunship && (v.targetGunshipAlt ?? 0) < 120) {
               v.targetGunshipAlt = 180;
@@ -4265,14 +4964,15 @@ export const VehicleControlMethods = {
           // Auto-GCAS emergency throttle & angle-of-attack recovery prevents fatal stall crashes when protection is ON
           v.isStalling = false;
           v.stallSinkVel = 0;
-          v.forwardSpeed = Math.max(v.forwardSpeed || 0, (stallSpd || 28) * 1.12);
+          v.throttle = Math.max(v.throttle || 0, 0.52 * maxThrottleCap);
+          v.forwardSpeed = Math.max(v.forwardSpeed || 0, (stallSpd || 28) * 1.18);
           v.pitch = Math.max(v.pitch || 0, 0.12);
           v.flightFSM?.send(AIRCRAFT_FLIGHT_EVENTS.RECOVER_STALL);
         }
         if (!insideSecretCaveNow && v.hasLeftRunwayOnce) {
           const obsTopY = this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z, nextY);
           const hasHardObstacleBelow = obsTopY > newGroundH + 1.5;
-          const nearHqAirfield = Math.abs(v.pos.x) > 1240 && Math.abs(v.pos.z) < 260;
+          const nearHqAirfield = Math.abs(v.pos.x) > 2460 && Math.abs(v.pos.z) < 280;
           const intentionalLanding =
             !recoveredStallThisFrame &&
             !v.isStalling &&
@@ -4444,6 +5144,16 @@ export const VehicleControlMethods = {
       );
     const hasSpiLock = !isGunship && Boolean(v.spiTargetPos);
 
+    const isForwardBubbleCockpit =
+      camMode === 'COCKPIT_1P' && !(isGunship && !v.gunshipManualFlight);
+    if (isForwardBubbleCockpit && !hasFreeLookOffset && !hasSpiLock) {
+      // Keep mouse-aim command bounded to the forward canopy field-of-view so you never wrap 180° behind your own seat
+      let cmdYawDiff = this.yaw - (v.yaw || 0);
+      while (cmdYawDiff > Math.PI) cmdYawDiff -= Math.PI * 2;
+      while (cmdYawDiff < -Math.PI) cmdYawDiff += Math.PI * 2;
+      this.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(cmdYawDiff, -0.92, 0.92);
+    }
+
     if (hasSpiLock) {
       const sdx = v.spiTargetPos.x - v.pos.x;
       const sdy = v.spiTargetPos.y - v.pos.y;
@@ -4454,6 +5164,11 @@ export const VehicleControlMethods = {
     } else if (hasFreeLookOffset) {
       chaseYaw = (v.yaw || 0) + (v.freeLookYaw || 0);
       chasePitch = THREE.MathUtils.clamp((v.pitch || 0) + (v.freeLookPitch || 0), -1.48, 1.35);
+    } else if (isForwardBubbleCockpit) {
+      // 1P Cockpit Camera MUST stay bolted 1:1 to the physical airframe (`v.yaw`, `v.pitch`, `v.roll`) —
+      // NEVER turning ahead of the lagging airplane body! Mouse input steers the Flight-Director Ring (`this.yaw`, `this.pitch`).
+      chaseYaw = v.yaw || 0;
+      chasePitch = v.pitch || 0;
     } else if (!isGunship && camMode === 'CHASE_3P') {
       let camYawDiff = this.yaw - v.yaw;
       while (camYawDiff > Math.PI) camYawDiff -= Math.PI * 2;
@@ -4463,26 +5178,24 @@ export const VehicleControlMethods = {
       while (camPitchDiff > Math.PI) camPitchDiff -= Math.PI * 2;
       while (camPitchDiff < -Math.PI) camPitchDiff += Math.PI * 2;
       chasePitch = v.pitch + camPitchDiff * 0.65;
-    } else if (camMode === 'COCKPIT_1P' && !isGunship) {
-      let camYawDiff = this.yaw - v.yaw;
-      while (camYawDiff > Math.PI) camYawDiff -= Math.PI * 2;
-      while (camYawDiff < -Math.PI) camYawDiff += Math.PI * 2;
-      chaseYaw = v.yaw + THREE.MathUtils.clamp(camYawDiff, -0.82, 0.82);
     }
 
-    const isDeepInvertedRoll = !isGunship && Math.abs(v.roll || 0) > 1.45;
+    const aerobaticRollBlend =
+      !isGunship && this.aircraftCollisionAvoidance === false
+        ? THREE.MathUtils.smoothstep(Math.abs(v.roll || 0), 1.18, 2.15)
+        : 0;
     const camRoll =
       hasSpiLock || hasFreeLookOffset
         ? 0
+        : isForwardBubbleCockpit
+        ? v.roll || 0
         : isGunship
         ? camMode === 'COCKPIT_1P'
           ? (v.roll || 0) * 0.45
           : 0
         : camMode === 'CHASE_3P'
-        ? isDeepInvertedRoll
-          ? v.roll || 0
-          : (v.roll || 0) * 0.42
-        : v.roll || 0;
+        ? (v.roll || 0) * THREE.MathUtils.lerp(0.3, 1.0, aerobaticRollBlend)
+        : (v.roll || 0) * THREE.MathUtils.lerp(0.82, 1.0, aerobaticRollBlend);
 
     _airQuatYaw.setFromAxisAngle(_axisY, chaseYaw);
     _airQuatPitch.setFromAxisAngle(_axisX, chasePitch + (this.recoilOffsetPitch || 0));
@@ -4490,9 +5203,10 @@ export const VehicleControlMethods = {
     _camQuatCombined.copy(_airQuatYaw).multiply(_airQuatPitch).multiply(_airQuatRoll);
 
     const lookDir = new THREE.Vector3(0, 0, -1).applyQuaternion(_camQuatCombined).normalize();
+    const chaseUpVec = _vehScratchB.set(0, 1, 0).applyQuaternion(_camQuatCombined).normalize();
 
     if (camMode === 'CHASE_3P') {
-      const pivotPos = v.pos.clone().addScaledVector(airUpVec, 2.2);
+      const pivotPos = v.pos.clone().addScaledVector(chaseUpVec, 2.2);
       const airGroundY = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
       const airAltAgl = v.pos.y - airGroundY;
       if (isGunship && !v.gunshipManualFlight) {
@@ -4507,12 +5221,12 @@ export const VehicleControlMethods = {
           this.camera.position.copy(camPos);
         }
       } else {
-        // Keep 3P Chase elevated cleanly ABOVE twin tailfins (never shrinking `upDist` into the dorsal spine when RMB zooming!)
+        // Keep 3P Chase centered directly behind & above the jet in camera space (`chaseUpVec`) so banking turns never swing the plane off-center!
         const upDist = isGunship ? 6.2 : isB2Spirit ? 5.0 : isWrightFlyer ? 3.9 : 4.35;
         const backDist = isGunship ? -21.0 : isB2Spirit ? -19.5 : isWrightFlyer ? -14.2 : -16.8;
         const camPos = v.pos
           .clone()
-          .addScaledVector(airUpVec, upDist)
+          .addScaledVector(chaseUpVec, upDist)
           .addScaledVector(lookDir, backDist);
         if (airAltAgl < 42.0) {
           const resolved = this.resolveCameraWallCollision(pivotPos, camPos, 0.45);
@@ -4749,7 +5463,14 @@ export const VehicleControlMethods = {
         }
       }
     }
-    this.aircraftCcipPoint = !isA2aMissileSelected && (ccipGrounded || isGunship) ? ccipPos : null;
+    this.aircraftCcipPoint =
+      !isA2aMissileSelected &&
+      !(isGunship && v.gunshipManualFlight) &&
+      altAgl >= 12.0 &&
+      !v.autoFlightMode &&
+      (ccipGrounded || isGunship)
+        ? ccipPos
+        : null;
 
     if (!this.ccipMarkerMesh && this.scene) {
       this.ccipMarkerMesh = new THREE.Mesh(_ccipRingGeo, _ccipRingMat);
@@ -4760,6 +5481,8 @@ export const VehicleControlMethods = {
       // NEVER place a 12.4m 3D orange ring in mid-air in front of the plane during cannon/rocket flight!
       const show3dCcip = Boolean(
         !isGunship &&
+          altAgl >= 12.0 &&
+          !v.autoFlightMode &&
           isBombOrdnanceSelected &&
           ccipGrounded &&
           ccipPos.distanceToSquared(camOrigin) >= 42 * 42
@@ -4774,6 +5497,7 @@ export const VehicleControlMethods = {
       }
     }
     this.updateGunshipOrbitVisualizer(v);
+    this.updateRunwayFlightDirector(v);
 
     // 6. Air-to-Air Active Radar Lock-On Scanner (AIM-120D AMRAAM / AIM-9X HMD Cone up to 2,100m!)
     const myGroundHForRadar = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
@@ -6048,5 +6772,157 @@ export const VehicleControlMethods = {
       tof,
       leadMeters
     };
+  },
+
+  /**
+   * Computes realistic maximum ground vehicle yaw rate `omega_max` (rad/s) at speed `absSpeed` (m/s),
+   * combining low-speed Ackermann / Cross-Drive Skid-Steer geometry (`R_min`) with high-speed lateral tire/track grip (`a_lat_max`):
+   * - Tracked MBTs (`tank`) & SPAAGs (`aa`) can neutral-pivot on the spot (`R = 0m` at `0 km/h`, `~0.72–0.80 rad/s`).
+   * - Wheeled APCs (`R_min = 8.8m`) & Humvees/Tigrs (`R_min = 7.5m`) require rolling velocity (`omega = 0` at `0 km/h`)
+   *   and widen naturally to `~60–70m` radius at `86–99 km/h` (`~0.98–1.10 G`) without 4G rollover snaps!
+   * - Motorcycles (`R_min = 2.4–3.5m`), ATVs (`3.8m`), Warhorses (`3.2m`), T-Rex (`5.5m`), and Raptors (`3.0m`)
+   *   turn tightly at low speed and carve realistic leaning/stride arcs at top speed.
+   */
+  computeGroundVehicleMaxYawRate(v, absSpeed = 0, subsystemTurnMult = 1.0) {
+    if (!v || v.isEmplacement) return 0;
+    const spd = Math.max(0, Math.abs(absSpeed));
+    const type = v.type || 'humvee';
+    const minR =
+      v.minTurnRadiusM ||
+      (type === 'apc'
+        ? 8.8
+        : type === 'humvee'
+        ? 7.5
+        : type === 'aa'
+        ? 6.2
+        : type === 'tank' || type === 'trex_mount'
+        ? 5.5
+        : type === 'atv'
+        ? 3.8
+        : type === 'warhorse'
+        ? 3.2
+        : type === 'raptor_mount'
+        ? 3.0
+        : 2.9);
+    const maxLatAcc =
+      v.maxLatAccelMs2 ||
+      (type === 'tank'
+        ? 8.6
+        : type === 'aa'
+        ? 9.4
+        : type === 'apc'
+        ? 9.6
+        : type === 'humvee' || type === 'trex_mount'
+        ? 10.8
+        : type === 'atv'
+        ? 11.8
+        : type === 'warhorse'
+        ? 13.5
+        : type === 'raptor_mount'
+        ? 15.8
+        : 12.8);
+
+    let lowSpeedRate;
+    if (type === 'tank' || type === 'aa' || v.canNeutralPivot) {
+      const neutralPivotRate = type === 'tank' ? 0.72 : 0.8;
+      lowSpeedRate = Math.max(neutralPivotRate, spd / minR);
+    } else if (type === 'warhorse') {
+      lowSpeedRate = Math.max(0.95, spd / minR);
+    } else if (type === 'trex_mount') {
+      lowSpeedRate = Math.max(0.52, spd / minR);
+    } else if (type === 'raptor_mount') {
+      lowSpeedRate = Math.max(0.85, spd / minR);
+    } else if (type === 'atv') {
+      lowSpeedRate = Math.max(0.22, spd / minR);
+    } else if (type === 'bike' || v.isHorseMount) {
+      lowSpeedRate = Math.max(0.38, spd / minR);
+    } else {
+      // Wheeled 4x4 / 8x8 Ackermann vehicles must roll to turn (`omega = V / R_min`)
+      lowSpeedRate = spd < 0.12 ? 0 : spd / minR;
+    }
+
+    const gripLimitedRate = spd > 1.5 ? maxLatAcc / spd : lowSpeedRate;
+    return Math.min(lowSpeedRate, gripLimitedRate) * subsystemTurnMult;
+  },
+
+  /**
+   * Computes realistic fixed-wing aircraft coordinated bank-to-turn yaw rate `omega` (rad/s) at `airSpeed` (m/s),
+   * governed by aerodynamic load-factor (`omega = a_lat(roll) / V`, `R = V^2 / a_lat`) + High-AoA low-speed agility:
+   * - Turn radius `R` scales strongly with speed squared (`R ∝ V^2`):
+   *   * F-15EX / Su-57 @ 215 m/s (774 km/h Afterburner): ~565m wide high-speed radius (~22°/s)
+   *   * F-15EX / Su-57 @ 125 m/s (450 km/h Corner Speed): ~185m combat radius (~39°/s)
+   *   * F-15EX / Su-57 @ 52 m/s (187 km/h [S] Airbrake Merge): ~42m tight High-Alpha dogfight radius (~72°/s)!
+   * - Straight-wing A-10C CAS (`R ≈ 30m` slow / `~98m` cruise) turns much tighter than fast jets at equal throttle,
+   *   while heavy B-2A flying-wing stealth bombers (`R ≈ 580–1,280m`) & AC-130 gunships carve wide 2G arcs.
+   */
+  computeAircraftBankedTurnRate(
+    v,
+    airSpeed = 85,
+    rollRad = 0,
+    yawDiff = 0,
+    tailAuthority = 1.0,
+    isActiveBarrelRoll = false
+  ) {
+    if (!v) return 0;
+    const role = v.aircraftRole || 'fighter';
+    const minSpd = v.minSpeed || (role === 'wright_flyer' ? 8.5 : 33);
+    const maxSpd = v.maxSpeed || (role === 'fighter' ? 215 : 128);
+    const effSpd = Math.max(minSpd, Math.abs(airSpeed));
+    const spdFrac = THREE.MathUtils.clamp((effSpd - minSpd) / Math.max(10, maxSpd - minSpd), 0, 1);
+    const maxBank =
+      role === 'fighter'
+        ? 1.05
+        : role === 'cas'
+        ? 0.94
+        : role === 'b2_spirit'
+        ? 0.62
+        : role === 'gunship'
+        ? 0.52
+        : 0.88;
+    let maxTurnAcc =
+      v.maxTurnAccelMs2 ||
+      (role === 'fighter'
+        ? 82.0
+        : role === 'cas'
+        ? 62.0
+        : role === 'b2_spirit'
+        ? 21.0
+        : role === 'gunship'
+        ? 16.5
+        : role === 'wright_flyer'
+        ? 18.0
+        : 56.0);
+    // Speed-dependent aerodynamic G & High-AoA LEX / Thrust-Vectoring envelope:
+    // Chopping throttle with [S] into low/corner dogfight speed unlocks crisp High-Alpha turn rates (~1.25–1.38 rad/s, R ≈ 32–45m!),
+    // whereas staying at full afterburner (215 m/s = 774 km/h) enforces realistic wide ~560m G-limited arcs!
+    if (role === 'fighter') {
+      maxTurnAcc =
+        effSpd <= 95
+          ? THREE.MathUtils.lerp(68.0, 84.0, THREE.MathUtils.clamp((effSpd - minSpd) / 50, 0, 1))
+          : THREE.MathUtils.lerp(84.0, 80.0, THREE.MathUtils.clamp((effSpd - 95) / 120, 0, 1));
+    } else if (role === 'cas') {
+      maxTurnAcc =
+        effSpd <= 78
+          ? THREE.MathUtils.lerp(56.0, 64.0, THREE.MathUtils.clamp((effSpd - minSpd) / 45, 0, 1))
+          : THREE.MathUtils.lerp(64.0, 56.0, THREE.MathUtils.clamp((effSpd - 78) / 50, 0, 1));
+    }
+
+    let bankFrac;
+    if (isActiveBarrelRoll) {
+      bankFrac = Math.sin(rollRad) * Math.cos(rollRad) * 1.6;
+    } else {
+      const isRollInverted = Math.cos(rollRad) < -0.2;
+      const refSin = Math.max(0.3, Math.sin(maxBank));
+      bankFrac = THREE.MathUtils.clamp(Math.sin(rollRad) / refSin, -1.15, 1.15) * (isRollInverted ? -0.85 : 1.0);
+    }
+
+    const coordRate = ((bankFrac * maxTurnAcc) / effSpd) * tailAuthority;
+    // Responsive rudder + High-AoA nose-pointing authority at low/medium dogfight speeds (tapers down at supersonic dash & on heavy bombers)
+    const isAgileJet = role === 'fighter' || role === 'cas' || role === 'wright_flyer' || role === 'bomber';
+    const rudderGain = isAgileJet ? THREE.MathUtils.lerp(1.05, 0.38, spdFrac) : 0.22;
+    const maxRudderAngle = isAgileJet ? 0.24 : 0.1;
+    const fineRudderTrim =
+      THREE.MathUtils.clamp(yawDiff, -maxRudderAngle, maxRudderAngle) * rudderGain * tailAuthority;
+    return coordRate + fineRudderTrim;
   }
 };

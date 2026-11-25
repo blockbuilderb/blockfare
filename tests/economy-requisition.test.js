@@ -1,9 +1,9 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { ECONOMY, VEHICLE_STATS, SQUAD_KIT_CAPS, PROJECTILES } from '../src/config.js?v=124';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=124';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=124';
+import { ECONOMY, VEHICLE_STATS, SQUAD_KIT_CAPS, PROJECTILES } from '../src/config.js?v=126';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=126';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=126';
 import {
   VehicleManager,
   PITCH_LIMITS_CAR,
@@ -11,14 +11,14 @@ import {
   classifyWeaponBallistics,
   getVehicleSeatLayout,
   initVehicleOrdnance
-} from '../src/vehicles.js?v=124';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=124';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=124';
-import { sound } from '../src/audio/SoundManager.js?v=124';
-import { BotManager, SQUAD_9MAN_ROSTERS, evaluateCatastrophicKill } from '../src/bots.js?v=124';
-import { NetworkManager } from '../src/network.js?v=124';
-import { ConquestSystem } from '../src/world/ConquestSystem.js?v=124';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=124';
+} from '../src/vehicles.js?v=126';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=126';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=126';
+import { sound } from '../src/audio/SoundManager.js?v=126';
+import { BotManager, SQUAD_9MAN_ROSTERS, evaluateCatastrophicKill } from '../src/bots.js?v=126';
+import { NetworkManager } from '../src/network.js?v=126';
+import { ConquestSystem } from '../src/world/ConquestSystem.js?v=126';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=126';
 
 function createEconomyPlayerHarness(overrides = {}) {
   const storage = new Map();
@@ -862,6 +862,7 @@ describe('Squad Caliber Penetration, Optics/Sensor Crits, Avionics FCS & Beyond-
     for (let i = 0; i < 30; i++) vm.recordTeamKillAndCheckB2('US');
     assert.equal(vm.isB2UnlockedForTeam('US'), false, 'Pre-deploy background AI skirmishes must not unlock B-2 early');
     vm._suppressPreDeployKills = false;
+    vm.vehicles.length = 0;
 
     const aiBot = { name: 'CPL_BAKER', team: 'US', dead: false, downed: false, pos: new THREE.Vector3(-900, 0, 0), mesh: new THREE.Group() };
     const hqTank = vm.spawnVehicle({

@@ -655,33 +655,33 @@ export function buildCasAircraftWingAndTail(ctx) {
     const frogWingTailGeo = getCachedMergedGeo('su25_wing_nacelle_tail', mergeParts, () => {
       const p = [];
       for (const side of [-1, 1]) {
-        // Anhedral swept shoulder wing panel
+        // Anhedral swept-BACK shoulder wing panel
         p.push({
           geo: getBox(5.55, 0.21, 2.08),
-          pos: [side * 3.25, 1.44, 0.08],
-          rot: [0, side * 0.12, -side * 0.075]
+          pos: [side * 3.25, 1.44, 0.32],
+          rot: [0, -side * 0.16, -side * 0.075]
         });
         // 2 upper-surface aerodynamic wing fences per wing
         p.push({
           geo: getBox(0.06, 0.18, 1.95),
-          pos: [side * 2.55, 1.56, 0.02],
-          rot: [0, side * 0.12, 0]
+          pos: [side * 2.55, 1.56, 0.22],
+          rot: [0, -side * 0.08, 0]
         });
         p.push({
           geo: getBox(0.06, 0.16, 1.75),
-          pos: [side * 4.25, 1.44, 0.22],
-          rot: [0, side * 0.12, 0]
+          pos: [side * 4.25, 1.44, 0.48],
+          rot: [0, -side * 0.08, 0]
         });
         // Signature split-petal wingtip airbrake / ECM pods
         p.push({
           geo: getCyl(0.16, 0.14, 1.95, 8),
-          pos: [side * 6.08, 1.24, 0.36],
+          pos: [side * 6.08, 1.24, 0.68],
           rot: [Math.PI / 2, 0, 0]
         });
         p.push({
           geo: getBox(0.24, 0.12, 0.52),
-          pos: [side * 6.18, 1.24, 1.22],
-          rot: [0, side * 0.26, 0]
+          pos: [side * 6.18, 1.24, 1.52],
+          rot: [0, -side * 0.22, 0]
         });
 
         // Flank-mounted R-195 turbojet nacelles (x = ±0.98, y = 1.28, z = 0.55; front at -1.25 >= -1.95!)
@@ -697,7 +697,7 @@ export function buildCasAircraftWingAndTail(ctx) {
           rot: [-0.08, 0, 0]
         });
 
-        // 8 Underwing Ordnance Pylons (4 per wing at x = ±1.85, ±2.85, ±3.85, ±4.85; z = -0.15)
+        // 8 Underwing Ordnance Pylons (4 per wing at x = ±1.85, ±2.85, ±3.85, ±4.85)
         for (const [px, py] of [
           [1.85, 1.22],
           [2.85, 1.15],
@@ -706,16 +706,16 @@ export function buildCasAircraftWingAndTail(ctx) {
         ]) {
           p.push({
             geo: getBox(0.13, 0.34, 1.28),
-            pos: [side * px, py, -0.05],
-            rot: [0, side * 0.1, 0]
+            pos: [side * px, py, 0.18],
+            rot: [0, 0, 0]
           });
         }
 
-        // Swept anhedral horizontal tailplanes
+        // Swept-BACK anhedral horizontal tailplanes
         p.push({
           geo: getBox(2.05, 0.15, 1.22),
-          pos: [side * 1.18, 1.52, 3.92],
-          rot: [0, side * 0.24, -side * 0.06]
+          pos: [side * 1.18, 1.52, 4.02],
+          rot: [0, -side * 0.26, -side * 0.06]
         });
       }
 
@@ -966,27 +966,27 @@ export function buildBomberAircraftWingAndTail(ctx) {
           rot: [Math.PI / 2, 0, 0]
         });
 
-        // Swept cropped-delta Strike Eagle wing panels (panel center ±3.25m, ~11.6m span)
+        // Swept-BACK cropped-delta Strike Eagle wing panels (panel center ±3.25m, ~11.6m span)
         p.push({
-          geo: getBox(4.95, 0.19, 3.05),
-          pos: [side * 3.25, 1.42, 0.58],
-          rot: [0, side * 0.28, 0]
+          geo: getBox(4.95, 0.19, 2.85),
+          pos: [side * 3.25, 1.42, 0.95],
+          rot: [0, -side * 0.32, 0]
         });
         p.push({
-          geo: getBox(1.85, 0.22, 3.45),
-          pos: [side * 1.55, 1.44, 0.35],
-          rot: [0, side * 0.36, 0]
+          geo: getBox(1.95, 0.22, 3.35),
+          pos: [side * 1.65, 1.44, 0.55],
+          rot: [0, -side * 0.22, 0]
         });
 
         // Underwing weapons pylons & LAU-128 missile rails
-        p.push({ geo: getBox(0.15, 0.34, 1.55), pos: [side * 2.55, 1.14, 0.38], rot: [0, 0, 0] });
-        p.push({ geo: getBox(0.36, 0.14, 1.65), pos: [side * 3.68, 1.24, 0.48], rot: [0, 0, 0] });
+        p.push({ geo: getBox(0.15, 0.34, 1.55), pos: [side * 2.55, 1.14, 0.65], rot: [0, 0, 0] });
+        p.push({ geo: getBox(0.36, 0.14, 1.65), pos: [side * 3.68, 1.24, 0.85], rot: [0, 0, 0] });
 
-        // Swept dogtooth horizontal stabilators
+        // Swept-BACK dogtooth horizontal stabilators
         p.push({
-          geo: getBox(2.15, 0.13, 1.52),
-          pos: [side * 1.98, 1.32, 4.25],
-          rot: [0, side * 0.34, 0]
+          geo: getBox(2.15, 0.13, 1.45),
+          pos: [side * 1.98, 1.32, 4.35],
+          rot: [0, -side * 0.34, 0]
         });
 
         // Twin upright Eagle vertical tails + signature top mass-balance / TEWS antenna pods
@@ -1090,11 +1090,11 @@ export function buildBomberAircraftWingAndTail(ctx) {
       rudders.push(rudder);
     }
     leftAileron = new THREE.Mesh(getBox(2.45, 0.12, 0.5), darkMat);
-    leftAileron.position.set(-4.35, 1.41, 2.08);
-    leftAileron.rotation.y = -0.28;
+    leftAileron.position.set(-4.15, 1.41, 2.38);
+    leftAileron.rotation.y = 0.28;
     rightAileron = new THREE.Mesh(getBox(2.45, 0.12, 0.5), darkMat);
-    rightAileron.position.set(4.35, 1.41, 2.08);
-    rightAileron.rotation.y = 0.28;
+    rightAileron.position.set(4.15, 1.41, 2.38);
+    rightAileron.rotation.y = -0.28;
     elevator = new THREE.Mesh(getBox(3.75, 0.12, 0.48), darkMat);
     elevator.position.set(0, 1.32, 4.68);
     group.add(leftAileron, rightAileron, elevator);
@@ -1115,27 +1115,27 @@ export function buildBomberAircraftWingAndTail(ctx) {
           rot: [0, 0, side * 0.28]
         });
 
-        // Swept Flanker/Fullback main strike wings
+        // Swept-BACK Flanker/Fullback main strike wings
         p.push({
-          geo: getBox(5.1, 0.19, 2.95),
-          pos: [side * 3.3, 1.4, 0.68],
-          rot: [0, side * 0.3, 0]
+          geo: getBox(5.1, 0.19, 2.85),
+          pos: [side * 3.3, 1.4, 0.98],
+          rot: [0, -side * 0.32, 0]
         });
         p.push({
-          geo: getBox(1.85, 0.22, 3.35),
-          pos: [side * 1.55, 1.42, 0.42],
-          rot: [0, side * 0.38, 0]
+          geo: getBox(1.95, 0.22, 3.25),
+          pos: [side * 1.65, 1.42, 0.62],
+          rot: [0, -side * 0.22, 0]
         });
 
         // Underwing strike pylons
-        p.push({ geo: getBox(0.15, 0.34, 1.48), pos: [side * 2.35, 1.12, 0.48], rot: [0, 0, 0] });
-        p.push({ geo: getBox(0.15, 0.34, 1.48), pos: [side * 3.65, 1.12, 0.58], rot: [0, 0, 0] });
+        p.push({ geo: getBox(0.15, 0.34, 1.48), pos: [side * 2.35, 1.12, 0.72], rot: [0, 0, 0] });
+        p.push({ geo: getBox(0.15, 0.34, 1.48), pos: [side * 3.65, 1.12, 0.92], rot: [0, 0, 0] });
 
-        // Swept all-moving differential tailplanes
+        // Swept-BACK all-moving differential tailplanes
         p.push({
-          geo: getBox(2.2, 0.13, 1.48),
-          pos: [side * 2.12, 1.3, 4.28],
-          rot: [0, side * 0.35, 0]
+          geo: getBox(2.2, 0.13, 1.45),
+          pos: [side * 2.12, 1.3, 4.38],
+          rot: [0, -side * 0.35, 0]
         });
 
         // Twin outward-canted Sukhoi tailfins

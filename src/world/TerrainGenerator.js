@@ -1,18 +1,18 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../textures.js?v=124';
-import { TERRAIN } from '../config.js?v=124';
-import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=124';
+import { TEXTURES } from '../textures.js?v=126';
+import { TERRAIN } from '../config.js?v=126';
+import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=126';
 
 const VOXEL_SIZE = 1.25;
 
-// Static baked terrain heightmap grid covering 100% of playable ground & airfields at exact 1.25m voxel step
-const HM_MIN_X = -2000;
-const HM_MAX_X = 2000;
+// Static baked terrain heightmap grid covering 100% of playable ground & rear strategic airbases at exact 1.25m voxel step
+const HM_MIN_X = -3100;
+const HM_MAX_X = 3100;
 const HM_MIN_Z = -1150;
 const HM_MAX_Z = 1150;
 const HM_STEP = 1.25;
 const HM_INV_STEP = 1 / HM_STEP;
-const HM_COLS = 3201; // (2000 - -2000) / 1.25 + 1
+const HM_COLS = 4961; // (3100 - -3100) / 1.25 + 1
 const HM_ROWS = 1841; // (1150 - -1150) / 1.25 + 1
 
 const _HQ_BUNKERS = [
@@ -103,8 +103,8 @@ export const TerrainGenerator = {
     if (Math.abs(x + 320) < 6.4 && z >= -4 && z <= 404) return true;    // Obj B <-> Main Hwy & North Bridge
     if (Math.abs(x - 330) < 6.4 && z >= -404 && z <= 4) return true;    // Obj D <-> Main Hwy & South Bridge
     if (Math.abs(x - 660) < 6.4 && z >= -4 && z <= 404) return true;    // Obj E <-> Main Hwy & North Bridge
-    if (Math.abs(x + 1495) < 7.0 && z >= -54 && z <= 4) return true;    // US HQ <-> US Airbase Gate
-    if (Math.abs(x - 1495) < 7.0 && z >= -4 && z <= 54) return true;    // RU HQ <-> RU Airbase Gate
+    if (Math.abs(x + 2795) < 7.0 && z >= -54 && z <= 4) return true;    // Highway <-> US Rear Airbase Gate
+    if (Math.abs(x - 2795) < 7.0 && z >= -4 && z <= 54) return true;    // Highway <-> RU Rear Airbase Gate
     if (Math.abs(x + 640) < 5.5 && z >= 0 && z <= 272) return true;     // NW Outpost Spur
     if (Math.abs(x - 640) < 5.5 && z >= -272 && z <= 0) return true;    // SE Outpost Spur
     return false;
@@ -159,11 +159,11 @@ export const TerrainGenerator = {
       }
     }
 
-    // Main East-West Highway corridor grading (z around 0, smoothly tapering out past |x| = 1,640m so it NEVER cracks the outer mountains!)
+    // Main East-West Highway corridor grading (z around 0, connecting Rear Strategic Airbases at ∓2735 to HQ & valley!)
     const absRoadX = Math.abs(x);
     const roadDist = Math.abs(z) / 13.5;
-    if (roadDist < 1.4 && absRoadX > 26 && absRoadX < 1940) {
-      const endFade = absRoadX <= 1640 ? 1.0 : 1.0 - (absRoadX - 1640) / 300;
+    if (roadDist < 1.4 && absRoadX > 26 && absRoadX < 2960) {
+      const endFade = absRoadX <= 2660 ? 1.0 : 1.0 - (absRoadX - 2660) / 300;
       const rw = (1 - roadDist / 1.4) * 0.88 * endFade * endFade;
       const roadTargetH = 1.25 + Math.sin(x * 0.008) * 1.1;
       h += (roadTargetH - h) * rw;
@@ -188,11 +188,11 @@ export const TerrainGenerator = {
 
     // Subterranean Sunken Bunker-Cave Excavation & Exact Flat Rectangular Airbase Grading (MODERN ERA ONLY)
     if ((this.era || (this.mapDef && this.mapDef.era) || 'modern') === 'modern') {
-      // Lock 100% of both 372m Parallel Runways, Outer Flight-Line Aprons & Thresholds flat at y = 1.25m (ZERO floating runway ends!)
+      // Lock 100% of both Rear Strategic Airbases (5,470m apart at x = ∓2735), Parallel Runways & Aprons flat at y = 1.25m!
       const absX = Math.abs(x);
       const teamZ = x < 0 ? -z : z;
-      if (absX >= 1194 && absX <= 1674 && teamZ >= 34 && teamZ <= 204) {
-        const dxOut = absX < 1238 ? (1238 - absX) / 44 : absX > 1630 ? (absX - 1630) / 44 : 0;
+      if (absX >= 2494 && absX <= 2974 && teamZ >= 34 && teamZ <= 204) {
+        const dxOut = absX < 2538 ? (2538 - absX) / 44 : absX > 2930 ? (absX - 2930) / 44 : 0;
         const dzOut = teamZ < 46 ? (46 - teamZ) / 12 : teamZ > 172 ? (teamZ - 172) / 32 : 0;
         const dEdge = Math.min(1, Math.hypot(dxOut, dzOut));
         if (dEdge < 1) {
@@ -333,8 +333,8 @@ export const TerrainGenerator = {
 
         if (hasRoad && (x > 26 || x < -26)) {
           const ax = x < 0 ? -x : x;
-          if (ax < 1940) {
-            const endFade = ax <= 1640 ? 1.0 : 1.0 - (ax - 1640) / 300;
+          if (ax < 2960) {
+            const endFade = ax <= 2660 ? 1.0 : 1.0 - (ax - 2660) / 300;
             h += (roadTargetX[ix] - h) * roadWeight * endFade * endFade;
           }
         }
@@ -350,12 +350,12 @@ export const TerrainGenerator = {
           }
         }
 
-        // Exact Flat Rectangular Airbase Grading across full 372m Runway + Outer Side Apron footprint (prevents floating runway ends!)
+        // Exact Flat Rectangular Airbase Grading across full 372m Rear Strategic Runway + Apron footprint (x = ∓2735)
         if (isModern) {
           const absX = x < 0 ? -x : x;
           const teamZ = x < 0 ? -z : z;
-          if (absX >= 1194 && absX <= 1674 && teamZ >= 34 && teamZ <= 204) {
-            const dxOut = absX < 1238 ? (1238 - absX) / 44 : absX > 1630 ? (absX - 1630) / 44 : 0;
+          if (absX >= 2494 && absX <= 2974 && teamZ >= 34 && teamZ <= 204) {
+            const dxOut = absX < 2538 ? (2538 - absX) / 44 : absX > 2930 ? (absX - 2930) / 44 : 0;
             const dzOut = teamZ < 46 ? (46 - teamZ) / 12 : teamZ > 172 ? (teamZ - 172) / 32 : 0;
             const dEdge = dxOut === 0 && dzOut === 0 ? 0 : Math.min(1, Math.hypot(dxOut, dzOut));
             if (dEdge < 1) {
@@ -488,7 +488,7 @@ export const TerrainGenerator = {
       const onValleyRoad = distRiver > 25 && this._isOnValleyRoad(vx, vz);
       const absVx = Math.abs(vx);
       const teamVz = vx < 0 ? -vz : vz;
-      const inAirbaseLawn = isModern && absVx >= 1238 && absVx <= 1630 && teamVz >= 46 && teamVz <= 170;
+      const inAirbaseLawn = isModern && absVx >= 2538 && absVx <= 2930 && teamVz >= 46 && teamVz <= 170;
 
       if (vy < -0.15 || distRiver < 31) {
         col = cSand;
@@ -779,8 +779,8 @@ export const TerrainGenerator = {
       const rwyEdgeBulbColors = [];
 
       for (const rwy of [
-        { cx: -1435, cz: -68, apronZ: -138, team: 'US', takeOffSign: 1 },
-        { cx: 1435, cz: 68, apronZ: 138, team: 'RU', takeOffSign: -1 }
+        { cx: -2735, cz: -68, apronZ: -138, team: 'US', takeOffSign: 1 },
+        { cx: 2735, cz: 68, apronZ: 138, team: 'RU', takeOffSign: -1 }
       ]) {
         const rwyGroup = new THREE.Group();
         const baseH = 1.25;
@@ -799,10 +799,10 @@ export const TerrainGenerator = {
         slab.receiveShadow = true;
         rwyGroup.add(slab);
 
-        // Continuous 4-Bay Outer Side Flight-Line Parking Apron (z = ∓138):
+        // Continuous 4-Bay Outer Side Flight-Line Parking Apron (z = ∓138, Rear Strategic Airbases 5,470m apart!):
         // Ordered strictly from BACK (Heaviest / Longest Takeoff Roll) -> FRONT (Fastest Jet):
-        //   Bay 1 (∓1576): AC-130 Gunship  •  Bay 2 (∓1528): B-2 Spirit  •  Bay 3 (∓1480): A-10 CAS  •  Bay 4 (∓1436): F-15 Fighter
-        const apronCenterX = rwy.team === 'US' ? -1490 : 1490;
+        //   Bay 1 (∓2876): AC-130 Gunship  •  Bay 2 (∓2828): B-2 Spirit  •  Bay 3 (∓2780): A-10 CAS  •  Bay 4 (∓2736): F-15 Fighter
+        const apronCenterX = rwy.team === 'US' ? -2790 : 2790;
         const sideApronShoulder = new THREE.Mesh(
           new THREE.BoxGeometry(236, 2.1, 32),
           runwayShoulderMat
@@ -818,7 +818,7 @@ export const TerrainGenerator = {
         sideApronSlab.receiveShadow = true;
         rwyGroup.add(sideApronSlab);
 
-        const bayXs = rwy.team === 'US' ? [-1576, -1528, -1480, -1436] : [1576, 1528, 1480, 1436];
+        const bayXs = rwy.team === 'US' ? [-2876, -2828, -2780, -2736] : [2876, 2828, 2780, 2736];
         for (const bayX of bayXs) {
           // Paved connector taxiway & yellow taxi lead from Outer Side Apron across to Runways 2 & 1
           const connTaxiSlab = new THREE.Mesh(
@@ -938,8 +938,8 @@ export const TerrainGenerator = {
           rwyGroup.add(strut);
         }
 
-        // Air Traffic Control (ATC) Tower & Windsock positioned cleanly on ONE OUTER SIDE (z = ∓146, x = ∓1390), NEVER between runways!
-        const atcX = rwy.team === 'US' ? -1390 : 1390;
+        // Air Traffic Control (ATC) Tower & Windsock positioned cleanly on ONE OUTER SIDE (z = ∓146, x = ∓2690), NEVER between runways!
+        const atcX = rwy.team === 'US' ? -2690 : 2690;
         const atcZ = rwy.team === 'US' ? -146 : 146;
         this.registerStaticStructureBox?.(
           atcX - 4.8,
@@ -1011,8 +1011,8 @@ export const TerrainGenerator = {
       const b2BeaconColors = [];
 
       for (const b2Lane of [
-        { cx: -1435, cz: -104, hangarX: -1528, hangarZ: -138, taxiX: -1495, taxiZ: -54, team: 'US' },
-        { cx: 1435, cz: 104, hangarX: 1528, hangarZ: 138, taxiX: 1495, taxiZ: 54, team: 'RU' }
+        { cx: -2735, cz: -104, hangarX: -2828, hangarZ: -138, taxiX: -2795, taxiZ: -54, team: 'US' },
+        { cx: 2735, cz: 104, hangarX: 2828, hangarZ: 138, taxiX: 2795, taxiZ: 54, team: 'RU' }
       ]) {
         const laneGroup = new THREE.Group();
         const baseH = 1.25;
@@ -1186,27 +1186,35 @@ export const TerrainGenerator = {
       };
 
       for (const hq of [
-        { team: 'US', sign: -1, frontX: -1436, backX: -1626, rwyZ: -48, outerRwyZ: -168, oppZ: 52, rwyGateCenter: -1495 },
-        { team: 'RU', sign: 1, frontX: 1436, backX: 1626, rwyZ: 48, outerRwyZ: 168, oppZ: -52, rwyGateCenter: 1495 }
+        { team: 'US', sign: -1, frontX: -1436, backX: -1626, rwyZ: -48, outerRwyZ: -168, oppZ: 52, rwyGateCenter: -2795 },
+        { team: 'RU', sign: 1, frontX: 1436, backX: 1626, rwyZ: 48, outerRwyZ: 168, oppZ: -52, rwyGateCenter: 2795 }
       ]) {
         const secGroup = new THREE.Group();
 
         if (hq.team === 'US') {
+          // Ground HQ Motor Pool Perimeter (-1436..-1626, z = -48..+52)
           addWallWithBarbedWire(secGroup, hq.frontX, hq.rwyZ, hq.frontX, -16, 3.2);
           addWallWithBarbedWire(secGroup, hq.frontX, 16, hq.frontX, hq.oppZ, 3.2);
           addWallWithBarbedWire(secGroup, hq.backX, hq.oppZ, hq.frontX, hq.oppZ, 3.2);
-          addWallWithBarbedWire(secGroup, hq.backX, hq.outerRwyZ, hq.backX, hq.oppZ, 3.2);
-          addWallWithBarbedWire(secGroup, hq.backX, hq.rwyZ, -1512, hq.rwyZ, 3.2);
-          addWallWithBarbedWire(secGroup, -1478, hq.rwyZ, -1250, hq.rwyZ, 3.2);
-          addWallWithBarbedWire(secGroup, hq.backX, hq.outerRwyZ, -1250, hq.outerRwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, hq.backX, hq.rwyZ, hq.backX, hq.oppZ, 3.2);
+          addWallWithBarbedWire(secGroup, hq.backX, hq.rwyZ, hq.frontX, hq.rwyZ, 3.2);
+          // Rear Strategic Airbase Perimeter (-2550..-2926, z = -48..-168)
+          addWallWithBarbedWire(secGroup, -2926, hq.outerRwyZ, -2926, hq.rwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, -2926, hq.rwyZ, -2812, hq.rwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, -2778, hq.rwyZ, -2550, hq.rwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, -2926, hq.outerRwyZ, -2550, hq.outerRwyZ, 3.2);
         } else {
+          // Ground HQ Motor Pool Perimeter (+1436..+1626, z = -52..+48)
           addWallWithBarbedWire(secGroup, hq.frontX, hq.oppZ, hq.frontX, -16, 3.2);
           addWallWithBarbedWire(secGroup, hq.frontX, 16, hq.frontX, hq.rwyZ, 3.2);
           addWallWithBarbedWire(secGroup, hq.frontX, hq.oppZ, hq.backX, hq.oppZ, 3.2);
-          addWallWithBarbedWire(secGroup, hq.backX, hq.oppZ, hq.backX, hq.outerRwyZ, 3.2);
-          addWallWithBarbedWire(secGroup, 1250, hq.rwyZ, 1478, hq.rwyZ, 3.2);
-          addWallWithBarbedWire(secGroup, 1512, hq.rwyZ, hq.backX, hq.rwyZ, 3.2);
-          addWallWithBarbedWire(secGroup, 1250, hq.outerRwyZ, hq.backX, hq.outerRwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, hq.backX, hq.oppZ, hq.backX, hq.rwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, hq.frontX, hq.rwyZ, hq.backX, hq.rwyZ, 3.2);
+          // Rear Strategic Airbase Perimeter (+2550..+2926, z = +48..+168)
+          addWallWithBarbedWire(secGroup, 2926, hq.rwyZ, 2926, hq.outerRwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, 2550, hq.rwyZ, 2778, hq.rwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, 2812, hq.rwyZ, 2926, hq.rwyZ, 3.2);
+          addWallWithBarbedWire(secGroup, 2550, hq.outerRwyZ, 2926, hq.outerRwyZ, 3.2);
         }
 
         // 2. Armored Checkpoint Guardhouses & Instanced Red/White Striped Boom Barriers at Main Road Gate

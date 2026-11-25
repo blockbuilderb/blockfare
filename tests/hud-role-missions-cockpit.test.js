@@ -1,8 +1,8 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=124';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=124';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=126';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=126';
 
 function makeMockElement(id = '') {
   const attrs = new Map();
@@ -226,5 +226,22 @@ describe('Bottom-Right Aircraft Cockpit HUD: Engine RPM, Climb/Dive Profile & Co
     assert.equal(ui.el('air-rpm-pct').textContent, '0% FAIL');
     assert.equal(ui.el('air-profile-plane-group').getAttribute('transform'), 'rotate(20.0 54 56)');
     assert.match(ui.el('air-profile-footer').textContent, /^▼ DIVE -20°/);
+
+    // 5. Right-side AIRFRAME bar reflects damaged airframeParts (never showing misleading 100% when engines are red!)
+    jet.isShotDown = false;
+    jet.hp = 1500;
+    jet.maxHp = 1500;
+    jet.airframeParts = {
+      avionics: 100,
+      cockpit: 100,
+      leftWing: 80,
+      rightWing: 80,
+      engines: 15,
+      tail: 40
+    };
+    ui._airCockpitHudAccum = 0.05;
+    ui.updateAircraftCockpitHud(jet, 1.0);
+    assert.notEqual(ui.el('air-hud-hp-val').textContent, '100%');
+    assert.match(ui.el('air-hud-hp-val').textContent, /ENG 15%/);
   });
 });

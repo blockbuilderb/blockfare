@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT, FORMATION, SQUAD_KIT_CAPS } from '../config.js?v=124';
-import { sound } from '../audio.js?v=124';
-import { tmpVec3 } from '../utils/VectorPool.js?v=124';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=124';
-import { events, makeEventBridge } from '../events.js?v=124';
+import { BOT, FORMATION, SQUAD_KIT_CAPS } from '../config.js?v=126';
+import { sound } from '../audio.js?v=126';
+import { tmpVec3 } from '../utils/VectorPool.js?v=126';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=126';
+import { events, makeEventBridge } from '../events.js?v=126';
 import {
   createSoldierMesh,
   updateSoldierEquippedWeapon,
   getDefaultWeaponIdForRole
-} from './SoldierMeshFactory.js?v=124';
-import { SightlineMethods } from './SightlineSystem.js?v=124';
-import { MedicAIMethods } from './MedicAI.js?v=124';
-import { BotAIMethods } from './BotAI.js?v=124';
+} from './SoldierMeshFactory.js?v=126';
+import { SightlineMethods } from './SightlineSystem.js?v=126';
+import { MedicAIMethods } from './MedicAI.js?v=126';
+import { BotAIMethods } from './BotAI.js?v=126';
 import {
   createBaseProtectionFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=124';
+} from '../core/StateMachines.js?v=126';
 
 const BOT_NAMES_US = [
   'SgtOkiDoki', 'WakistanVet', 'VoxelMedic', 'EagleOne', 'BlockBuster',
@@ -52,19 +52,31 @@ export const SQUAD_9MAN_ROSTERS = {
   CHARLIE: ['ASSAULT', 'ENGINEER', 'MEDIC', 'ASSAULT', 'ENGINEER', 'SUPPORT', 'MEDIC', 'ASSAULT', 'ASSAULT'],
   DELTA:   ['ASSAULT', 'MEDIC', 'SUPPORT', 'ASSAULT', 'MEDIC', 'ENGINEER', 'SUPPORT', 'ASSAULT', 'ASSAULT'],
   ECHO:    ['ASSAULT', 'RECON', 'MEDIC', 'ASSAULT', 'SUPPORT', 'ENGINEER', 'MEDIC', 'ASSAULT', 'ASSAULT'],
-  FALCON:  ['ASSAULT', 'ASSAULT', 'MEDIC', 'ASSAULT', 'SUPPORT', 'ASSAULT', 'MEDIC', 'ASSAULT', 'ENGINEER']
+  FALCON:  ['ASSAULT', 'ASSAULT', 'MEDIC', 'ASSAULT', 'SUPPORT', 'ASSAULT', 'MEDIC', 'ASSAULT', 'ENGINEER'],
+  FOXTROT: ['ASSAULT', 'ASSAULT', 'MEDIC', 'SUPPORT', 'ENGINEER', 'ASSAULT', 'MEDIC', 'ASSAULT', 'RECON'],
+  GOLF:    ['ASSAULT', 'MEDIC', 'SUPPORT', 'ASSAULT', 'SUPPORT', 'ENGINEER', 'MEDIC', 'ASSAULT', 'ASSAULT'],
+  HOTEL:   ['ASSAULT', 'ENGINEER', 'MEDIC', 'ASSAULT', 'ENGINEER', 'SUPPORT', 'MEDIC', 'ASSAULT', 'ASSAULT'],
+  IRON:    ['ASSAULT', 'ASSAULT', 'MEDIC', 'SUPPORT', 'ENGINEER', 'ASSAULT', 'MEDIC', 'ASSAULT', 'ASSAULT'],
+  KILO:    ['ASSAULT', 'RECON', 'MEDIC', 'ASSAULT', 'SUPPORT', 'ENGINEER', 'MEDIC', 'ASSAULT', 'ASSAULT'],
+  VIPER:   ['ASSAULT', 'ASSAULT', 'MEDIC', 'ASSAULT', 'SUPPORT', 'ASSAULT', 'MEDIC', 'ASSAULT', 'ENGINEER']
 };
 
 const HELMET_COLOR_US = new THREE.Color(0x2980b9);
 const HELMET_COLOR_RU = new THREE.Color(0xc0392b);
 
 export const SQUAD_DEFS = [
-  { id: 'ALPHA', short: 'ALP', branch: 'LAND', specialty: 'LAND ASSAULT & BREACH', defaultFlag: 2 },
-  { id: 'BRAVO', short: 'BRV', branch: 'ARMOR', specialty: 'HEAVY ARMOR SQUAD (TANKS & IFVs)', defaultFlag: 0, isArmorSquad: true },
-  { id: 'CHARLIE', short: 'CHR', branch: 'LAND', specialty: 'LAND ANTI-ARMOR & SAPPER', defaultFlag: 1 },
-  { id: 'DELTA', short: 'DLT', branch: 'LAND', specialty: 'LAND MEDICAL & LOGISTICS', defaultFlag: 3 },
-  { id: 'ECHO', short: 'ECH', branch: 'LAND', specialty: 'LAND RECON & PATHFINDER', defaultFlag: 4 },
-  { id: 'FALCON', short: 'FLC', branch: 'AIR', specialty: 'AIR WING SQUAD (JETS & GUNSHIPS)', defaultFlag: 2, isAirSquad: true }
+  { id: 'ALPHA', short: 'ALP', branch: 'LAND', squadType: 'INFANTRY', maxSize: 9, icon: '⚔️', specialty: 'INFANTRY ASSAULT & BREACH (9P)', defaultFlag: 2 },
+  { id: 'CHARLIE', short: 'CHR', branch: 'LAND', squadType: 'INFANTRY', maxSize: 9, icon: '🚀', specialty: 'ANTI-ARMOR & SAPPER INFANTRY (9P)', defaultFlag: 1 },
+  { id: 'DELTA', short: 'DLT', branch: 'LAND', squadType: 'INFANTRY', maxSize: 9, icon: '➕', specialty: 'COMBAT MEDICAL & LOGISTICS (9P)', defaultFlag: 3 },
+  { id: 'FOXTROT', short: 'FOX', branch: 'LAND', squadType: 'INFANTRY', maxSize: 9, icon: '🔥', specialty: 'SHOCK RIFLE INFANTRY (9P)', defaultFlag: 2 },
+  { id: 'GOLF', short: 'GLF', branch: 'LAND', squadType: 'INFANTRY', maxSize: 9, icon: '📦', specialty: 'HEAVY WEAPONS & SUPPORT (9P)', defaultFlag: 1 },
+  { id: 'HOTEL', short: 'HTL', branch: 'LAND', squadType: 'INFANTRY', maxSize: 9, icon: '🛠️', specialty: 'MECHANIZED SAPPER INFANTRY (9P)', defaultFlag: 3 },
+  { id: 'ECHO', short: 'ECH', branch: 'RECON', squadType: 'RECON', maxSize: 6, icon: '🎯', specialty: 'RECON SNIPER & PATHFINDER (6P)', defaultFlag: 4, isReconSquad: true },
+  { id: 'KILO', short: 'KIL', branch: 'RECON', squadType: 'RECON', maxSize: 6, icon: '🌲', specialty: 'JTAC LASER & DEEP RECON (6P)', defaultFlag: 0, isReconSquad: true },
+  { id: 'BRAVO', short: 'BRV', branch: 'ARMOR', squadType: 'ARMOR', maxSize: 4, icon: '🛡️', specialty: 'HEAVY TANK PLATOON (4P CREW)', defaultFlag: 0, isArmorSquad: true },
+  { id: 'IRON', short: 'IRN', branch: 'ARMOR', squadType: 'ARMOR', maxSize: 4, icon: '🛡️', specialty: 'IFV & SPAAG ARMOR CREW (4P)', defaultFlag: 4, isArmorSquad: true },
+  { id: 'FALCON', short: 'FLC', branch: 'AIR', squadType: 'AIR', maxSize: 4, icon: '✈️', specialty: 'STRIKE FIGHTER WING (4P PILOTS)', defaultFlag: 2, isAirSquad: true },
+  { id: 'VIPER', short: 'VPR', branch: 'AIR', squadType: 'AIR', maxSize: 4, icon: '🛸', specialty: 'CAS & AC-130 GUNSHIP WING (4P)', defaultFlag: 2, isAirSquad: true }
 ];
 
 export class BotManager {
@@ -239,14 +251,16 @@ export class BotManager {
       return (def ? def.defaultFlag : 0) % flagCount;
     }
     if (team === 'RU') {
-      if (squadId === 'ECHO' || squadId === 'BRAVO') return 4; // OBJ E
-      if (squadId === 'DELTA' || squadId === 'CHARLIE') return 3; // OBJ D
-      return 2; // ALPHA & FALCON -> OBJ C
+      if (squadId === 'ECHO' || squadId === 'BRAVO' || squadId === 'IRON') return 4; // OBJ E
+      if (squadId === 'DELTA' || squadId === 'CHARLIE' || squadId === 'HOTEL') return 3; // OBJ D
+      if (squadId === 'KILO' || squadId === 'GOLF') return 1; // OBJ B pressure
+      return 2; // ALPHA, FOXTROT, FALCON, VIPER -> OBJ C
     }
     // US Team (West):
-    if (squadId === 'ECHO' || squadId === 'BRAVO') return 0; // OBJ A
-    if (squadId === 'CHARLIE' || squadId === 'DELTA') return 1; // OBJ B
-    return 2; // ALPHA & FALCON -> OBJ C
+    if (squadId === 'ECHO' || squadId === 'BRAVO' || squadId === 'KILO') return 0; // OBJ A
+    if (squadId === 'CHARLIE' || squadId === 'DELTA' || squadId === 'GOLF') return 1; // OBJ B
+    if (squadId === 'IRON' || squadId === 'HOTEL') return 3; // OBJ D pressure
+    return 2; // ALPHA, FOXTROT, FALCON, VIPER -> OBJ C
   }
 
   /**
@@ -1455,18 +1469,114 @@ export class BotManager {
    * automatically reassigns 1 excess AI squadmate in the first 9-man slice to `ASSAULT` Rifleman
    * so Squad's 9-man role caps are strictly honored without locking out solo players!
    */
+  /**
+   * Creates a Player-Founded Custom Specialized Squad (`INFANTRY` 9P, `ARMOR` 4P, `AIR` 4P, or `RECON` 6P):
+   * - Registers the squad dynamically in `SQUAD_DEFS` so Scoreboard, Command Net & Deploy Screen all recognize it.
+   * - If `locked === false` (`🔓 Open`), automatically recruits up to `maxSize - 1` friendly AI bots into the new squad
+   *   and equips them with branch-appropriate kits! If `locked === true` (`🔒 Locked`), reserves it for solo/friends!
+   */
+  createCustomSquad({ callsign = '', squadType = 'INFANTRY', locked = false, team = 'US' } = {}) {
+    const typeKey = ['INFANTRY', 'ARMOR', 'AIR', 'RECON'].includes(String(squadType).toUpperCase())
+      ? String(squadType).toUpperCase()
+      : 'INFANTRY';
+    const typeSpec = SQUAD_KIT_CAPS?.SQUAD_TYPES?.[typeKey] || {
+      id: 'INFANTRY',
+      maxSize: 9
+    };
+    const cleaned = String(callsign || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9_-]/g, '')
+      .slice(0, 12);
+    const defaultPrefix =
+      typeKey === 'AIR'
+        ? 'EAGLE'
+        : typeKey === 'ARMOR'
+        ? 'TITAN'
+        : typeKey === 'RECON'
+        ? 'GHOST'
+        : 'OMEGA';
+    let sqId = cleaned || `${defaultPrefix}-${SQUAD_DEFS.length + 1}`;
+    let dedup = 2;
+    while (SQUAD_DEFS.some((s) => s.id === sqId)) {
+      sqId = `${(cleaned || defaultPrefix).slice(0, 9)}-${dedup++}`;
+    }
+    const short = sqId.replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'SQD';
+    const icon =
+      typeKey === 'AIR' ? '✈️' : typeKey === 'ARMOR' ? '🛡️' : typeKey === 'RECON' ? '🎯' : '⚔️';
+    const branch = typeKey === 'AIR' ? 'AIR' : typeKey === 'ARMOR' ? 'ARMOR' : typeKey === 'RECON' ? 'RECON' : 'LAND';
+    const maxSize = typeSpec.maxSize || (typeKey === 'INFANTRY' ? 9 : typeKey === 'RECON' ? 6 : 4);
+    const newSquadDef = {
+      id: sqId,
+      short,
+      branch,
+      squadType: typeKey,
+      maxSize,
+      icon,
+      locked: Boolean(locked),
+      isCustomSquad: true,
+      ownerTeam: team,
+      isAirSquad: typeKey === 'AIR',
+      isArmorSquad: typeKey === 'ARMOR',
+      isReconSquad: typeKey === 'RECON',
+      specialty: `CUSTOM ${typeKey} SQUAD (${maxSize}P${locked ? ' • LOCKED' : ' • OPEN'})`,
+      defaultFlag: 2
+    };
+    SQUAD_DEFS.push(newSquadDef);
+
+    let recruitedCount = 0;
+    if (!locked && Array.isArray(this.bots) && this.bots.length > 0) {
+      const wantAi = Math.max(0, maxSize - 1);
+      const roleCycle =
+        typeKey === 'AIR'
+          ? ['ASSAULT', 'RECON', 'ENGINEER']
+          : typeKey === 'ARMOR'
+          ? ['ENGINEER', 'ENGINEER', 'MEDIC']
+          : typeKey === 'RECON'
+          ? ['RECON', 'MEDIC', 'SUPPORT', 'ENGINEER', 'ASSAULT']
+          : ['MEDIC', 'SUPPORT', 'ENGINEER', 'ASSAULT', 'MEDIC', 'SUPPORT', 'ASSAULT', 'RECON'];
+      for (let i = this.bots.length - 1; i >= 0 && recruitedCount < wantAi; i--) {
+        const b = this.bots[i];
+        if (!b || b.team !== team || b.retiredForHuman || b.isCommander || b.isSquadLeader) continue;
+        b.squad = sqId;
+        b.squadShort = short;
+        b.squadMemberIndex = recruitedCount + 1;
+        if ((this.world?.era || 'modern') === 'modern' && !b.isDinosaur) {
+          const nextRole = roleCycle[recruitedCount % roleCycle.length];
+          b.role = nextRole;
+          if (b.mesh) {
+            updateSoldierEquippedWeapon(b.mesh, getDefaultWeaponIdForRole(nextRole, b.team), b.team, {
+              role: nextRole
+            });
+          }
+        }
+        recruitedCount++;
+      }
+    }
+
+    return { squad: newSquadDef, recruitedAi: recruitedCount };
+  }
+
   rebalanceAiSquadForPlayerRole(player) {
     if (!player || player.squadDoctrineEnabled === false) return null;
     if ((this.world?.era || 'modern') !== 'modern') return null;
     const team = player.team || 'US';
     const squadId = player.squad || 'ALPHA';
+    const sqDef = SQUAD_DEFS.find((s) => s.id === squadId);
+    const sqTypeKey = sqDef?.squadType || 'INFANTRY';
+    const typeCaps = SQUAD_KIT_CAPS?.SQUAD_TYPES?.[sqTypeKey]?.roleCaps;
     const pRoleLower = String(player.role || 'assault').toLowerCase();
-    const maxCap = SQUAD_KIT_CAPS?.ROLE_MAX_PER_9?.[pRoleLower] ?? 9;
+    const maxCap =
+      (typeCaps && typeof typeCaps[pRoleLower] === 'number' && typeCaps[pRoleLower] > 0
+        ? typeCaps[pRoleLower]
+        : null) ??
+      SQUAD_KIT_CAPS?.ROLE_MAX_PER_9?.[pRoleLower] ??
+      9;
+    const sliceLimit = Math.max(3, (sqDef?.maxSize || 9) - 1);
     if (maxCap >= 9) return null;
 
     const pRoleUpper = pRoleLower.toUpperCase();
     const sliceBots = this.bots.filter(
-      (b) => b && b.team === team && b.squad === squadId && (b.squadMemberIndex || 0) < 8
+      (b) => b && b.team === team && b.squad === squadId && (b.squadMemberIndex || 0) < sliceLimit
     );
     const matchingAi = sliceBots.filter((b) => b.role === pRoleUpper);
     // Player occupies 1 slot of `pRoleUpper` in this 9-man squad; ensure AI holds at most `maxCap - 1`

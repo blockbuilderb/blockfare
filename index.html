@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MODERN BLOCKFARE — Multi-Era Voxel Combined Arms FPS</title>
-  <link rel="stylesheet" href="./style.css?v=124" />
+  <link rel="stylesheet" href="./style.css?v=126" />
   <script type="importmap">
     {
       "imports": {
@@ -68,7 +68,8 @@
           if (
             document.getElementById('gunsmith-modal') ||
             document.getElementById('settings-modal') ||
-            document.getElementById('mp-invite-modal')
+            document.getElementById('mp-invite-modal') ||
+            document.getElementById('controls-overlay')
           ) {
             return;
           }
@@ -563,7 +564,7 @@
         <span>&bull;</span>
         <span><b>[TAB]</b> Stats</span>
         <span>&bull;</span>
-        <span id="hud-manual-btn" style="color:#7bed9f;font-weight:900;cursor:pointer;pointer-events:auto;" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp()" title="Open Field &amp; Flight Controls Manual [F1]">📖 <b>[F1]</b> Manual</span>
+        <span id="hud-manual-btn" style="color:#7bed9f;font-weight:900;cursor:pointer;pointer-events:auto;" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp()" title="Open Field &amp; Flight Controls Manual [? / F1]">📖 <b>[? / F1]</b> Help</span>
         <span>&bull;</span>
         <span id="hud-settings-btn" style="color:#81ecec;font-weight:800;cursor:pointer;pointer-events:auto;" title="Open Audio &amp; World Settings">⚙️ Settings</span>
       </div>
@@ -1368,7 +1369,10 @@
           <h1 id="main-menu-title" style="margin:2px 0 0 0;font-size:28px;font-weight:900;letter-spacing:1px;color:#ffffff;">SWITCH COMBAT ERA</h1>
           <div style="font-size:13px;color:#94a3b8;margin-top:2px;">Modern Blockfare (Frugis River Valley) is the default theater. Switch anytime to preview Medieval or Jurassic Beta theaters.</div>
         </div>
-        <button type="button" id="close-era-menu-btn" onclick="var m=document.getElementById('main-menu-screen');if(m){m.classList.add('hidden');m.style.display='none';}" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:#ecf0f1;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:900;cursor:pointer;white-space:nowrap;">✕ BACK TO DEPLOY</button>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button type="button" id="main-menu-help-btn" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp()" style="background:rgba(0,210,211,0.16);border:1px solid #00d2d3;color:#81ecec;border-radius:6px;padding:7px 12px;font-size:12px;font-weight:900;cursor:pointer;white-space:nowrap;">📖 [?] CONTROLS MANUAL</button>
+          <button type="button" id="close-era-menu-btn" onclick="var m=document.getElementById('main-menu-screen');if(m){m.classList.add('hidden');m.style.display='none';}" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.25);color:#ecf0f1;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:900;cursor:pointer;white-space:nowrap;">✕ BACK TO DEPLOY</button>
+        </div>
       </div>
 
       <!-- 3 Era Selection Cards (Click card or button to open that Era's Configure & Deploy screen) -->
@@ -1473,6 +1477,7 @@
           <button type="button" id="deploy-doctrine-toggle-btn" class="deploy-tool-btn active" style="border:1px solid #2ecc71;color:#7bed9f;background:rgba(46,204,113,0.18);" title="Toggle Squad Specialized Licenses, Engineer-Only Walls &amp; Base/FOB Gunsmith ON/OFF">🎖️ Doctrine: ON</button>
           <button type="button" id="deploy-gunsmith-btn" class="deploy-tool-btn armory" title="Customize Weapons, 16 Optics, Attachments, Body Armor &amp; Armory Cases [L]">🔧 [L] Armory (<span id="deploy-cash-val">🏦 $100,000</span>)</button>
           <button type="button" id="deploy-backpack-btn" class="deploy-tool-btn backpack" title="Open Backpack &amp; Extracted Loot Warehouse [I]">🎒 [I] Pack</button>
+          <button type="button" id="deploy-help-btn" class="deploy-tool-btn help" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp()" style="border:1px solid rgba(0,210,211,0.65);color:#81ecec;background:rgba(0,210,211,0.15);" title="Open Searchable Field &amp; Flight Controls Manual [? / F1]">📖 [?] Help</button>
           <button type="button" id="deploy-settings-btn" class="deploy-tool-btn settings" title="Audio Volume, Building Destruction, Friendly Fire &amp; FPS Settings">⚙️ Settings</button>
           <button id="open-main-menu-btn" type="button" class="deploy-nav-btn" title="Optional: Switch Era / Theater (Medieval &amp; Jurassic Beta)">🌍 Eras</button>
         </div>
@@ -1593,7 +1598,10 @@
           </div>
 
           <div class="deploy-sub-controls">
-            <h2 style="margin: 6px 0 4px 0;">2. FACTION, RANK &amp; SQUAD</h2>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0 4px 0;gap:6px;">
+              <h2 style="margin:0;">2. FACTION, RANK &amp; SPECIALIZED SQUADS</h2>
+              <button type="button" id="open-create-squad-btn" style="background:rgba(46,204,113,0.18);border:1px solid #2ecc71;color:#7bed9f;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:900;cursor:pointer;letter-spacing:0.4px;" title="Create your own Specialized Infantry (9P), Armor (4P), Air Wing (4P), or Recon (6P) Squad!">➕ Create Squad</button>
+            </div>
             <div class="team-select-row">
               <button class="team-btn active" id="us-team-btn" data-team="US" data-subfaction="US">US FORCES (BLUE)</button>
               <button class="team-btn" id="ru-team-btn" data-team="RU" data-subfaction="RU">RU FORCES (RED)</button>
@@ -1602,15 +1610,37 @@
             <div class="rank-select-row" id="rank-select-row">
               <button class="rank-btn active" data-rank="MEMBER" title="Follow your AI Squad Leader &amp; receive dynamic role missions">● Member</button>
               <button class="rank-btn" data-rank="SQUAD_LEADER" title="Lead your selected tactical squad">▲ Squad Lead</button>
-              <button class="rank-btn" data-rank="COMMANDER" title="Command all 6 Squads + Garrison, UAV &amp; Force Orders">★ Commander (All)</button>
+              <button class="rank-btn" data-rank="COMMANDER" title="Command all 12+ Squads + Garrison, UAV &amp; Force Orders">★ Commander (All)</button>
             </div>
-            <div class="squad-select-row" id="squad-select-row">
-              <button class="squad-btn active" data-squad="ALPHA" title="Land Assault Infantry Squad">⚔️ Alpha</button>
-              <button class="squad-btn" data-squad="BRAVO" title="Heavy Armor &amp; IFV Squad">🛡 Bravo</button>
-              <button class="squad-btn" data-squad="CHARLIE" title="Anti-Armor &amp; Sapper Squad">🚀 Charlie</button>
-              <button class="squad-btn" data-squad="DELTA" title="Medical &amp; Logistics Squad">➕ Delta</button>
-              <button class="squad-btn" data-squad="ECHO" title="Recon &amp; JTAC Pathfinder Squad">🎯 Echo</button>
-              <button class="squad-btn" data-squad="FALCON" title="Tactical Air Wing / Plane Squad">✈️ Falcon</button>
+            <!-- Inline Custom Squad Creator Drawer (Hidden until [+ Create Squad] is clicked) -->
+            <div id="create-squad-drawer" class="hidden" style="background:rgba(10,20,30,0.95);border:1px solid rgba(46,204,113,0.55);border-radius:5px;padding:6px 8px;margin-bottom:5px;display:none;flex-direction:column;gap:5px;">
+              <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
+                <input id="custom-squad-name-input" type="text" maxlength="12" placeholder="CALLSIGN (e.g. OMEGA)" style="flex:1;min-width:95px;background:#081119;color:#fff;border:1px solid rgba(255,255,255,0.24);border-radius:3px;padding:3px 6px;font-size:10.5px;font-weight:800;text-transform:uppercase;" />
+                <select id="custom-squad-type-select" style="background:#081119;color:#81ecec;border:1px solid rgba(0,210,211,0.45);border-radius:3px;padding:3px 5px;font-size:10.5px;font-weight:800;">
+                  <option value="INFANTRY">🪖 Infantry Squad (9P)</option>
+                  <option value="ARMOR">🛡️ Armor Crew (4P)</option>
+                  <option value="AIR">✈️ Pilot Air Wing (4P)</option>
+                  <option value="RECON">🎯 Recon / JTAC (6P)</option>
+                </select>
+                <label style="font-size:10px;color:#cbd5e1;font-weight:800;display:inline-flex;align-items:center;gap:3px;cursor:pointer;" title="Locked squads stay reserved for you / friends without AI auto-fill">
+                  <input id="custom-squad-locked-chk" type="checkbox" /> 🔒 Lock
+                </label>
+                <button type="button" id="confirm-create-squad-btn" style="background:#27ae60;color:#fff;border:none;border-radius:3px;padding:3px 8px;font-size:10px;font-weight:900;cursor:pointer;">✓ LEAD</button>
+              </div>
+            </div>
+            <div class="squad-select-row" id="squad-select-row" style="max-height:84px;overflow-y:auto;">
+              <button class="squad-btn active" data-squad="ALPHA" title="Infantry Assault Squad (9P • Max 2 Support, 2 Medic, 2 LAT, 1 Sniper)">⚔️ Alpha <small style="opacity:0.72;">INF</small></button>
+              <button class="squad-btn" data-squad="CHARLIE" title="Anti-Armor Sapper Infantry Squad (9P)">🚀 Charlie <small style="opacity:0.72;">INF</small></button>
+              <button class="squad-btn" data-squad="DELTA" title="Medical &amp; Logistics Infantry Squad (9P)">➕ Delta <small style="opacity:0.72;">INF</small></button>
+              <button class="squad-btn" data-squad="FOXTROT" title="Shock Rifle Infantry Squad (9P)">🔥 Foxtrot <small style="opacity:0.72;">INF</small></button>
+              <button class="squad-btn" data-squad="GOLF" title="Heavy Weapons &amp; Support Infantry Squad (9P)">📦 Golf <small style="opacity:0.72;">INF</small></button>
+              <button class="squad-btn" data-squad="HOTEL" title="Mechanized Sapper Infantry Squad (9P)">🛠️ Hotel <small style="opacity:0.72;">INF</small></button>
+              <button class="squad-btn" data-squad="ECHO" title="Recon Sniper &amp; Pathfinder Team (6P • Up to 2 Snipers)">🎯 Echo <small style="opacity:0.72;">REC</small></button>
+              <button class="squad-btn" data-squad="KILO" title="JTAC Laser &amp; Deep Recon Team (6P)">🌲 Kilo <small style="opacity:0.72;">REC</small></button>
+              <button class="squad-btn" data-squad="BRAVO" title="Heavy Tank Platoon (4P Armor Crew)">🛡 Bravo <small style="color:#f1c40f;">ARM</small></button>
+              <button class="squad-btn" data-squad="IRON" title="IFV &amp; SPAAG Mechanized Armor Crew (4P)">🛡 Iron <small style="color:#f1c40f;">ARM</small></button>
+              <button class="squad-btn" data-squad="FALCON" title="Strike Fighter Aviation Wing (4P Pilots)">✈️ Falcon <small style="color:#00d2d3;">AIR</small></button>
+              <button class="squad-btn" data-squad="VIPER" title="CAS &amp; AC-130 Gunship Wing (4P Pilots)">🛸 Viper <small style="color:#00d2d3;">AIR</small></button>
             </div>
           </div>
         </div>
@@ -1646,13 +1676,13 @@
 
       <div class="deploy-footer">
         <div class="control-tips">
-          <b>WASD</b> Move &bull; <b>RMB</b> Aim/Block &bull; <b>E</b> Vehicle/Mount &bull; <b>F</b> Revive/Loot &bull; <b>L</b> Armory &bull; <b>I</b> Pack &bull; <b>K</b> Map &bull; <b>TAB</b> Full Controls
+          <b>WASD</b> Move &bull; <b>RMB</b> Aim/Block &bull; <b>E</b> Vehicle/Mount &bull; <b>F</b> Revive/Loot &bull; <b>L</b> Armory &bull; <b>I</b> Pack &bull; <b>K</b> Map &bull; <b>TAB</b> Stats &bull; <span id="deploy-footer-help-btn" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp()" style="color:#7bed9f;font-weight:900;cursor:pointer;text-decoration:underline;" title="Click or press [? / F1] to open the full Controls &amp; Operations Manual">📖 <b>[? / F1]</b> Controls Manual</span>
         </div>
         <button id="deploy-btn" type="button" class="deploy-cta-btn" onclick="window.forceEnterGame && window.forceEnterGame()">DEPLOY [ENTER / SPACE]</button>
       </div>
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=124"></script>
+  <script type="module" src="./src/main.js?v=126"></script>
 </body>
 </html>

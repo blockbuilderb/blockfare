@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { events } from '../events.js?v=124';
+import { events } from '../events.js?v=126';
 
 function markShared(asset) {
   if (asset) {
@@ -110,7 +110,15 @@ export const ConquestSystem = {
   },
 
   updateFlags(dt, units, onFlagCaptured = null) {
-    const playerUnit = units && units.length > 0 ? units[0] : null;
+    const unitList = Array.isArray(units)
+      ? units
+      : units && Array.isArray(onFlagCaptured)
+      ? [units, ...onFlagCaptured]
+      : units
+      ? [units]
+      : [];
+    const effCallback = typeof onFlagCaptured === 'function' ? onFlagCaptured : null;
+    const playerUnit = unitList.length > 0 ? unitList[0] : null;
     const bm =
       this.botManager ||
       (typeof window !== 'undefined' && window.game ? window.game.botManager : null);
@@ -226,9 +234,9 @@ export const ConquestSystem = {
             }
           }
         }
-      } else if (units) {
-        for (let i = 0; i < units.length; i++) {
-          const u = units[i];
+      } else if (unitList.length > 0) {
+        for (let i = 0; i < unitList.length; i++) {
+          const u = unitList[i];
           if (!u || u.dead) continue;
           const uPos = resolveUnitCapturePos(u);
           if (!uPos) continue;
@@ -252,6 +260,9 @@ export const ConquestSystem = {
       flag.ruDownedPresent = ruDownedExcluded;
       flag.zoneClashing = usSoldiers > 0 && ruSoldiers > 0;
 
+      if (typeof flag.captureProgress !== 'number') {
+        flag.captureProgress = typeof flag.progress === 'number' ? flag.progress : 0;
+      }
       const prevOwner = flag.owner;
       const prevContested = Boolean(flag.contested);
 
@@ -299,14 +310,16 @@ export const ConquestSystem = {
             newOwner: flag.owner,
             prevOwner: prevTeamOwner
           });
-          if (onFlagCaptured && !onFlagCaptured._isEventsBridge) {
-            onFlagCaptured(flag, flag.owner, prevTeamOwner);
+          if (effCallback && !effCallback._isEventsBridge) {
+            effCallback(flag, flag.owner, prevTeamOwner);
           }
         }
       }
 
       const absProg = Math.abs(flag.captureProgress) * 0.01;
-      flag.bannerMesh.position.y = 2.4 + absProg * 6.6;
+      if (flag.bannerMesh) {
+        flag.bannerMesh.position.y = 2.4 + absProg * 6.6;
+      }
       const colorHex =
         flag.captureProgress > 10
           ? 0x3498db
@@ -317,8 +330,8 @@ export const ConquestSystem = {
         flag._lastColorHex = colorHex;
         const targetCol =
           colorHex === 0x3498db ? _colUS : colorHex === 0xe74c3c ? _colRU : _colNeutral;
-        flag.bannerMesh.material.color.copy(targetCol);
-        flag.zoneMesh.material.color.copy(targetCol);
+        if (flag.bannerMesh?.material) flag.bannerMesh.material.color.copy(targetCol);
+        if (flag.zoneMesh?.material) flag.zoneMesh.material.color.copy(targetCol);
       }
     }
   }

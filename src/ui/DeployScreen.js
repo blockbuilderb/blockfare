@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=124';
-import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=124';
-import { events } from '../events.js?v=124';
+import { SQUAD_DEFS } from '../bots.js?v=126';
+import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=126';
+import { events } from '../events.js?v=126';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=124';
+} from '../core/StateMachines.js?v=126';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=124';
+} from '../utils/KeyboardShortcuts.js?v=126';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -22,12 +22,19 @@ export const DeployScreen = {
         this.selectedClass = btn.dataset.class;
         if ((this.world?.era || 'modern') === 'modern') {
           if (this.player?.squadDoctrineEnabled !== false) {
-            const autoSquad =
-              this.selectedClass === 'pilot'
-                ? 'FALCON'
-                : this.selectedClass === 'armor'
-                ? 'BRAVO'
-                : null;
+            const curSqDef = SQUAD_DEFS.find((s) => s.id === this.selectedSquad);
+            let autoSquad = null;
+            if (this.selectedClass === 'pilot' && !curSqDef?.isAirSquad) {
+              autoSquad = 'FALCON';
+            } else if (this.selectedClass === 'armor' && !curSqDef?.isArmorSquad) {
+              autoSquad = 'BRAVO';
+            } else if (
+              this.selectedClass !== 'pilot' &&
+              this.selectedClass !== 'armor' &&
+              (curSqDef?.isAirSquad || curSqDef?.isArmorSquad)
+            ) {
+              autoSquad = this.selectedClass === 'recon' ? 'ECHO' : 'ALPHA';
+            }
             if (autoSquad) {
               this.selectedSquad = autoSquad;
               document.querySelectorAll('.squad-btn').forEach((sb) => {
@@ -119,14 +126,121 @@ export const DeployScreen = {
       });
     });
 
-    const squadBtns = document.querySelectorAll('.squad-btn');
-    squadBtns.forEach((btn) => {
+    const bindSquadButton = (btn) => {
+      if (!btn || btn._boundSquadClick) return;
+      btn._boundSquadClick = true;
       btn.addEventListener('click', () => {
-        squadBtns.forEach((b) => b.classList.remove('active'));
+        document.querySelectorAll('.squad-btn').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         this.selectedSquad = btn.dataset.squad;
+        const sqDef = SQUAD_DEFS.find((s) => s.id === this.selectedSquad);
+        if (
+          sqDef &&
+          (this.world?.era || 'modern') === 'modern' &&
+          this.player?.squadDoctrineEnabled !== false
+        ) {
+          if (sqDef.isAirSquad && this.selectedClass !== 'pilot') {
+            document.querySelector('.class-btn[data-class="pilot"]')?.click();
+          } else if (sqDef.isArmorSquad && this.selectedClass !== 'armor' && this.selectedClass !== 'engineer') {
+            document.querySelector('.class-btn[data-class="armor"]')?.click();
+          }
+        }
+        this.updateDeployClassTraitsCard?.();
       });
-    });
+    };
+    document.querySelectorAll('.squad-btn').forEach(bindSquadButton);
+
+    // Custom Specialized Squad Creator (`➕ Create Squad` on Deploy Screen)
+    const openCreateSqBtn = document.getElementById('open-create-squad-btn');
+    const createSqDrawer = document.getElementById('create-squad-drawer');
+    const confirmCreateSqBtn = document.getElementById('confirm-create-squad-btn');
+    const sqNameInput = document.getElementById('custom-squad-name-input');
+    const sqTypeSelect = document.getElementById('custom-squad-type-select');
+    const sqLockedChk = document.getElementById('custom-squad-locked-chk');
+    if (openCreateSqBtn && createSqDrawer) {
+      openCreateSqBtn.addEventListener('click', () => {
+        const isHidden = createSqDrawer.classList.contains('hidden');
+        createSqDrawer.classList.toggle('hidden', !isHidden);
+        createSqDrawer.style.display = isHidden ? 'flex' : 'none';
+        if (isHidden && sqTypeSelect) {
+          sqTypeSelect.value =
+            this.selectedClass === 'pilot'
+              ? 'AIR'
+              : this.selectedClass === 'armor'
+              ? 'ARMOR'
+              : this.selectedClass === 'recon'
+              ? 'RECON'
+              : 'INFANTRY';
+          sqNameInput?.focus();
+        }
+      });
+    }
+    if (confirmCreateSqBtn && this.botManager?.createCustomSquad) {
+      confirmCreateSqBtn.addEventListener('click', () => {
+        const sType = sqTypeSelect?.value || 'INFANTRY';
+        const rawName = sqNameInput?.value || '';
+        const locked = Boolean(sqLockedChk?.checked);
+        const res = this.botManager.createCustomSquad({
+          callsign: rawName,
+          squadType: sType,
+          locked,
+          team: this.selectedTeam || 'US'
+        });
+        if (!res || !res.squad) return;
+        const sq = res.squad;
+        const squadRow = document.getElementById('squad-select-row');
+        if (squadRow) {
+          document.querySelectorAll('.squad-btn').forEach((b) => b.classList.remove('active'));
+          const tagCol =
+            sq.squadType === 'AIR'
+              ? '#00d2d3'
+              : sq.squadType === 'ARMOR'
+              ? '#f1c40f'
+              : '#7bed9f';
+          const shortType =
+            sq.squadType === 'AIR'
+              ? 'AIR'
+              : sq.squadType === 'ARMOR'
+              ? 'ARM'
+              : sq.squadType === 'RECON'
+              ? 'REC'
+              : 'INF';
+          const newBtn = document.createElement('button');
+          newBtn.className = 'squad-btn active';
+          newBtn.dataset.squad = sq.id;
+          newBtn.title = sq.specialty;
+          newBtn.innerHTML = `${sq.icon} ${sq.id} <small style="color:${tagCol};">${
+            sq.locked ? '🔒' : ''
+          }${shortType}</small>`;
+          squadRow.prepend(newBtn);
+          bindSquadButton(newBtn);
+        }
+        this.selectedSquad = sq.id;
+        this.selectedRank = 'SQUAD_LEADER';
+        document.querySelectorAll('.rank-btn').forEach((rb) => {
+          rb.classList.toggle('active', rb.dataset.rank === 'SQUAD_LEADER');
+        });
+        if (sqNameInput) sqNameInput.value = '';
+        if (createSqDrawer) {
+          createSqDrawer.classList.add('hidden');
+          createSqDrawer.style.display = 'none';
+        }
+        if ((this.world?.era || 'modern') === 'modern' && this.player?.squadDoctrineEnabled !== false) {
+          if (sq.isAirSquad && this.selectedClass !== 'pilot') {
+            document.querySelector('.class-btn[data-class="pilot"]')?.click();
+          } else if (sq.isArmorSquad && this.selectedClass !== 'armor') {
+            document.querySelector('.class-btn[data-class="armor"]')?.click();
+          }
+        }
+        this.updateDeployClassTraitsCard?.();
+        this.addXpNotification?.(
+          0,
+          `🎖️ CREATED ${sq.icon} ${sq.id} (${sq.squadType} • ${sq.maxSize}P${
+            sq.locked ? ' LOCKED' : ` • ${res.recruitedAi} AI ASSIGNED`
+          }) — YOU ARE SQUAD LEADER!`
+        );
+      });
+    }
 
     const nextRoundBtn = this.el('next-round-btn');
     if (nextRoundBtn) {
@@ -608,6 +722,16 @@ export const DeployScreen = {
             document.activeElement.blur();
           }
           return;
+        }
+
+        if (e.code === 'Escape') {
+          const ctrlOverlay = this.el('controls-overlay') || document.getElementById('controls-overlay');
+          if (ctrlOverlay) {
+            e.preventDefault();
+            ctrlOverlay.remove();
+            if (this._domCache) this._domCache.delete('controls-overlay');
+            return;
+          }
         }
 
         // If [Y] Commander Radial Wheel (#commo-rose) is open, allow pressing bare 1-8 or -/+ to execute order immediately
@@ -1428,15 +1552,30 @@ export const DeployScreen = {
           titleEl.appendChild(badgeEl);
         }
         badgeEl.style.display = 'inline-block';
-        const isUnlimited = cls === 'assault';
-        badgeEl.textContent = doctrineOn ? SQUAD_KIT_CAPS.BADGE_LABELS[cls] : 'DOCTRINE OFF';
-        badgeEl.style.background = isUnlimited
+        const curSqDef = SQUAD_DEFS.find((s) => s.id === this.selectedSquad);
+        const sqTypeKey = curSqDef?.squadType || 'INFANTRY';
+        const sqTypeSpec = SQUAD_KIT_CAPS?.SQUAD_TYPES?.[sqTypeKey];
+        const capInThisSquad = sqTypeSpec?.roleCaps?.[cls];
+        const isUnlimited = cls === 'assault' && sqTypeKey === 'INFANTRY';
+        const isRestrictedInSquad = doctrineOn && typeof capInThisSquad === 'number' && capInThisSquad === 0;
+        badgeEl.textContent = !doctrineOn
+          ? 'DOCTRINE OFF'
+          : isRestrictedInSquad
+          ? `SWITCH SQUAD (${cls === 'pilot' ? 'AIR' : cls === 'armor' ? 'ARMOR' : 'INF'})`
+          : typeof capInThisSquad === 'number' && capInThisSquad < (sqTypeSpec?.maxSize || 9)
+          ? `MAX ${capInThisSquad} / ${sqTypeSpec?.shortTag || 'SQD'}`
+          : SQUAD_KIT_CAPS.BADGE_LABELS[cls];
+        badgeEl.style.background = isRestrictedInSquad
+          ? 'rgba(231, 76, 60, 0.22)'
+          : isUnlimited
           ? 'rgba(46, 204, 113, 0.2)'
           : 'rgba(241, 196, 15, 0.18)';
-        badgeEl.style.border = isUnlimited
+        badgeEl.style.border = isRestrictedInSquad
+          ? '1px solid rgba(231, 76, 60, 0.6)'
+          : isUnlimited
           ? '1px solid rgba(46, 204, 113, 0.55)'
           : '1px solid rgba(241, 196, 15, 0.55)';
-        badgeEl.style.color = isUnlimited ? '#7bed9f' : '#ffeaa7';
+        badgeEl.style.color = isRestrictedInSquad ? '#ff7675' : isUnlimited ? '#7bed9f' : '#ffeaa7';
       });
     }
   },
@@ -1572,17 +1711,17 @@ export const DeployScreen = {
       }
       if (!b2Unlocked) {
         const isRu = this.selectedTeam === 'RU';
-        spawnVec.set(isRu ? 1492 : -1492, 0, isRu ? 60 : -60);
+        spawnVec.set(isRu ? 2792 : -2792, 0, isRu ? 60 : -60);
         spawnSource = 'MAIN_BASE';
         setTimeout(() => {
           this.addXpNotification?.(
             0,
-            `🔒 B-2 SPIRIT REQUIRES 25 FACTION KILLS (${curKills}/25) — DEPLOYED AS [PILOT] AT HQ RUNWAY!`
+            `🔒 B-2 SPIRIT REQUIRES 25 FACTION KILLS (${curKills}/25) — DEPLOYED AS [PILOT] AT STRATEGIC REAR AIRBASE!`
           );
         }, 350);
       } else {
         const isRu = this.selectedTeam === 'RU';
-        spawnVec.set(isRu ? 1528 : -1528, 0, isRu ? 124 : -124);
+        spawnVec.set(isRu ? 2828 : -2828, 0, isRu ? 124 : -124);
         spawnSource = 'HQ_B2_SPIRIT_LANE';
       }
     } else if (this.selectedSpawn === 'WRIGHT_CAVE') {
@@ -1590,6 +1729,15 @@ export const DeployScreen = {
       const isRu = this.selectedTeam === 'RU';
       spawnVec.set(isRu ? 1594 : -1594, 0, isRu ? 32 : -32);
       spawnSource = 'SECRET_HQ_WRIGHT_CAVE';
+    } else if (
+      this.selectedSpawn === 'BASE' &&
+      eraNow === 'modern' &&
+      this.selectedClass === 'pilot' &&
+      !isJurassicDino
+    ) {
+      const isRu = this.selectedTeam === 'RU';
+      spawnVec.set(isRu ? 2760 : -2760, 0, isRu ? 124 : -124);
+      spawnSource = 'STRATEGIC_REAR_AIRBASE';
     } else if (this.selectedSpawn !== 'BASE') {
       let flag = this.world.flags.find(
         (f) => f.id === this.selectedSpawn && f.owner === this.selectedTeam

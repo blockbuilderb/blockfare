@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=124';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=124';
+import { UI, getEraRoles } from '../config.js?v=126';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=126';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -92,7 +92,7 @@ export const HudRenderer = {
     return this.toggleControlsOverlay(initialTab);
   },
 
-  // Comprehensive Tabbed Field & Flight Operations Manual [F1]
+  // Comprehensive Searchable 6-Tab Field & Flight Operations Manual [? / F1]
   toggleControlsOverlay(initialTab = null) {
     let el = this.el('controls-overlay');
     if (el) {
@@ -100,6 +100,12 @@ export const HudRenderer = {
       if (this._domCache) this._domCache.delete('controls-overlay');
       if (!initialTab) return;
     }
+    if (typeof document !== 'undefined' && document.pointerLockElement && document.exitPointerLock) {
+      try {
+        document.exitPointerLock();
+      } catch (_) {}
+    }
+
     const defaultTab =
       initialTab ||
       (this.player?.activeVehicle?.aircraftRole === 'gunship'
@@ -114,147 +120,378 @@ export const HudRenderer = {
     el.id = 'controls-overlay';
     el.style.cssText = `
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      background: linear-gradient(180deg, rgba(10,16,24,0.98), rgba(6,10,15,0.99));
-      border: 1.5px solid rgba(0,210,211,0.65); border-top: 3px solid #00d2d3;
-      border-radius: 10px; padding: 18px 22px; z-index: 10000;
+      background: linear-gradient(180deg, rgba(9,15,23,0.985), rgba(5,9,14,0.995));
+      border: 1.5px solid rgba(0,210,211,0.7); border-top: 3px solid #00d2d3;
+      border-radius: 10px; padding: 16px 20px; z-index: 10020;
       font-family: 'Rajdhani', 'Segoe UI', sans-serif; color: #ecf0f1;
-      width: min(760px, 94vw); max-height: 88vh; overflow-y: auto;
-      font-size: 13px; line-height: 1.55; pointer-events: auto;
-      box-shadow: 0 20px 55px rgba(0,0,0,0.9);
+      width: min(880px, 95vw); max-height: 89vh; overflow-y: auto;
+      font-size: 12.8px; line-height: 1.5; pointer-events: auto;
+      box-shadow: 0 22px 64px rgba(0,0,0,0.94), 0 0 28px rgba(0,210,211,0.16);
     `;
 
     const isMac = isMacPlatform();
     const modShort = getShortOrderModifierLabel(isMac);
-    const sections = {
-      ac130: `
-        <div style="background:rgba(46,204,113,0.1);border:1px solid rgba(46,204,113,0.45);border-radius:6px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;">
-          <b style="color:#7bed9f;">🛸 AC-130 GUNSHIP EVOLUTION (1968 VIETNAM ➔ 2024 GHOSTRIDER):</b> All heavy cannons fire strictly out the <b>LEFT (PORT)</b> side! Use <b>[R]</b> to switch between flying straight to a new sector (<b>Transit Mode</b>) and banking in a left-hand circle around a FOB (<b>Orbit Mode</b>).
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;">
-          <div><b style="color:#00d2d3;">[R] Key</b> — <b>TRANSIT FLIGHT ⇄ PYLON ORBIT</b> Toggle</div>
-          <div><b style="color:#00d2d3;">[C] Key</b> — Left-Window HUD / Belly FLIR Pod / 3P</div>
-          <div><b style="color:#f1c40f;">[A / D] (1968 Manual)</b> — Steepen / Shallow Left Pylon Bank</div>
-          <div><b style="color:#f1c40f;">[WASD] (Coupled AP)</b> — Slide GPS Orbit Circle Across Map</div>
-          <div><b style="color:#7bed9f;">[F] Key</b> — Snap GPS Orbit Anchor onto FOB / Crosshair</div>
-          <div><b style="color:#7bed9f;">[↑ / ↓] or [- / +]</b> — Adjust Loiter Altitude (125m – 310m AGL)</div>
-          <div><b>[1] / LMB</b> — 20mm/25mm Gatling Cannon</div>
-          <div><b>[2] / LMB</b> — 40mm L/60 Bofors HE Autocannon</div>
-          <div><b>[3] or [Space]</b> — 105mm M102 Heavy Howitzer</div>
-          <div><b>[RMB]</b> — Sensor / Sight Zoom Toggle</div>
-          <div><b style="color:#ff9f43;">[N] Key</b> — Cycle Day / NVG / White-Hot / Black-Hot IR</div>
-          <div><b style="color:#a29bfe;">[L] Hangar</b> — Unlock EOTech, FLIR MFD &amp; Coupled Autopilot</div>
-          <div><b>[X] Key</b> — Deploy Angel-Wing Flares &amp; ECM Repair</div>
-          <div><b>[E] Key</b> — Eject with Tactical Parachute</div>
-        </div>
-      `,
-      jets: `
-        <div style="background:rgba(72,219,251,0.1);border:1px solid rgba(72,219,251,0.45);border-radius:6px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;">
-          <b style="color:#48dbfb;">✈️ FIGHTERS (F-15EX / SU-57), A-10C CAS &amp; B-2A SPIRIT:</b> Hold enemy planes inside your forward HUD cone for <b>~1.1s</b> until <b>🔒 LOCKED</b>, then press <b>[Space]</b> for an autonomous <b>FOX-3 Shoot-and-Forget</b> A2A missile!
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;">
-          <div><b>[W / S]</b> — Afterburner Boost / Airbrake Slowdown</div>
-          <div><b>Mouse / [↑ ↓]</b> — Pitch &amp; Full 360° Loops / Inverted Flight</div>
-          <div><b>[A / D]</b> — Full 360° Roll (Release &gt;115° to Fly Upside-Down!)</div>
-          <div><b style="color:#7bed9f;">Hold [ALT]</b> — <b>Free-Look Around / Down</b> (Auto-Levels Plane)</div>
-          <div><b style="color:#f1c40f;">[R] Key</b> — <b>LAAP Level-Hold Autopilot</b> (Look Down &amp; Align CAS Runs!)</div>
-          <div><b style="color:#00d2d3;">[F] Key</b> — <b>Sight Stabilization (◆ TGP SPI)</b> Lock Ground Point</div>
-          <div><b>[C] Key</b> — Cycle 3P Chase / 1P Bubble Cockpit / Nose TGP</div>
-          <div><b style="color:#ff6b81;">[Space] (Slot 1/2)</b> — <b>AIM-120D Shoot-and-Forget A2A</b> (1.1s Lock)</div>
-          <div><b>[3] + LMB / Space</b> — Drop JDAM / GBU-28 onto CCIP Ring</div>
-          <div><b>[N] Key</b> — Cycle Installed Sensor Pod (NVG / WHOT / BHOT IR)</div>
-          <div><b>[G] Key</b> — Toggle Auto Terrain Collision Avoidance</div>
-          <div><b>[X] Key</b> — Flares / ECM / B-2 Active RAM Cloak</div>
-          <div><b>[9] / [Shift+9]</b> — Launch Sortie / Cycle Plane Type</div>
-          <div><b>[L] Key</b> — Open Aircraft Hangar &amp; Sensor Upgrades</div>
-          <div><b>[E] Key</b> — Zero-Zero Ejection Seat &amp; Parachute</div>
-        </div>
-      `,
-      armor: `
-        <div style="background:rgba(241,196,15,0.1);border:1px solid rgba(241,196,15,0.45);border-radius:6px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;">
-          <b style="color:#f1c40f;">🛡️ MAIN BATTLE TANKS, 8×8 IFVs, SPAAG AA &amp; BIKES:</b> Watch the bottom-right <b>Hull vs. View</b> dial to angle frontal armor while aiming your turret independently.
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;">
-          <div><b>[W / A / S / D]</b> — Drive &amp; Pivot Hull</div>
-          <div><b>Mouse</b> — Independent 360° Stabilized Turret Aim</div>
-          <div><b>[LMB] / [1]</b> — Fire 120mm APFSDS / 30mm Autocannon</div>
-          <div><b>[Space] / [2]</b> — Fire Coaxial 7.62mm MG / Lock SAM (AA)</div>
-          <div><b style="color:#00d2d3;">[C] Key</b> — 1P Commander Periscope / Gunner Optic / 3P</div>
-          <div><b style="color:#ff9f43;">[N] Key</b> — Cycle Crew NVG / CITV White-Hot &amp; Black-Hot IR</div>
-          <div><b>[X] Key</b> — Pop 360° IR Smoke / Trophy APS Rocket Shield</div>
-          <div><b>[RMB]</b> — Magnified FCS Gunner Zoom</div>
-          <div><b>[L] Key</b> — Armor Upgrade Bay (CITV FLIR, ERA, APS, Dozer)</div>
-          <div><b>[E] Key</b> — Enter / Disembark Vehicle</div>
-        </div>
-      `,
-      infantry: `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;">
-          <div><b>WASD + Shift</b> — Move &amp; Tactical Sprint</div>
-          <div><b>Space / C / Z</b> — Jump &amp; Vault / Crouch / Prone</div>
-          <div><b>LMB / RMB / R</b> — Fire / ADS Scope / Reload (2× = Fast)</div>
-          <div><b style="color:#7bed9f;">[V] Key</b> — Toggle Variable Scope Zoom (1x⇄4x/6x) or Canted Sight</div>
-          <div><b style="color:#ff7675;">[J] / [Shift+J]</b> — Request Infantry A-10 CAS Strafe / Cycle Strike</div>
-          <div><b style="color:#f1c40f;">[L] Key</b> — Gunsmith &amp; Hangar (at Base, Friendly FOB, or Ammo Box)</div>
-          <div><b>[I] Key</b> — Tactical Backpack &amp; Loot Inventory</div>
-          <div><b>[F] Key</b> — Revive/Heal • Resupply • Engineer Build Chest Wall</div>
-          <div><b>[E] Key</b> — Drag Downed Teammate to Cover / Board Vehicle</div>
-          <div><b>[H] / [P]</b> — Hold to Bandage Bleed / Repack Loose Mags</div>
-          <div><b>[7] / [8] / [B]</b> — Class Deployable / Engineer Bunker Blueprint</div>
-          <div><b>[N] Key</b> — Night Vision / GPNVG-18 Thermal</div>
-          <div><b>[K] / Hold [Y]</b> — Full Tactical Map / Squad Command Wheel</div>
-          <div><b style="color:#00d2d3;">${isMac ? '[⌥ / ⌃ + G, C, H, R, F, 1-5]' : `[${modShort}+G, C, H, R, F, 1-5] (Mac: [⌥ / ⌃ + G, C, H, R, F, 1-5])`}</b> — Garrison &amp; Squad Orders</div>
-          <div><b style="color:#a29bfe;">[Shift+1..7] / [F5–F11]</b> — Field Role Swap (<b>[Shift+7]</b> Pilot on Mac)</div>
-          <div><b>[Tab] / [? / F1]</b> — Scoreboard &amp; Stats / Close Manual</div>
-        </div>
-      `
-    };
+    const macOrdersLabel = isMac
+      ? '[⌥ / ⌃ + 1..5, F, H, C, G, R]'
+      : `[${modShort} + 1..5, F, H, C, G, R] (Mac: ⌥/⌃)`;
 
-    const renderManualTab = (tabKey) => {
-      const tabsMeta = [
-        { id: 'ac130', lbl: '🛸 AC-130 GUNSHIP' },
-        { id: 'jets', lbl: '✈️ JETS & BOMBERS' },
-        { id: 'armor', lbl: '🛡️ TANKS & ARMOR' },
-        { id: 'infantry', lbl: '🪖 INFANTRY & CAS' }
-      ];
-      el.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;">
-          <div style="font-size:18px;font-weight:900;color:#00d2d3;letter-spacing:1.5px;">📖 FIELD &amp; FLIGHT OPERATIONS MANUAL [? / F1]</div>
-          <button type="button" id="manual-close-btn" style="background:#e74c3c;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:900;cursor:pointer;">✕ CLOSE [? / F1]</button>
-        </div>
-        <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">
-          ${tabsMeta
-            .map(
-              (t) => `<button type="button" class="manual-tab-btn" data-mtab="${t.id}" style="flex:1;min-width:135px;padding:6px 8px;border-radius:5px;border:1.5px solid ${
-                tabKey === t.id ? '#00d2d3' : 'rgba(255,255,255,0.16)'
-              };background:${
-                tabKey === t.id ? 'rgba(0,210,211,0.22)' : 'rgba(15,24,34,0.92)'
-              };color:${
-                tabKey === t.id ? '#81ecec' : '#cbd5e1'
-              };font-size:11.5px;font-weight:900;cursor:pointer;">${t.lbl}</button>`
+    const manualCatalog = [
+      {
+        id: 'quickstart',
+        lbl: '⚡ HUD & BASICS',
+        bannerColor: '#00d2d3',
+        bannerBg: 'rgba(0,210,211,0.1)',
+        bannerHtml:
+          '<b style="color:#00d2d3;">⚡ HUD SYMBOLS, 3-PILLAR ECONOMY &amp; DAMAGE GUIDE:</b> Everything on your screen explained at a glance — from Aircraft HUD circles to Main Base spawns and localized trauma.',
+        groups: [
+          {
+            title: '🎯 AIRCRAFT & TANK HUD SYMBOLS',
+            items: [
+              ['Cyan + Circle (Jets)', 'Aircraft Nose / Seeker Aim Cursor — steers flight path & locks A2A missiles'],
+              ['Green ⊕ IMPACT Circle', 'Gravity-compensated ground impact pipper (GUN / ROCKET / BOMB CCIP) — put green ⊕ on target!'],
+              ['3D Ground Ring (Bombs)', 'Appears on terrain ONLY in Bomb mode ([3]) when bomb arc intersects ground'],
+              ['Lead Circle (Dogfight)', 'Computed lead pipper ahead of moving enemy aircraft — aim rotary cannon here'],
+              ['Tank Hull vs. View Dial', 'Bottom-right gauge shows Hull armor facing vs. 360° independent Turret aim']
+            ]
+          },
+          {
+            title: '💰 ECONOMY & ANATOMY PAPER-DOLLS',
+            items: [
+              ['$0 FREE HQ Pool', 'Main Base Jets (Pilot), Tanks/IFVs (Armor Crew) & HQ Bikes deploy FREE ($0)'],
+              ['⚡ Match Cash', 'Earned via kills, captures, revives & resupplies — buys frontline vehicle/CAS drops'],
+              ['🏦 Armory Bank', 'Persistent career bank — unlocks permanent Gunsmith optics, weapons & Hangar mods [L]'],
+              ['6-Zone Soldier Doll', 'Head, Thorax, L/R Arms (+sway/reload penalty) & L/R Legs (limp) — Hold [H] to splint!'],
+              ['6-Zone Airframe Doll', 'Avionics, Cockpit, L/R Wings, Engines & Tail — repair via [X] ECM (+22%) or <45m HQ pass']
+            ]
+          }
+        ]
+      },
+      {
+        id: 'infantry',
+        lbl: '🪖 INFANTRY & MED',
+        bannerColor: '#7bed9f',
+        bannerBg: 'rgba(46,204,113,0.1)',
+        bannerHtml:
+          '<b style="color:#7bed9f;">🪖 INFANTRY COMBAT, OPTICS, MEDICAL TRAUMA &amp; LOOT:</b> Customize scopes across multiple rifles in <b>[L] Armory</b> (at Base, Friendly FOBs, or <b>[7]</b> Stashes) and splint limb fractures with <b>Hold [H]</b>.',
+        groups: [
+          {
+            title: '🏃 MOVEMENT, GUNPLAY & OPTICS',
+            items: [
+              ['WASD + Shift', 'Move & Tactical Sprint'],
+              ['Space / C / Z', 'Jump & Ledge Vault / Toggle Crouch / Toggle Prone'],
+              ['Tap Q / RMB + E', '3D Tactical Ping (Tap Q) • Lean Left (Hold Q) / Lean Right (RMB + E)'],
+              ['LMB / RMB / Shift', 'Fire Weapon / ADS Scope / Hold Breath (steadies sniper sway)'],
+              ['[V] Key', 'Toggle Variable Scope Zoom (1x ⇄ 4x/6x/12x), Canted Red-Dot, or Weapon Inspect'],
+              ['[X] / [N] Keys', 'Cycle Scope Zeroing (100m–400m) / Toggle NVG or Thermal Scope Polarity (WHOT/BHOT)'],
+              ['[R] / 2× [R] / [P]', 'Tactical Mag Swap / Emergency Speed-Drop Reload / Tarkov Bullet-by-Bullet Mag Pack']
+            ]
+          },
+          {
+            title: '🩺 MEDICAL, LOOTING & CLASS GADGETS',
+            items: [
+              ['Hold [H]', 'Bandage Heavy Bleed & Splint Arm/Leg Fractures (restores aim & sprint)'],
+              ['Hold [F] / [E]', 'Revive Downed Teammate (Medic 2× speed) / Drag Downed Ally to Cover or Board Vehicle'],
+              ['Tap [F] / Hold [F]', 'Quick Auto-Loot Body or Resupply / Open Side-by-Side Loot Grid'],
+              ['[I] / [L] Keys', '2D Tactical Backpack Grid / Open Gunsmith & Hangar (+ ⚡ ALL GUNS scope buy)'],
+              ['[1–4] / [G]', 'Primary, Sidearm, Launcher ([3] toggles RPG-7 ⇄ Stinger AA on Engineer!), C4/Hammer / Frag'],
+              ['[5] / [6] / [7] / [8]', 'SL Rally [5] • Recon Beacon [6] • Ammo & Kit Stash [7] • Build Bunker/Emplacement [8]'],
+              ['[F] / [T] / [B]', 'Engineer Quick Chest Wall [F] • Cycle Fortification Blueprint [T] • Build Menu [B]'],
+              ['[0] / [Shift+0]', 'Deliver Recon Dirt Bike ($250) / 4×4 Quad ATV ($350) 5m ahead (Free at Main Base)'],
+              ['[Shift+1..7] / [F5–F11]', 'Instant Field Role Swap at Base, Friendly FOB, or [7] Stash ([Shift+7] = Pilot)']
+            ]
+          }
+        ]
+      },
+      {
+        id: 'armor',
+        lbl: '🛡️ TANKS & BIKES',
+        bannerColor: '#f1c40f',
+        bannerBg: 'rgba(241,196,15,0.1)',
+        bannerHtml:
+          '<b style="color:#f1c40f;">🛡️ MAIN BATTLE TANKS, 8×8 IFVs, SPAAG AA &amp; BIKES:</b> Slot <b>[1]</b> fires hyper-velocity <b>780 m/s APFSDS Sabot</b> darts, while Slot <b>[3]</b> launches crosshair-guided <b>TOW-2B / Kornet / Refleks ATGMs</b>!',
+        groups: [
+          {
+            title: '💥 3-SLOT ARMOR WEAPONS & OPTICS',
+            items: [
+              ['[W / A / S / D] + Mouse', 'Drive & Angle Hull Armor independently of 360° Stabilized Turret Aim'],
+              ['[1] + LMB', 'Hyper-Velocity 120mm/125mm APFSDS Sabot (780 m/s flat) or 30mm Autocannon (460 m/s)'],
+              ['[2] or [Space]', '7.62mm Coaxial MG (Infantry suppression) • Homing Stinger/9M311 SAM on SPAAG AA'],
+              ['[3] + LMB', 'SACLOS Guided ATGM (TOW-2B / Kornet / 9M119M Refleks) — keep crosshair on target to steer!'],
+              ['[Q] or Mouse Wheel', 'Quick-cycle Vehicle Weapon Slots ([1] ⇄ [2] ⇄ [3])'],
+              ['[RMB] / [C] Key', 'Magnified FCS Gunner Zoom / Cycle 3P Chase ⇄ 1P Hatch ⇄ Bore-Sight Optic'],
+              ['[N] / [X] Keys', 'Cycle Crew NVG & CITV WHOT/BHOT Thermal / Pop 360° IR Smoke & Trophy APS Shield']
+            ]
+          },
+          {
+            title: '👥 MULTI-CREW SEATS, REARM & BIKES',
+            items: [
+              ['[F1] / [F2] / [F3] / [F4]', 'Switch Seat: [F1] Driver • [F2] Gunner • [F3] +60° Roof .50 CROWS/Kord RWS • [F4] Pax'],
+              ['[R] Key (In Vehicle)', 'Check Rearm Status • Auto-rearms & repairs at HQ Motor Pool, Friendly FOBs & [7] Stashes'],
+              ['[L] / [E] Keys', 'Open Armor Upgrade Bay (CITV FLIR, ERA, Trophy APS, Dozer) / Enter & Exit Vehicle'],
+              ['[Space] / [X] (Bikes)', 'Motorcycle & 4×4 ATV Wheelie / Overdrive Torque Boost (6-Speed & 2-Stroke Powerband)']
+            ]
+          }
+        ]
+      },
+      {
+        id: 'jets',
+        lbl: '✈️ JETS & B-2',
+        bannerColor: '#48dbfb',
+        bannerBg: 'rgba(72,219,251,0.1)',
+        bannerHtml:
+          '<b style="color:#48dbfb;">✈️ TWO-TIER FLIGHT ENVELOPE ([G] KEY):</b> Default <b>[G] AUTO ON</b> gives beginners smooth upright banked turns &amp; terrain pull-up (cannot flip upside-down). Toggle <b>[G] OFF</b> to unlock full <b>360° Barrel Rolls, Vertical Loops &amp; Upside-Down Flight</b>!',
+        groups: [
+          {
+            title: '🕹️ FLIGHT CONTROLS & TWO-TIER ENVELOPE',
+            items: [
+              ['[W] / [S] Keys', '≤35% Throttle = Runway Taxi Mode • >38% = Takeoff/Afterburner • Hold [S] at 0 km/h = Tug Pushback / C-130 Reverse'],
+              ['Mouse + [A / D] ([G] ON)', 'Easy Mode (Default): Smooth upright coordinated banked turns (capped at 58°, auto-levels)'],
+              ['[G] Key Toggle', 'Switch Easy Upright Assist (AUTO ON) ⇄ Advanced 360° Aerobatics & Realistic Crash (OFF)'],
+              ['[A / D] & [↑ / ↓] ([G] OFF)', 'Advanced Mode: Full 360° Aileron Rolls, Loops & Sustained Upside-Down Flight (release >117°)!'],
+              ['Hold [ALT]', 'Decoupled Free-Look Around / Straight Down while plane auto-levels at current altitude'],
+              ['[R] Key (Universal AP)', 'On Runway: Auto-Takeoff • Low Approach: ILS Auto-Land • Mid-Air: LAAP Level-Hold Autopilot!'],
+              ['[F] Key', 'Toggle Sight Stabilization (◆ TGP SPI) locking camera & Mavericks onto ground target']
+            ]
+          },
+          {
+            title: '🚀 AIR WEAPONS, SENSORS & SURVIVABILITY',
+            items: [
+              ['[1] + LMB', '20mm M61 Vulcan / 30mm GAU-8 Avenger Rotary Cannon (aim at Dogfight Lead or Green ⊕)'],
+              ['[2] or [Space] (Fighter)', 'AIM-120D / R-77M FOX-3 Shoot-and-Forget A2A Missile (~1.1s cone lock or 10° boresight)'],
+              ['[2] (A-10C / B-2A)', 'Hydra-70 / S-8 Rocket Pod Salvo (A-10C) • Precision 2,000lb GBU-31 JDAM (B-2A)'],
+              ['[3] + LMB / [Space]', 'Drop JDAM / GBU-28 onto 3D Bomb Ring, fire AGM-65 Maverick, or B-2 GBU-57 MOP'],
+              ['[C] / [RMB] / [N]', 'Cycle 3P Chase ⇄ 1P Bubble Canopy ⇄ Nose TGP / Telephoto Zoom / NVG & WHOT/BHOT FLIR'],
+              ['[X] / [E] Keys', 'Deploy IR Flares + +22% ECM Patch (or B-2 RAM Cloak) / Zero-Zero Eject + Parachute'],
+              ['HQ Runway Pit-Stop', 'Land & park on HQ Runway (~4s) to replace damaged Wings/Engines/Radar & 100% Rearm (or <45m low-pass)']
+            ]
+          }
+        ]
+      },
+      {
+        id: 'ac130',
+        lbl: '🛸 AC-130 GUNSHIP',
+        bannerColor: '#a29bfe',
+        bannerBg: 'rgba(162,155,254,0.12)',
+        bannerHtml:
+          '<b style="color:#a29bfe;">🛸 AC-130 GUNSHIP (1968 VIETNAM ➔ 2024 GHOSTRIDER):</b> All 3 heavy cannons fire strictly out the <b>LEFT (PORT)</b> fuselage! Press <b>[R]</b> to switch between straight <b>Transit Flight</b> and banking in a left-hand <b>Pylon Orbit</b>.',
+        groups: [
+          {
+            title: '🔄 PYLON ORBIT, ALTITUDE & NAVIGATION',
+            items: [
+              ['[R] Key (Universal AP)', 'Runway: Auto-Takeoff • Low Approach: ILS Auto-Land • Airspace: Curved Tangent Entry ⇄ Pylon Orbit!'],
+              ['[F] Key (Orbit)', 'Snap & Lock GPS Pylon Orbit Anchor anywhere on the map (zero geo-fence)'],
+              ['[W / A / S / D] (Orbit)', 'Slide GPS Pylon Orbit Circle across the battlefield (Manual Bank in 1968 Era)'],
+              ['[Q / Z] or [↑ / ↓] / [- / +]', 'Climb / Descend Loiter Altitude (180m – 1,800m AGL; scales orbit circle & slant range)'],
+              ['[ [ ] / [ ] ] Brackets', 'Tighten or Widen Pylon Orbit Radius manually']
+            ]
+          },
+          {
+            title: '💥 PORT CANNONS, ZOOM & HANGAR TECH',
+            items: [
+              ['[1] + LMB', '25mm GAU-12 Equalizer Gatling Cannon (High-ROF anti-infantry & light vehicles)'],
+              ['[2] + LMB', '40mm L/60 Bofors HE-Frag Autocannon (Precision splash & structure destruction)'],
+              ['[3] or [Space]', '105mm M102 Heavy Howitzer (Massive blast radius vs. armor & bunkers)'],
+              ['Mouse Wheel / [RMB]', 'Continuous 1.1×–8.0× Optical Zoom / Quick Zoom Toggle'],
+              ['[C] / [N] / [L] Keys', 'Left-Window HUD ⇄ Belly FLIR ⇄ 3P / Day-WHOT-BHOT-NVG / [L] Hangar Era Upgrades'],
+              ['[X] / [E] Keys', 'Angel-Wing Flare Salvo & ECM Repair / Parachute Eject']
+            ]
+          }
+        ]
+      },
+      {
+        id: 'command',
+        lbl: '★ COMMAND & ERAS',
+        bannerColor: '#ff9f43',
+        bannerBg: 'rgba(255,159,67,0.1)',
+        bannerHtml:
+          '<b style="color:#ff9f43;">★ 12+ SPECIALIZED SQUADS, CUSTOM SQUAD CREATOR, MEDIEVAL &amp; JURASSIC ERAS:</b> Join Specialized Infantry (9P), Armor (4P), Air Wing (4P), or Recon (6P) squads — or click <b>➕ Create Squad</b> on Deploy!',
+        groups: [
+          {
+            title: '📡 TACTICAL MAP, CAS & SQUAD ORDERS',
+            items: [
+              ['[K] or [CapsLock]', 'Open Interactive Tactical Map, Squad Roster & Right-Click Precision Airstrike'],
+              ['Hold [Y] (+ 1..8)', 'Open Radial Command Wheel (Attack A–E, Follow, Defend, Scope, Spacing)'],
+              [macOrdersLabel, 'Direct Orders: [1–5] Obj A–E • [F] Follow • [H] Defend • [C] Charge • [G] Garrison • [R] Retreat'],
+              ['[- / =] (Minus / Plus)', 'Squad Spacing: Stay Close [- ] vs. Fan Out Wide [=]'],
+              ['[U] / [J] / [Shift+J]', 'Launch MQ-9 UAV Scan [U] • Call CAS/Artillery at Crosshair [J] • Cycle Strike Type [Shift+J]'],
+              ['[9] / [Shift+9]', 'Request Combat Aircraft / Heavy Armor Drop [9] • Cycle Requested Vehicle [Shift+9]']
+            ]
+          },
+          {
+            title: '⚔️ MEDIEVAL, 🦖 JURASSIC & ⚙️ SYSTEM KEYS',
+            items: [
+              ['Mouse Dir + RMB / LMB', 'Medieval 4-Directional Mount & Blade Sword/Shield Parry (RMB) & Riposte/Shield Bash (LMB)'],
+              ['[V] (Bows) / [G] (Siege)', 'Toggle Lit Fire Arrows [V] • Call Men to Crew Counterweight Trebuchet [G]'],
+              ['Warhorse & Dino Mounts', '[E] Mount Warhorse ([1] Bow, [2] Couched Lance), Alpha T-Rex (Jaw Crush) or Raptor'],
+              ['[O] / [M] / [Tab]', 'Multiplayer Room Lobby [O] • Redeploy / Change Class [M] • Live Scoreboard [Tab]'],
+              ['[? / F1] / [F2] / [F3]', 'Open/Close This Manual [? / F1] • FPS Counter [F2] • Live Battle Telemetry [F3]'],
+              ['Mac Vehicle Seats', 'No-Fn Mac Seat Chords: [⌥/Alt+P] Seat 2 • [⌥/Alt+`] Seat 3 • [Shift+L] Cycle']
+            ]
+          }
+        ]
+      }
+    ];
+
+    let activeTab = manualCatalog.some((s) => s.id === defaultTab) ? defaultTab : 'infantry';
+    let searchQuery = '';
+
+    const escapeHtml = (str) =>
+      String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    const renderSectionCard = (sec, qLower) => {
+      const filteredGroups = [];
+      for (const grp of sec.groups) {
+        const matchedItems = qLower
+          ? grp.items.filter(
+              ([k, d]) =>
+                k.toLowerCase().includes(qLower) ||
+                d.toLowerCase().includes(qLower) ||
+                grp.title.toLowerCase().includes(qLower) ||
+                sec.lbl.toLowerCase().includes(qLower)
             )
-            .join('')}
+          : grp.items;
+        if (matchedItems.length > 0) {
+          filteredGroups.push({ title: grp.title, items: matchedItems });
+        }
+      }
+      if (filteredGroups.length === 0) return '';
+
+      return `
+        <div class="manual-sec-block" style="margin-bottom:12px;">
+          ${
+            !qLower
+              ? `<div style="background:${sec.bannerBg};border:1px solid ${sec.bannerColor}66;border-left:4px solid ${sec.bannerColor};border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:12.2px;">${sec.bannerHtml}</div>`
+              : `<div style="font-size:12px;font-weight:900;color:${sec.bannerColor};letter-spacing:1px;margin:8px 0 6px 0;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:3px;">${sec.lbl}</div>`
+          }
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:10px;">
+            ${filteredGroups
+              .map(
+                (grp) => `
+              <div style="background:rgba(14,23,34,0.88);border:1px solid rgba(255,255,255,0.1);border-radius:7px;padding:9px 12px;">
+                <div style="font-size:11.5px;font-weight:900;color:${sec.bannerColor};letter-spacing:0.8px;margin-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:4px;">${grp.title}</div>
+                <div style="display:flex;flex-direction:column;gap:5px;">
+                  ${grp.items
+                    .map(
+                      ([keyLbl, desc]) => `
+                    <div style="display:flex;align-items:baseline;gap:8px;font-size:12px;line-height:1.38;">
+                      <kbd style="background:rgba(0,210,211,0.13);border:1px solid rgba(0,210,211,0.42);color:#81ecec;border-radius:4px;padding:1px 6px;font-family:Consolas,monospace;font-size:11px;font-weight:900;white-space:nowrap;flex-shrink:0;">${escapeHtml(keyLbl)}</kbd>
+                      <span style="color:#dfe6e9;">${escapeHtml(desc)}</span>
+                    </div>`
+                    )
+                    .join('')}
+                </div>
+              </div>`
+              )
+              .join('')}
+          </div>
         </div>
-        <div>${sections[tabKey] || sections.infantry}</div>
-        <div style="margin-top:12px;color:#95a5a6;font-size:11px;text-align:center;">Press <b>[? / F1]</b> anytime to open/close manual • Mac Orders: <b>[⌥ / ⌃ + G, C, H, R, F, 1-5]</b> • Role Swap: <b>[Shift+1..7]</b></div>
       `;
-      el.querySelectorAll('.manual-tab-btn').forEach((btn) => {
-        btn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          renderManualTab(btn.dataset.mtab);
-        });
-      });
-      el.querySelector('#manual-close-btn')?.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        el.remove();
-        if (this._domCache) this._domCache.delete('controls-overlay');
-      });
     };
 
-    renderManualTab(defaultTab);
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap;border-bottom:1px solid rgba(0,210,211,0.28);padding-bottom:9px;">
+        <div>
+          <div style="font-size:18px;font-weight:900;color:#00d2d3;letter-spacing:1.3px;">📖 BLOCKFARE FIELD &amp; FLIGHT OPERATIONS MANUAL</div>
+          <div style="font-size:11px;color:#94a3b8;font-weight:700;">Press <b>[?]</b> or <b>[F1]</b> anytime in-game or on the Deploy Screen &bull; Press <b>[ESC]</b> to close</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <input id="manual-search-input" type="text" placeholder="🔍 Filter keys, weapons, vehicles..." style="background:#070d14;color:#fff;border:1px solid rgba(0,210,211,0.5);border-radius:5px;padding:5px 10px;font-size:12px;font-weight:700;width:230px;outline:none;" />
+          <button type="button" id="manual-close-btn" style="background:#e74c3c;color:#fff;border:none;border-radius:5px;padding:6px 12px;font-size:11.5px;font-weight:900;cursor:pointer;">✕ CLOSE [ESC]</button>
+        </div>
+      </div>
+      <div id="manual-tabs-row" style="display:flex;gap:5px;margin-bottom:11px;flex-wrap:wrap;"></div>
+      <div id="manual-body-content"></div>
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.09);color:#94a3b8;font-size:11px;text-align:center;">
+        Tip: In Aircraft, press <b>[G]</b> to switch between <b>Easy Upright Flight (AUTO ON)</b> and <b>Advanced 360° Aerobatics &amp; Upside-Down Flight (OFF)</b>!
+      </div>
+    `;
+
+    const tabsRowEl = el.querySelector('#manual-tabs-row');
+    const bodyEl = el.querySelector('#manual-body-content');
+    const searchInputEl = el.querySelector('#manual-search-input');
+
+    const updateManualView = () => {
+      const q = searchQuery.trim().toLowerCase();
+      const allTabs = [...manualCatalog, { id: 'all', lbl: '📋 ALL CONTROLS' }];
+      if (tabsRowEl) {
+        tabsRowEl.innerHTML = allTabs
+          .map((t) => {
+            const isSel = !q && activeTab === t.id;
+            return `<button type="button" class="manual-tab-btn" data-mtab="${t.id}" style="flex:1;min-width:112px;padding:5px 7px;border-radius:5px;border:1.5px solid ${
+              isSel ? '#00d2d3' : 'rgba(255,255,255,0.15)'
+            };background:${
+              isSel ? 'rgba(0,210,211,0.22)' : 'rgba(15,24,34,0.92)'
+            };color:${
+              isSel ? '#81ecec' : '#cbd5e1'
+            };font-size:11px;font-weight:900;cursor:pointer;">${t.lbl}</button>`;
+          })
+          .join('');
+        tabsRowEl.querySelectorAll('.manual-tab-btn').forEach((btn) => {
+          btn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            activeTab = btn.dataset.mtab;
+            if (searchInputEl && searchQuery) {
+              searchQuery = '';
+              searchInputEl.value = '';
+            }
+            updateManualView();
+          });
+        });
+      }
+
+      if (!bodyEl) return;
+      if (q) {
+        const htmlBlocks = manualCatalog.map((sec) => renderSectionCard(sec, q)).filter(Boolean);
+        bodyEl.innerHTML =
+          htmlBlocks.length > 0
+            ? htmlBlocks.join('')
+            : `<div style="padding:24px;text-align:center;color:#94a3b8;font-size:13px;">No controls matched "<b>${escapeHtml(
+                searchQuery
+              )}</b>". Click any tab above or clear the search box.</div>`;
+      } else if (activeTab === 'all') {
+        bodyEl.innerHTML = manualCatalog.map((sec) => renderSectionCard(sec, '')).join('');
+      } else {
+        const sec = manualCatalog.find((s) => s.id === activeTab) || manualCatalog[1];
+        bodyEl.innerHTML = renderSectionCard(sec, '');
+      }
+    };
+
+    if (searchInputEl) {
+      searchInputEl.addEventListener('input', (ev) => {
+        ev.stopPropagation();
+        searchQuery = searchInputEl.value || '';
+        updateManualView();
+      });
+      searchInputEl.addEventListener('keydown', (ev) => {
+        ev.stopPropagation();
+        if (ev.code === 'Escape') {
+          if (searchInputEl.value) {
+            searchInputEl.value = '';
+            searchQuery = '';
+            updateManualView();
+          } else {
+            el.remove();
+            if (this._domCache) this._domCache.delete('controls-overlay');
+          }
+        }
+      });
+    }
+
+    el.querySelector('#manual-close-btn')?.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      el.remove();
+      if (this._domCache) this._domCache.delete('controls-overlay');
+    });
+
+    updateManualView();
     document.body.appendChild(el);
     if (this._domCache) this._domCache.set('controls-overlay', el);
   },
 
-  showHitmarker(type = 'normal', label = 'HIT') {
+  showHitmarker(type = 'normal', label = 'HIT', durationSec = null) {
     this.hitmarkerEl.classList.remove('hidden', 'headshot', 'armor', 'kill');
     if (type === 'headshot') this.hitmarkerEl.classList.add('headshot');
     else if (type === 'armor') this.hitmarkerEl.classList.add('armor');
@@ -262,7 +499,17 @@ export const HudRenderer = {
     if (this.hitConfirmTagEl) {
       this.hitConfirmTagEl.textContent = label;
     }
-    this.hitmarkerTimer = type === 'kill' ? 0.34 : 0.22;
+    const isBdaTag =
+      typeof label === 'string' &&
+      (label.includes('TO GO') || label.includes('DESTROYED') || label.includes('RICOCHET'));
+    this.hitmarkerTimer =
+      typeof durationSec === 'number'
+        ? durationSec
+        : isBdaTag
+        ? 0.95
+        : type === 'kill'
+        ? 0.38
+        : 0.22;
   },
 
   addTicketEvent(team, delta, category, label) {
@@ -1024,6 +1271,37 @@ export const HudRenderer = {
           const jetCanopySvg = this.el('jet-cockpit-canopy-svg');
           if (jetCanopySvg) {
             jetCanopySvg.classList.toggle('hidden', !isJetBubbleCockpit);
+          }
+          // 1P Cockpit Mouse-Aim Flight Director Ring: shows where your mouse commands the nose to pull
+          // while the physical cockpit canopy & HUD turn smoothly 1:1 with the airplane body!
+          let dirRingEl = this.el('ckp-mouse-director-ring');
+          if (isJetBubbleCockpit && !dirRingEl) {
+            dirRingEl = document.createElement('div');
+            dirRingEl.id = 'ckp-mouse-director-ring';
+            dirRingEl.style.cssText =
+              'position:fixed;top:50%;left:50%;width:28px;height:28px;border:2px dashed rgba(0,255,170,0.82);border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;z-index:18;box-shadow:0 0 8px rgba(0,255,170,0.3);display:flex;align-items:center;justify-content:center;font-size:9px;color:#00ffaa;font-weight:900;';
+            dirRingEl.textContent = '•';
+            cockpitFrameEl.appendChild(dirRingEl);
+            if (this._domCache) this._domCache.set('ckp-mouse-director-ring', dirRingEl);
+          }
+          if (dirRingEl) {
+            dirRingEl.style.display = isJetBubbleCockpit ? 'flex' : 'none';
+            if (isJetBubbleCockpit) {
+              let dyaw = (this.player.yaw || 0) - (activeVeh.yaw || 0);
+              while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+              while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+              let dpitch = (this.player.pitch || 0) - (activeVeh.pitch || 0);
+              while (dpitch > Math.PI) dpitch -= Math.PI * 2;
+              while (dpitch < -Math.PI) dpitch += Math.PI * 2;
+              const cosR = Math.cos(-(activeVeh.roll || 0));
+              const sinR = Math.sin(-(activeVeh.roll || 0));
+              const rawX = -dyaw * 420;
+              const rawY = -dpitch * 420;
+              const scrX = Math.max(-280, Math.min(280, rawX * cosR - rawY * sinR));
+              const scrY = Math.max(-190, Math.min(190, rawX * sinR + rawY * cosR));
+              dirRingEl.style.transform = `translate(calc(-50% + ${scrX.toFixed(1)}px), calc(-50% + ${scrY.toFixed(1)}px))`;
+              dirRingEl.style.opacity = Math.hypot(scrX, scrY) < 6 ? '0.28' : '0.9';
+            }
           }
           const leftWinSightEl = this.el('ac130-left-window-sight');
           if (leftWinSightEl) {
@@ -2300,23 +2578,66 @@ export const HudRenderer = {
         : 'F-15EX EAGLE';
     }
 
-    const hpPct = v.isShotDown
+    const rawHpPct = v.isShotDown
       ? 0
       : Math.max(0, Math.min(100, Math.round(((v.hp || 0) / (v.maxHp || 1500)) * 100)));
+    let airframePct = rawHpPct;
+    let worstPartTag = '';
+    let worstPartPct = 100;
+    if (!v.isShotDown && v.airframeParts) {
+      const ap = v.airframeParts;
+      const partEntries = [
+        ['ENG', ap.engines ?? 100],
+        ['L.WING', ap.leftWing ?? 100],
+        ['R.WING', ap.rightWing ?? 100],
+        ['TAIL', ap.tail ?? 100],
+        ['RADAR', ap.avionics ?? 100],
+        ['CANOPY', ap.cockpit ?? 100]
+      ];
+      let sumPct = 0;
+      for (let pi = 0; pi < partEntries.length; pi++) {
+        const [lbl, val] = partEntries[pi];
+        sumPct += val;
+        if (val < worstPartPct) {
+          worstPartPct = val;
+          worstPartTag = lbl;
+        }
+      }
+      const avgPartPct = sumPct / partEntries.length;
+      const structuralPct = Math.round(avgPartPct * 0.62 + worstPartPct * 0.38);
+      airframePct = Math.min(rawHpPct, structuralPct);
+    }
+    const barSeverityPct = Math.min(
+      airframePct,
+      worstPartPct <= 30 ? 24 : worstPartPct <= 65 ? 52 : airframePct
+    );
     const hpFillEl = this.el('air-hud-hp-fill');
     const hpValEl = this.el('air-hud-hp-val');
     if (hpFillEl) {
-      hpFillEl.style.width = `${hpPct}%`;
+      hpFillEl.style.width = `${airframePct}%`;
       hpFillEl.style.background =
-        hpPct > 55
+        barSeverityPct > 65
           ? 'linear-gradient(90deg, #27ae60, #2ecc71)'
-          : hpPct > 25
+          : barSeverityPct > 30
           ? 'linear-gradient(90deg, #e67e22, #f1c40f)'
           : 'linear-gradient(90deg, #c0392b, #ff4757)';
+      if (hpFillEl.parentElement) {
+        hpFillEl.parentElement.style.borderColor =
+          barSeverityPct > 65
+            ? 'rgba(46, 204, 113, 0.45)'
+            : barSeverityPct > 30
+            ? 'rgba(241, 196, 15, 0.55)'
+            : 'rgba(255, 71, 87, 0.72)';
+      }
     }
     if (hpValEl) {
-      hpValEl.textContent = v.isShotDown ? 'MAYDAY' : `${hpPct}%`;
-      hpValEl.style.color = hpPct > 55 ? '#7bed9f' : hpPct > 25 ? '#f1c40f' : '#ff6b6b';
+      const dmgSuffix =
+        !v.isShotDown && worstPartPct < 75 && worstPartTag
+          ? ` • ${worstPartPct <= 30 ? '⚠️' : ''}${worstPartTag} ${Math.round(worstPartPct)}%`
+          : '';
+      hpValEl.textContent = v.isShotDown ? 'MAYDAY' : `${airframePct}%${dmgSuffix}`;
+      hpValEl.style.color =
+        barSeverityPct > 65 ? '#7bed9f' : barSeverityPct > 30 ? '#f1c40f' : '#ff6b6b';
     }
 
     const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];

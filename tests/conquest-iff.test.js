@@ -7,7 +7,7 @@ import {
   OBJECTIVE_MOTORPOOL_BASES
 } from '../src/assets/vehicle-defs.js';
 import { VehicleManager } from '../src/vehicles.js';
-import { events } from '../src/events.js?v=124';
+import { events } from '../src/events.js?v=126';
 
 const NODE_FOB_LAYOUT = [
   { id: 'A', name: 'FOB ALPHA', x: -660, z: -280, radius: 28 },

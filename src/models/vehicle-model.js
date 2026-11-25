@@ -10,13 +10,13 @@ import {
   buildHumveeModel,
   buildApcModel,
   buildSpaagModel
-} from './armor-models.js?v=124';
+} from './armor-models.js?v=126';
 import {
   buildCasAircraftWingAndTail,
   buildBomberAircraftWingAndTail,
   buildEmplacementModel,
   buildDinoMountModel
-} from './air-emplacement-models.js?v=124';
+} from './air-emplacement-models.js?v=126';
 
 // ─── SHARED VEHICLE GEOMETRY & WHEEL MERGE CACHES (userData.shared = true) ───
 const _vehGeoCache = new Map();
@@ -1314,7 +1314,7 @@ export function createVehicleMesh(cfg) {
         for (const side of [-1, 1]) {
           const sweptHalf = new THREE.Mesh(new THREE.BoxGeometry(9.4, 0.34, 2.45), airWingMat);
           sweptHalf.position.set(side * 4.35, 2.55, 0.85);
-          sweptHalf.rotation.y = side * 0.46;
+          sweptHalf.rotation.y = -side * 0.46;
           sweptHalf.castShadow = true;
           group.add(sweptHalf);
         }
@@ -1524,44 +1524,84 @@ export function createVehicleMesh(cfg) {
           ordOliveMat
         }));
       } else {
-        // US: F-15EX Eagle II / F-22A Strike Fighter • RU: Sukhoi Su-57 Felon / Su-34 Fullback
-        // Sculpted swept trapezoidal delta-wings, twin side engine intakes + LERX strakes, twin afterburner nozzles & canted tails!
+        // US: McDonnell Douglas / Boeing F-15EX Eagle II (45° Swept-Back Cropped-Delta Wing, NO Canards, Upright Twin Tails)
+        // RU: Sukhoi Su-57 Felon / Su-35S Flanker-E (Swept-Back Trapezoidal Delta Wing, Canted Twin Tails & Rear Tail-Sting)
+        // 1. Sculpted True 45° Swept-Back Cropped-Delta Main Wing Planform (Shape Y maps to +Z aft after rotateX(PI/2)!)
+        const fWingShape = new THREE.Shape();
+        fWingShape.moveTo(0, -1.85);
+        fWingShape.lineTo(1.14, -1.85);
+        fWingShape.lineTo(5.62, 1.92); // 45° swept-BACK leading edge out to wingtip!
+        fWingShape.lineTo(5.18, 2.74); // Characteristic raked/cropped F-15 wingtip
+        fWingShape.lineTo(1.08, 2.52); // Nearly straight F-15 trailing edge
+        fWingShape.lineTo(-1.08, 2.52);
+        fWingShape.lineTo(-5.18, 2.74);
+        fWingShape.lineTo(-5.62, 1.92);
+        fWingShape.lineTo(-1.14, -1.85);
+        fWingShape.closePath();
+
+        const fWingGeo = new THREE.ExtrudeGeometry(fWingShape, {
+          depth: 0.16,
+          bevelEnabled: true,
+          bevelThickness: 0.03,
+          bevelSize: 0.05,
+          bevelSegments: 1
+        });
+        fWingGeo.rotateX(Math.PI / 2);
+        fWingGeo.computeVertexNormals();
+        const fWingMesh = new THREE.Mesh(fWingGeo, airWingMat);
+        fWingMesh.position.set(0, 1.44, 0.05);
+        fWingMesh.castShadow = true;
+        fWingMesh.receiveShadow = true;
+        group.add(fWingMesh);
+
+        // 2. Swept-Back All-Moving Dogtooth Horizontal Stabilators (z = +3.30 .. +5.05 aft, matching CCW winding!)
         for (const side of [-1, 1]) {
-          // Twin Angled Variable-Ramp Side Engine Intakes & Blended LERX Chines
-          const intakeDuct = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.68, 5.4), airMat);
-          intakeDuct.position.set(side * 0.92, 1.26, 0.65);
+          const stabShape = new THREE.Shape();
+          if (side > 0) {
+            stabShape.moveTo(0.92, 3.28);
+            stabShape.lineTo(3.02, 4.58);
+            stabShape.lineTo(2.76, 5.08);
+            stabShape.lineTo(0.92, 4.92);
+          } else {
+            stabShape.moveTo(-0.92, 4.92);
+            stabShape.lineTo(-2.76, 5.08);
+            stabShape.lineTo(-3.02, 4.58);
+            stabShape.lineTo(-0.92, 3.28);
+          }
+          stabShape.closePath();
+          const stabGeo = new THREE.ExtrudeGeometry(stabShape, {
+            depth: 0.12,
+            bevelEnabled: false
+          });
+          stabGeo.rotateX(Math.PI / 2);
+          stabGeo.computeVertexNormals();
+          const tailplane = new THREE.Mesh(stabGeo, airWingMat);
+          tailplane.position.set(0, 1.36, 0);
+          tailplane.castShadow = true;
+          group.add(tailplane);
+
+          // Twin Chiseled 2D Variable-Ramp Side Engine Intakes & Conformal Fuel Tank (CFT) Shoulders (NO forward canards!)
+          const intakeDuct = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.72, 5.35), airMat);
+          intakeDuct.position.set(side * 0.94, 1.25, 0.62);
           intakeDuct.castShadow = true;
           group.add(intakeDuct);
           cockpitCanopyParts.push(intakeDuct);
 
+          const intakeRamp = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.16, 0.95), airWingMat);
+          intakeRamp.position.set(side * 0.94, 1.56, -2.18);
+          intakeRamp.rotation.x = 0.24;
+          group.add(intakeRamp);
+          cockpitCanopyParts.push(intakeRamp);
+
           const intakeMouth = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.56, 0.35), darkMat);
-          intakeMouth.position.set(side * 0.94, 1.24, -2.06);
+          intakeMouth.position.set(side * 0.94, 1.22, -2.12);
           intakeMouth.rotation.x = 0.22;
           group.add(intakeMouth);
           cockpitCanopyParts.push(intakeMouth);
-
-          const lerxStrake = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.14, 3.1), airWingMat);
-          lerxStrake.position.set(side * 1.18, 1.48, -1.35);
-          lerxStrake.rotation.y = -side * 0.38;
-          group.add(lerxStrake);
-          cockpitCanopyParts.push(lerxStrake);
-
-          // Swept Main Fighter Wing Panels
-          const wingPanel = new THREE.Mesh(new THREE.BoxGeometry(4.85, 0.18, 2.85), airWingMat);
-          wingPanel.position.set(side * 3.15, 1.36, 0.65);
-          wingPanel.rotation.y = side * 0.26;
-          wingPanel.castShadow = true;
-          group.add(wingPanel);
-
-          // Swept All-Moving Horizontal Stabilators
-          const tailplane = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.13, 1.45), airWingMat);
-          tailplane.position.set(side * 1.85, 1.34, 4.15);
-          tailplane.rotation.y = side * 0.32;
-          group.add(tailplane);
         }
 
         if (!isUS) {
-          // Sukhoi Su-57 / Su-34 Signature Rear Radar Tail-Sting Boom between Twin Nozzles
+          // Sukhoi Su-57 / Su-35S Signature Rear Radar Tail-Sting Boom between Twin Nozzles
           const suTailSting = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.36, 2.15), airMat);
           suTailSting.position.set(0, 1.38, 4.65);
           group.add(suTailSting);
@@ -1569,17 +1609,26 @@ export function createVehicleMesh(cfg) {
 
         const rudders = [];
         for (const side of [-1, 1]) {
-          const cantedTail = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.85, 1.85), airWingMat);
-          cantedTail.position.set(side * 1.02, 2.22, 3.45);
-          cantedTail.rotation.z = -side * (isUS ? 0.24 : 0.4);
-          group.add(cantedTail);
-          const rudder = new THREE.Mesh(new THREE.BoxGeometry(0.13, 1.45, 0.42), darkMat);
-          rudder.position.set(side * 1.02, 2.22, 4.46);
-          rudder.rotation.z = -side * (isUS ? 0.24 : 0.4);
+          // US F-15EX: Iconic Twin Upright Vertical Tails + Fin-Tip TEWS Pods • RU Su-57: Canted Twin Tails
+          const tailCant = isUS ? -side * 0.04 : -side * 0.36;
+          const vertTail = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.98, 1.88), airWingMat);
+          vertTail.position.set(side * 1.04, 2.3, 3.55);
+          vertTail.rotation.z = tailCant;
+          vertTail.castShadow = true;
+          group.add(vertTail);
+          if (isUS) {
+            const tewsPod = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.12, 8), airMat);
+            tewsPod.rotation.x = Math.PI / 2;
+            tewsPod.position.set(side * 1.08, 3.3, 3.52);
+            group.add(tewsPod);
+          }
+          const rudder = new THREE.Mesh(new THREE.BoxGeometry(0.13, 1.52, 0.42), darkMat);
+          rudder.position.set(side * 1.04, 2.28, 4.58);
+          rudder.rotation.z = tailCant;
           group.add(rudder);
           rudders.push(rudder);
 
-          // Twin Cylindrical Turkey-Feather Afterburner Nozzles + Glowing Core
+          // Twin Cylindrical Turkey-Feather F110-GE-129 Afterburner Nozzles + Glowing Core
           const nozzleShroud = new THREE.Mesh(
             new THREE.CylinderGeometry(0.34, 0.4, 0.95, 10),
             darkMat
@@ -1596,32 +1645,34 @@ export function createVehicleMesh(cfg) {
           burner.position.set(side * (isUS ? 0.52 : 0.64), 1.32, 4.92);
           group.add(burner);
 
-          // Wingtip AIM-9X / R-73 Air-to-Air Homing Missiles
-          const a2aMissile = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 1.75), ordWhiteMat);
-          a2aMissile.position.set(side * 5.45, 1.36, 0.85);
-          group.add(a2aMissile);
+          // Underwing Dual LAU-128 Pylon AIM-120D AMRAAM / R-77MFOX-3 Missiles (authentic F-15 underwing stations!)
+          for (const mx of [3.35, 3.72]) {
+            const a2aMissile = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 1.82), ordWhiteMat);
+            a2aMissile.position.set(side * mx, 1.18, 1.05);
+            group.add(a2aMissile);
+          }
 
-          // Underwing 500lb JDAM / KAB-500 Precision Bombs
-          const jdam = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 1.8), ordOliveMat);
-          jdam.position.set(side * 2.65, 0.94, 0.45);
+          // Inboard Underwing 500lb JDAM / KAB-500 Precision Bombs
+          const jdam = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 1.78), ordOliveMat);
+          jdam.position.set(side * 2.25, 1.02, 0.92);
           group.add(jdam);
         }
         // Centerline 2,000lb GBU-28 / KAB-1500 Heavy Bomb
         const gbu = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.44, 2.35), ordOliveMat);
-        gbu.position.set(0, 0.78, 0.25);
+        gbu.position.set(0, 0.78, 0.45);
         group.add(gbu);
-        const leftAileron = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.11, 0.44), darkMat);
-        leftAileron.position.set(-4.1, 1.35, 2.05);
-        leftAileron.rotation.y = -0.26;
+        const leftAileron = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.11, 0.42), darkMat);
+        leftAileron.position.set(-3.45, 1.36, 2.66);
+        leftAileron.rotation.y = 0.05;
         group.add(leftAileron);
-        const rightAileron = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.11, 0.44), darkMat);
-        rightAileron.position.set(4.1, 1.35, 2.05);
-        rightAileron.rotation.y = 0.26;
+        const rightAileron = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.11, 0.42), darkMat);
+        rightAileron.position.set(3.45, 1.36, 2.66);
+        rightAileron.rotation.y = -0.05;
         group.add(rightAileron);
-        const elevator = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.11, 0.44), darkMat);
-        elevator.position.set(0, 1.34, 4.72);
+        const elevator = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.11, 0.42), darkMat);
+        elevator.position.set(0, 1.32, 4.86);
         group.add(elevator);
-        group.userData.controlSurfaces = { leftAileron, rightAileron, elevator, rudders, wingSpan: 5.5 };
+        group.userData.controlSurfaces = { leftAileron, rightAileron, elevator, rudders, wingSpan: 5.6 };
       }
     }
   } else if (cfg.isEmplacement && cfg.type !== 'trebuchet') {

@@ -481,45 +481,51 @@ export const DEPLOYABLES = {
 };
 
 // ---------------------------------------------------------------------------
-// VEHICLES (Consistent, realistic combat vehicle speed hierarchy across all eras)
-// - Main Battle Tank (M1A2 / T-90M): 19.0 m/s (68 km/h max), heavy 65-ton tracked inertia
-// - Mobile Air Defense (LAV-AD / Tunguska): 21.5 m/s (77 km/h max), 16-ton radar SPAAG
-// - Wheeled IFV / APC (LAV-25 / BTR-82A): 23.5 m/s (85 km/h max), 15-ton 8x8 amphibious IFV
-// - Tactical Armored Car (M1151 Humvee / GAZ Tigr): 26.5 m/s (95 km/h max), nimble 5-ton 4x4
-// - Tactical 4x4 Quad ATV (Polaris MV850): 29.0 m/s (104 km/h max), all-terrain scout quad
-// - Military Recon Motorcycles (M1030M1 / AWD 450 / SOF Silent / KLR650): 32.0–36.5 m/s (115–131 km/h)
+// VEHICLES (Realistic Combat Speeds & Physical Turn-Radius Envelopes Across All Eras)
+// - Ground Vehicles obey both low-speed Ackermann / Skid-Steer R_min AND high-speed lateral tire/track G-limits:
+//   * Main Battle Tank (M1A2 / T-90M): 19.0 m/s (68 km/h), 0.0m neutral pivot in place, ~42m turn radius @ 68 km/h (~0.88G)
+//   * Mobile Air Defense (LAV-AD / Tunguska): 21.5 m/s (77 km/h), 0.0m/6.2m low-speed, ~49m turn radius @ 77 km/h (~0.96G)
+//   * Wheeled 8x8 IFV / APC (LAV-25 / BTR-82A): 24.0 m/s (86 km/h), 8.8m R_min (17.6m circle), ~60m @ 86 km/h (~0.98G)
+//   * Tactical 4x4 Armored Car (M1151 Humvee / GAZ Tigr): 27.5 m/s (99 km/h), 7.5m R_min (24.6 ft), ~70m @ 99 km/h (~1.10G)
+//   * Tactical 4x4 Quad ATV (Polaris MV850): 28.5 m/s (103 km/h), 3.8m R_min, ~69m @ 103 km/h (~1.20G)
+//   * Military Recon Motorcycles (M1030M1 / AWD 450 / KLR650): 29.0–36.5 m/s (104–131 km/h), 2.8–3.3m R_min, ~67–96m @ top speed
+// - Fixed-Wing Aircraft obey aerodynamic load-factor bank-to-turn physics (R = V^2 / a_lat):
+//   * 1903 Wright Flyer I: 22 m/s (79 km/h) cruise, 34 m/s (122 km/h) max, ~29m tight biplane turn radius
+//   * AC-130J / Tu-95MS Gunship: 54 m/s (194 km/h) orbit, 86 m/s (310 km/h) transit, 195m–1,220m pylon / ~188–450m transit radius
+//   * A-10C / Su-25SM CAS: 78 m/s (281 km/h) cruise, 128 m/s (461 km/h) dash, ~132m valley loiter turn radius (4.7G)
+//   * F-15EX / Su-57 Fighter: 125 m/s (450 km/h) corner, 215 m/s (774 km/h) afterburner, ~244m corner / ~616m AB radius (6.5–7.6G)
+//   * B-2A Spirit / PAK DA Stealth Bomber: 115 m/s (414 km/h) cruise, 164 m/s (590 km/h) max, ~678m–1,280m wide bomber radius (2.0G)
 // ---------------------------------------------------------------------------
 export const VEHICLE_STATS = {
-  TANK: { maxHp: 1600, speed: 19.0, accelRate: 1.45, brakeRate: 2.4, turnRate: 0.98, minPitchRad: -0.18, maxPitchRad: 0.35 },
-  APC: { maxHp: 1050, speed: 23.5, accelRate: 1.95, brakeRate: 2.8, turnRate: 1.25, minPitchRad: -0.18, maxPitchRad: 0.52 },
-  AA_VEHICLE: { maxHp: 980, speed: 21.5, accelRate: 1.9, brakeRate: 2.7, turnRate: 1.25, minPitchRad: -0.14, maxPitchRad: 1.48 },
-  HUMVEE: { maxHp: 700, speed: 26.5, accelRate: 2.55, brakeRate: 3.4, turnRate: 1.5, minPitchRad: -0.26, maxPitchRad: 1.05 },
-  PLANE_CAS: { maxHp: 1550, speed: 60, minSpeed: 31, maxSpeed: 88, accelRate: 2.7, brakeRate: 3.1, turnRate: 1.92, dialMaxKmh: 420, serviceCeilingM: 13700 },
-  PLANE_BOMBER: { maxHp: 1400, speed: 84, minSpeed: 42, maxSpeed: 145, accelRate: 3.8, brakeRate: 3.0, turnRate: 1.32, dialMaxKmh: 600, serviceCeilingM: 18300 },
-  PLANE_FIGHTER: { maxHp: 1300, speed: 114, minSpeed: 44, maxSpeed: 196, accelRate: 5.4, brakeRate: 3.6, turnRate: 1.72, dialMaxKmh: 720, serviceCeilingM: 19800 },
-  PLANE_GUNSHIP: { maxHp: 3200, speed: 48, minSpeed: 30, maxSpeed: 68, accelRate: 2.0, brakeRate: 2.2, turnRate: 0.68, dialMaxKmh: 300, serviceCeilingM: 9100 },
-  PLANE_B2_SPIRIT: { maxHp: 2400, speed: 108, minSpeed: 48, maxSpeed: 152, accelRate: 3.8, brakeRate: 3.0, turnRate: 0.78, stealthFactor: 0.12, dialMaxKmh: 600, serviceCeilingM: 15240 },
-  // 1903 Wright Flyer I ("Kitty Hawk Flyer" — Secret Cave Pioneer Biplane):
-  // Real-world stall speed: ~29 km/h (8.0 m/s / 18 mph); starts slow with gradual spool-up acceleration (accelRate: 0.24)
-  // before winding up to an incredible 522 km/h (145 m/s) cruise and 846 km/h (235 m/s) top speed!
-  PLANE_WRIGHT_FLYER: { maxHp: 1800, speed: 145.0, minSpeed: 8.0, maxSpeed: 235.0, accelRate: 0.24, brakeRate: 1.85, turnRate: 2.25, stealthFactor: 0.25, serviceCeilingM: 2400 },
+  TANK: { maxHp: 1600, speed: 19.0, accelRate: 1.45, brakeRate: 2.4, turnRate: 0.72, minTurnRadiusM: 5.5, maxLatAccelMs2: 8.6, canNeutralPivot: true, minPitchRad: -0.18, maxPitchRad: 0.35 },
+  APC: { maxHp: 1050, speed: 24.0, accelRate: 1.95, brakeRate: 2.8, turnRate: 1.15, minTurnRadiusM: 8.8, maxLatAccelMs2: 9.6, minPitchRad: -0.18, maxPitchRad: 0.52 },
+  AA_VEHICLE: { maxHp: 980, speed: 21.5, accelRate: 1.9, brakeRate: 2.7, turnRate: 0.80, minTurnRadiusM: 6.2, maxLatAccelMs2: 9.4, canNeutralPivot: true, minPitchRad: -0.14, maxPitchRad: 1.48 },
+  HUMVEE: { maxHp: 700, speed: 27.5, accelRate: 2.55, brakeRate: 3.4, turnRate: 1.45, minTurnRadiusM: 7.5, maxLatAccelMs2: 10.8, minPitchRad: -0.26, maxPitchRad: 1.05 },
+  PLANE_CAS: { maxHp: 1550, speed: 70, minSpeed: 32, maxSpeed: 104, accelRate: 3.1, brakeRate: 3.4, turnRate: 1.15, maxTurnAccelMs2: 58.0, dialMaxKmh: 440, serviceCeilingM: 13700 },
+  PLANE_BOMBER: { maxHp: 1400, speed: 105, minSpeed: 44, maxSpeed: 175, accelRate: 4.2, brakeRate: 3.2, turnRate: 0.88, maxTurnAccelMs2: 48.0, dialMaxKmh: 680, serviceCeilingM: 18300 },
+  PLANE_FIGHTER: { maxHp: 1300, speed: 125, minSpeed: 45, maxSpeed: 215, accelRate: 5.8, brakeRate: 3.8, turnRate: 1.02, maxTurnAccelMs2: 64.0, dialMaxKmh: 820, serviceCeilingM: 19800 },
+  PLANE_GUNSHIP: { maxHp: 3200, speed: 54, minSpeed: 30, maxSpeed: 86, accelRate: 2.4, brakeRate: 2.5, turnRate: 0.48, maxTurnAccelMs2: 15.5, dialMaxKmh: 340, serviceCeilingM: 9100 },
+  PLANE_B2_SPIRIT: { maxHp: 2400, speed: 115, minSpeed: 46, maxSpeed: 164, accelRate: 4.0, brakeRate: 3.0, turnRate: 0.45, maxTurnAccelMs2: 19.5, stealthFactor: 0.12, dialMaxKmh: 620, serviceCeilingM: 15240 },
+  // 1903 Wright Flyer I ("Kitty Hawk Flyer" — Pioneer Spruce-and-Muslin Biplane):
+  // Real-world stall ~30 km/h (8.5 m/s), barnstorming cruise 79 km/h (22 m/s), max dive/tailwind 122 km/h (34 m/s), ~29m turn radius!
+  PLANE_WRIGHT_FLYER: { maxHp: 1800, speed: 22.0, minSpeed: 8.5, maxSpeed: 34.0, accelRate: 1.15, brakeRate: 2.1, turnRate: 1.45, maxTurnAccelMs2: 16.5, stealthFactor: 0.25, dialMaxKmh: 160, serviceCeilingM: 2400 },
   EMPLACEMENT: { maxHp: 650, speed: 0, accelRate: 0, brakeRate: 10, turnRate: 0, minPitchRad: -0.26, maxPitchRad: 1.05 },
 
-  // Military Recon Motorcycles, Silent E-Motos & Tactical 4x4 Quad ATV Stats (Consistent combat speeds)
-  BIKE_50CC: { maxHp: 380, speed: 24.0, accelRate: 3.5, brakeRate: 4.8, turnRate: 2.45, cc: 50 },
-  BIKE_125CC_2T: { maxHp: 420, speed: 29.5, accelRate: 4.8, brakeRate: 5.2, turnRate: 2.55, cc: 125, isTwoStroke: true },
-  BIKE_250CC_2T: { maxHp: 460, speed: 32.0, accelRate: 5.5, brakeRate: 5.4, turnRate: 2.4, cc: 250, isTwoStroke: false },
-  BIKE_500CC_2T: { maxHp: 520, speed: 35.0, accelRate: 6.2, brakeRate: 5.6, turnRate: 2.25, cc: 450, isTwoStroke: false },
-  BIKE_600CC: { maxHp: 560, speed: 36.5, accelRate: 5.8, brakeRate: 6.0, turnRate: 2.15, cc: 650 },
-  BIKE_750CC: { maxHp: 600, speed: 38.0, accelRate: 6.3, brakeRate: 6.2, turnRate: 2.1, cc: 750 },
-  BIKE_1000CC: { maxHp: 650, speed: 41.0, accelRate: 7.0, brakeRate: 6.8, turnRate: 2.05, cc: 1000 },
-  SCOOTER_KUKIRIN: { maxHp: 360, speed: 25.0, accelRate: 6.2, brakeRate: 5.5, turnRate: 2.75, isElectric: true },
-  EMOTO_TUTTIO: { maxHp: 390, speed: 24.0, accelRate: 6.5, brakeRate: 5.4, turnRate: 2.65, isElectric: true },
-  EMOTO_YOZMA: { maxHp: 430, speed: 27.5, accelRate: 6.9, brakeRate: 5.5, turnRate: 2.55, isElectric: true },
-  EMOTO_CEMOTO: { maxHp: 460, speed: 31.0, accelRate: 7.2, brakeRate: 5.6, turnRate: 2.45, isElectric: true },
-  EMOTO_SURRON: { maxHp: 480, speed: 33.5, accelRate: 7.8, brakeRate: 5.8, turnRate: 2.5, isElectric: true },
-  EMOTO_STARK_VARG: { maxHp: 550, speed: 37.5, accelRate: 8.8, brakeRate: 6.2, turnRate: 2.4, isElectric: true },
-  ATV_QUAD: { maxHp: 680, speed: 29.0, accelRate: 4.8, brakeRate: 5.2, turnRate: 2.1 },
+  // Military Recon Motorcycles, Silent E-Motos & Tactical 4x4 Quad ATV Stats (Realistic speed & lean-grip turn radii)
+  BIKE_50CC: { maxHp: 380, speed: 18.5, accelRate: 3.5, brakeRate: 4.8, turnRate: 2.45, minTurnRadiusM: 2.4, maxLatAccelMs2: 11.5, cc: 50 },
+  BIKE_125CC_2T: { maxHp: 420, speed: 29.0, accelRate: 4.8, brakeRate: 5.2, turnRate: 2.4, minTurnRadiusM: 2.8, maxLatAccelMs2: 12.6, cc: 125, isTwoStroke: true },
+  BIKE_250CC_2T: { maxHp: 460, speed: 32.0, accelRate: 5.5, brakeRate: 5.4, turnRate: 2.35, minTurnRadiusM: 2.9, maxLatAccelMs2: 12.8, cc: 250, isTwoStroke: false },
+  BIKE_500CC_2T: { maxHp: 520, speed: 35.0, accelRate: 6.2, brakeRate: 5.6, turnRate: 2.25, minTurnRadiusM: 3.1, maxLatAccelMs2: 13.0, cc: 450, isTwoStroke: false },
+  BIKE_600CC: { maxHp: 560, speed: 36.5, accelRate: 5.8, brakeRate: 6.0, turnRate: 2.15, minTurnRadiusM: 3.3, maxLatAccelMs2: 13.0, cc: 650 },
+  BIKE_750CC: { maxHp: 600, speed: 38.0, accelRate: 6.3, brakeRate: 6.2, turnRate: 2.1, minTurnRadiusM: 3.4, maxLatAccelMs2: 13.2, cc: 750 },
+  BIKE_1000CC: { maxHp: 650, speed: 40.5, accelRate: 7.0, brakeRate: 6.8, turnRate: 2.05, minTurnRadiusM: 3.5, maxLatAccelMs2: 13.5, cc: 1000 },
+  SCOOTER_KUKIRIN: { maxHp: 360, speed: 22.0, accelRate: 6.0, brakeRate: 5.5, turnRate: 2.6, minTurnRadiusM: 2.5, maxLatAccelMs2: 11.8, isElectric: true },
+  EMOTO_TUTTIO: { maxHp: 390, speed: 21.5, accelRate: 6.2, brakeRate: 5.4, turnRate: 2.55, minTurnRadiusM: 2.5, maxLatAccelMs2: 11.8, isElectric: true },
+  EMOTO_YOZMA: { maxHp: 430, speed: 25.5, accelRate: 6.8, brakeRate: 5.5, turnRate: 2.45, minTurnRadiusM: 2.7, maxLatAccelMs2: 12.2, isElectric: true },
+  EMOTO_CEMOTO: { maxHp: 460, speed: 29.0, accelRate: 7.2, brakeRate: 5.6, turnRate: 2.4, minTurnRadiusM: 2.8, maxLatAccelMs2: 12.6, isElectric: true },
+  EMOTO_SURRON: { maxHp: 480, speed: 32.0, accelRate: 7.8, brakeRate: 5.8, turnRate: 2.4, minTurnRadiusM: 2.9, maxLatAccelMs2: 12.8, isElectric: true },
+  EMOTO_STARK_VARG: { maxHp: 550, speed: 35.5, accelRate: 8.8, brakeRate: 6.2, turnRate: 2.3, minTurnRadiusM: 3.1, maxLatAccelMs2: 13.0, isElectric: true },
+  ATV_QUAD: { maxHp: 680, speed: 28.5, accelRate: 4.8, brakeRate: 5.2, turnRate: 2.1, minTurnRadiusM: 3.8, maxLatAccelMs2: 11.8 },
 
   // RPM values (Upgraded high-cadence mounted weapons: .50 Cal M2HB 720 RPM, 7.62mm Coax MG 950 RPM, 30mm Autocannon 330 RPM, A-10 GAU-8 1320 RPM)
   RPM_TANK_US: 28,
@@ -780,17 +786,49 @@ export const SQUAD_KIT_CAPS = {
     engineer: 2,  // Max 2 LAT (RPG-7) per 9-man squad (1 in standard squads, 2 in Charlie Anti-Armor)
     support: 2,   // Max 2 Automatic Riflemen (LMG) per 9-man squad
     recon: 1,     // Max 1 Marksman / Sniper per 9-man squad
-    armor: 9,     // Dedicated BRAVO Armor Crewmen (PDW + Repair, no RPG spam)
-    pilot: 9      // Dedicated FALCON Combat Pilots
+    armor: 9,     // Dedicated BRAVO / IRON Armor Crewmen (PDW + Repair, no RPG spam)
+    pilot: 9      // Dedicated FALCON / VIPER Combat Pilots
+  },
+  // Specialized Squad Types (Squad / Project Reality Combined-Arms Organization for up to 250v250):
+  // Differentiates 9-Man Infantry Squads, 6-Man Recon Teams, 4-Man Armor Crews, and 4-Man Pilot Wings!
+  SQUAD_TYPES: {
+    INFANTRY: {
+      id: 'INFANTRY',
+      label: '🪖 INFANTRY SQUAD (9P)',
+      shortTag: 'INF • 9P',
+      maxSize: 9,
+      roleCaps: { assault: 9, medic: 2, engineer: 2, support: 2, recon: 1, armor: 0, pilot: 0 }
+    },
+    RECON: {
+      id: 'RECON',
+      label: '🎯 RECON / JTAC TEAM (6P)',
+      shortTag: 'REC • 6P',
+      maxSize: 6,
+      roleCaps: { assault: 6, medic: 2, engineer: 1, support: 1, recon: 2, armor: 0, pilot: 0 }
+    },
+    ARMOR: {
+      id: 'ARMOR',
+      label: '🛡️ ARMOR CREW SQUAD (4P)',
+      shortTag: 'ARM • 4P',
+      maxSize: 4,
+      roleCaps: { armor: 4, engineer: 2, medic: 1, assault: 1, support: 0, recon: 0, pilot: 0 }
+    },
+    AIR: {
+      id: 'AIR',
+      label: '✈️ TACTICAL AIR WING (4P)',
+      shortTag: 'AIR • 4P',
+      maxSize: 4,
+      roleCaps: { pilot: 4, recon: 1, engineer: 1, medic: 0, assault: 0, support: 0, armor: 0 }
+    }
   },
   BADGE_LABELS: {
     assault: 'UNLIMITED RIFLEMAN',
     medic: 'MAX 2 / SQUAD',
     engineer: 'MAX 1–2 LAT / SQUAD',
     support: 'MAX 2 LMG / SQUAD',
-    recon: 'MAX 1 SNIPER / SQUAD',
-    armor: 'BRAVO ARMOR CREW',
-    pilot: 'FALCON AIR WING'
+    recon: 'MAX 1–2 SNIPER / SQUAD',
+    armor: 'ARMOR SQUAD (4P CREW)',
+    pilot: 'AIR WING SQUAD (4P)'
   }
 };
 
