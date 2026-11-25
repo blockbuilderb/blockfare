@@ -143,12 +143,19 @@ export function resolveGlobalCommandShortcut(e, ctx = {}) {
   // Never hijack browser/OS Command (`⌘`) or Windows/Linux `Ctrl+R/W/T/L` shortcuts
   if (e.metaKey && !cmdMod) return null;
 
-  // 0. Multi-Crew Vehicle Seat Switching ([F1–F4] when inside any vehicle; Shift+?/Alt+P/Alt+`/Shift+L still open overlays!)
+  // 0. Multi-Crew Vehicle Seat Switching ([F1–F8] when inside any vehicle; Shift+?/Alt+P/Alt+`/Shift+L still open overlays!)
   if (
     inVehicle &&
     !anyMod &&
     !e.shiftKey &&
-    (e.code === 'F1' || e.code === 'F2' || e.code === 'F3' || e.code === 'F4')
+    (e.code === 'F1' ||
+      e.code === 'F2' ||
+      e.code === 'F3' ||
+      e.code === 'F4' ||
+      e.code === 'F5' ||
+      e.code === 'F6' ||
+      e.code === 'F7' ||
+      e.code === 'F8')
   ) {
     return { type: 'SWITCH_VEHICLE_SEAT', seatIndex: Number(e.code.slice(1)) - 1 };
   }

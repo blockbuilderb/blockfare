@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=126';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=126';
+import { sound } from './audio.js?v=127';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=127';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=126';
-import { createVehicleMesh } from './models/vehicle-model.js?v=126';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=126';
-import { events, makeEventBridge } from './events.js?v=126';
+} from './assets/vehicle-defs.js?v=127';
+import { createVehicleMesh } from './models/vehicle-model.js?v=127';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=127';
+import { events, makeEventBridge } from './events.js?v=127';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=126';
+} from './core/StateMachines.js?v=127';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -70,6 +70,21 @@ const SHARED_WRECK_FIRE_MAT = markShared(
 export function getVehicleSeatLayout(v) {
   if (!v) return ['DRIVER'];
   if (v.isAircraft) {
+    if (v.aircraftRole === 'heli_transport') {
+      return [
+        'PILOT',
+        'LEFT_MINIGUN',
+        'RIGHT_MINIGUN',
+        'TROOP_1',
+        'TROOP_2',
+        'TROOP_3',
+        'TROOP_4',
+        'TROOP_5'
+      ];
+    }
+    if (v.aircraftRole === 'heli_attack') {
+      return ['PILOT', 'CPG_GUNNER'];
+    }
     if (v.aircraftRole === 'gunship') {
       return ['PILOT', 'TV_GUNNER', 'HOWITZER_FCO', 'LOADMASTER'];
     }
@@ -77,6 +92,20 @@ export function getVehicleSeatLayout(v) {
   }
   if (v.isEmplacement || v.type === 'trebuchet') {
     return ['GUNNER'];
+  }
+  if (v.type === 'truck_transport') {
+    return [
+      'DRIVER',
+      'CO_GUNNER',
+      'TROOP_1',
+      'TROOP_2',
+      'TROOP_3',
+      'TROOP_4',
+      'TROOP_5',
+      'TROOP_6',
+      'TROOP_7',
+      'TROOP_8'
+    ];
   }
   if (
     v.type === 'bike' ||
@@ -94,7 +123,7 @@ export function getVehicleSeatLayout(v) {
 
 /**
  * Initializes realistic finite vehicle ordnance pools (replenished via `<45m` HQ Runway Low-Pass,
- * HQ Motor Pool, or Friendly FOB Supply Stations!).
+ * HQ Helipads, HQ Motor Pool, Friendly FOB Supply Stations, or 6×6 Logistics Trucks!).
  */
 export function initVehicleOrdnance(v) {
   if (!v) return null;
@@ -106,7 +135,11 @@ export function initVehicleOrdnance(v) {
   let maxPools = null;
   if (v.isAircraft) {
     const role = v.aircraftRole || 'cas';
-    if (role === 'gunship') {
+    if (role === 'heli_transport') {
+      maxPools = { slot0: 2400, slot1: 14, slot2: 4 }; // 2,400× Twin 7.62mm M134 Miniguns, 14× 70mm Hydra/S-8, 4× Stinger/Igla
+    } else if (role === 'heli_attack') {
+      maxPools = { slot0: 600, slot1: 19, slot2: 8 }; // 600× 30mm M230/2A42 Chain Gun, 19× Hydra-70/S-8, 8× AGM-114L Hellfire / 9K121 Vikhr ATGMs
+    } else if (role === 'gunship') {
       maxPools = { slot0: 1800, slot1: 80, slot2: 20 }; // 1800× 25mm, 80× 40mm Bofors, 20× 105mm ready rack
     } else if (role === 'cas') {
       maxPools = { slot0: 1150, slot1: 14, slot2: 4 }; // 1150× 30mm GAU-8 drum, 14× Hydra-70, 4× AGM-65 Maverick
@@ -125,6 +158,8 @@ export function initVehicleOrdnance(v) {
     maxPools = { slot0: 600, slot1: 8 }; // 600× Radar AA Bursts, 8× Ready-Pod Stinger / 9M311 SAMs
   } else if (v.type === 'emplace_mortar') {
     maxPools = { slot0: 24, slot1: 6 }; // 24× 81mm HE Shells, 6× 3-Round Rapid Barrages
+  } else if (v.type === 'truck_transport') {
+    maxPools = { slot0: 600, slot1: 600 }; // 600× 7.62mm M240B / PKP Roof Ring Defense MG
   } else if (v.type === 'humvee' || v.type === 'emplace_hmg') {
     maxPools = { slot0: 500, slot1: 500 }; // 500× .50 BMG M2HB / Kord Heavy Ammo Cans
   }
@@ -161,6 +196,9 @@ export function classifyWeaponBallistics(weaponName = '') {
       w.includes('APFSDS') ||
       w.includes('APHE') ||
       w.includes('MAVERICK') ||
+      w.includes('HELLFIRE') ||
+      w.includes('VIKHR') ||
+      w.includes('ATAKA') ||
       w.includes('AGM') ||
       w.includes('KH-29') ||
       w.includes('JDAM') ||
@@ -597,7 +635,12 @@ export class VehicleManager {
         : VEHICLE_DEFS;
     for (const def of defsToSpawn) {
       const [sx, sy, sz] = def.spawnPos;
-      const isPlane = Boolean(def.type === 'plane' || def.isAircraft);
+      const isPlane = Boolean(def.type === 'plane' || def.isAircraft || def.isHelicopter);
+      const isHeliDef = Boolean(
+        def.isHelicopter ||
+          def.aircraftRole === 'heli_transport' ||
+          def.aircraftRole === 'heli_attack'
+      );
       const isBikeOrAtv = Boolean(
         def.type === 'bike' ||
           def.type === 'atv' ||
@@ -609,24 +652,32 @@ export class VehicleManager {
           def.isHorseMount
       );
       const halfW = isPlane
-        ? 4.5
+        ? isHeliDef
+          ? 3.8
+          : 4.5
         : def.type === 'bike'
         ? 0.48
         : def.type === 'atv'
         ? 0.85
         : def.type === 'tank'
         ? 1.95
+        : def.type === 'truck_transport'
+        ? 1.55
         : def.type === 'apc'
         ? 1.65
         : 1.45;
       const halfL = isPlane
-        ? 4.8
+        ? isHeliDef
+          ? 4.4
+          : 4.8
         : def.type === 'bike'
         ? 1.02
         : def.type === 'atv'
         ? 1.22
         : def.type === 'tank'
         ? 3.55
+        : def.type === 'truck_transport'
+        ? 3.65
         : def.type === 'apc'
         ? 3.35
         : 2.65;
@@ -686,7 +737,7 @@ export class VehicleManager {
   }
 
   spawnVehicle(cfg) {
-    const { group, wheels, turretPivot, barrelGroup } = createVehicleMesh(cfg);
+    const { group, wheels, turretPivot, barrelGroup, dynamicNodes } = createVehicleMesh(cfg);
     group.position.copy(cfg.spawnPos);
     group.rotation.y = cfg.spawnYaw;
     this.scene.add(group);
@@ -694,7 +745,12 @@ export class VehicleManager {
     const isInitialReinforcement = false;
     const initialDelay = 0;
 
-    const isPlane = Boolean(cfg.type === 'plane' || cfg.isAircraft);
+    const isHeli = Boolean(
+      cfg.isHelicopter ||
+        cfg.aircraftRole === 'heli_transport' ||
+        cfg.aircraftRole === 'heli_attack'
+    );
+    const isPlane = Boolean(cfg.type === 'plane' || cfg.isAircraft || isHeli);
     const isRegularB2 = Boolean(
       isPlane && cfg.aircraftRole === 'b2_spirit' && !String(cfg.id || '').startsWith('secret_')
     );
@@ -718,17 +774,27 @@ export class VehicleManager {
         ? VEHICLE_STATS.TICKET_COST_B2_SPIRIT || 45
         : cfg.aircraftRole === 'gunship'
         ? VEHICLE_STATS.TICKET_COST_GUNSHIP || 34
+        : cfg.aircraftRole === 'heli_transport'
+        ? VEHICLE_STATS.TICKET_COST_HELI_TRANSPORT || 18
+        : cfg.aircraftRole === 'heli_attack'
+        ? VEHICLE_STATS.TICKET_COST_HELI_ATTACK || 26
         : VEHICLE_STATS.TICKET_COST_PLANE || 30
       : cfg.type === 'tank' || cfg.type === 'trex_mount'
       ? VEHICLE_STATS.TICKET_COST_TANK || 24
       : cfg.type === 'apc' || cfg.type === 'aa'
       ? VEHICLE_STATS.TICKET_COST_APC || 16
+      : cfg.type === 'truck_transport'
+      ? VEHICLE_STATS.TICKET_COST_TRUCK || 6
       : isLightBikeOrMount
       ? 4
       : VEHICLE_STATS.TICKET_COST_HUMVEE || 8;
     const factionMoneyCost = isPlane
       ? cfg.aircraftRole === 'b2_spirit'
         ? VEHICLE_STATS.FACTION_COST_B2_SPIRIT || 2500
+        : cfg.aircraftRole === 'heli_transport'
+        ? VEHICLE_STATS.FACTION_COST_HELI_TRANSPORT || 700
+        : cfg.aircraftRole === 'heli_attack'
+        ? VEHICLE_STATS.FACTION_COST_HELI_ATTACK || 1150
         : VEHICLE_STATS.FACTION_COST_PLANE || 1500
       : cfg.type === 'tank'
       ? VEHICLE_STATS.FACTION_COST_TANK || 1300
@@ -736,12 +802,18 @@ export class VehicleManager {
       ? VEHICLE_STATS.FACTION_COST_APC || 800
       : cfg.type === 'aa'
       ? VEHICLE_STATS.FACTION_COST_AA || 850
+      : cfg.type === 'truck_transport'
+      ? VEHICLE_STATS.FACTION_COST_TRUCK || 250
       : cfg.type === 'humvee'
       ? VEHICLE_STATS.FACTION_COST_CAR || 350
       : 0;
     const ticketCategory = isPlane ? 'PLANE' : isHeavyArmorType ? 'TANK' : 'CAR';
     const statBlock = isPlane
-      ? cfg.aircraftRole === 'wright_flyer'
+      ? cfg.aircraftRole === 'heli_transport'
+        ? VEHICLE_STATS.HELI_TRANSPORT
+        : cfg.aircraftRole === 'heli_attack'
+        ? VEHICLE_STATS.HELI_ATTACK
+        : cfg.aircraftRole === 'wright_flyer'
         ? VEHICLE_STATS.PLANE_WRIGHT_FLYER
         : cfg.aircraftRole === 'b2_spirit'
         ? VEHICLE_STATS.PLANE_B2_SPIRIT
@@ -760,6 +832,8 @@ export class VehicleManager {
       ? VEHICLE_STATS.AA_VEHICLE
       : cfg.type === 'apc'
       ? VEHICLE_STATS.APC
+      : cfg.type === 'truck_transport'
+      ? VEHICLE_STATS.TRUCK_TRANSPORT
       : cfg.type === 'atv'
       ? VEHICLE_STATS.ATV_QUAD
       : cfg.type === 'bike'
@@ -772,7 +846,9 @@ export class VehicleManager {
     const brakeRate =
       cfg.brakeRate ?? statBlock.brakeRate ?? (cfg.type === 'tank' ? 2.2 : cfg.type === 'apc' ? 2.6 : 3.2);
     const hullHalfWidth = isPlane
-      ? cfg.aircraftRole === 'b2_spirit'
+      ? isHeli
+        ? 3.8
+        : cfg.aircraftRole === 'b2_spirit'
         ? 7.5
         : cfg.aircraftRole === 'wright_flyer'
         ? 6.2
@@ -789,11 +865,15 @@ export class VehicleManager {
       ? 1.15
       : cfg.type === 'tank'
       ? 1.95
+      : cfg.type === 'truck_transport'
+      ? 1.55
       : cfg.type === 'apc' || cfg.type === 'aa'
       ? 1.65
       : 1.45;
     const hullHalfLength = isPlane
-      ? 4.8
+      ? isHeli
+        ? 4.4
+        : 4.8
       : cfg.type === 'warhorse'
       ? 0.65
       : cfg.type === 'raptor_mount'
@@ -806,11 +886,15 @@ export class VehicleManager {
       ? 1.15
       : cfg.type === 'tank'
       ? 3.55
+      : cfg.type === 'truck_transport'
+      ? 3.65
       : cfg.type === 'apc' || cfg.type === 'aa'
       ? 3.35
       : 2.65;
     const massTonnes = isPlane
-      ? 18
+      ? isHeli
+        ? 10.2
+        : 18
       : cfg.type === 'bike'
       ? 0.18
       : cfg.type === 'atv'
@@ -819,6 +903,8 @@ export class VehicleManager {
       ? 2.5
       : cfg.type === 'tank'
       ? 65
+      : cfg.type === 'truck_transport'
+      ? 12.5
       : cfg.type === 'apc' || cfg.type === 'aa'
       ? 16
       : 5.5;
@@ -826,6 +912,7 @@ export class VehicleManager {
     const vehicle = {
       ...cfg,
       isAircraft: isPlane,
+      isHelicopter: isHeli,
       turnRate,
       accelRate,
       brakeRate,
@@ -892,6 +979,7 @@ export class VehicleManager {
       turretPivot,
       barrelGroup,
       wheels,
+      dynamicNodes: dynamicNodes || group.userData?.dynamicNodes || null,
       controlSurfaces: group.userData?.controlSurfaces || null,
       vortexTimer: 0
     };
@@ -1788,11 +1876,16 @@ export class VehicleManager {
     if (era !== 'modern') {
       return { ok: false, reason: 'ERA_LOCKED' };
     }
-    if (player.squadDoctrineEnabled !== false && player.role !== 'pilot') {
+    if (
+      player.squadDoctrineEnabled !== false &&
+      player.role !== 'pilot' &&
+      aircraftRole !== 'heli_transport'
+    ) {
       return { ok: false, reason: 'REQUIRES_PILOT_LICENSE' };
     }
     const team = player.team || 'US';
     const normRole = aircraftRole === 'bomber' ? 'b2_spirit' : aircraftRole || 'cas';
+    const isHeliRole = normRole === 'heli_transport' || normRole === 'heli_attack';
 
     if (normRole === 'b2_spirit' && !this.isB2UnlockedForTeam(team)) {
       return {
@@ -1834,25 +1927,44 @@ export class VehicleManager {
 
     if (!plane) {
       const isRU = team === 'RU';
-      const apronZ = isRU ? 138 : -138;
-      const apronX =
-        normRole === 'gunship'
+      const apronZ = isHeliRole
+        ? normRole === 'heli_transport'
           ? isRU
-            ? 2876
-            : -2876
-          : normRole === 'b2_spirit'
-          ? isRU
-            ? 2828
-            : -2828
-          : normRole === 'cas'
-          ? isRU
-            ? 2780
-            : -2780
+            ? 44
+            : -44
           : isRU
-          ? 2736
-          : -2736;
+          ? -44
+          : 44
+        : isRU
+        ? 138
+        : -138;
+      const apronX = isHeliRole
+        ? isRU
+          ? 1504
+          : -1504
+        : normRole === 'gunship'
+        ? isRU
+          ? 2876
+          : -2876
+        : normRole === 'b2_spirit'
+        ? isRU
+          ? 2828
+          : -2828
+        : normRole === 'cas'
+        ? isRU
+          ? 2780
+          : -2780
+        : isRU
+        ? 2736
+        : -2736;
       const gH = this.world ? this.world.getGroundHeightAt(apronX, apronZ) : 0;
       const nameByRole = {
+        heli_transport: isRU
+          ? 'MI-8AMTSH TERMINATOR TRANSPORT HELI (8 SEATS • PKT DOOR GUNS + S-8)'
+          : 'UH-60M BLACK HAWK ASSAULT TRANSPORT (8 SEATS • TWIN M134 MINIGUNS)',
+        heli_attack: isRU
+          ? 'KA-52 ALLIGATOR COAXIAL ATTACK HELI (30MM 2A42 + S-8 + 8× VIKHR ATGM)'
+          : 'AH-64E APACHE LONGBOW ATTACK HELI (30MM M230 + HYDRA + 8× HELLFIRE ATGM)',
         cas: isRU
           ? 'SU-25SM FROGFOOT (30MM + S-8 ROCKETS)'
           : 'A-10C WARTHOG (30MM GAU-8 + ROCKETS)',
@@ -1868,6 +1980,8 @@ export class VehicleManager {
         wright_flyer: '1903 WRIGHT FLYER I'
       };
       const statByRole = {
+        heli_transport: VEHICLE_STATS.HELI_TRANSPORT,
+        heli_attack: VEHICLE_STATS.HELI_ATTACK,
         cas: VEHICLE_STATS.PLANE_CAS,
         fighter: VEHICLE_STATS.PLANE_FIGHTER,
         gunship: VEHICLE_STATS.PLANE_GUNSHIP,
@@ -1880,18 +1994,29 @@ export class VehicleManager {
         name: nameByRole[normRole] || nameByRole.cas,
         type: 'plane',
         isAircraft: true,
+        isHelicopter: isHeliRole,
         aircraftRole: normRole,
         isStealthAircraft: normRole === 'b2_spirit' || normRole === 'wright_flyer',
         stealthFactor: normRole === 'b2_spirit' ? 0.12 : normRole === 'wright_flyer' ? 0.25 : 1.0,
         team,
         spawnPos: new THREE.Vector3(apronX, gH, apronZ),
-        spawnYaw: isRU ? Math.PI / 2 - 0.32 : -Math.PI / 2 - 0.32,
+        spawnYaw: isHeliRole
+          ? isRU
+            ? Math.PI / 2
+            : -Math.PI / 2
+          : isRU
+          ? Math.PI / 2 - 0.32
+          : -Math.PI / 2 - 0.32,
         maxHp: sb.maxHp || 1550,
         speed: sb.speed || 62,
-        minSpeed: sb.minSpeed || 32,
+        minSpeed: sb.minSpeed ?? (isHeliRole ? 0 : 32),
         maxSpeed: sb.maxSpeed || 95,
         weaponType:
-          normRole === 'b2_spirit'
+          normRole === 'heli_transport'
+            ? 'heli_minigun'
+            : normRole === 'heli_attack'
+            ? 'heli_attack'
+            : normRole === 'b2_spirit'
             ? 'b2_carpet_bomb'
             : normRole === 'wright_flyer'
             ? 'wright_gatling'
@@ -1903,7 +2028,11 @@ export class VehicleManager {
             ? 'wright_dynamite'
             : undefined,
         rpm:
-          normRole === 'gunship'
+          normRole === 'heli_transport'
+            ? VEHICLE_STATS.RPM_HELI_MINIGUN
+            : normRole === 'heli_attack'
+            ? VEHICLE_STATS.RPM_HELI_30MM
+            : normRole === 'gunship'
             ? VEHICLE_STATS.RPM_AC130_25MM
             : normRole === 'fighter'
             ? VEHICLE_STATS.RPM_FIGHTER_VULCAN
@@ -1946,7 +2075,7 @@ export class VehicleManager {
     plane.mesh.visible = true;
 
     if (launchAirborne) {
-      const entryBackDist = 140;
+      const entryBackDist = isHeliRole ? 28 : 140;
       const headingYaw = team === 'US' ? -Math.PI / 2 : Math.PI / 2;
       const startX = THREE.MathUtils.clamp(
         player.pos.x + (team === 'US' ? -entryBackDist : entryBackDist),
@@ -1954,26 +2083,38 @@ export class VehicleManager {
         2450
       );
       const startZ = THREE.MathUtils.clamp(player.pos.z, -1650, 1650);
-      const alt =
-        normRole === 'wright_flyer'
-          ? 62
-          : normRole === 'b2_spirit'
-          ? 185
-          : normRole === 'gunship'
-          ? 165
-          : normRole === 'fighter'
-          ? 155
-          : 120;
+      const gStart = this.world ? this.world.getGroundHeightAt(startX, startZ) : 0;
+      const alt = isHeliRole
+        ? Math.max(gStart + 46, 52)
+        : normRole === 'wright_flyer'
+        ? 62
+        : normRole === 'b2_spirit'
+        ? 185
+        : normRole === 'gunship'
+        ? 165
+        : normRole === 'fighter'
+        ? 155
+        : 120;
       plane.pos.set(startX, alt, startZ);
       plane.yaw = headingYaw;
-      plane.pitch = normRole === 'wright_flyer' ? 0.0 : normRole === 'gunship' ? -0.02 : -0.04;
+      plane.pitch = isHeliRole
+        ? -0.08
+        : normRole === 'wright_flyer'
+        ? 0.0
+        : normRole === 'gunship'
+        ? -0.02
+        : -0.04;
       plane.roll = 0;
+      plane.heliHoverHold = false;
       plane.gunshipManualFlight = normRole === 'gunship';
       plane.orbitAssist = false;
       plane.turretYaw = headingYaw;
-      plane.throttle = normRole === 'wright_flyer' ? 0.14 : 0.58;
-      plane.forwardSpeed =
-        normRole === 'wright_flyer' ? 13.5 : plane.speed || (normRole === 'b2_spirit' ? 125 : 62);
+      plane.throttle = isHeliRole ? 0.55 : normRole === 'wright_flyer' ? 0.14 : 0.58;
+      plane.forwardSpeed = isHeliRole
+        ? 26
+        : normRole === 'wright_flyer'
+        ? 13.5
+        : plane.speed || (normRole === 'b2_spirit' ? 125 : 62);
       plane.mesh.position.copy(plane.pos);
       plane.mesh.rotation.set(plane.pitch, plane.yaw, plane.roll, 'YXZ');
       syncAircraftFlightFSM(plane, { onRunway: false });
@@ -2121,13 +2262,19 @@ export class VehicleManager {
     if (era !== 'modern') {
       return { ok: false, reason: 'ERA_LOCKED' };
     }
-    if (player.squadDoctrineEnabled !== false && player.role !== 'armor') {
+    if (
+      player.squadDoctrineEnabled !== false &&
+      player.role !== 'armor' &&
+      armorType !== 'truck_transport'
+    ) {
       return { ok: false, reason: 'REQUIRES_ARMOR_LICENSE' };
     }
     const team = player.team || 'US';
     const isRU = team === 'RU';
     const normType =
-      armorType === 'car' || armorType === 'humvee'
+      armorType === 'truck_transport'
+        ? 'truck_transport'
+        : armorType === 'car' || armorType === 'humvee'
         ? 'car'
         : armorType === 'apc'
         ? 'apc'
@@ -2221,6 +2368,9 @@ export class VehicleManager {
       veh.thermalFSM?.send(VEHICLE_THERMAL_EVENTS.RESET);
     } else {
       const nameMap = {
+        truck_transport: isRU
+          ? 'KAMAZ-5350 MUSTANG 6×6 TROOP & LOGISTICS TRUCK (10 SEATS + RESUPPLY)'
+          : 'M1083A1 MTV 6×6 TROOP & LOGISTICS TRUCK (10 SEATS + RESUPPLY)',
         car: isRU ? 'GAZ TIGR UP-ARMORED SCOUT (.50 HMG)' : 'M1151 UP-ARMORED HUMVEE (.50 HMG)',
         tank: isRU
           ? 'T-90M PRORYV MBT (125MM + COAX)'
@@ -2231,7 +2381,9 @@ export class VehicleManager {
           : 'M163 PIVADS / LAV-AD SPAAG (25MM + STINGER SAM)'
       };
       const statBlock =
-        normType === 'car'
+        normType === 'truck_transport'
+          ? VEHICLE_STATS.TRUCK_TRANSPORT
+          : normType === 'car'
           ? VEHICLE_STATS.HUMVEE || { maxHp: 750, speed: 24 }
           : normType === 'tank'
           ? VEHICLE_STATS.TANK
@@ -2242,13 +2394,14 @@ export class VehicleManager {
         id: `req_${normType}_${team.toLowerCase()}_${Date.now()}`,
         name: nameMap[normType],
         type: normType,
+        isLogisticsTruck: normType === 'truck_transport',
         team,
         spawnPos: dropPos.clone(),
         spawnYaw: player.yaw || 0,
         maxHp: statBlock.maxHp,
         speed: statBlock.speed,
         weaponType:
-          normType === 'car'
+          normType === 'truck_transport' || normType === 'car'
             ? 'hmg'
             : normType === 'tank'
             ? 'tank_cannon'
@@ -2256,7 +2409,9 @@ export class VehicleManager {
             ? 'autocannon'
             : 'aa_autocannon',
         rpm:
-          normType === 'car'
+          normType === 'truck_transport'
+            ? 650
+            : normType === 'car'
             ? 750
             : normType === 'tank'
             ? isRU
@@ -2835,7 +2990,7 @@ export class VehicleManager {
     //     * [1] 30mm GAU-8 Depleted-Uranium "BRRRT!": Steep >=20° roof dive or rear pass shreds an MBT in ~1.0s!
     // =========================================================================
     if (vehicle.type === 'tank') {
-      const isDedicatedAtgm = /MAVERICK|AGM-65|KH-29|HELLFIRE|GRIFFIN/.test(
+      const isDedicatedAtgm = /MAVERICK|AGM-65|KH-29|HELLFIRE|VIKHR|ATAKA|GRIFFIN/.test(
         String(weaponName || '').toUpperCase()
       );
       if (isDedicatedAtgm) {
@@ -3737,6 +3892,25 @@ export class VehicleManager {
           const isUsPlane = v.team !== 'RU';
           const overFriendlyAirfield =
             (isUsPlane ? v.pos.x <= -2475 : v.pos.x >= 2475) && Math.abs(v.pos.z) <= 300;
+          const hqBaseAir =
+            v.team === 'RU'
+              ? this.world?.spawns?.RU_BASE || { x: 1520, z: 0 }
+              : this.world?.spawns?.US_BASE || { x: -1520, z: 0 };
+          const overHqHelipad =
+            Boolean(v.isHelicopter) &&
+            Math.hypot(v.pos.x - hqBaseAir.x, v.pos.z - hqBaseAir.z) <= 155;
+          let overFobHelipad = false;
+          let fobPadId = '';
+          if (v.isHelicopter && Array.isArray(this.world?.flags)) {
+            for (let fi = 0; fi < this.world.flags.length; fi++) {
+              const fl = this.world.flags[fi];
+              if (fl && fl.owner === v.team && Math.hypot(v.pos.x - fl.pos.x, v.pos.z - fl.pos.z) <= 44) {
+                overFobHelipad = true;
+                fobPadId = fl.id;
+                break;
+              }
+            }
+          }
           const altAglHere = v.pos.y - gHere;
           if (overFriendlyAirfield && altAglHere <= 45.0 && !v.isShotDown) {
             inSupplyZone = true;
@@ -3745,6 +3919,13 @@ export class VehicleManager {
               ? 'HQ RUNWAY GROUND CREW PIT-STOP'
               : 'HQ RUNWAY LOW-PASS (<45M)';
             repairMult = isRunwayParkedPitStop ? 2.2 : 1.35;
+          } else if ((overHqHelipad || overFobHelipad) && altAglHere <= 28.0 && !v.isShotDown) {
+            inSupplyZone = true;
+            isRunwayParkedPitStop = altAglHere <= 4.5 && Math.abs(v.forwardSpeed || 0) < 12.0;
+            supplyLabel = overHqHelipad
+              ? 'MAIN BASE HQ HELIPAD FARP'
+              : `OBJ ${fobPadId} FORWARD HELIPAD FARP`;
+            repairMult = isRunwayParkedPitStop ? 2.1 : 1.25;
           }
         } else {
           const hqBase =
@@ -3866,10 +4047,147 @@ export class VehicleManager {
         }
       }
 
+      // ─── 6×6 TROOP TRANSPORT & MOBILE LOGISTICS TRUCK CONVOY + RESUPPLY AURA ─────────
+      // 1) Opening-Round AI Squad Convoy: friendly infantry bots board NPC-driven or human-driven 6×6 Troop Trucks
+      //    at HQ/rear (`> 75m` from uncaptured objectives) and automatically disembark on foot when arriving within
+      //    `48m` of a neutral/contested/enemy Objective Flag!
+      // 2) Mobile Logistics Resupply Aura (`<= 14m`): refills nearby friendly soldiers' loose ammo & field dressings!
+      if (v.type === 'truck_transport' && !v.dead) {
+        if (!Array.isArray(v.aiPassengers)) v.aiPassengers = [];
+        for (let pi = v.aiPassengers.length - 1; pi >= 0; pi--) {
+          const pax = v.aiPassengers[pi];
+          if (!pax || pax.dead || pax.downed || pax.ridingVehicle !== v) {
+            if (pax && pax.ridingVehicle === v) pax.ridingVehicle = null;
+            v.aiPassengers.splice(pi, 1);
+          } else {
+            pax.pos.copy(v.pos);
+            if (pax.mesh) pax.mesh.visible = false;
+          }
+        }
+
+        if ((v.npcDriver || v.driver) && botManager && Array.isArray(botManager.bots)) {
+          let nearAssaultFlag = null;
+          if (Array.isArray(this.world?.flags)) {
+            for (let fi = 0; fi < this.world.flags.length; fi++) {
+              const fl = this.world.flags[fi];
+              if (fl && (fl.owner !== v.team || fl.contested)) {
+                const dFl = Math.hypot(v.pos.x - fl.pos.x, v.pos.z - fl.pos.z);
+                if (dFl <= 52) {
+                  nearAssaultFlag = fl;
+                  break;
+                }
+              }
+            }
+          }
+
+          // Auto-disembark AI infantry squad when the 6×6 Troop Truck reaches the objective zone (or takes heavy damage)!
+          if (v.aiPassengers.length > 0 && (nearAssaultFlag || v.hp < v.maxHp * 0.45)) {
+            const gDrop = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : v.pos.y;
+            for (let pi = 0; pi < v.aiPassengers.length; pi++) {
+              const pax = v.aiPassengers[pi];
+              if (!pax) continue;
+              pax.ridingVehicle = null;
+              const sideSign = pi % 2 === 0 ? 1 : -1;
+              const backDist = 3.8 + Math.floor(pi / 2) * 1.15;
+              const dxDrop = Math.sin(v.yaw || 0) * backDist + Math.cos(v.yaw || 0) * sideSign * 2.1;
+              const dzDrop = Math.cos(v.yaw || 0) * backDist - Math.sin(v.yaw || 0) * sideSign * 2.1;
+              const safeDrop = this.world?.pushOutOfBuildingFootprint
+                ? this.world.pushOutOfBuildingFootprint(v.pos.x + dxDrop, v.pos.z + dzDrop, 1.4)
+                : { x: v.pos.x + dxDrop, z: v.pos.z + dzDrop };
+              pax.pos.set(
+                safeDrop.x,
+                this.world ? this.world.getGroundHeightAt(safeDrop.x, safeDrop.z) : gDrop,
+                safeDrop.z
+              );
+              if (pax.mesh) {
+                pax.mesh._culledOffFrustum = false;
+                pax.mesh.position.copy(pax.pos);
+                pax.mesh.visible = true;
+              }
+            }
+            v.aiPassengers.length = 0;
+            v._convoyDropCooldown = 14.0;
+          } else {
+            v._convoyDropCooldown = Math.max(0, (v._convoyDropCooldown || 0) - dt);
+            const maxTruckPax = 9;
+            if (
+              v._convoyDropCooldown <= 0 &&
+              !nearAssaultFlag &&
+              v.aiPassengers.length < maxTruckPax &&
+              Math.abs(v.forwardSpeed || 0) < 16.0
+            ) {
+              v._truckBoardTimer = (v._truckBoardTimer || 0) - dt;
+              if (v._truckBoardTimer <= 0) {
+                v._truckBoardTimer = 0.55;
+                for (let bi = 0; bi < botManager.bots.length && v.aiPassengers.length < maxTruckPax; bi++) {
+                  const b = botManager.bots[bi];
+                  if (
+                    !b ||
+                    b.dead ||
+                    b.downed ||
+                    b.drivingVehicle ||
+                    b.ridingVehicle ||
+                    b.team !== v.team ||
+                    b.rescueTarget ||
+                    b.role === 'PILOT' ||
+                    b.squad === 'BRAVO' ||
+                    b.squad === 'FALCON'
+                  ) {
+                    continue;
+                  }
+                  if (b.pos.distanceToSquared(v.pos) <= 28 * 28) {
+                    b.ridingVehicle = v;
+                    if (b.mesh) b.mesh.visible = false;
+                    v.aiPassengers.push(b);
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Mobile Squad Logistics Resupply Aura (`<= 14m` around any friendly 6×6 Troop & Supply Truck)
+        v._logiSupplyTimer = (v._logiSupplyTimer || 0) + dt;
+        if (v._logiSupplyTimer >= 3.5) {
+          v._logiSupplyTimer = 0;
+          if (
+            player &&
+            !player.dead &&
+            !player.downed &&
+            player.team === v.team &&
+            !player.activeVehicle &&
+            player.pos.distanceToSquared(v.pos) <= 14 * 14
+          ) {
+            let resuppliedPlayer = false;
+            const prim = player.slots?.[0];
+            if (prim && prim.def && prim.def.clipSize > 1) {
+              const maxLoose = prim.maxLooseAmmo || 120;
+              if ((prim.looseAmmo || 0) < maxLoose) {
+                prim.looseAmmo = Math.min(maxLoose, (prim.looseAmmo || 0) + 30);
+                resuppliedPlayer = true;
+              }
+            }
+            const maxBand = player.role === 'medic' ? 9 : 3;
+            if ((player.bandages || 0) < maxBand) {
+              player.bandages = Math.min(maxBand, (player.bandages || 0) + 1);
+              resuppliedPlayer = true;
+            }
+            if (resuppliedPlayer && player.onAwardXp) {
+              const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+              if (nowMs - (v._lastLogiToastMs || 0) > 10000) {
+                v._lastLogiToastMs = nowMs;
+                player.onAwardXp(10, '🚚📦 6×6 LOGISTICS TRUCK RESUPPLIED AMMO & FIELD DRESSINGS!');
+              }
+            }
+          }
+        }
+      }
+
       // Multi-Crew AI Squadmate Passenger Boarding when Player drives a multi-seat ground vehicle
       if (
         !v.isAircraft &&
         !v.isEmplacement &&
+        player &&
         v.driver === player &&
         botManager &&
         Array.isArray(botManager.bots)
@@ -5301,6 +5619,26 @@ export class VehicleManager {
    *   disappear while a player is running toward them!
    */
   updateAircraftAiAndPhysics(v, dt, player, botManager, onDeployMenu = false) {
+    if (v.isHelicopter && v.mesh?.userData) {
+      const isLiveHeli = Boolean(
+        v.driver || v.remoteDriverId || v.aiPilotActive || Math.abs(v.forwardSpeed || 0) > 0.5
+      );
+      v._rotorSpinSpeed = THREE.MathUtils.lerp(
+        v._rotorSpinSpeed || 0,
+        isLiveHeli ? 28.0 : 3.2,
+        Math.min(1, dt * (isLiveHeli ? 3.5 : 1.2))
+      );
+      const dRot = v._rotorSpinSpeed * dt;
+      if (v.mesh.userData.mainRotorHub) {
+        v.mesh.userData.mainRotorHub.rotation.y += dRot;
+      }
+      if (v.mesh.userData.coaxUpperRotorHub) {
+        v.mesh.userData.coaxUpperRotorHub.rotation.y -= dRot;
+      }
+      if (v.mesh.userData.tailRotorHub) {
+        v.mesh.userData.tailRotorHub.rotation.x += dRot * 1.85;
+      }
+    }
     if (v.aircraftRole === 'gunship' && v.wheels && (v.driver || v.remoteDriverId || v.aiPilotActive)) {
       for (const prop of v.wheels) {
         prop.rotation.z += dt * 22;

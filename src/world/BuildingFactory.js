@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { createRadarTowerMesh } from '../models/prop-models.js?v=126';
+import { createRadarTowerMesh } from '../models/prop-models.js?v=127';
 
 const VOXEL_SIZE = 1.25;
 const SPATIAL_MIN_X = -2048;
@@ -705,16 +705,44 @@ export const BuildingFactory = {
     }
 
     const topGy = groundGy + floors * floorHeight;
+    const isDowntownHighRise = floors >= 5 && width >= 9 && depth >= 8;
     for (let x = 0; x < width; x++) {
       for (let z = 0; z < depth; z++) {
         if (x === 0 || x === width - 1 || z === 0 || z === depth - 1) {
-          if ((x + z) % 2 === 0) {
+          // Downtown High-Rise Sniper Overwatch Parapet: solid corner merlons + low firing embrasures!
+          const isCorner = (x <= 1 || x >= width - 2) && (z <= 1 || z >= depth - 2);
+          if (isCorner || (x + z) % 2 === 0) {
             addBuildingVoxel(startGx + x, topGy, startGz + z, 'darkConcrete');
           }
         }
       }
     }
-    if (width >= 7 && depth >= 6) {
+    if (isDowntownHighRise && this.scene) {
+      // Flat Unobstructed Rooftop Helipad ("H" Pad) for Helicopter Landings & Sniper Insertions!
+      const padGroup = new THREE.Group();
+      const padCenterWx = (startGx + (width - 1) * 0.5) * VOXEL_SIZE;
+      const padCenterWz = (startGz + (depth - 1) * 0.5) * VOXEL_SIZE;
+      const roofTopWy = (topGy - 0.5) * VOXEL_SIZE + 0.03;
+      const ringMat = new THREE.MeshBasicMaterial({ color: 0xf1c40f, side: THREE.DoubleSide });
+      const hMat = new THREE.MeshBasicMaterial({ color: 0xecf0f1 });
+      const padRadius = Math.min(width, depth) * VOXEL_SIZE * 0.32;
+      const padRing = new THREE.Mesh(new THREE.RingGeometry(padRadius * 0.84, padRadius, 24), ringMat);
+      padRing.rotation.x = -Math.PI / 2;
+      padGroup.add(padRing);
+      const barLen = padRadius * 1.05;
+      const barThick = 0.36;
+      for (const sx of [-1, 1]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(barThick, 0.04, barLen), hMat);
+        leg.position.set(sx * (barLen * 0.36), 0.01, 0);
+        padGroup.add(leg);
+      }
+      const cross = new THREE.Mesh(new THREE.BoxGeometry(barLen * 0.75, 0.04, barThick), hMat);
+      cross.position.set(0, 0.01, 0);
+      padGroup.add(cross);
+      padGroup.position.set(padCenterWx, roofTopWy, padCenterWz);
+      this.scene.add(padGroup);
+      if (this._ownedWorldObjects) this._ownedWorldObjects.push(padGroup);
+    } else if (width >= 7 && depth >= 6) {
       addBuildingVoxel(startGx + midX, topGy, startGz + midZ, 'darkConcrete');
       addBuildingVoxel(startGx + midX + 1, topGy, startGz + midZ, 'wood', true);
     }

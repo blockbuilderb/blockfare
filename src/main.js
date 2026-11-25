@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=126';
-import { VehicleManager } from './vehicles.js?v=126';
-import { BotManager } from './bots.js?v=126';
-import { PlayerController } from './player.js?v=126';
-import { NetworkManager } from './network.js?v=126';
-import { UIManager } from './ui.js?v=126';
-import { TelemetryLogger } from './telemetry.js?v=126';
-import { sound } from './audio.js?v=126';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=126';
-import { events, makeEventBridge } from './events.js?v=126';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=126';
+import { VoxelWorld } from './world.js?v=127';
+import { VehicleManager } from './vehicles.js?v=127';
+import { BotManager } from './bots.js?v=127';
+import { PlayerController } from './player.js?v=127';
+import { NetworkManager } from './network.js?v=127';
+import { UIManager } from './ui.js?v=127';
+import { TelemetryLogger } from './telemetry.js?v=127';
+import { sound } from './audio.js?v=127';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=127';
+import { events, makeEventBridge } from './events.js?v=127';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=127';
 
 class BattleBitGame {
   constructor() {

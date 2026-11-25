@@ -67,11 +67,25 @@ Play live in your browser: **[https://blockbuilderb.github.io/blockfare/](https:
 
 ---
 
-## 5. Tanks, APCs, SPAAG AA, Motorcycles & Mounts
+## 4B. Helicopters (`UH-60M` / `Mi-8` Transport & `AH-64E` / `Ka-52` Attack) & Rooftop Insertions
 
 | Key / Input | Action | Notes |
 | :--- | :--- | :--- |
-| **`E`** | Enter / Mount / Exit Vehicle | Boards friendly Tanks, IFVs, Jeeps, FOB Motorcycles/ATVs, Warhorses, or Dino Mounts |
+| **`W` / `S` (Hold)** | Collective Pitch Up / Down | Vertical climb and controlled vertical descent (`0 km/h` hover capable, zero stall!) |
+| **`Mouse Movement`** | Cyclic Pitch & Lateral Bank | Tilts rotor disc forward to accelerate up to `~280–300 km/h`, or pull back to flare into a stationary hover |
+| **`A` / `D`** | Tail-Rotor Pedal Yaw & Lateral Strafe | 360° hover pirouette at low speed and coordinated banked turns at cruise |
+| **`R`** | Toggle Auto-Hover Hold (`HOVER HOLD`) | Locks precision station-keeping (`0 m/s` vertical & horizontal drift) above rooftops or ridges |
+| **`E` (`<= 22m` Above Roof/Ground)** | Rooftop Step-Out / Fast-Rope Insertion | Safely places **Recon Snipers** & squads onto **Downtown FOB C Skyscraper `"H"` Helipads** with zero fall damage! |
+| **`F1` – `F8`** | Multi-Crew Seat Switching | **`UH-60M / Mi-8` (All Classes!)**: `[F1]` Pilot, `[F2/F3]` Twin Door Miniguns, `[F4–F8]` Troop Bench • **`AH-64E / Ka-52`**: `[F1]` Pilot, `[F2]` CPG FLIR Gunner |
+| **`1` / `2` / `3` + `LMB`** | Rotorcraft Weapons | **`AH-64E / Ka-52`**: `[1]` `30mm` Chain Gun, `[2]` `Hydra-70 / S-8` Rockets, `[3]` `AGM-114L Hellfire / 9K121 Vikhr` Lock-On ATGM (2-Hit MBT Buster) |
+
+---
+
+## 5. Tanks, APCs, SPAAG AA, `6×6` Troop Trucks, Motorcycles & Mounts
+
+| Key / Input | Action | Notes |
+| :--- | :--- | :--- |
+| **`E`** | Enter / Mount / Exit Vehicle | Boards friendly Tanks, IFVs, `6×6` Troop Trucks (`10` seats + `<= 14m` Mobile Resupply Aura), Jeeps, Bikes/ATVs, Warhorses, or Dino Mounts |
 | **`W` / `S` / `A` / `D`** | Drive / Gallop & Steer | Progressive engine spool & 1-block obstacle crushing/climbing |
 | **`LMB`** | Fire Main Cannon / Autocannon / Mounted Bow / Jaws | `120/125mm APFSDS` (MBT), `30mm HE` (IFV), `1,050 RPM Proximity Flak` (AA), `9mm SMG` (Bike) |
 | **`Space`** | Secondary Weapon / Boost / Jump | **Tank/IFV**: `7.62mm Coax MG` • **SPAAG AA**: Launch locked SAM • **Bike/ATV**: Wheelie / Nitro Boost • **Warhorse**: Rear/Jump • **T-Rex/Raptor**: Apex Roar / Pounce Leap |

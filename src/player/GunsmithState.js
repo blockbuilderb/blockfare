@@ -7,11 +7,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=126';
-import { sound } from '../audio.js?v=126';
-import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=126';
-import { events } from '../events.js?v=126';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=126';
+} from '../weapons.js?v=127';
+import { sound } from '../audio.js?v=127';
+import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=127';
+import { events } from '../events.js?v=127';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=127';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',
@@ -1630,6 +1630,8 @@ export const GunsmithMethods = {
     const mods = this.getVehicleUpgradeMods ? this.getVehicleUpgradeMods() : {};
     const isAir =
       vehKey === 'wright_flyer' ||
+      vehKey === 'heli_transport' ||
+      vehKey === 'heli_attack' ||
       vehKey === 'cas' ||
       vehKey === 'fighter' ||
       vehKey === 'gunship' ||

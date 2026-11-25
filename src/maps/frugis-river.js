@@ -3,7 +3,7 @@
 // All 5 Forward Operating Bases (A-E) start NEUTRAL (0%) for fair Conquest starts.
 // ============================================================================
 
-import { TERRAIN } from '../config.js?v=126';
+import { TERRAIN } from '../config.js?v=127';
 
 export const FRUGIS_RIVER_MAP = {
   "id": "frugis_river",
@@ -180,15 +180,15 @@ export const FRUGIS_RIVER_MAP = {
     {
       "x": -68,
       "z": 0,
-      "rx": 48,
-      "rz": 64,
+      "rx": 58,
+      "rz": 76,
       "h": 1.25
     },
     {
       "x": 68,
       "z": 0,
-      "rx": 48,
-      "rz": 64,
+      "rx": 58,
+      "rz": 76,
       "h": 1.25
     },
     {
@@ -253,7 +253,7 @@ export const FRUGIS_RIVER_MAP = {
     },
     {
       "id": "C",
-      "name": "OBJ CHARLIE — RIVER CITY BRIDGE PLAZA",
+      "name": "OBJ CHARLIE — DOWNTOWN SKYLINE & BRIDGE PLAZA",
       "x": 0,
       "z": 0,
       "owner": "NEUTRAL",
@@ -572,132 +572,100 @@ export const FRUGIS_RIVER_MAP = {
       "darkConcrete"
     ],
     [
-      -46,
-      -13,
-      7,
-      6,
-      2,
-      "darkConcrete"
-    ],
-    [
-      39,
-      7,
-      7,
-      6,
-      2,
-      "concrete"
-    ],
-    [
-      -49,
-      -22,
-      10,
-      7,
-      4,
-      "darkConcrete"
-    ],
-    [
-      39,
-      -22,
-      10,
-      7,
-      4,
-      "concrete"
-    ],
-    [
-      -48,
-      12,
+      -47,
+      -26,
+      11,
       9,
       7,
-      3,
+      "darkConcrete"
+    ],
+    [
+      -47,
+      15,
+      11,
+      9,
+      6,
+      "concrete"
+    ],
+    [
+      -64,
+      -25,
+      10,
+      8,
+      5,
+      "concrete"
+    ],
+    [
+      -64,
+      15,
+      10,
+      8,
+      5,
+      "darkConcrete"
+    ],
+    [
+      -55,
+      -41,
+      10,
+      8,
+      4,
       "brick"
     ],
     [
-      39,
-      12,
+      -55,
+      31,
+      10,
+      8,
+      4,
+      "brick"
+    ],
+    [
+      37,
+      15,
+      11,
       9,
       7,
-      3,
-      "brick"
-    ],
-    [
-      -47,
-      -5,
-      8,
-      6,
-      2,
-      "concrete"
-    ],
-    [
-      39,
-      -5,
-      8,
-      6,
-      2,
       "darkConcrete"
     ],
     [
-      -47,
-      -34,
-      8,
+      37,
+      -26,
+      11,
+      9,
       6,
-      3,
-      "brick"
-    ],
-    [
-      -47,
-      26,
-      8,
-      6,
-      3,
       "concrete"
     ],
     [
-      39,
-      -34,
+      54,
+      -25,
+      10,
       8,
-      6,
-      3,
-      "brick"
-    ],
-    [
-      39,
-      26,
-      8,
-      6,
-      3,
-      "concrete"
-    ],
-    [
-      -47,
-      26,
-      8,
-      6,
-      2,
+      5,
       "darkConcrete"
     ],
     [
-      39,
-      26,
+      54,
+      15,
+      10,
       8,
-      6,
-      2,
-      "darkConcrete"
-    ],
-    [
-      -47,
-      -34,
-      8,
-      6,
-      2,
+      5,
       "concrete"
     ],
     [
-      39,
-      -34,
+      45,
+      -41,
+      10,
       8,
-      6,
-      2,
-      "concrete"
+      4,
+      "brick"
+    ],
+    [
+      45,
+      31,
+      10,
+      8,
+      4,
+      "brick"
     ],
     [
       252,

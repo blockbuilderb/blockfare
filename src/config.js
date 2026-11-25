@@ -501,6 +501,9 @@ export const VEHICLE_STATS = {
   APC: { maxHp: 1050, speed: 24.0, accelRate: 1.95, brakeRate: 2.8, turnRate: 1.15, minTurnRadiusM: 8.8, maxLatAccelMs2: 9.6, minPitchRad: -0.18, maxPitchRad: 0.52 },
   AA_VEHICLE: { maxHp: 980, speed: 21.5, accelRate: 1.9, brakeRate: 2.7, turnRate: 0.80, minTurnRadiusM: 6.2, maxLatAccelMs2: 9.4, canNeutralPivot: true, minPitchRad: -0.14, maxPitchRad: 1.48 },
   HUMVEE: { maxHp: 700, speed: 27.5, accelRate: 2.55, brakeRate: 3.4, turnRate: 1.45, minTurnRadiusM: 7.5, maxLatAccelMs2: 10.8, minPitchRad: -0.26, maxPitchRad: 1.05 },
+  TRUCK_TRANSPORT: { maxHp: 920, speed: 23.0, accelRate: 1.85, brakeRate: 2.9, turnRate: 1.05, minTurnRadiusM: 9.4, maxLatAccelMs2: 9.0, minPitchRad: -0.22, maxPitchRad: 0.95 },
+  HELI_TRANSPORT: { maxHp: 1750, speed: 54, minSpeed: 0, maxSpeed: 72, accelRate: 3.4, brakeRate: 3.8, turnRate: 1.55, maxTurnAccelMs2: 24.0, dialMaxKmh: 280, serviceCeilingM: 6100 },
+  HELI_ATTACK: { maxHp: 1550, speed: 60, minSpeed: 0, maxSpeed: 78, accelRate: 3.8, brakeRate: 4.0, turnRate: 1.75, maxTurnAccelMs2: 28.0, dialMaxKmh: 300, serviceCeilingM: 6400 },
   PLANE_CAS: { maxHp: 1550, speed: 70, minSpeed: 32, maxSpeed: 104, accelRate: 3.1, brakeRate: 3.4, turnRate: 1.15, maxTurnAccelMs2: 58.0, dialMaxKmh: 440, serviceCeilingM: 13700 },
   PLANE_BOMBER: { maxHp: 1400, speed: 105, minSpeed: 44, maxSpeed: 175, accelRate: 4.2, brakeRate: 3.2, turnRate: 0.88, maxTurnAccelMs2: 48.0, dialMaxKmh: 680, serviceCeilingM: 18300 },
   PLANE_FIGHTER: { maxHp: 1300, speed: 125, minSpeed: 45, maxSpeed: 215, accelRate: 5.8, brakeRate: 3.8, turnRate: 1.02, maxTurnAccelMs2: 64.0, dialMaxKmh: 820, serviceCeilingM: 19800 },
@@ -545,11 +548,15 @@ export const VEHICLE_STATS = {
   RPM_EMPLACE_HMG: 750,
   RPM_EMPLACE_AA: 1100,
   RPM_MORTAR: 24,
+  RPM_HELI_MINIGUN: 1500,
+  RPM_HELI_30MM: 650,
 
   // Respawn delays (seconds) & Faction War-Chest Economy (Crew + Equipment Replacement)
   RESPAWN_DELAY_TANK: 34.0,
   RESPAWN_DELAY_APC: 26.0,
   RESPAWN_DELAY_HUMVEE: 18.0,
+  RESPAWN_DELAY_TRUCK: 20.0,
+  RESPAWN_DELAY_HELI: 34.0,
   RESPAWN_DELAY_PLANE: 42.0,
   RESPAWN_DELAY_B2_SPIRIT: 95.0,
 
@@ -562,17 +569,23 @@ export const VEHICLE_STATS = {
   FACTION_COST_FIGHTER: 900,
   FACTION_COST_GUNSHIP: 1200,
   FACTION_COST_B2_SPIRIT: 2500,
+  FACTION_COST_HELI_TRANSPORT: 700,
+  FACTION_COST_HELI_ATTACK: 1150,
   FACTION_COST_TANK: 1300,
   FACTION_COST_APC: 800,
   FACTION_COST_AA: 850,
   FACTION_COST_CAR: 350,
+  FACTION_COST_TRUCK: 250,
   B2_UNLOCK_KILLS: 25,
 
   // Ticket costs (Trained Crew Personnel + Expensive Military Hardware)
+  TICKET_COST_TRUCK: 6,
   TICKET_COST_HUMVEE: 8,
   TICKET_COST_APC: 16,
   TICKET_COST_AA: 16,
+  TICKET_COST_HELI_TRANSPORT: 18,
   TICKET_COST_TANK: 24,
+  TICKET_COST_HELI_ATTACK: 26,
   TICKET_COST_PLANE: 30,
   TICKET_COST_GUNSHIP: 34,
   TICKET_COST_B2_SPIRIT: 45,
@@ -609,6 +622,8 @@ export const VEHICLE_STATS = {
   AIRSPACE_DEFAULT_ALT: 220,
   SERVICE_CEILINGS: {
     wright_flyer: 2400,  // Barnstorming biplane unpressurized open-frame ceiling (~7,870 ft)
+    heli_transport: 6100,// UH-60M Black Hawk / Mi-8AMTSh utility rotorcraft ceiling (~20,000 ft)
+    heli_attack: 6400,   // AH-64E Apache Longbow / Ka-52 Alligator attack rotorcraft ceiling (~21,000 ft)
     gunship: 9100,       // AC-130J / Tu-95MS pressurized turboprop ceiling (30,000 ft)
     cas: 13700,          // A-10C Thunderbolt II / Su-25SM service ceiling (45,000 ft)
     b2_spirit: 15240,    // Northrop B-2A Spirit high-altitude stealth cruise ceiling (50,000 ft)
@@ -678,9 +693,12 @@ export const ECONOMY = {
     foot: 0,
     bike: 100,
     atv: 150,
+    truck_transport: 300,
     car: 450,
+    heli_transport: 750,
     apc: 850,
     aa: 950,
+    heli_attack: 1250,
     tank: 1400,
     wright_flyer: 300,
     cas: 1100,
@@ -694,9 +712,12 @@ export const ECONOMY = {
     foot: 0,
     bike: 0,
     atv: 0,
+    truck_transport: 0,
     car: 50,
+    heli_transport: 75,
     apc: 100,
     aa: 100,
+    heli_attack: 125,
     tank: 150,
     wright_flyer: 0,
     cas: 125,
@@ -710,9 +731,12 @@ export const ECONOMY = {
     foot: 0,
     bike: 20,
     atv: 25,
+    truck_transport: 25,
     car: 25,
+    heli_transport: 40,
     apc: 40,
     aa: 45,
+    heli_attack: 55,
     tank: 65,
     wright_flyer: 25,
     cas: 50,

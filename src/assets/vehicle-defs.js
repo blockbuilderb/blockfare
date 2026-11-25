@@ -4,7 +4,7 @@
 // Positions stored as arrays [x, y, z] — y is computed at runtime via getGroundHeightAt.
 // =========================================================================
 
-import { VEHICLE_STATS } from '../config.js?v=126';
+import { VEHICLE_STATS } from '../config.js?v=127';
 
 export const VEHICLE_DEFS = [
   // ===================== US FLEET (Open Motor Pool Apron aligned with 28m Main Gate at x = -904..-884, z = -10..+10) =====================
@@ -342,6 +342,176 @@ export const VEHICLE_DEFS = [
     weaponType: 'hmg',
     rpm: 850,
     patrolPoints: [[620, 0, -18]]
+  },
+
+  // ===================== 6×6 TROOP TRANSPORT & LOGISTICS CONVOY TRUCKS (10 SEATS + MOBILE RESUPPLY • $0 FREE AT HQ) =====================
+  {
+    id: 'us_truck_1',
+    name: 'M1083A1 MTV 6×6 TROOP & LOGISTICS TRUCK (10 SEATS + RESUPPLY)',
+    type: 'truck_transport',
+    isLogisticsTruck: true,
+    team: 'US',
+    spawnPos: [-1490, 0, -18],
+    spawnYaw: -Math.PI / 2,
+    maxHp: VEHICLE_STATS.TRUCK_TRANSPORT.maxHp,
+    speed: VEHICLE_STATS.TRUCK_TRANSPORT.speed,
+    weaponType: 'hmg',
+    rpm: 650,
+    patrolPoints: [
+      [-660, 0, -245],
+      [-320, 0, 285],
+      [-58, 0, 0]
+    ]
+  },
+  {
+    id: 'us_truck_2',
+    name: 'M1083A1 MTV 6×6 ASSAULT TRANSPORT TRUCK (10 SEATS + RESUPPLY)',
+    type: 'truck_transport',
+    isLogisticsTruck: true,
+    team: 'US',
+    spawnPos: [-1490, 0, 18],
+    spawnYaw: -Math.PI / 2,
+    maxHp: VEHICLE_STATS.TRUCK_TRANSPORT.maxHp,
+    speed: VEHICLE_STATS.TRUCK_TRANSPORT.speed,
+    weaponType: 'hmg',
+    rpm: 650,
+    patrolPoints: [
+      [-620, 0, 16],
+      [-320, 0, 290],
+      [-62, 0, 4]
+    ]
+  },
+  {
+    id: 'ru_truck_1',
+    name: 'KAMAZ-5350 MUSTANG 6×6 TROOP & LOGISTICS TRUCK (10 SEATS + RESUPPLY)',
+    type: 'truck_transport',
+    isLogisticsTruck: true,
+    team: 'RU',
+    spawnPos: [1490, 0, 18],
+    spawnYaw: Math.PI / 2,
+    maxHp: VEHICLE_STATS.TRUCK_TRANSPORT.maxHp,
+    speed: VEHICLE_STATS.TRUCK_TRANSPORT.speed,
+    weaponType: 'hmg',
+    rpm: 650,
+    patrolPoints: [
+      [660, 0, 245],
+      [330, 0, -285],
+      [58, 0, 0]
+    ]
+  },
+  {
+    id: 'ru_truck_2',
+    name: 'URAL-4320 6×6 ASSAULT TRANSPORT TRUCK (10 SEATS + RESUPPLY)',
+    type: 'truck_transport',
+    isLogisticsTruck: true,
+    team: 'RU',
+    spawnPos: [1490, 0, -18],
+    spawnYaw: Math.PI / 2,
+    maxHp: VEHICLE_STATS.TRUCK_TRANSPORT.maxHp,
+    speed: VEHICLE_STATS.TRUCK_TRANSPORT.speed,
+    weaponType: 'hmg',
+    rpm: 650,
+    patrolPoints: [
+      [620, 0, -16],
+      [330, 0, -290],
+      [62, 0, -4]
+    ]
+  },
+
+  // ===================== MAIN BASE HQ ROTORCRAFT HELIPADS (TRANSPORT BLACK HAWK / MI-8 + ATTACK APACHE / KA-52) =====================
+  {
+    id: 'us_uh60_transport',
+    name: 'UH-60M BLACK HAWK ASSAULT TRANSPORT (8 SEATS • TWIN M134 MINIGUNS)',
+    type: 'plane',
+    isAircraft: true,
+    isHelicopter: true,
+    aircraftRole: 'heli_transport',
+    team: 'US',
+    spawnPos: [-1504, 0, -44],
+    spawnYaw: -Math.PI / 2,
+    maxHp: VEHICLE_STATS.HELI_TRANSPORT.maxHp,
+    speed: VEHICLE_STATS.HELI_TRANSPORT.speed,
+    minSpeed: 0,
+    maxSpeed: VEHICLE_STATS.HELI_TRANSPORT.maxSpeed,
+    weaponType: 'heli_minigun',
+    rpm: VEHICLE_STATS.RPM_HELI_MINIGUN,
+    coaxRpm: 180,
+    patrolPoints: [
+      [-660, 68, -280],
+      [-52, 58, 0],
+      [-320, 65, 320]
+    ]
+  },
+  {
+    id: 'us_ah64_apache',
+    name: 'AH-64E APACHE LONGBOW ATTACK HELI (30MM M230 + HYDRA + 8× HELLFIRE ATGM)',
+    type: 'plane',
+    isAircraft: true,
+    isHelicopter: true,
+    aircraftRole: 'heli_attack',
+    team: 'US',
+    spawnPos: [-1504, 0, 44],
+    spawnYaw: -Math.PI / 2,
+    maxHp: VEHICLE_STATS.HELI_ATTACK.maxHp,
+    speed: VEHICLE_STATS.HELI_ATTACK.speed,
+    minSpeed: 0,
+    maxSpeed: VEHICLE_STATS.HELI_ATTACK.maxSpeed,
+    weaponType: 'heli_attack',
+    rpm: VEHICLE_STATS.RPM_HELI_30MM,
+    coaxRpm: 210,
+    patrolPoints: [
+      [-480, 74, -220],
+      [0, 72, -120],
+      [-280, 75, 260],
+      [180, 74, 120]
+    ]
+  },
+  {
+    id: 'ru_mi8_transport',
+    name: 'MI-8AMTSH TERMINATOR TRANSPORT HELI (8 SEATS • PKT DOOR GUNS + S-8)',
+    type: 'plane',
+    isAircraft: true,
+    isHelicopter: true,
+    aircraftRole: 'heli_transport',
+    team: 'RU',
+    spawnPos: [1504, 0, 44],
+    spawnYaw: Math.PI / 2,
+    maxHp: VEHICLE_STATS.HELI_TRANSPORT.maxHp,
+    speed: VEHICLE_STATS.HELI_TRANSPORT.speed,
+    minSpeed: 0,
+    maxSpeed: VEHICLE_STATS.HELI_TRANSPORT.maxSpeed,
+    weaponType: 'heli_minigun',
+    rpm: VEHICLE_STATS.RPM_HELI_MINIGUN,
+    coaxRpm: 180,
+    patrolPoints: [
+      [660, 68, 280],
+      [52, 58, 0],
+      [330, 65, -320]
+    ]
+  },
+  {
+    id: 'ru_ka52_alligator',
+    name: 'KA-52 ALLIGATOR COAXIAL ATTACK HELI (30MM 2A42 + S-8 + 8× VIKHR ATGM)',
+    type: 'plane',
+    isAircraft: true,
+    isHelicopter: true,
+    aircraftRole: 'heli_attack',
+    team: 'RU',
+    spawnPos: [1504, 0, -44],
+    spawnYaw: Math.PI / 2,
+    maxHp: VEHICLE_STATS.HELI_ATTACK.maxHp,
+    speed: VEHICLE_STATS.HELI_ATTACK.speed,
+    minSpeed: 0,
+    maxSpeed: VEHICLE_STATS.HELI_ATTACK.maxSpeed,
+    weaponType: 'heli_attack',
+    rpm: VEHICLE_STATS.RPM_HELI_30MM,
+    coaxRpm: 210,
+    patrolPoints: [
+      [480, 74, 220],
+      [0, 72, 120],
+      [280, 75, -260],
+      [-180, 74, -120]
+    ]
   },
 
   // ===================== US & RU COMBAT AIRCRAFT WINGS (PARKED ON OUTER SIDE APRON z = ∓138: BIGGEST IN BACK -> FASTEST IN FRONT!) =====================

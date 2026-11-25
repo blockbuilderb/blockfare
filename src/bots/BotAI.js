@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=126';
-import { BOT } from '../config.js?v=126';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=126';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=126';
-import { events } from '../events.js?v=126';
+import { sound } from '../audio.js?v=127';
+import { BOT } from '../config.js?v=127';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=127';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=127';
+import { events } from '../events.js?v=127';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -582,7 +582,9 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     if (bot.ridingVehicle) {
       if (
         bot.ridingVehicle.dead ||
-        !bot.ridingVehicle.driver ||
+        (!bot.ridingVehicle.driver &&
+          !bot.ridingVehicle.npcDriver &&
+          !bot.ridingVehicle.aiPilotActive) ||
         !Array.isArray(bot.ridingVehicle.aiPassengers) ||
         !bot.ridingVehicle.aiPassengers.includes(bot)
       ) {

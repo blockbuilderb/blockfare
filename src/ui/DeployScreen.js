@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=126';
-import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=126';
-import { events } from '../events.js?v=126';
+import { SQUAD_DEFS } from '../bots.js?v=127';
+import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=127';
+import { events } from '../events.js?v=127';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=126';
+} from '../core/StateMachines.js?v=127';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=126';
+} from '../utils/KeyboardShortcuts.js?v=127';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -56,7 +56,7 @@ export const DeployScreen = {
                 this._deployVehDrawerOpen = true;
               }
             } else if (this.selectedClass === 'pilot') {
-              const prefAir = ['fighter', 'cas', 'gunship'].find((k) =>
+              const prefAir = ['fighter', 'cas', 'heli_attack', 'heli_transport', 'gunship'].find((k) =>
                 this.vehicleManager.findAvailableBaseVehicle(tm, k)
               );
               if (prefAir) {
@@ -1483,7 +1483,7 @@ export const DeployScreen = {
         : {
             A: 'OBJ A (WEST TOWN)',
             B: 'OBJ B (CONTAINERS)',
-            C: 'OBJ C (RIVER CITY)',
+            C: 'OBJ C (DOWNTOWN)',
             D: 'OBJ D (RADAR HILL)',
             E: 'OBJ E (INDUSTRIAL)'
           };
@@ -1857,6 +1857,8 @@ export const DeployScreen = {
         this.player.enterVehicle?.(freeHqVeh, true);
       } else if (
         reqVehKey === 'wright_flyer' ||
+        reqVehKey === 'heli_transport' ||
+        reqVehKey === 'heli_attack' ||
         reqVehKey === 'cas' ||
         reqVehKey === 'fighter' ||
         reqVehKey === 'gunship' ||
@@ -1869,6 +1871,7 @@ export const DeployScreen = {
           this.player.enterVehicle?.(res.vehicle, true);
         }
       } else if (
+        reqVehKey === 'truck_transport' ||
         reqVehKey === 'car' ||
         reqVehKey === 'apc' ||
         reqVehKey === 'aa' ||

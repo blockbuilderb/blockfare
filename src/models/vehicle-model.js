@@ -10,13 +10,14 @@ import {
   buildHumveeModel,
   buildApcModel,
   buildSpaagModel
-} from './armor-models.js?v=126';
+} from './armor-models.js?v=127';
 import {
   buildCasAircraftWingAndTail,
   buildBomberAircraftWingAndTail,
   buildEmplacementModel,
   buildDinoMountModel
-} from './air-emplacement-models.js?v=126';
+} from './air-emplacement-models.js?v=127';
+import { buildHelicopterModel, buildTroopTruckModel } from './heli-truck-models.js?v=127';
 
 // ─── SHARED VEHICLE GEOMETRY & WHEEL MERGE CACHES (userData.shared = true) ───
 const _vehGeoCache = new Map();
@@ -564,6 +565,14 @@ export function createVehicleMesh(cfg) {
     ({ barrelGroup } = buildTankModel(modelCtx));
   } else if (cfg.type === 'humvee') {
     ({ barrelGroup } = buildHumveeModel(modelCtx));
+  } else if (cfg.type === 'truck_transport') {
+    ({ barrelGroup } = buildTroopTruckModel(modelCtx));
+  } else if (
+    cfg.isHelicopter ||
+    cfg.aircraftRole === 'heli_transport' ||
+    cfg.aircraftRole === 'heli_attack'
+  ) {
+    ({ barrelGroup } = buildHelicopterModel(modelCtx));
   } else if (cfg.type === 'plane' || cfg.isAircraft) {
     // =========================================================================
     // 3D COMBAT AIRCRAFT MODELS (Nose points along -Z to match flight vector):
@@ -3059,6 +3068,9 @@ export function createVehicleMesh(cfg) {
       for (let i = 0; i < ud.winchWheels.length; i++) dynamicNodes.add(ud.winchWheels[i]);
     }
     if (ud.headNeckGroup) dynamicNodes.add(ud.headNeckGroup);
+    if (ud.mainRotorHub) dynamicNodes.add(ud.mainRotorHub);
+    if (ud.coaxUpperRotorHub) dynamicNodes.add(ud.coaxUpperRotorHub);
+    if (ud.tailRotorHub) dynamicNodes.add(ud.tailRotorHub);
   }
 
   group.traverse((child) => {

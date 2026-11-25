@@ -1,14 +1,14 @@
 import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { sound } from '../src/audio.js?v=126';
-import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=126';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=126';
-import { VehicleManager } from '../src/vehicles.js?v=126';
-import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=126';
-import { createVehicleMesh } from '../src/models/vehicle-model.js?v=126';
-import { BotManager, SQUAD_DEFS } from '../src/bots/BotManager.js?v=126';
-import { SQUAD_KIT_CAPS } from '../src/config.js?v=126';
+import { sound } from '../src/audio.js?v=127';
+import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=127';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=127';
+import { VehicleManager } from '../src/vehicles.js?v=127';
+import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=127';
+import { createVehicleMesh } from '../src/models/vehicle-model.js?v=127';
+import { BotManager, SQUAD_DEFS } from '../src/bots/BotManager.js?v=127';
+import { SQUAD_KIT_CAPS } from '../src/config.js?v=127';
 
 let createdWindowShim = false;
 let prevMuted = false;
@@ -1534,3 +1534,219 @@ test('v125.1 Real-World Doctrine: AC-130 105mm HE immobilizes MBT (~4-5 hits) & 
     );
     assert.ok(casCruiseR < f15CornerR && f15CornerR < f15AfterburnerR && f15CornerR < b2CruiseR);
   });
+
+// ============================================================================
+// v127: Transport & Attack Helicopters, 6x6 Troop Convoy Trucks, Rooftop Sniper
+//       Fast-Rope Insertions & Downtown FOB C High-Rise Skyline
+// ============================================================================
+test('v127.1 Helicopters (UH-60M/Mi-8 Transport & AH-64E/Ka-52 Attack) + 6x6 Troop Trucks: models, seats, Recon access, AI convoys & 2-hit Hellfire/Vikhr ATGM', async () => {
+  const { FRUGIS_RIVER_MAP } = await import('../src/maps/frugis-river.js?v=127');
+  const scene = new THREE.Scene();
+  const contestedFlagC = {
+    id: 'C',
+    name: 'OBJ CHARLIE — DOWNTOWN SKYLINE & BRIDGE PLAZA',
+    owner: 'NEUTRAL',
+    contested: true,
+    pos: new THREE.Vector3(-2, 0, 12),
+    radius: 36
+  };
+  const world = {
+    era: 'modern',
+    projectiles: [],
+    voxels: new Map(),
+    key: (gx, gy, gz) => `${gx},${gy},${gz}`,
+    getGroundHeightAt: () => 0,
+    worldToGrid: (x, y, z) => ({
+      gx: Math.floor(x / 1.25),
+      gy: Math.floor(y / 1.25),
+      gz: Math.floor(z / 1.25)
+    }),
+    getVoxel: () => 0,
+    spawnDebris: () => {},
+    spawnExplosionVisual: () => {},
+    flags: [contestedFlagC]
+  };
+  const vm = new VehicleManager(scene, world);
+
+  const usTransHeli = vm.vehicles.find((v) => v.team === 'US' && v.aircraftRole === 'heli_transport');
+  const ruTransHeli = vm.vehicles.find((v) => v.team === 'RU' && v.aircraftRole === 'heli_transport');
+  const usAtkHeli = vm.vehicles.find((v) => v.team === 'US' && v.aircraftRole === 'heli_attack');
+  const ruAtkHeli = vm.vehicles.find((v) => v.team === 'RU' && v.aircraftRole === 'heli_attack');
+  const usTruck = vm.vehicles.find((v) => v.team === 'US' && v.type === 'truck_transport');
+  const ruTruck = vm.vehicles.find((v) => v.team === 'RU' && v.type === 'truck_transport');
+
+  assert.ok(usTransHeli && ruTransHeli, 'Both US UH-60M and RU Mi-8AMTSh transport helicopters spawn at Main Base HQ');
+  assert.ok(usAtkHeli && ruAtkHeli, 'Both US AH-64E Apache and RU Ka-52 Alligator attack helicopters spawn at Main Base HQ');
+  assert.ok(usTruck && ruTruck, 'Both US M1083A1 and RU KamAZ-5350 6x6 troop trucks spawn at Main Base HQ');
+
+  // Seat capacities & 3D rotor hubs
+  assert.equal(usTransHeli.seatNames.length, 8, 'UH-60M / Mi-8 transport helicopter must have 8 seats (Pilot, 2 Door Gunners, 5 Troops)');
+  assert.equal(usTransHeli.crewSeats.length, 8);
+  assert.equal(usAtkHeli.seatNames.length, 2, 'AH-64E / Ka-52 attack helicopter must have 2 tandem/side-by-side crew seats');
+  assert.equal(usTruck.seatNames.length, 10, '6x6 troop transport truck must have 10 seats (Driver, Co-Driver, 8 Rear Bench)');
+  assert.ok(
+    usTransHeli.mesh.userData?.mainRotorHub && usTransHeli.mesh.userData?.tailRotorHub,
+    'UH-60M has main + tail rotor hubs'
+  );
+  assert.ok(
+    ruAtkHeli.mesh.userData?.mainRotorHub && ruAtkHeli.mesh.userData?.coaxUpperRotorHub,
+    'Ka-52 Alligator has coaxial counter-rotating rotor hubs'
+  );
+
+  // Recon Sniper can order/fly Transport Helicopter AND request 6x6 Troop Truck even with strict Squad Doctrine ON!
+  const reconSniper = {
+    team: 'US',
+    role: 'recon',
+    canFlyAircraft: false,
+    squadDoctrineEnabled: true,
+    pos: new THREE.Vector3(-1500, 0, -40),
+    yaw: 0,
+    payForVehicleRequisition: () => ({ ok: true, cost: 750, useStock: true }),
+    getVehicleUpgradeMods: () => ({})
+  };
+  const heliOrderRes = vm.orderPlayerAircraft(reconSniper, 'heli_transport');
+  assert.equal(heliOrderRes.ok, true, 'Recon Sniper must be allowed to fly/order Transport Helicopter with Doctrine ON');
+  const atkBlockedRes = vm.orderPlayerAircraft(reconSniper, 'heli_attack');
+  assert.equal(atkBlockedRes.ok, false, 'Dedicated Attack Helicopter still requires Combat Pilot license when Doctrine ON');
+  const truckOrderRes = vm.requestPlayerArmorVehicle(reconSniper, 'truck_transport');
+  assert.equal(truckOrderRes.ok, true, 'Infantry/Recon must be allowed to request 6x6 Troop Truck with Doctrine ON');
+
+  // Hellfire / Vikhr ATGM is a true 2-hit MBT Tank-Buster
+  const ruTank = vm.vehicles.find((v) => v.type === 'tank' && v.team === 'RU');
+  assert.ok(ruTank);
+  ruTank.hp = 2100;
+  ruTank.maxHp = 2100;
+  ruTank.eraBlocksIntact = 4;
+  const apachePos = new THREE.Vector3(ruTank.pos.x - 180, 95, ruTank.pos.z);
+  assert.equal(
+    vm.damageVehicle(ruTank, 1180, 'APACHE_1', 'US', 'AGM-114L HELLFIRE ATGM', null, null, apachePos),
+    false,
+    '1st AGM-114L Hellfire leaves 2100 HP MBT crippled with 1 hit to go'
+  );
+  assert.equal(
+    vm.damageVehicle(ruTank, 1180, 'APACHE_1', 'US', 'AGM-114L HELLFIRE ATGM', null, null, apachePos),
+    true,
+    '2nd AGM-114L Hellfire destroys 2100 HP MBT'
+  );
+
+  // AI Infantry Convoy Boarding at HQ & Auto-Disembark near Contested Downtown FOB C!
+  const driverBot = {
+    id: 'us_convoy_drv',
+    name: 'CPL_DRIVER',
+    team: 'US',
+    role: 'ASSAULT',
+    squad: 'ALPHA',
+    dead: false,
+    downed: false,
+    pos: usTruck.pos.clone(),
+    mesh: new THREE.Group()
+  };
+  const squadRiders = Array.from({ length: 4 }, (_, idx) => ({
+    id: `us_rider_${idx}`,
+    name: `PVT_RIDER_${idx}`,
+    team: 'US',
+    role: idx === 0 ? 'RECON' : 'MEDIC',
+    squad: 'ALPHA',
+    dead: false,
+    downed: false,
+    drivingVehicle: null,
+    ridingVehicle: null,
+    pos: usTruck.pos.clone().add(new THREE.Vector3(3 + idx, 0, 2)),
+    mesh: new THREE.Group(),
+    resupplyTimer: 0
+  }));
+  usTruck.npcDriver = driverBot;
+  driverBot.drivingVehicle = usTruck;
+  const mockBm = { bots: [driverBot, ...squadRiders] };
+
+  vm.update(0.25, null, mockBm, false);
+  assert.equal(usTruck.aiPassengers.length, 4, 'Nearby friendly infantry bots automatically board 6x6 convoy truck at HQ');
+  assert.equal(squadRiders[0].ridingVehicle, usTruck);
+  assert.equal(squadRiders[0].mesh.visible, false);
+
+  // Drive truck within 38m of contested Downtown Objective C -> AI squad automatically disembarks!
+  usTruck.pos.set(-34, 0, 10);
+  vm.update(0.25, null, mockBm, false);
+  assert.equal(usTruck.aiPassengers.length, 0, 'AI squad automatically disembarks 6x6 truck within 52m of contested flag');
+  assert.equal(squadRiders[0].ridingVehicle, null);
+  assert.equal(squadRiders[0].mesh.visible, true);
+
+  // Downtown FOB C Skyline check: >= 10 high-rise towers (floors >= 4, including 7-story pinnacle towers) & clear (0,0) bridge boulevard
+  const downtownHighRises = FRUGIS_RIVER_MAP.buildings.filter(
+    (b) => Math.abs(b[0]) <= 70 && Math.abs(b[1]) <= 55 && b[4] >= 4
+  );
+  const sevenStoryTowers = downtownHighRises.filter((b) => b[4] >= 7);
+  assert.ok(downtownHighRises.length >= 10, `Expected >=10 Downtown FOB C high-rises, got ${downtownHighRises.length}`);
+  assert.ok(sevenStoryTowers.length >= 2, 'Downtown FOB C must include 7-story (~35m) sniper & helipad pinnacle towers');
+});
+
+test('v127.2 Helicopter 3D Collective/Hover Physics, Zero Stall & Safe Rooftop Sniper Insertion on 35m Skyscraper', () => {
+  const roofHeightM = 35.0; // 7-story Downtown FOB C skyscraper roof with "H" helipad
+  const { pilot, vehicle } = createPilotOrdnanceHarness({
+    aircraftRole: 'heli_transport',
+    pos: new THREE.Vector3(-52, 0, -28),
+    forwardSpeed: 0,
+    gunshipOrbit: false
+  });
+  vehicle.isHelicopter = true;
+  vehicle.minSpeed = 0;
+  vehicle.liftoffSpeed = 0;
+  vehicle.speed = 65;
+  vehicle.maxSpeed = 79;
+  vehicle.heliHoverHold = false;
+  vehicle.heliVertVel = 0;
+  vehicle.velVector = new THREE.Vector3();
+
+  // 1.Helicopter never triggers fixed-wing runway takeoff/landing guide ribbons
+  assert.equal(pilot.getRunwayAssistEligibility(vehicle), null, 'Helicopters must never show fixed-wing runway ILS trails');
+
+  // 2. Collective climb [W] straight up from 0 km/h stationary hover with ZERO aerodynamic stall!
+  vehicle.pos.set(0, 0, 0);
+  pilot.getAircraftObstacleHeightAt = (wx, wz) =>
+    Math.abs(wx - -52) <= 7 && Math.abs(wz - -28) <= 6 ? roofHeightM : 0;
+  pilot.keys.KeyW = true;
+  for (let i = 0; i < 60; i++) {
+    pilot.updateAircraftControl(1 / 60, vehicle);
+  }
+  pilot.keys.KeyW = false;
+  assert.ok(vehicle.pos.y > 7.5, `Helicopter [W] collective must climb vertically from 0 km/h (got y=${vehicle.pos.y.toFixed(2)}m)`);
+  assert.equal(vehicle.isStalling, false, 'Helicopter must never enter fixed-wing aerodynamic stall at 0 km/h');
+
+  // 3. [R] engages Auto-Hover Hold (`HOVER_HOLD`) in mid-air
+  const rMode = pilot.handleAircraftRKey();
+  assert.equal(rMode, 'HOVER_HOLD');
+  assert.equal(vehicle.heliHoverHold, true);
+
+  // 4. Position above the 35m Downtown Skyscraper Rooftop Helipad (-52, 38.5, -28), release Hover Hold & descend [S] onto solid roof!
+  pilot.handleAircraftRKey(); // Toggle Hover Hold OFF
+  assert.equal(vehicle.heliHoverHold, false);
+  vehicle.pos.set(-52, roofHeightM + 3.2, -28);
+  vehicle.heliVertVel = -2.0;
+  pilot.keys.KeyS = true;
+  for (let i = 0; i < 90; i++) {
+    pilot.updateAircraftControl(1 / 60, vehicle);
+  }
+  pilot.keys.KeyS = false;
+  assert.equal(vehicle.dead, false, 'Helicopter must touch down gently on 35m skyscraper helipad without crashing');
+  assert.ok(
+    Math.abs(vehicle.pos.y - roofHeightM) < 0.25,
+    `Helicopter skids must rest solidly on the 35m skyscraper roof (got y=${vehicle.pos.y.toFixed(2)}m)`
+  );
+
+  // 5. Recon Sniper presses [E] on/above the 35m skyscraper roof -> steps safely onto the roof (NO parachute eject, 0 fall velocity)!
+  pilot.vel = new THREE.Vector3(0, -12, 0);
+  pilot.parachuting = false;
+  let ejectedWithChute = false;
+  pilot.activateParachuteEject = () => {
+    ejectedWithChute = true;
+    pilot.parachuting = true;
+  };
+  pilot.handleVehicleAndDragKey();
+  assert.equal(pilot.activeVehicle, null, 'Sniper exits transport helicopter');
+  assert.equal(ejectedWithChute, false, 'Exiting on/above skyscraper roof (<=22m clearance) must NOT parachute-eject away from roof');
+  assert.ok(
+    pilot.pos.y >= roofHeightM,
+    `Sniper must stand safely on top of the 35m skyscraper roof (got y=${pilot.pos.y.toFixed(2)}m)`
+  );
+  assert.equal(pilot.vel.y, 0, 'Rooftop step-out / fast-rope insertion sets vertical velocity to 0 for zero fall damage');
+});

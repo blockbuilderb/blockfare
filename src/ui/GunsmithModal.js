@@ -6,18 +6,18 @@ import {
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from '../weapons.js?v=126';
-import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=126';
-import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=126';
-import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=126';
-import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=126';
-import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=126';
-import { sound } from '../audio.js?v=126';
+} from '../weapons.js?v=127';
+import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=127';
+import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=127';
+import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=127';
+import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=127';
+import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=127';
+import { sound } from '../audio.js?v=127';
 import {
   ARMORY_CASE_STATES,
   ARMORY_CASE_EVENTS,
   createArmoryCaseRouletteFSM
-} from '../core/StateMachines.js?v=126';
+} from '../core/StateMachines.js?v=127';
 
 export const GunsmithModal = {
   formatCashAmount(val) {
@@ -105,6 +105,18 @@ export const GunsmithModal = {
     const options = isPilot
       ? [
           { key: 'foot', icon: '🥾', label: 'ON FOOT', sub: 'Runway PDW' },
+          {
+            key: 'heli_transport',
+            icon: '🚁',
+            label: isRU ? 'MI-8 TERMINATOR' : 'UH-60 BLACK HAWK',
+            sub: '8-Seat Rooftop'
+          },
+          {
+            key: 'heli_attack',
+            icon: '🚁',
+            label: isRU ? 'KA-52 ALLIGATOR' : 'AH-64E APACHE',
+            sub: isRU ? '30mm + Vikhr ATGM' : '30mm + Hellfire'
+          },
           { key: 'wright_flyer', icon: '🪁', label: isRU ? '1913 MUROMETS' : '1903 FLYER', sub: 'Light Scout' },
           { key: 'cas', icon: '🐗', label: isRU ? 'SU-25SM CAS' : 'A-10C WARTHOG', sub: '30mm + Rockets' },
           { key: 'fighter', icon: '✈️', label: isRU ? 'SU-57 FELON' : 'F-15EX EAGLE', sub: 'FOX-3 + JDAM' },
@@ -120,6 +132,12 @@ export const GunsmithModal = {
       : isArmor
       ? [
           { key: 'foot', icon: '🥾', label: 'ON FOOT', sub: 'Crew PDW + RPG' },
+          {
+            key: 'truck_transport',
+            icon: '🚚',
+            label: isRU ? 'KAMAZ 6×6 TRUCK' : 'MTV 6×6 TRUCK',
+            sub: '10-Seat + Supply'
+          },
           { key: 'car', icon: '🚙', label: isRU ? 'GAZ TIGR HMG' : 'HUMVEE .50', sub: 'Fast Armored' },
           { key: 'apc', icon: '🛡️', label: isRU ? 'BTR-82A IFV' : 'LAV-25 IFV', sub: '30mm Autocannon' },
           { key: 'aa', icon: '🎯', label: isRU ? 'TUNGUSKA AA' : 'LAV-AD SPAAG', sub: 'Rotary + SAM' },
@@ -128,7 +146,19 @@ export const GunsmithModal = {
       : [
           { key: 'foot', icon: '🥾', label: 'ON FOOT', sub: 'Standard Kit' },
           { key: 'bike', icon: '🏍️', label: 'DIRT BIKE', sub: 'M1030M1 Enduro' },
-          { key: 'atv', icon: '🛞', label: '4×4 QUAD ATV', sub: 'Polaris MV850' }
+          { key: 'atv', icon: '🛞', label: '4×4 QUAD ATV', sub: 'Polaris MV850' },
+          {
+            key: 'truck_transport',
+            icon: '🚚',
+            label: isRU ? 'KAMAZ 6×6 TRUCK' : 'MTV 6×6 TRUCK',
+            sub: '10-Seat + Supply'
+          },
+          {
+            key: 'heli_transport',
+            icon: '🚁',
+            label: isRU ? 'MI-8 TRANSPORT' : 'UH-60 BLACK HAWK',
+            sub: '8-Seat Rooftop'
+          }
         ];
 
     const validKeys = options.map((o) => o.key);
@@ -159,12 +189,12 @@ export const GunsmithModal = {
       Boolean(this.vehicleManager?.findAvailableBaseVehicle?.(team, curOpt.key));
     const curQuote = this.player.getVehicleRequisitionQuote?.(curOpt.key) || { totalCost: 0 };
     const isExpanded = Boolean(this._deployVehDrawerOpen);
-    const catTag = isPilot ? '✈️ AIRCRAFT' : isArmor ? '🛡️ ARMOR' : '🏍️ TRANSPORT';
+    const catTag = isPilot ? '✈️ AIR & HELIS' : isArmor ? '🛡️ ARMOR & CONVOY' : '🚁 TRANSPORT & AIRLIFT';
     const expandHint = isPilot
-      ? 'FLYER / A-10 / F-15 / AC-130 / B-2'
+      ? 'APACHE / BLACK HAWK / A-10 / F-15 / AC-130 / B-2'
       : isArmor
-      ? 'HUMVEE / IFV / SPAAG AA / TANK'
-      : 'DIRT BIKE / 4×4 QUAD ATV';
+      ? '6×6 TRUCK / HUMVEE / IFV / SPAAG AA / TANK'
+      : 'BIKE / ATV / 6×6 TROOP TRUCK / BLACK HAWK';
 
     const sampleCheckKey = isPilot ? 'cas' : isArmor ? 'tank' : 'bike';
     const hasAnyPaidMods = Boolean(this.player.hasModdedVehicleLoadout?.(sampleCheckKey));

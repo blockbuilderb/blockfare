@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=126';
+import { sound } from '../audio.js?v=127';
 import {
   PLAYER,
   COMBAT,
@@ -8,10 +8,10 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=126';
-import { events } from '../events.js?v=126';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=126';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=126';
+} from '../config.js?v=127';
+import { events } from '../events.js?v=127';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=127';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=127';
 
 function markShared(asset) {
   if (asset) {

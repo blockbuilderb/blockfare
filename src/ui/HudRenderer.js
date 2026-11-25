@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=126';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=126';
+import { UI, getEraRoles } from '../config.js?v=127';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=127';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -108,7 +108,9 @@ export const HudRenderer = {
 
     const defaultTab =
       initialTab ||
-      (this.player?.activeVehicle?.aircraftRole === 'gunship'
+      (this.player?.activeVehicle?.isHelicopter || this.player?.activeVehicle?.type === 'truck_transport'
+        ? 'heli'
+        : this.player?.activeVehicle?.aircraftRole === 'gunship'
         ? 'ac130'
         : this.player?.activeVehicle?.isAircraft
         ? 'jets'
@@ -229,6 +231,37 @@ export const HudRenderer = {
               ['[R] Key (In Vehicle)', 'Check Rearm Status • Auto-rearms & repairs at HQ Motor Pool, Friendly FOBs & [7] Stashes'],
               ['[L] / [E] Keys', 'Open Armor Upgrade Bay (CITV FLIR, ERA, Trophy APS, Dozer) / Enter & Exit Vehicle'],
               ['[Space] / [X] (Bikes)', 'Motorcycle & 4×4 ATV Wheelie / Overdrive Torque Boost (6-Speed & 2-Stroke Powerband)']
+            ]
+          }
+        ]
+      },
+      {
+        id: 'heli',
+        lbl: '🚁 HELIS & TRUCKS',
+        bannerColor: '#2ecc71',
+        bannerBg: 'rgba(46,204,113,0.12)',
+        bannerHtml:
+          '<b style="color:#2ecc71;">🚁 TRANSPORT &amp; ATTACK HELICOPTERS + 6×6 TROOP TRUCKS:</b> <b>ALL classes</b> (including <b>Recon Snipers</b>!) can fly <b>UH-60M / Mi-8 Transport Helicopters</b> to land or fast-rope onto <b>Downtown FOB C Skyscraper Helipads</b>, and drive <b>10-Seat 6×6 Troop &amp; Supply Trucks</b>!',
+        groups: [
+          {
+            title: '🚁 HELICOPTER COLLECTIVE, CYCLIC & ROOFTOP LANDING',
+            items: [
+              ['[W] / [S] Keys', 'Collective Pitch Up (Vertical Climb) / Collective Down (Descend & Land on Roofs)'],
+              ['Mouse Aim', 'Cyclic Pitch Forward/Back & Roll Strafe — nose down accelerates, pull back flares to 0 km/h hover!'],
+              ['[A] / [D] Keys', 'Tail-Rotor Pedal Yaw (360° Hover Pirouette) + Lateral Banking Strafe'],
+              ['[R] Key (Auto-Hover)', 'Engage / Release Precision Auto-Hover Station-Keeping (holds 0 m/s vertical & horizontal!)'],
+              ['[E] Key (<=22m Roof/Ground)', 'Safe Rooftop Step-Out or Low-Hover Fast-Rope Insertion onto Downtown Skyscrapers (0 fall dmg!)'],
+              ['[F1–F8] Seat Switch', '[F1] Pilot • [F2/F3] Door Miniguns / Apache FLIR Gunner (auto-holds hover!) • [F4–F8] Troops'],
+              ['[1 / 2 / 3] + LMB / [X]', 'AH-64E / Ka-52: [1] 30mm HEDP • [2] Hydra/S-8 Rockets • [3] Hellfire/Vikhr ATGM • [X] IR Flares']
+            ]
+          },
+          {
+            title: '🚚 6×6 TROOP CONVOY TRUCK & DOWNTOWN OVERWATCH',
+            items: [
+              ['10-Seat 6×6 Troop Truck', '$0 FREE at Main Base HQ (All Classes) — carries 2 Cab + 8 Rear Bench Soldiers to the front'],
+              ['AI Squad Convoy Boarding', 'Friendly AI squads automatically board HQ/player 6×6 trucks and disembark near contested flags'],
+              ['Mobile Supply Aura (<=14m)', 'Parked/nearby 6×6 Logistics Trucks automatically resupply friendly squad magazines & gadgets'],
+              ['Downtown FOB C ("H" Pads)', '5–7 story skyscrapers (25m–35m tall) feature flat rooftop "H" helipads + walkable interior stairs']
             ]
           }
         ]
@@ -2549,15 +2582,26 @@ export const HudRenderer = {
     const isB2 = aRole === 'b2_spirit';
     const isCas = aRole === 'cas';
     const isGunship = aRole === 'gunship';
+    const isHeliTransport = aRole === 'heli_transport';
+    const isHeliAttack = aRole === 'heli_attack';
+    const isHeli = Boolean(v.isHelicopter || isHeliTransport || isHeliAttack);
 
     // 1. Header Bar: Aircraft Tail Badge, Airframe Integrity Bar & Heading / G-Load Pill
     const iconEl = this.el('air-hud-icon');
     const modelEl = this.el('air-hud-model');
     if (iconEl) {
-      iconEl.textContent = isWright ? '🪁' : isB2 ? '🦇' : isGunship ? '🛸' : '✈️';
+      iconEl.textContent = isHeli ? '🚁' : isWright ? '🪁' : isB2 ? '🦇' : isGunship ? '🛸' : '✈️';
     }
     if (modelEl) {
-      modelEl.textContent = isWright
+      modelEl.textContent = isHeliAttack
+        ? v.team === 'RU'
+          ? 'KA-52 ALLIGATOR'
+          : 'AH-64E APACHE'
+        : isHeliTransport
+        ? v.team === 'RU'
+          ? 'MI-8AMTSH TERMINATOR'
+          : 'UH-60M BLACK HAWK'
+        : isWright
         ? v.team === 'RU'
           ? '1913 ILYA MUROMETS'
           : '1903 WRIGHT FLYER I'
@@ -2656,10 +2700,12 @@ export const HudRenderer = {
     if (hdgPillEl) {
       hdgPillEl.textContent = v.isShotDown
         ? '🚨 SHOT DOWN — PRESS [E] EJECT!'
-        : v.isStalling
+        : !isHeli && v.isStalling
         ? '⚠️ STALL — HOLD [W] & NOSE DOWN!'
+        : isHeli && v.heliHoverHold
+        ? `🚁 HOVER HOLD [R] • HDG ${String(hdgDeg).padStart(3, '0')}° ${hdgDirStr}`
         : `HDG ${String(hdgDeg).padStart(3, '0')}° ${hdgDirStr} • ${gLoad.toFixed(1)}G`;
-      hdgPillEl.style.color = v.isShotDown || v.isStalling ? '#ff6b6b' : '';
+      hdgPillEl.style.color = v.isShotDown || (!isHeli && v.isStalling) ? '#ff6b6b' : isHeli && v.heliHoverHold ? '#00ffcc' : '';
     }
 
     // 2. Per-Aircraft Realistic Speedometer Envelope & Dynamic SVG Arcs
@@ -2667,7 +2713,9 @@ export const HudRenderer = {
     const kmh = Math.round(spdMs * 3.6);
     const kts = Math.round(spdMs * 1.94384);
     const mach = (spdMs / 340.3).toFixed(2);
-    const scaleMaxKmh = isWright
+    const scaleMaxKmh = isHeli
+      ? 360
+      : isWright
       ? kmh <= 115
         ? 120
         : 900
@@ -2679,7 +2727,7 @@ export const HudRenderer = {
       ? 600
       : 720;
 
-    const minKmh = (v.minSpeed || 30) * 3.6;
+    const minKmh = isHeli ? 0 : (v.minSpeed || 30) * 3.6;
     const cruiseKmh = (v.speed || 62) * 3.6;
     const maxKmh = (v.maxSpeed || 96) * 3.6;
     const asiArcSig = `${aRole}_${scaleMaxKmh}_${Math.round(minKmh)}_${Math.round(maxKmh)}`;
@@ -2738,7 +2786,7 @@ export const HudRenderer = {
       asiKmhEl.textContent = String(kmh).padStart(3, '0');
       asiKmhEl.setAttribute(
         'fill',
-        v.isShotDown || v.isStalling || kmh <= minKmh * 1.06
+        v.isShotDown || (!isHeli && (v.isStalling || kmh <= minKmh * 1.06))
           ? '#ff4757'
           : wHeld || kmh >= maxKmh * 0.92
           ? '#00d2d3'
@@ -2751,6 +2799,16 @@ export const HudRenderer = {
     if (asiMachEl) {
       const stateTag = v.isShotDown
         ? '🚨 EJECT [E]'
+        : isHeli
+        ? v.heliHoverHold
+          ? '🚁 HOVER [R]'
+          : kmh < 18
+          ? '🚁 HOVER'
+          : wHeld
+          ? '▲ CLIMB'
+          : sHeld
+          ? '▼ DESCEND'
+          : 'CRUISE'
         : v.isStalling || kmh <= minKmh * 1.06
         ? '⚠️ STALL'
         : wHeld || kmh >= maxKmh * 0.92
@@ -2760,12 +2818,12 @@ export const HudRenderer = {
         : sHeld
         ? '🛑 BRAKE'
         : 'CRUISE';
-      asiMachEl.textContent = `M ${mach} • ${stateTag}`;
+      asiMachEl.textContent = isHeli ? stateTag : `M ${mach} • ${stateTag}`;
       asiMachEl.setAttribute(
         'fill',
-        v.isShotDown || v.isStalling || kmh <= minKmh * 1.06
+        v.isShotDown || (!isHeli && (v.isStalling || kmh <= minKmh * 1.06))
           ? '#ff6b6b'
-          : wHeld
+          : wHeld || (isHeli && v.heliHoverHold)
           ? '#00d2d3'
           : sHeld
           ? '#f39c12'
@@ -2819,12 +2877,14 @@ export const HudRenderer = {
     }
     const rpmUnitLblEl = this.el('air-rpm-unit-lbl');
     if (rpmUnitLblEl) {
-      this._setText(rpmUnitLblEl, isWright ? 'PROP RPM' : isGunship ? 'TRBPRP %' : 'N1 ×10%');
+      this._setText(rpmUnitLblEl, isHeli ? 'ROTOR %' : isWright ? 'PROP RPM' : isGunship ? 'TRBPRP %' : 'N1 ×10%');
     }
     const rpmPctEl = this.el('air-rpm-pct');
     if (rpmPctEl) {
       const rpmModeSuffix = v.isShotDown
         ? 'FAIL'
+        : isHeli
+        ? 'NR'
         : rpmPctRound > 100
         ? 'WEP/AB'
         : isGunship || isWright
@@ -2838,7 +2898,7 @@ export const HudRenderer = {
     }
     const rpmNumEl = this.el('air-rpm-num');
     if (rpmNumEl) {
-      const maxNominalRpm = isWright ? 1450 : isGunship ? 2200 : isCas ? 7600 : 8800;
+      const maxNominalRpm = isHeli ? 275 : isWright ? 1450 : isGunship ? 2200 : isCas ? 7600 : 8800;
       const actualRpm = Math.round((this._smoothedAirRpmPct / 100) * maxNominalRpm);
       this._setText(rpmNumEl, `${actualRpm.toLocaleString()} RPM`);
       rpmNumEl.setAttribute('fill', v.isShotDown ? '#ff6b6b' : wHeld ? '#00d2d3' : '#7bed9f');
@@ -3070,7 +3130,19 @@ export const HudRenderer = {
 
     // 5. Visual Weapon Bay Pylon & Countermeasure Strip ([1], [2], [3], [X])
     const activeSlot = v.activeWeaponSlot || 0;
-    const pylonDefs = isWright
+    const pylonDefs = isHeliAttack
+      ? [
+          { icon: '🔥', lbl: v.team === 'RU' ? '30MM 2A42' : '30MM M230' },
+          { icon: '🚀', lbl: v.team === 'RU' ? 'S-8 RKT' : 'HYDRA-70' },
+          { icon: '🎯', lbl: v.team === 'RU' ? 'VIKHR ATGM' : 'HELLFIRE' }
+        ]
+      : isHeliTransport
+      ? [
+          { icon: '🔥', lbl: v.team === 'RU' ? 'TWIN PKT' : 'TWIN M134' },
+          { icon: '🚀', lbl: 'DOOR/RKT' },
+          { icon: '🪢', lbl: 'ROOF [E]' }
+        ]
+      : isWright
       ? [
           { icon: '⚙️', lbl: 'GATLING' },
           { icon: '🧨', lbl: 'DYNAMITE' },
@@ -3180,7 +3252,10 @@ export const HudRenderer = {
           const priPct = priCd > 0.12 ? Math.max(15, Math.min(100, (1 - priCd / 0.85) * 100)) : ammoPct;
           barNode.style.width = `${Math.max(8, priPct)}%`;
           barNode.style.background = priCd > 0.12 ? '#f39c12' : '#2ecc71';
-        } else if (i === 1 && aRole === 'fighter' && this.player?.aircraftLockTarget) {
+        } else if (
+          ((i === 1 && aRole === 'fighter') || (i === 2 && isHeliAttack)) &&
+          this.player?.aircraftLockTarget
+        ) {
           const lockPct = Math.round((this.player.aircraftLockProgress || 0) * 100);
           barNode.style.width = `${Math.max(25, lockPct)}%`;
           barNode.style.background = lockPct >= 100 ? '#ff4757' : '#f1c40f';
@@ -3976,15 +4051,18 @@ export const HudRenderer = {
           <text id="moto-dial-kmh" x="60" y="83" fill="#00d2d3" font-size="12" font-weight="900" font-family="Consolas, monospace" text-anchor="middle">000</text>
           <text id="moto-dial-gear" x="60" y="94" fill="#f1c40f" font-size="7.5" font-weight="900" text-anchor="middle">KM/H • N</text>
         `;
-      } else if (v.type === 'humvee') {
-        pTitle = '4×4 TACTICAL MRAP & RWS';
-        legTur = '▲ .50 CAL RWS';
-        legHul = '▬ 4×4 CHASSIS';
-        l1 = 'RWS HDG';
+      } else if (v.type === 'humvee' || v.type === 'truck_transport' || v.type === 'emplace_hmg') {
+        const isTroopTruck = v.type === 'truck_transport';
+        pTitle = isTroopTruck ? '6×6 TROOP & LOGISTICS CONVOY' : '4×4 TACTICAL MRAP & RWS';
+        legTur = isTroopTruck ? '▲ CAB VIEW' : '▲ .50 CAL RWS';
+        legHul = isTroopTruck ? '▬ 6×6 CHASSIS' : '▬ 4×4 CHASSIS';
+        l1 = isTroopTruck ? 'VIEW HDG' : 'RWS HDG';
         l2 = 'CHASSIS HDG';
-        l3 = 'MOUNT OFFSET';
+        l3 = isTroopTruck ? 'LOOK OFFSET' : 'MOUNT OFFSET';
         l4 = 'DRIVETRAIN';
-        ctrlText = 'WASD Drive 4×4 • Mouse Aim Roof .50 Cal HMG • LMB Fire • [E] Exit Vehicle';
+        ctrlText = isTroopTruck
+          ? 'WASD Drive 6×6 Convoy • 10 Seats + <=14m Squad Resupply Aura • [F1–F8] Seats • [E] Exit'
+          : 'WASD Drive 4×4 • Mouse Aim Roof .50 Cal HMG • LMB Fire • [E] Exit Vehicle';
         hullSvg = `
           <rect x="35" y="32" width="6" height="16" rx="2" fill="rgba(25, 32, 38, 0.95)" stroke="#2ecc71" stroke-width="1.3"/>
           <rect x="79" y="32" width="6" height="16" rx="2" fill="rgba(25, 32, 38, 0.95)" stroke="#2ecc71" stroke-width="1.3"/>
@@ -4647,6 +4725,19 @@ export const HudRenderer = {
         wpn2BarEl.style.background = '#e74c3c';
         wpn2StatusEl.textContent = `STRIDE SPEED: ${spdKmh} / ${maxKmh} KM/H`;
         wpn2StatusEl.style.color = '#ff7979';
+      }
+      return;
+    }
+
+    if (v.type === 'truck_transport') {
+      const paxCount = (v.aiPassengers ? v.aiPassengers.length : 0) + (v.driver ? 1 : 0);
+      if (wpn1NameEl) wpn1NameEl.textContent = `[CONVOY] 10-SEAT BED (${paxCount}/10 ABOARD)`;
+      if (wpn1KeyEl) wpn1KeyEl.textContent = '<=14M SUPPLY';
+      if (wpn1BarEl && wpn1StatusEl) {
+        wpn1BarEl.style.width = '100%';
+        wpn1BarEl.style.background = '#2ecc71';
+        wpn1StatusEl.textContent = 'LOGISTICS AURA ACTIVE • RESUPPLIES NEARBY SQUADS';
+        wpn1StatusEl.style.color = '#2ecc71';
       }
       return;
     }

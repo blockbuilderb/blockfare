@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=126';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=126';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=126';
-import { events } from '../events.js?v=126';
+import { sound } from '../audio.js?v=127';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=127';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=127';
+import { events } from '../events.js?v=127';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +11,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=126';
+} from '../core/StateMachines.js?v=127';
 
 function markShared(asset) {
   if (asset) {
@@ -206,7 +206,21 @@ export const VehicleControlMethods = {
     }
 
     const seatRole = seatNames[seatIndex];
-    if (v.isAircraft && v.aircraftRole === 'gunship') {
+    if (v.isAircraft && v.isHelicopter) {
+      const gH = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
+      if (seatIndex >= 1 && !v.remoteDriverId && v.pos.y - gH > 3.5) {
+        // Solo Helicopter Gunner / Cabin Sniper Assist: automatically engage Auto-Hover Hold when switching out of [F1] Pilot!
+        v.heliHoverHold = true;
+        v.heliHoverAlt = v.pos.y;
+      }
+      if (v.aircraftRole === 'heli_attack' && seatIndex === 1) {
+        this.vehicleCameraMode = 'OPTIC_NOSE';
+        this.thirdPersonVehicle = false;
+      } else if (seatIndex >= 1) {
+        this.vehicleCameraMode = 'COCKPIT_1P';
+        this.thirdPersonVehicle = false;
+      }
+    } else if (v.isAircraft && v.aircraftRole === 'gunship') {
       const gH = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
       if ((seatIndex === 1 || seatIndex === 2) && v.pos.y - gH > 18.0) {
         v.gunshipManualFlight = false;
@@ -250,7 +264,18 @@ export const VehicleControlMethods = {
     if (this.activeVehicle) {
       const v = this.activeVehicle;
       const groundH = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
-      const isAirbornePlane = Boolean(v.isAircraft && (v.pos.y > groundH + 2.5 || v.isShotDown));
+      const supportY = v.isHelicopter
+        ? Math.max(groundH, this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z, v.pos.y + 3.0))
+        : groundH;
+      const heliClearanceAboveSupport = v.pos.y - supportY;
+      const isHeliRooftopOrFastRope = Boolean(
+        v.isHelicopter && !v.isShotDown && heliClearanceAboveSupport <= 22.0
+      );
+      const isAirbornePlane = Boolean(
+        v.isAircraft &&
+          !isHeliRooftopOrFastRope &&
+          (v.pos.y > supportY + 2.5 || v.isShotDown)
+      );
       if (v.mesh && !v.dead) {
         v.mesh.visible = true;
       }
@@ -276,7 +301,20 @@ export const VehicleControlMethods = {
           if (pax) {
             pax.ridingVehicle = null;
             const ang = (pi / Math.max(1, v.aiPassengers.length)) * Math.PI * 2;
-            pax.pos.set(v.pos.x + Math.cos(ang) * 3.8, groundH, v.pos.z + Math.sin(ang) * 3.8);
+            const dropX = v.pos.x + Math.cos(ang) * (v.isHelicopter ? 1.8 : 3.8);
+            const dropZ = v.pos.z + Math.sin(ang) * (v.isHelicopter ? 1.8 : 3.8);
+            const paxSupY = v.isHelicopter
+              ? Math.max(
+                  this.world ? this.world.getGroundHeightAt(dropX, dropZ) : groundH,
+                  this.getAircraftObstacleHeightAt(dropX, dropZ, v.pos.y + 3.0)
+                )
+              : groundH;
+            const useCenterRoof = v.isHelicopter && Math.abs(paxSupY - supportY) > 1.8;
+            pax.pos.set(
+              useCenterRoof ? v.pos.x : dropX,
+              (useCenterRoof ? supportY : paxSupY) + 0.12,
+              useCenterRoof ? v.pos.z : dropZ
+            );
             if (pax.mesh) {
               pax.mesh.position.copy(pax.pos);
               pax.mesh.visible = !pax.dead;
@@ -300,11 +338,53 @@ export const VehicleControlMethods = {
       if (this._runwayAssistVisGroup) this._runwayAssistVisGroup.visible = false;
       v.autoFlightMode = null;
       if (this.viewModelGroup) this.viewModelGroup.visible = true;
-      events.emit('player:exited-vehicle', { vehicle: v, reason: isAirbornePlane ? 'ejected' : 'manual' });
+      events.emit('player:exited-vehicle', {
+        vehicle: v,
+        reason: isAirbornePlane ? 'ejected' : isHeliRooftopOrFastRope ? 'rooftop_insert' : 'manual'
+      });
 
       if (isAirbornePlane) {
         v.aiPilotActive = !v.isShotDown;
         this.activateParachuteEject(v.pos);
+      } else if (isHeliRooftopOrFastRope) {
+        // Rooftop Step-Out or Low-Hover Fast-Rope Insertion (< 22m above roof/ground — zero fall damage & never steps off roof edge!)
+        if (heliClearanceAboveSupport > 2.2) {
+          v.heliHoverHold = true;
+          v.heliHoverAlt = v.pos.y;
+          v.aiPilotActive = false;
+        }
+        const rightX = Math.cos(v.yaw || 0);
+        const rightZ = -Math.sin(v.yaw || 0);
+        let safeOutX = v.pos.x;
+        let safeOutZ = v.pos.z;
+        let safeOutY = supportY;
+        for (const sideDist of [2.1, -2.1, 0]) {
+          const cx = v.pos.x + rightX * sideDist;
+          const cz = v.pos.z + rightZ * sideDist;
+          const cy = Math.max(
+            this.world ? this.world.getGroundHeightAt(cx, cz) : groundH,
+            this.getAircraftObstacleHeightAt(cx, cz, v.pos.y + 3.0)
+          );
+          if (Math.abs(cy - supportY) <= 1.6) {
+            safeOutX = cx;
+            safeOutZ = cz;
+            safeOutY = cy;
+            break;
+          }
+        }
+        this.pos.set(safeOutX, safeOutY + 0.15, safeOutZ);
+        this.vel.set(0, 0, 0);
+        this.isGrounded = true;
+        this.parachuting = false;
+        this.parachuteCut = false;
+        if (this.onAwardXp && (supportY > groundH + 3.5 || heliClearanceAboveSupport > 3.0)) {
+          this.onAwardXp(
+            20,
+            supportY > groundH + 3.5
+              ? `🚁🎯 ROOFTOP SNIPER INSERTION COMPLETE (${Math.round(supportY - groundH)}M HIGH-RISE ROOF)!`
+              : '🪢🚁 FAST-ROPE HOVER INSERTION COMPLETE!'
+          );
+        }
       } else {
         const exitOffsetX = v.type === 'bike' || v.type === 'atv' ? 2.1 : 3.6;
         this.pos.copy(v.pos).add(new THREE.Vector3(exitOffsetX, 0.35, 0));
@@ -373,12 +453,16 @@ export const VehicleControlMethods = {
     const strictDoctrine = this.squadDoctrineEnabled !== false;
     if (!silent && era === 'modern') {
       if (nearVehicle.isAircraft) {
-        if (strictDoctrine && this.role !== 'pilot') {
+        if (
+          strictDoctrine &&
+          this.role !== 'pilot' &&
+          nearVehicle.aircraftRole !== 'heli_transport'
+        ) {
           sound.playEmptyClick?.();
           if (this.onAwardXp) {
             this.onAwardXp(
               0,
-              '🔒 REQUIRES [COMBAT PILOT] LICENSE TO FLY AIRCRAFT! (SWITCH TO PILOT [L] OR TOGGLE DOCTRINE OFF IN ⚙️ SETTINGS)'
+              '🔒 REQUIRES [COMBAT PILOT] LICENSE TO FLY JETS & ATTACK HELIS! (TRANSPORT HELICOPTERS ARE OPEN TO ALL CLASSES!)'
             );
           }
           return false;
@@ -585,8 +669,14 @@ export const VehicleControlMethods = {
             : nearVehicle.ac130HasCoupledAutopilot
             ? `🛸 ${nearVehicle.ac130EraLabel || 'AC-130'} COUPLED PYLON AUTOPILOT (${nearVehicle.orbitAnchorLabel || 'FOB'}) — [R] TRANSIT/ORBIT • [F] LOCK ORBIT • [C] LEFT-WINDOW/BELLY CAM • [F1] MANUAL`
             : `🛸 ${nearVehicle.ac130EraLabel || '1968 AC-130A'} ORBIT MODE — [A/D] BANK LEFT PYLON • [R] TRANSIT ⇄ ORBIT • [L] UNLOCK EOTECH & COUPLED AUTOPILOT • [F1] MANUAL`
+          : nearVehicle.isAircraft && nearVehicle.isHelicopter
+          ? nearVehicle.aircraftRole === 'heli_attack'
+            ? `🚁 ${nearVehicle.name}${customBadge} — [W/S] COLLECTIVE LIFT/LAND • MOUSE CYCLIC • [A/D] PEDAL YAW • [1] 30MM • [2] ROCKETS • [3] HELLFIRE ATGM • [R] HOVER HOLD`
+            : `🚁 ${nearVehicle.name}${customBadge} — [W/S] COLLECTIVE LIFT/LAND • MOUSE CYCLIC • [A/D] PEDAL YAW • [R] HOVER HOLD • [E] ROOFTOP / FAST-ROPE EXIT • [F1–F8] SEATS`
           : nearVehicle.isAircraft
           ? `✈️ COCKPIT READY: ${nearVehicle.name}${customBadge} ([W/S] THROTTLE • MOUSE/ARROWS LOOP • [C] COCKPIT/3P/NOSE CAM • [X] FLARES • [E] EJECT)`
+          : nearVehicle.type === 'truck_transport'
+          ? `🚚 ${nearVehicle.name}${customBadge} — 10-SEAT SQUAD CONVoy & MOBILE RESUPPLY AURA ([F1] DRIVER • [F2] ROOF MG • [F3–F8] TROOP BENCH)`
           : isMotoOrAtv
           ? `🏍️ MOUNTED ${nearVehicle.name}${customBadge} ([W/S] PROGRESSIVE THROTTLE • [A/D] LEAN/CARVE • [SPACE/X] ${boostName} • [C] HELMET/3P CAM)`
           : `🛡️ MOUNTED ${nearVehicle.name}${customBadge} ([C] COMMANDER HATCH / GUNNER OPTIC / 3P CAM • [X] APS/SMOKE)`
@@ -1417,15 +1507,19 @@ export const VehicleControlMethods = {
     if ((this.world?.era || 'modern') !== 'modern') {
       return null;
     }
-    const roles = ['b2_spirit', 'wright_flyer', 'cas', 'fighter', 'gunship'];
+    const roles = ['heli_transport', 'heli_attack', 'cas', 'fighter', 'gunship', 'b2_spirit', 'wright_flyer'];
     const normForce = forceRole === 'bomber' ? 'b2_spirit' : forceRole;
     if (normForce && roles.includes(normForce)) {
       this.preferredAircraftRole = normForce;
     } else {
-      const curIdx = roles.indexOf(this.preferredAircraftRole || 'b2_spirit');
+      const curIdx = roles.indexOf(this.preferredAircraftRole || 'heli_transport');
       this.preferredAircraftRole = roles[(curIdx + 1) % roles.length];
     }
     const roleLabels = {
+      heli_transport:
+        '🚁 TRANSPORT HELICOPTER: UH-60M BLACK HAWK / MI-8AMTSH (8 SEATS • TWIN MINIGUNS • ROOFTOP SNIPER INSERTION)',
+      heli_attack:
+        '🚁 ATTACK HELICOPTER: AH-64E APACHE LONGBOW / KA-52 ALLIGATOR (30MM CHAIN GUN + HYDRA + 8× HELLFIRE/VIKHR ATGM)',
       b2_spirit:
         '🦇 NORTHROP B-2A SPIRIT STEALTH BOMBER (CARPET BOMB BAY [1/LMB] + GBU-57 MOP [2/SPACE] + 88% RAM STEALTH)',
       wright_flyer:
@@ -1582,12 +1676,17 @@ export const VehicleControlMethods = {
       }
       return null;
     }
-    if (this.squadDoctrineEnabled !== false && this.role !== 'pilot') {
+    if (
+      this.squadDoctrineEnabled !== false &&
+      this.role !== 'pilot' &&
+      forceRole !== 'heli_transport' &&
+      this.preferredAircraftRole !== 'heli_transport'
+    ) {
       sound.playEmptyClick?.();
       if (this.onAwardXp) {
         this.onAwardXp(
           0,
-          '🔒 REQUIRES [COMBAT PILOT] LICENSE TO FLY AIRCRAFT! (SWITCH TO PILOT [L] OR TOGGLE DOCTRINE OFF IN ⚙️ SETTINGS)'
+          '🔒 REQUIRES [COMBAT PILOT] LICENSE FOR JETS & ATTACK HELIS! (USE [SHIFT+9] TO SELECT 🚁 TRANSPORT HELICOPTER FOR ANY CLASS!)'
         );
       }
       return null;
@@ -1792,7 +1891,21 @@ export const VehicleControlMethods = {
     sound.playWeaponSwitch?.();
     let label = '';
     if (v.isAircraft) {
-      if (v.aircraftRole === 'wright_flyer') {
+      if (v.aircraftRole === 'heli_transport') {
+        label =
+          clamped === 0
+            ? '🔥 [1] TWIN 7.62MM M134 DOOR MINIGUNS (1,500 RPM • LMB)'
+            : clamped === 1
+            ? '🚀 [2] 70MM HYDRA / S-8 UTILITY ROCKET POD (LMB / SPACE)'
+            : '🎯 [3] FIM-92 STINGER / IGLA SELF-DEFENSE A2A MISSILE (LMB / SPACE)';
+      } else if (v.aircraftRole === 'heli_attack') {
+        label =
+          clamped === 0
+            ? '💥 [1] 30MM M230 / 2A42 CHIN AUTOCANNON (650 RPM HEDP • LMB)'
+            : clamped === 1
+            ? '🚀 [2] 19-TUBE HYDRA-70 / S-8 ROCKET SALVO (LMB / SPACE)'
+            : '🎯 [3] AGM-114L HELLFIRE / 9K121 VIKHR TANK-BUSTER ATGM (8× • LMB / SPACE)';
+      } else if (v.aircraftRole === 'wright_flyer') {
         label =
           clamped === 0
             ? '🔫 [1] 1903 HAND-CRANKED BRASS GATLING MG (840 RPM • LMB)'
@@ -3394,7 +3507,7 @@ export const VehicleControlMethods = {
    * - `'LANDING'`: Airborne inside the friendly HQ Airbase ILS Approach Corridor (`altAgl <= 340m`, `dist <= 1950m`, low/med speed)
    */
   getRunwayAssistEligibility(v) {
-    if (!v || !v.isAircraft || v.dead || v.isShotDown) return null;
+    if (!v || !v.isAircraft || v.isHelicopter || v.dead || v.isShotDown) return null;
     const isUs = (v.team || this.team) !== 'RU';
     // Exact paved 3D asphalt runway coordinates matching `TerrainGenerator.js`:
     //   US West Runway: cx = -2735, cz = -68 (thresholds at x = -2903 & -2567, apron at z = -138)
@@ -3454,6 +3567,26 @@ export const VehicleControlMethods = {
   handleAircraftRKey() {
     const v = this.activeVehicle;
     if (!v || !v.isAircraft || v.dead) return false;
+
+    if (v.isHelicopter) {
+      v.heliHoverHold = !v.heliHoverHold;
+      if (v.heliHoverHold) {
+        v.heliHoverAlt = v.pos.y;
+      } else {
+        this.yaw = v.yaw || this.yaw;
+      }
+      sound.playRadioBeep?.(true);
+      if (this.onAwardXp) {
+        const gH = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
+        this.onAwardXp(
+          0,
+          v.heliHoverHold
+            ? `🚁 [R] AUTO-HOVER HOLD ON (${Math.round(v.pos.y - gH)}M AGL) — POSITION LOCKED FOR SNIPING / FLIR GUNNER / [E] ROOFTOP INSERT!`
+            : '🕹️ [R] AUTO-HOVER HOLD OFF — CYCLIC FLIGHT CONTROL ACTIVE!'
+        );
+      }
+      return v.heliHoverHold ? 'HOVER_HOLD' : false;
+    }
 
     if (v.autoFlightMode === 'TAKEOFF' || v.autoFlightMode === 'LANDING') {
       const prev = v.autoFlightMode;
@@ -3801,7 +3934,7 @@ export const VehicleControlMethods = {
   getAircraftObstacleHeightAt(wx, wz, aircraftY = 0) {
     const terrY = this.world ? this.world.getGroundHeightAt(wx, wz) : 0;
     if (!this.world || !this.world.voxels) return terrY;
-    if (aircraftY > 55.0 && Math.abs(wx) < 2000 && Math.abs(wz) < 1300) {
+    if (aircraftY > 75.0 && Math.abs(wx) < 2000 && Math.abs(wz) < 1300) {
       return terrY;
     }
     let maxY = terrY;
@@ -3809,7 +3942,7 @@ export const VehicleControlMethods = {
     const gx = g.gx;
     const baseGy = g.gy;
     const gz = g.gz;
-    for (let dy = 0; dy <= 18; dy++) {
+    for (let dy = 0; dy <= 36; dy++) {
       const vox = this.world.getVoxel(gx, baseGy + dy, gz);
       if (vox && !vox.isProp) {
         const top = vox.maxY ?? terrY + (dy + 1) * 1.25;
@@ -3825,12 +3958,12 @@ export const VehicleControlMethods = {
    */
   checkAircraftStructureCollision(v, pos, flightDir) {
     if (!this.world || !this.world.voxels) return null;
-    if (pos.y > 55.0 && Math.abs(pos.x) < 2000 && Math.abs(pos.z) < 1300) {
+    if (pos.y > 75.0 && Math.abs(pos.x) < 2000 && Math.abs(pos.z) < 1300) {
       return null;
     }
     const rightX = Math.cos(v.yaw || 0);
     const rightZ = -Math.sin(v.yaw || 0);
-    const wingSpan = v.aircraftRole === 'b2_spirit' ? 6.5 : 4.2;
+    const wingSpan = v.isHelicopter ? 3.5 : v.aircraftRole === 'b2_spirit' ? 6.5 : 4.2;
     const wingSin = Math.sin(v.roll || 0) * wingSpan;
 
     for (let i = 0; i < 5; i++) {
@@ -4009,6 +4142,247 @@ export const VehicleControlMethods = {
       _airQuatCombined.copy(_airQuatYaw).multiply(_airQuatPitch).multiply(_airQuatRoll);
       v.mesh.quaternion.copy(_airQuatCombined);
       this.pos.copy(v.pos);
+    } else if (v.isHelicopter) {
+      // =========================================================================
+      // DEDICATED 3D ROTORCRAFT FLIGHT DYNAMICS (UH-60M / MI-8 TRANSPORT & AH-64E / KA-52 ATTACK)
+      // - Zero stall speed (hovers effortlessly at 0 km/h!).
+      // - [W / S] Collective Lift: vertical climb (+16.5 m/s) & precision vertical descent (-13.5 m/s).
+      // - [A / D] Tail-Rotor / Coaxial Pedal Yaw (89 deg/s on-the-spot pirouette) + lateral roll strafe.
+      // - Mouse Cyclic Pitch & Heading: nose-down tilt accelerates up to 260–281 km/h; nose-up flares to hover.
+      // - [R] Auto-Hover Hold: locks 3D hover position & altitude for solo Door Minigun / Apache FLIR / Rooftop Insert!
+      // - Solid Building & Skyscraper Rooftop Touchdown: lands cleanly on any flat roof or Downtown "H" helipad!
+      // =========================================================================
+      v.isStalling = false;
+      v.stallSinkVel = 0;
+      const apH = v.airframeParts || null;
+      const engFracH = apH ? THREE.MathUtils.clamp((apH.engines ?? 100) / 100, 0.25, 1) : 1.0;
+      const tailFracH = apH ? THREE.MathUtils.clamp((apH.tail ?? 100) / 100, 0.35, 1) : 1.0;
+
+      // Sample support height across center + landing skids/wheels so rooftop touchdowns are rock-solid
+      let heliSupportY = Math.max(
+        groundH,
+        this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z, v.pos.y + 3.2)
+      );
+      for (const [sxOff, szOff] of [
+        [1.5, 1.7],
+        [-1.5, 1.7],
+        [1.5, -1.7],
+        [-1.5, -1.7]
+      ]) {
+        const sampleY = this.getAircraftObstacleHeightAt(
+          v.pos.x + sxOff,
+          v.pos.z + szOff,
+          v.pos.y + 3.2
+        );
+        if (sampleY > heliSupportY && sampleY <= v.pos.y + 1.8) {
+          heliSupportY = sampleY;
+        }
+      }
+      const onPadOrRoof = v.pos.y <= heliSupportY + 0.55;
+      const isHeliPilot = (this.vehicleSeatIndex || 0) === 0 && !v.remoteDriverId;
+      if (!isHeliPilot && !v.remoteDriverId && !onPadOrRoof) {
+        v.heliHoverHold = true;
+        if (typeof v.heliHoverAlt !== 'number') v.heliHoverAlt = v.pos.y;
+      }
+
+      const auxClimbInput =
+        (this.keys['KeyQ'] || this.keys['ArrowUp'] || this.keys['Equal'] || this.keys['PageUp'] ? 1 : 0) -
+        (this.keys['KeyZ'] || this.keys['ArrowDown'] || this.keys['Minus'] || this.keys['PageDown'] ? 1 : 0);
+      const collectiveInput = isHeliPilot
+        ? throttleInput !== 0
+          ? throttleInput
+          : auxClimbInput
+        : 0;
+
+      v.throttle = THREE.MathUtils.lerp(
+        v.throttle ?? 0.5,
+        collectiveInput > 0 ? 0.92 : collectiveInput < 0 ? 0.18 : onPadOrRoof ? 0.08 : 0.54,
+        Math.min(1, dt * 5.5)
+      );
+
+      if (typeof v._heliVelX !== 'number') v._heliVelX = 0;
+      if (typeof v._heliVelY !== 'number') v._heliVelY = 0;
+      if (typeof v._heliVelZ !== 'number') v._heliVelZ = 0;
+
+      // Vertical Collective Velocity
+      const maxClimbMs = 16.5 * engFracH * thinAirCeilFactor;
+      const maxSinkMs = -13.5;
+      let targetVelY = 0;
+      if (collectiveInput > 0) {
+        targetVelY = maxClimbMs;
+        v.heliHoverAlt = v.pos.y + 0.4;
+      } else if (collectiveInput < 0) {
+        targetVelY = onPadOrRoof ? 0 : maxSinkMs;
+        v.heliHoverAlt = Math.max(heliSupportY, v.pos.y - 0.4);
+      } else if (v.heliHoverHold && typeof v.heliHoverAlt === 'number') {
+        targetVelY = THREE.MathUtils.clamp((v.heliHoverAlt - v.pos.y) * 2.8, -8.0, 10.0);
+      } else {
+        targetVelY = onPadOrRoof ? 0 : 0;
+      }
+      v._heliVelY = THREE.MathUtils.lerp(v._heliVelY, targetVelY, Math.min(1, dt * 5.2));
+
+      // Cyclic Pitch, Roll, Pedal Yaw & Horizontal Velocity
+      const effHeliMaxSpd = (v.maxSpeed || 74) * (0.55 + 0.45 * engFracH);
+      if (v.heliHoverHold || !isHeliPilot || (onPadOrRoof && collectiveInput <= 0)) {
+        if (isHeliPilot && bankInput !== 0 && !onPadOrRoof) {
+          v.yaw = (v.yaw || 0) + bankInput * 0.95 * tailFracH * dt;
+        }
+        v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, Math.min(1, dt * 5.8));
+        v.roll = THREE.MathUtils.lerp(v.roll || 0, 0, Math.min(1, dt * 5.8));
+        const dampRate = onPadOrRoof ? 8.5 : 3.8;
+        v._heliVelX = THREE.MathUtils.lerp(v._heliVelX, 0, Math.min(1, dt * dampRate));
+        v._heliVelZ = THREE.MathUtils.lerp(v._heliVelZ, 0, Math.min(1, dt * dampRate));
+      } else {
+        let yawErr = (this.yaw || 0) - (v.yaw || 0);
+        while (yawErr > Math.PI) yawErr -= Math.PI * 2;
+        while (yawErr < -Math.PI) yawErr += Math.PI * 2;
+
+        const horizSpdNow = Math.hypot(v._heliVelX, v._heliVelZ);
+        const hoverBlend = THREE.MathUtils.clamp(1.0 - horizSpdNow / 24.0, 0, 1);
+        const pedalYawRate = bankInput * (1.55 * hoverBlend + 0.65 * (1 - hoverBlend)) * tailFracH;
+        const mouseYawRate = THREE.MathUtils.clamp(yawErr * 2.1, -1.55, 1.55) * tailFracH;
+        const totalYawStep = (pedalYawRate + mouseYawRate * 0.85) * dt;
+        v.yaw = (v.yaw || 0) + totalYawStep;
+        if (bankInput !== 0) {
+          this.yaw = (this.yaw || 0) + pedalYawRate * dt * 0.75;
+        }
+
+        // Cyclic Pitch: tilting mouse nose-down (`this.pitch < 0`) drives forward rotor thrust; nose-up flares & reverses!
+        const cmdPitch = THREE.MathUtils.clamp(this.pitch || 0, -0.45, 0.38);
+        const targetHeliPitch = THREE.MathUtils.clamp(cmdPitch * 0.92, -0.42, 0.35);
+        const targetHeliRoll = THREE.MathUtils.clamp(
+          bankInput * 0.38 + yawErr * (0.25 + 0.45 * (1 - hoverBlend)),
+          -0.56,
+          0.56
+        );
+        v.pitch = THREE.MathUtils.lerp(v.pitch || 0, targetHeliPitch, Math.min(1, dt * 4.8));
+        v.roll = THREE.MathUtils.lerp(v.roll || 0, targetHeliRoll, Math.min(1, dt * 5.2));
+
+        const noseFwdX = -Math.sin(v.yaw || 0);
+        const noseFwdZ = -Math.cos(v.yaw || 0);
+        const rightLatX = Math.cos(v.yaw || 0);
+        const rightLatZ = -Math.sin(v.yaw || 0);
+
+        const fwdCyclicFrac =
+          v.pitch < -0.02
+            ? THREE.MathUtils.clamp(-v.pitch / 0.38, 0, 1)
+            : v.pitch > 0.04
+            ? -THREE.MathUtils.clamp((v.pitch - 0.04) / 0.32, 0, 0.24)
+            : 0;
+        const latStrafeSpd = -bankInput * hoverBlend * 14.0;
+        const desiredVx = noseFwdX * (fwdCyclicFrac * effHeliMaxSpd) + rightLatX * latStrafeSpd;
+        const desiredVz = noseFwdZ * (fwdCyclicFrac * effHeliMaxSpd) + rightLatZ * latStrafeSpd;
+        const horizAccelGain = fwdCyclicFrac < 0 || Math.abs(fwdCyclicFrac) < 0.05 ? 2.6 : 1.95;
+        v._heliVelX = THREE.MathUtils.lerp(v._heliVelX, desiredVx, Math.min(1, dt * horizAccelGain));
+        v._heliVelZ = THREE.MathUtils.lerp(v._heliVelZ, desiredVz, Math.min(1, dt * horizAccelGain));
+      }
+
+      const maxAirX = VEHICLE_STATS.AIRSPACE_MAX_X || 2400;
+      const maxAirZ = VEHICLE_STATS.AIRSPACE_MAX_Z || 1650;
+      let candX = THREE.MathUtils.clamp(v.pos.x + v._heliVelX * dt, -maxAirX, maxAirX);
+      let candZ = THREE.MathUtils.clamp(v.pos.z + v._heliVelZ * dt, -maxAirZ, maxAirZ);
+      let candY = v.pos.y + v._heliVelY * dt;
+
+      // Side-wall building check when flying low between Downtown FOB C skyscrapers
+      if (this.world?.voxels && candY < 45.0) {
+        const gSide = this.world.worldToGrid(candX, candY + 1.1, candZ, _tmpGrid);
+        const sideVox = this.world.getVoxel(gSide.gx, gSide.gy, gSide.gz);
+        if (sideVox && !sideVox.isProp && candY + 0.6 < (sideVox.maxY ?? candY + 2.0)) {
+          if (this.aircraftCollisionAvoidance === false && Math.hypot(v._heliVelX, v._heliVelZ) > 22.0) {
+            v.shotDownAttacker = {
+              attackerName: this.name || 'PILOT ERROR',
+              attackerTeam: v.team === 'US' ? 'RU' : 'US',
+              weaponName: 'HELICOPTER CRASHED INTO HIGH-RISE TOWER'
+            };
+            this.vehicleManager?.finalizeShotDownCrash?.(v);
+            return;
+          }
+          candX = v.pos.x;
+          candZ = v.pos.z;
+          v._heliVelX *= -0.15;
+          v._heliVelZ *= -0.15;
+        }
+      }
+
+      v.pos.x = candX;
+      v.pos.z = candZ;
+      const newGndH = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
+      let nextSupportY = Math.max(
+        newGndH,
+        this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z, Math.max(v.pos.y, candY) + 3.0)
+      );
+      if (nextSupportY > v.pos.y + 2.2) {
+        nextSupportY = newGndH;
+      }
+
+      if (candY <= nextSupportY) {
+        if (
+          this.aircraftCollisionAvoidance === false &&
+          v.hasLeftRunwayOnce &&
+          v._heliVelY < -14.5
+        ) {
+          v.pos.y = nextSupportY + 0.4;
+          v.shotDownAttacker = {
+            attackerName: this.name || 'PILOT ERROR',
+            attackerTeam: v.team === 'US' ? 'RU' : 'US',
+            weaponName: 'HELICOPTER HARD LANDING CRASH'
+          };
+          this.vehicleManager?.finalizeShotDownCrash?.(v);
+          return;
+        }
+        v.pos.y = nextSupportY;
+        v._heliVelY = 0;
+        if (collectiveInput <= 0) {
+          v._heliVelX *= Math.pow(0.02, dt);
+          v._heliVelZ *= Math.pow(0.02, dt);
+          v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, Math.min(1, dt * 8.0));
+          v.roll = THREE.MathUtils.lerp(v.roll || 0, 0, Math.min(1, dt * 8.0));
+          v.hasLeftRunwayOnce = false;
+        }
+      } else {
+        v.pos.y = Math.min(maxAirspaceAlt, candY);
+        if (v.pos.y - nextSupportY > 3.0) {
+          v.hasLeftRunwayOnce = true;
+        }
+      }
+
+      const noseFwdNowX = -Math.sin(v.yaw || 0);
+      const noseFwdNowZ = -Math.cos(v.yaw || 0);
+      v.forwardSpeed = v._heliVelX * noseFwdNowX + v._heliVelZ * noseFwdNowZ;
+      if (!v.velVector) v.velVector = new THREE.Vector3();
+      v.velVector.set(v._heliVelX, v._heliVelY, v._heliVelZ);
+      syncAircraftFlightFSM(v, { onRunway: v.pos.y <= nextSupportY + 0.6 });
+
+      // Spin 3D Main Rotor, Counter-Rotating Coaxial Rotor (Ka-52) & Tail Rotor
+      if (v.mesh?.userData) {
+        v._rotorSpinSpeed = THREE.MathUtils.lerp(v._rotorSpinSpeed || 18, 30.0, Math.min(1, dt * 4.0));
+        const dRot = v._rotorSpinSpeed * dt;
+        if (v.mesh.userData.mainRotorHub) v.mesh.userData.mainRotorHub.rotation.y += dRot;
+        if (v.mesh.userData.coaxUpperRotorHub) v.mesh.userData.coaxUpperRotorHub.rotation.y -= dRot;
+        if (v.mesh.userData.tailRotorHub) v.mesh.userData.tailRotorHub.rotation.x += dRot * 1.85;
+      }
+
+      v.turretYaw = this.yaw;
+      v.turretPitch = this.pitch;
+      if ((v.sensorGlitchTimer || 0) > 0) v.sensorGlitchTimer = Math.max(0, v.sensorGlitchTimer - dt);
+      if ((v.opticsGlitchTimer || 0) > 0) v.opticsGlitchTimer = Math.max(0, v.opticsGlitchTimer - dt);
+
+      _airQuatYaw.setFromAxisAngle(_axisY, v.yaw || 0);
+      _airQuatPitch.setFromAxisAngle(_axisX, v.pitch || 0);
+      _airQuatRoll.setFromAxisAngle(_axisZ, v.roll || 0);
+      _airQuatCombined.copy(_airQuatYaw).multiply(_airQuatPitch).multiply(_airQuatRoll);
+      v.mesh.position.copy(v.pos);
+      v.mesh.quaternion.copy(_airQuatCombined);
+      this.pos.copy(v.pos);
+
+      const curHeliAgl = Math.max(0, v.pos.y - newGndH);
+      if (curHeliAgl < 5.5) {
+        v.airborneRadarTimer = 0;
+      } else {
+        v.airborneRadarTimer = (v.airborneRadarTimer || 0) + dt;
+      }
+      // Low-flying Nap-of-the-Earth (NOE < 28m AGL) masks helicopters from enemy radar SAMs!
+      v.isLowAltRadarMasked = curHeliAgl < 28.0 || v.airborneRadarTimer < 3.5;
     } else {
       // =========================================================================
       // 1. REALISTIC NON-INSTANT THROTTLE & PROGRESSIVE ENGINE SPOOL ACCELERATION
@@ -5133,8 +5507,12 @@ export const VehicleControlMethods = {
 
     let chaseYaw = this.yaw;
     let chasePitch = this.pitch;
+    const isHeliFreeAim = Boolean(
+      v.isHelicopter && (v.heliHoverHold || (this.vehicleSeatIndex || 0) >= 1)
+    );
     const hasFreeLookOffset =
       !isGunship &&
+      !isHeliFreeAim &&
       Boolean(
         this.keys['AltLeft'] ||
           this.keys['AltRight'] ||
@@ -5145,7 +5523,7 @@ export const VehicleControlMethods = {
     const hasSpiLock = !isGunship && Boolean(v.spiTargetPos);
 
     const isForwardBubbleCockpit =
-      camMode === 'COCKPIT_1P' && !(isGunship && !v.gunshipManualFlight);
+      camMode === 'COCKPIT_1P' && !(isGunship && !v.gunshipManualFlight) && !isHeliFreeAim;
     if (isForwardBubbleCockpit && !hasFreeLookOffset && !hasSpiLock) {
       // Keep mouse-aim command bounded to the forward canopy field-of-view so you never wrap 180° behind your own seat
       let cmdYawDiff = this.yaw - (v.yaw || 0);
@@ -5623,7 +6001,176 @@ export const VehicleControlMethods = {
     }
 
     if (wantPrimary && v.fireCooldown <= 0) {
-      if (isWrightFlyer && (activeSlot === 0 || activeSlot === 2)) {
+      if (v.aircraftRole === 'heli_transport') {
+        if (activeSlot === 1 || activeSlot === 2) {
+          v.maxFireCooldown = activeSlot === 1 ? 0.34 : 1.35;
+          v.fireCooldown = 0.22;
+          v.coaxCooldown = 0;
+        } else {
+          // UH-60M Black Hawk / Mi-8AMTSh [1]: Twin 7.62mm M134 Door Miniguns (1,500 RPM Tracer Stream!)
+          if (!this.consumeVehicleOrdnance(v, 'slot0', 1, 'TWIN M134 MINIGUN')) {
+            return;
+          }
+          v.maxFireCooldown = 60 / 1500;
+          v.fireCooldown = v.maxFireCooldown;
+          v.coaxHeat = Math.min(1.0, (v.coaxHeat || 0) + 0.009);
+          this.recoilOffsetPitch += 0.0005;
+          this.addShake(0.02);
+          sound.playGunshot('lmg', 0);
+
+          const spread = 0.0034;
+          const shotDir = camDir
+            .clone()
+            .add(
+              new THREE.Vector3(
+                (Math.random() - 0.5) * spread,
+                (Math.random() - 0.5) * spread,
+                (Math.random() - 0.5) * spread
+              )
+            )
+            .normalize();
+          this._heliMiniCount = ((this._heliMiniCount || 0) + 1) % 4;
+          const miniSplash =
+            this._heliMiniCount === 0
+              ? { radius: 2.2, damage: 45, weaponName: '7.62MM M134 MINIGUN' }
+              : null;
+          this.fireBallisticRay(
+            camOrigin,
+            shotDir,
+            56,
+            2.0,
+            65,
+            v.team === 'RU' ? '7.62MM PKT DOOR MG' : '7.62MM M134 MINIGUN',
+            1.6,
+            {
+              isMountedMg: true,
+              muzzleVelocity: 420,
+              bulletGravity: 3.8,
+              maxEffectiveRange: 950,
+              tracerEveryShots: 1,
+              explosiveSplash: miniSplash
+            },
+            1,
+            noseMuzzle
+          );
+        }
+      } else if (v.aircraftRole === 'heli_attack') {
+        if (activeSlot === 0) {
+          // AH-64E Apache Longbow / Ka-52 Alligator [1]: 30mm M230 / 2A42 Chin HEDP Chain Gun (650 RPM Aimed to Crosshair!)
+          if (!this.consumeVehicleOrdnance(v, 'slot0', 1, '30MM M230 CHAIN GUN')) {
+            return;
+          }
+          v.maxFireCooldown = 60 / 650;
+          v.fireCooldown = v.maxFireCooldown;
+          v.coaxHeat = Math.min(1.0, (v.coaxHeat || 0) + 0.014);
+          this.recoilOffsetPitch += 0.0012;
+          this.addShake(0.04);
+          sound.playGunshot('autocannon', 0);
+
+          const spread = 0.0024;
+          const shotDir = camDir
+            .clone()
+            .add(
+              new THREE.Vector3(
+                (Math.random() - 0.5) * spread,
+                (Math.random() - 0.5) * spread,
+                (Math.random() - 0.5) * spread
+              )
+            )
+            .normalize();
+          const chainLbl = v.team === 'RU' ? '30MM 2A42 AUTOCANNON' : '30MM M230 HEDP CHAIN GUN';
+          this._gauBurstCount = ((this._gauBurstCount || 0) + 1) % 2;
+          const hedpSplash =
+            this._gauBurstCount === 0
+              ? { radius: 3.8, damage: 115, weaponName: chainLbl }
+              : null;
+          this.fireBallisticRay(
+            camOrigin,
+            shotDir,
+            92,
+            2.0,
+            165,
+            chainLbl,
+            2.3,
+            {
+              isMountedMg: true,
+              muzzleVelocity: 420,
+              bulletGravity: 3.6,
+              maxEffectiveRange: 1250,
+              tracerEveryShots: 1,
+              explosiveSplash: hedpSplash
+            },
+            1,
+            noseMuzzle
+          );
+        } else if (activeSlot === 1) {
+          v.maxFireCooldown = 0.32;
+          v.fireCooldown = v.maxFireCooldown;
+          v.coaxCooldown = 0;
+        } else {
+          // AH-64E Apache / Ka-52 Alligator [3]: AGM-114L Longbow Hellfire / 9K121 Vikhr Top-Attack Tank-Buster ATGM!
+          const hfLabel = v.team === 'RU' ? '9K121 VIKHR LASER ATGM' : 'AGM-114L HELLFIRE ATGM';
+          if (!this.consumeVehicleOrdnance(v, 'slot2', 1, hfLabel)) {
+            return;
+          }
+          v.maxFireCooldown = 1.35;
+          v.fireCooldown = v.maxFireCooldown;
+          this.addShake(0.24);
+          sound.playRocketLaunch?.(0);
+
+          const aimHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 1600);
+          let hellfireTarget = null;
+          let bestScore = Infinity;
+          const allVehs = this.vehicleManager?.vehicles;
+          if (Array.isArray(allVehs)) {
+            for (let vi = 0; vi < allVehs.length; vi++) {
+              const cand = allVehs[vi];
+              if (!cand || cand.dead || cand === v || (v.team && cand.team === v.team)) continue;
+              const toCand = cand.pos.clone().sub(camOrigin);
+              const distC = toCand.length();
+              if (distC < 14 || distC > 1600) continue;
+              const dotC = toCand.divideScalar(distC).dot(camDir);
+              if (dotC < 0.92) continue;
+              const anglePenalty = (1 - dotC) * 1600;
+              const score = distC * 0.3 + anglePenalty;
+              if (score < bestScore) {
+                bestScore = score;
+                hellfireTarget = cand;
+              }
+            }
+          }
+
+          const tgtPt = hellfireTarget
+            ? new THREE.Vector3(hellfireTarget.pos.x, hellfireTarget.pos.y + 1.4, hellfireTarget.pos.z)
+            : aimHit.point;
+          const hfDir = tgtPt.clone().sub(noseMuzzle).normalize();
+          const hfMesh = new THREE.Mesh(_a2aMissileGeo, _a2aMissileMat);
+          hfMesh.position.copy(noseMuzzle);
+          hfMesh.lookAt(tgtPt);
+          this.scene.add(hfMesh);
+
+          this.world.projectiles.push({
+            type: 'air_rocket',
+            weaponName: hfLabel,
+            weaponLabel: hfLabel,
+            mesh: hfMesh,
+            vel: hfDir.multiplyScalar(235),
+            gravity: hellfireTarget ? 0 : 0.25,
+            life: 14.0,
+            turnRate: hellfireTarget ? 4.6 : 0,
+            targetVehicle: hellfireTarget,
+            blastRadius: 8.8,
+            blastDamage: 820,
+            owner: this
+          });
+          if (this.onAwardXp) {
+            const lockTxt = hellfireTarget
+              ? `LONGBOW LOCK ON ${hellfireTarget.name.split(' (')[0]}`
+              : 'LASER BORESIGHT TRACK';
+            this.onAwardXp(0, `🎯🚀 ${hfLabel} AWAY (${lockTxt})!`);
+          }
+        }
+      } else if (isWrightFlyer && (activeSlot === 0 || activeSlot === 2)) {
         // 1903 Wright Flyer I [1 / 3]: Hand-Cranked Brass Gatling MG (840 RPM Explosive Brass Slugs!)
         v.maxFireCooldown = 60 / 840;
         v.fireCooldown = v.maxFireCooldown;
@@ -6173,12 +6720,70 @@ export const VehicleControlMethods = {
     // Secondary / Heavy Ordnance ([SPACE] / [F] or Slot [2] + [LMB])
     const triggerSecondary =
       wantSpaceOrdnance ||
+      (this.isFiring && v.isHelicopter && activeSlot === 1) ||
+      (this.isFiring && v.aircraftRole === 'heli_transport' && activeSlot === 2) ||
       (this.isFiring && v.aircraftRole === 'cas' && activeSlot === 1) ||
       (this.isFiring && v.aircraftRole === 'fighter' && activeSlot === 1) ||
       (this.isFiring && isB2Spirit && activeSlot === 1) ||
       (this.isFiring && isWrightFlyer && activeSlot === 1);
     if (triggerSecondary && v.coaxCooldown <= 0) {
-      if (isWrightFlyer && activeSlot <= 1) {
+      if (v.isHelicopter && activeSlot <= 1) {
+        // Helicopter Hydra-70 / S-8 Rocket Pod Salvo ([SPACE] or Slot [2] + [LMB])
+        if (!this.consumeVehicleOrdnance(v, 'slot1', 1, 'HYDRA-70 / S-8 ROCKET')) {
+          return;
+        }
+        v.coaxCooldown = 0.32;
+        this.addShake(0.15);
+        sound.playRocketLaunch?.(0);
+
+        const aimHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 520);
+        const rktDir = aimHit.point.clone().sub(noseMuzzle).normalize();
+        const rktMesh = new THREE.Mesh(_airRocketGeo, _airRocketMat);
+        rktMesh.position.copy(noseMuzzle);
+        rktMesh.lookAt(aimHit.point);
+        this.scene.add(rktMesh);
+
+        const rktLbl = v.team === 'RU' ? '80MM S-8 ROCKET POD' : '70MM HYDRA-70 ROCKET POD';
+        this.world.projectiles.push({
+          type: 'air_rocket',
+          weaponName: rktLbl,
+          weaponLabel: rktLbl,
+          mesh: rktMesh,
+          vel: rktDir.multiplyScalar(PROJECTILES.AIR_ROCKET?.speed || 175),
+          gravity: PROJECTILES.AIR_ROCKET?.gravity || 0.65,
+          life: 14.0,
+          blastRadius: 6.4,
+          blastDamage: 265,
+          owner: this
+        });
+      } else if (v.aircraftRole === 'heli_attack' && activeSlot === 2) {
+        // AH-64E / Ka-52 [SPACE] in Slot [3]: Fire Hellfire / Vikhr Tank-Buster ATGM!
+        const hfLabel = v.team === 'RU' ? '9K121 VIKHR LASER ATGM' : 'AGM-114L HELLFIRE ATGM';
+        if (!this.consumeVehicleOrdnance(v, 'slot2', 1, hfLabel)) {
+          return;
+        }
+        v.coaxCooldown = 1.35;
+        this.addShake(0.24);
+        sound.playRocketLaunch?.(0);
+        const aimHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 1600);
+        const hfDir = aimHit.point.clone().sub(noseMuzzle).normalize();
+        const hfMesh = new THREE.Mesh(_a2aMissileGeo, _a2aMissileMat);
+        hfMesh.position.copy(noseMuzzle);
+        hfMesh.lookAt(aimHit.point);
+        this.scene.add(hfMesh);
+        this.world.projectiles.push({
+          type: 'air_rocket',
+          weaponName: hfLabel,
+          weaponLabel: hfLabel,
+          mesh: hfMesh,
+          vel: hfDir.multiplyScalar(235),
+          gravity: 0.2,
+          life: 14.0,
+          blastRadius: 8.8,
+          blastDamage: 820,
+          owner: this
+        });
+      } else if (isWrightFlyer && activeSlot <= 1) {
         // 1903 Wright Flyer I [2 / SPACE]: 3-Bundle Kitty Hawk Dynamite Crate Cluster Drop!
         v.coaxCooldown = 0.75;
         this.addShake(0.22);
