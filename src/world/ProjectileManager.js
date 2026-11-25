@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=122';
-import { TERRAIN } from '../config.js?v=122';
-import { events } from '../events.js?v=122';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=122';
+import { sound } from '../audio.js?v=123';
+import { TERRAIN } from '../config.js?v=123';
+import { events } from '../events.js?v=123';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=123';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;
@@ -1654,7 +1654,7 @@ export const ProjectileManager = {
               : pType === 'air_rocket'
               ? 5.6
               : pType === 'rpg'
-              ? 3.2
+              ? 2.7
               : 2.8);
           const dmg =
             proj.blastDamage ||
@@ -1673,7 +1673,7 @@ export const ProjectileManager = {
               : pType === 'ac130_40mm' || pType === 'air_rocket'
               ? 240
               : pType === 'rpg'
-              ? 220
+              ? 185
               : 95);
           const aud = getListenerAudio(hitPos);
           const soundScale =

@@ -1,11 +1,11 @@
 import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { sound } from '../src/audio.js?v=122';
-import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=122';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=122';
-import { VehicleManager } from '../src/vehicles.js?v=122';
-import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=122';
+import { sound } from '../src/audio.js?v=123';
+import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=123';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=123';
+import { VehicleManager } from '../src/vehicles.js?v=123';
+import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=123';
 
 let createdWindowShim = false;
 let prevMuted = false;

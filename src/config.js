@@ -757,6 +757,34 @@ export const MAT_HP = {
 };
 
 // ---------------------------------------------------------------------------
+// SQUAD 9-MAN KIT & FIRE-SUPPORT CATEGORY CAPS (Offworld Industries Squad Rules)
+// - Standard 9-man infantry squad: 1 SL + 3–4 Riflemen + max 2 Medics + max 3 Fire-Support
+// - Fire-Support / Specialist caps prevent RPG-7 & Sniper spam across 500-player battles!
+// ---------------------------------------------------------------------------
+export const SQUAD_KIT_CAPS = {
+  SQUAD_SIZE: 9,
+  MAX_FIRE_SUPPORT_PER_9: 3, // Combined cap across ENGINEER (LAT), SUPPORT (LMG), and RECON (Marksman)
+  ROLE_MAX_PER_9: {
+    assault: 9,   // Unlimited Rifleman / Breacher backbone
+    medic: 2,     // Max 2 Combat Medics per 9-man squad
+    engineer: 2,  // Max 2 LAT (RPG-7) per 9-man squad (1 in standard squads, 2 in Charlie Anti-Armor)
+    support: 2,   // Max 2 Automatic Riflemen (LMG) per 9-man squad
+    recon: 1,     // Max 1 Marksman / Sniper per 9-man squad
+    armor: 9,     // Dedicated BRAVO Armor Crewmen (PDW + Repair, no RPG spam)
+    pilot: 9      // Dedicated FALCON Combat Pilots
+  },
+  BADGE_LABELS: {
+    assault: 'UNLIMITED RIFLEMAN',
+    medic: 'MAX 2 / SQUAD',
+    engineer: 'MAX 1–2 LAT / SQUAD',
+    support: 'MAX 2 LMG / SQUAD',
+    recon: 'MAX 1 SNIPER / SQUAD',
+    armor: 'BRAVO ARMOR CREW',
+    pilot: 'FALCON AIR WING'
+  }
+};
+
+// ---------------------------------------------------------------------------
 // BOT
 // ---------------------------------------------------------------------------
 export const BOT = {
@@ -766,10 +794,10 @@ export const BOT = {
   BLEEDOUT_TIMER: 95.0,
   RESPAWN_TIMER: 3.5,
 
-  // Engage ranges (Squad-calibrated LAT RPG-7 effective anti-armor range < 100m)
+  // Engage ranges (Squad-calibrated LAT RPG-7 effective anti-armor range < 92m)
   ENGAGE_RANGE_INFANTRY: 115,
-  ENGAGE_RANGE_RPG_CHECK: 98,
-  ENGAGE_RANGE_RPG_TOGGLE: 92,
+  ENGAGE_RANGE_RPG_CHECK: 92,
+  ENGAGE_RANGE_RPG_TOGGLE: 86,
   COMBAT_RANGE_INFANTRY: 68,
   COMBAT_RANGE_VEHICLE: 65,
 
@@ -821,13 +849,14 @@ export const BOT = {
   GRAVITY: 24.0,
   VAULT_JUMP_SPEED: 7.6,
 
-  // Shoot cooldowns (Squad LAT RPG-7 single-tube manual reload: 7.5–10.0s, 2 HEAT rockets per spawn)
+  // Shoot cooldowns (Squad LAT RPG-7 single-tube manual reload: 9.5–13.0s, 2 HEAT rockets per spawn, 1 MANPADS SAM for AA techs)
   BURST_PAUSE_BASE: 0.48,
   BURST_PAUSE_RAND: 0.4,
   BURST_SHOT_INTERVAL: 0.11,
-  RPG_COOLDOWN_BASE: 7.5,
-  RPG_COOLDOWN_RAND: 2.5,
+  RPG_COOLDOWN_BASE: 9.5,
+  RPG_COOLDOWN_RAND: 3.5,
   RPG_ROCKETS_PER_SPAWN: 2,
+  SAM_MISSILES_PER_SPAWN: 1,
 
   // AI think
   RETHINK_TIMER_BASE: 3.5,

@@ -1,17 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT, FORMATION } from '../config.js?v=122';
-import { sound } from '../audio.js?v=122';
-import { tmpVec3 } from '../utils/VectorPool.js?v=122';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=122';
-import { events, makeEventBridge } from '../events.js?v=122';
-import { createSoldierMesh } from './SoldierMeshFactory.js?v=122';
-import { SightlineMethods } from './SightlineSystem.js?v=122';
-import { MedicAIMethods } from './MedicAI.js?v=122';
-import { BotAIMethods } from './BotAI.js?v=122';
+import { BOT, FORMATION, SQUAD_KIT_CAPS } from '../config.js?v=123';
+import { sound } from '../audio.js?v=123';
+import { tmpVec3 } from '../utils/VectorPool.js?v=123';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=123';
+import { events, makeEventBridge } from '../events.js?v=123';
+import {
+  createSoldierMesh,
+  updateSoldierEquippedWeapon,
+  getDefaultWeaponIdForRole
+} from './SoldierMeshFactory.js?v=123';
+import { SightlineMethods } from './SightlineSystem.js?v=123';
+import { MedicAIMethods } from './MedicAI.js?v=123';
+import { BotAIMethods } from './BotAI.js?v=123';
 import {
   createBaseProtectionFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=122';
+} from '../core/StateMachines.js?v=123';
 
 const BOT_NAMES_US = [
   'SgtOkiDoki', 'WakistanVet', 'VoxelMedic', 'EagleOne', 'BlockBuster',
@@ -35,7 +39,21 @@ const BOT_NAMES_RU = [
   'Vikhr_02', 'Baikal_RU', 'Sapsan_BB', 'TaigaWolf', 'Varyag_01'
 ];
 
-const CLASSES = ['MEDIC', 'ENGINEER', 'ASSAULT', 'MEDIC', 'ENGINEER', 'SUPPORT'];
+/**
+ * Offworld Industries *Squad*-Calibrated 9-Man Squad Role Rosters:
+ * Prevents the old modulo-6 bug where 50% of all bots spawned as RPG/Stinger Engineers!
+ * - Each 9-man squad slice enforces Squad's Fire-Support cap (<=3 combined LAT + LMG + Marksman),
+ *   max 2 Medics, max 1 Marksman (RECON), and 1–2 LAT Engineers (2 only in CHARLIE Anti-Armor;
+ *   1 in ALPHA/DELTA/ECHO/BRAVO/FALCON -> ~12.8% team-wide LAT ratio!).
+ */
+export const SQUAD_9MAN_ROSTERS = {
+  ALPHA:   ['ASSAULT', 'ASSAULT', 'MEDIC', 'ASSAULT', 'SUPPORT', 'MEDIC', 'ENGINEER', 'ASSAULT', 'RECON'],
+  BRAVO:   ['ASSAULT', 'ASSAULT', 'MEDIC', 'SUPPORT', 'ENGINEER', 'ASSAULT', 'MEDIC', 'ASSAULT', 'ASSAULT'],
+  CHARLIE: ['ASSAULT', 'ENGINEER', 'MEDIC', 'ASSAULT', 'ENGINEER', 'SUPPORT', 'MEDIC', 'ASSAULT', 'ASSAULT'],
+  DELTA:   ['ASSAULT', 'MEDIC', 'SUPPORT', 'ASSAULT', 'MEDIC', 'ENGINEER', 'SUPPORT', 'ASSAULT', 'ASSAULT'],
+  ECHO:    ['ASSAULT', 'RECON', 'MEDIC', 'ASSAULT', 'SUPPORT', 'ENGINEER', 'MEDIC', 'ASSAULT', 'ASSAULT'],
+  FALCON:  ['ASSAULT', 'ASSAULT', 'MEDIC', 'ASSAULT', 'SUPPORT', 'ASSAULT', 'MEDIC', 'ASSAULT', 'ENGINEER']
+};
 
 const HELMET_COLOR_US = new THREE.Color(0x2980b9);
 const HELMET_COLOR_RU = new THREE.Color(0xc0392b);
@@ -1093,12 +1111,8 @@ export class BotManager {
     const isSquadLeader = squadMemberIndex === 0;
     const isCommander = index === 0;
 
-    let role =
-      squadDef.id === 'FALCON'
-        ? 'ENGINEER'
-        : squadDef.id === 'BRAVO' && squadMemberIndex < 8
-        ? 'ENGINEER'
-        : CLASSES[index % CLASSES.length];
+    const squadRoster = SQUAD_9MAN_ROSTERS[squadDef.id] || SQUAD_9MAN_ROSTERS.ALPHA;
+    let role = squadRoster[squadMemberIndex % squadRoster.length];
     let botName = name;
     let subFaction = team;
 
@@ -1253,6 +1267,16 @@ export class BotManager {
       hasMedicBag: role === 'MEDIC',
       medicBagSupply: role === 'MEDIC' ? (BOT.MEDIC_BAG_MAX_SUPPLY || 600) : 0,
       maxMedicBagSupply: role === 'MEDIC' ? (BOT.MEDIC_BAG_MAX_SUPPLY || 600) : 0,
+      hasManpads:
+        era === 'modern' &&
+        role === 'ENGINEER' &&
+        (squadDef.id === 'FALCON' || (squadDef.id === 'CHARLIE' && squadMemberIndex % 9 === 4)),
+      samMissilesLeft:
+        era === 'modern' &&
+        role === 'ENGINEER' &&
+        (squadDef.id === 'FALCON' || (squadDef.id === 'CHARLIE' && squadMemberIndex % 9 === 4))
+          ? BOT.SAM_MISSILES_PER_SPAWN || 1
+          : 0,
       rpgRocketsLeft: role === 'ENGINEER' ? (BOT.RPG_ROCKETS_PER_SPAWN || 2) : 0,
       maxRpgRockets: role === 'ENGINEER' ? (BOT.RPG_ROCKETS_PER_SPAWN || 2) : 0,
       medicKills: 0,
@@ -1353,6 +1377,53 @@ export class BotManager {
     });
 
     this.bots.push(bot);
+  }
+
+  /**
+   * Computes live 9-man fireteam slice kit counts for `(team, squadId)` and, when the human player
+   * equips a capped specialist kit (`ENGINEER`, `RECON`, `SUPPORT`, `MEDIC`) with Squad Doctrine ON,
+   * automatically reassigns 1 excess AI squadmate in the first 9-man slice to `ASSAULT` Rifleman
+   * so Squad's 9-man role caps are strictly honored without locking out solo players!
+   */
+  rebalanceAiSquadForPlayerRole(player) {
+    if (!player || player.squadDoctrineEnabled === false) return null;
+    if ((this.world?.era || 'modern') !== 'modern') return null;
+    const team = player.team || 'US';
+    const squadId = player.squad || 'ALPHA';
+    const pRoleLower = String(player.role || 'assault').toLowerCase();
+    const maxCap = SQUAD_KIT_CAPS?.ROLE_MAX_PER_9?.[pRoleLower] ?? 9;
+    if (maxCap >= 9) return null;
+
+    const pRoleUpper = pRoleLower.toUpperCase();
+    const sliceBots = this.bots.filter(
+      (b) => b && b.team === team && b.squad === squadId && (b.squadMemberIndex || 0) < 8
+    );
+    const matchingAi = sliceBots.filter((b) => b.role === pRoleUpper);
+    // Player occupies 1 slot of `pRoleUpper` in this 9-man squad; ensure AI holds at most `maxCap - 1`
+    let excess = matchingAi.length + 1 - maxCap;
+    let reassigned = 0;
+    for (let i = matchingAi.length - 1; i >= 0 && excess > 0; i--) {
+      const b = matchingAi[i];
+      if (b.isSquadLeader || b.isCommander) continue;
+      b.role = 'ASSAULT';
+      b.usingRpg = false;
+      b.hasManpads = false;
+      b.samMissilesLeft = 0;
+      b.rpgRocketsLeft = 0;
+      b.maxRpgRockets = 0;
+      const parts = b.parts || b.mesh?.userData?.parts;
+      if (parts?.rpgShoulderGroup) parts.rpgShoulderGroup.visible = false;
+      if (parts?.rpgBackTube) parts.rpgBackTube.visible = false;
+      if (parts?.gunGroup) parts.gunGroup.visible = true;
+      if (b.mesh) {
+        updateSoldierEquippedWeapon(b.mesh, getDefaultWeaponIdForRole('ASSAULT', b.team), b.team, {
+          role: 'ASSAULT'
+        });
+      }
+      excess--;
+      reassigned++;
+    }
+    return reassigned;
   }
 
   /**

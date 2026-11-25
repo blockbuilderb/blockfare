@@ -1,9 +1,9 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { ECONOMY, VEHICLE_STATS } from '../src/config.js?v=122';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=122';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=122';
+import { ECONOMY, VEHICLE_STATS, SQUAD_KIT_CAPS } from '../src/config.js?v=123';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=123';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=123';
 import {
   VehicleManager,
   PITCH_LIMITS_CAR,
@@ -11,13 +11,13 @@ import {
   classifyWeaponBallistics,
   getVehicleSeatLayout,
   initVehicleOrdnance
-} from '../src/vehicles.js?v=122';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=122';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=122';
-import { sound } from '../src/audio/SoundManager.js?v=122';
-import { BotManager, evaluateCatastrophicKill } from '../src/bots.js?v=122';
-import { NetworkManager } from '../src/network.js?v=122';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=122';
+} from '../src/vehicles.js?v=123';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=123';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=123';
+import { sound } from '../src/audio/SoundManager.js?v=123';
+import { BotManager, SQUAD_9MAN_ROSTERS, evaluateCatastrophicKill } from '../src/bots.js?v=123';
+import { NetworkManager } from '../src/network.js?v=123';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=123';
 
 function createEconomyPlayerHarness(overrides = {}) {
   const storage = new Map();
@@ -729,5 +729,87 @@ describe('Squad Caliber Penetration, Optics/Sensor Crits, Avionics FCS & Beyond-
     assert.ok(WEAPON_DEFS.sv98.adsSpeed >= 22 && WEAPON_DEFS.sv98.chestMult >= 1.5);
     assert.ok(WEAPON_DEFS.awm.adsSpeed >= 21 && WEAPON_DEFS.awm.chestMult >= 1.6);
     assert.ok(WEAPON_DEFS.sv98.damage * WEAPON_DEFS.sv98.chestMult >= 160, 'SV-98 upper-chest One-Shot-Kill');
+  });
+
+  test('Distinct 3D Aircraft Crash Wrecks (never tank turrets) & Offworld Squad 9-Man Kit Slot Caps (~12.8% LAT vs old 50% bug)', () => {
+    // 1. Crashed Aircraft spawn distinct swept-wing/flying-wing/cargo airframe wrecks with ZERO tank turrets
+    const vmWreck = {
+      scene: new THREE.Scene(),
+      world: { getGroundHeightAt: () => 0 },
+      activeWrecks: [],
+      spawnVehicleWreck: VehicleManager.prototype.spawnVehicleWreck
+    };
+
+    for (const role of ['fighter', 'cas', 'gunship', 'b2_spirit', 'wright_flyer']) {
+      const w = vmWreck.spawnVehicleWreck({
+        id: `plane_${role}`,
+        type: 'plane',
+        isAircraft: true,
+        aircraftRole: role,
+        pos: new THREE.Vector3(10, 0, 10),
+        yaw: 0.4
+      });
+      assert.equal(w.wreckKind, 'aircraft', `${role} wreck must be aircraft kind`);
+      assert.equal(
+        w.mesh.getObjectByName('tankWreckTurret'),
+        undefined,
+        `Crashed ${role} plane must NEVER spawn a tank turret!`
+      );
+      assert.ok(
+        w.mesh.getObjectByName('aircraftWreckFuselage') && w.mesh.getObjectByName('aircraftWreckWingL'),
+        `Crashed ${role} plane must include aircraft fuselage & wing wreckage`
+      );
+    }
+
+    const truckWreck = vmWreck.spawnVehicleWreck({
+      id: 'us_humvee_1',
+      type: 'humvee',
+      isAircraft: false,
+      pos: new THREE.Vector3(0, 0, 0),
+      yaw: 0
+    });
+    assert.equal(truckWreck.wreckKind, 'truck');
+    assert.equal(truckWreck.mesh.getObjectByName('tankWreckTurret'), undefined);
+    assert.ok(truckWreck.mesh.getObjectByName('truckWreckCab'));
+
+    const tankWreck = vmWreck.spawnVehicleWreck({
+      id: 'ru_t90_1',
+      type: 'tank',
+      isAircraft: false,
+      pos: new THREE.Vector3(0, 0, 0),
+      yaw: 0
+    });
+    assert.equal(tankWreck.wreckKind, 'armor');
+    assert.ok(tankWreck.mesh.getObjectByName('tankWreckTurret'));
+    assert.ok(tankWreck.mesh.getObjectByName('tankWreckBarrel'));
+
+    // 2. Squad 9-Man Kit Slot Caps: <=2 LAT Engineers, <=2 Medics, <=1 Recon Marksman, <=3 Fire-Support per 9-man squad
+    let totalSlots = 0;
+    let totalEngineers = 0;
+    let totalRecons = 0;
+    for (const [sqId, roster] of Object.entries(SQUAD_9MAN_ROSTERS)) {
+      assert.equal(roster.length, 9, `${sqId} roster must be a 9-man Squad template`);
+      const counts = { ASSAULT: 0, MEDIC: 0, ENGINEER: 0, SUPPORT: 0, RECON: 0 };
+      for (const r of roster) {
+        counts[r] = (counts[r] || 0) + 1;
+        totalSlots++;
+        if (r === 'ENGINEER') totalEngineers++;
+        if (r === 'RECON') totalRecons++;
+      }
+      assert.ok(counts.ENGINEER <= SQUAD_KIT_CAPS.ROLE_MAX_PER_9.engineer, `${sqId} LAT cap <=2`);
+      assert.ok(counts.MEDIC <= SQUAD_KIT_CAPS.ROLE_MAX_PER_9.medic, `${sqId} Medic cap <=2`);
+      assert.ok(counts.RECON <= SQUAD_KIT_CAPS.ROLE_MAX_PER_9.recon, `${sqId} Marksman cap <=1`);
+      const fireSupportTotal = counts.ENGINEER + counts.SUPPORT + counts.RECON;
+      assert.ok(
+        fireSupportTotal <= SQUAD_KIT_CAPS.MAX_FIRE_SUPPORT_PER_9,
+        `${sqId} combined Fire-Support roles (${fireSupportTotal}) must be <= 3`
+      );
+    }
+    const teamEngineerRatio = totalEngineers / totalSlots;
+    assert.ok(
+      teamEngineerRatio > 0.1 && teamEngineerRatio <= 0.16,
+      `Team-wide LAT Engineer ratio should be ~13% (got ${(teamEngineerRatio * 100).toFixed(1)}%)`
+    );
+    assert.ok(totalRecons >= 2, 'ECHO and ALPHA squads now field actual RECON marksmen');
   });
 });

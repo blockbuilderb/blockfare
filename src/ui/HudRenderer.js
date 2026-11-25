@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=122';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=122';
+import { UI, getEraRoles } from '../config.js?v=123';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=123';
 
 export const HudRenderer = {
   _setText(el, str) {

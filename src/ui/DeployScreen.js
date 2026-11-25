@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=122';
-import { CLASS_TRAITS, VEHICLE_STATS, getAllowedRoleIds } from '../config.js?v=122';
-import { events } from '../events.js?v=122';
+import { SQUAD_DEFS } from '../bots.js?v=123';
+import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=123';
+import { events } from '../events.js?v=123';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=122';
+} from '../core/StateMachines.js?v=123';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=122';
+} from '../utils/KeyboardShortcuts.js?v=123';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -1379,6 +1379,39 @@ export const DeployScreen = {
           }</span>`;
       }
     }
+
+    // Render Squad-style 9-Man Kit Slot Cap Badges on Modern Combat Role Buttons
+    if (typeof document !== 'undefined') {
+      const era = (this.world && this.world.era) || 'modern';
+      const doctrineOn = this.player?.squadDoctrineEnabled !== false;
+      document.querySelectorAll('.class-btn[data-class]').forEach((btn) => {
+        const cls = btn.dataset.class;
+        const titleEl = btn.querySelector('.class-title');
+        if (!titleEl) return;
+        let badgeEl = titleEl.querySelector('.squad-kit-cap-pill');
+        if (era !== 'modern' || !SQUAD_KIT_CAPS?.BADGE_LABELS?.[cls]) {
+          if (badgeEl) badgeEl.style.display = 'none';
+          return;
+        }
+        if (!badgeEl) {
+          badgeEl = document.createElement('span');
+          badgeEl.className = 'squad-kit-cap-pill';
+          badgeEl.style.cssText =
+            'float:right;font-size:9px;font-weight:900;padding:1px 6px;border-radius:3px;letter-spacing:0.6px;';
+          titleEl.appendChild(badgeEl);
+        }
+        badgeEl.style.display = 'inline-block';
+        const isUnlimited = cls === 'assault';
+        badgeEl.textContent = doctrineOn ? SQUAD_KIT_CAPS.BADGE_LABELS[cls] : 'DOCTRINE OFF';
+        badgeEl.style.background = isUnlimited
+          ? 'rgba(46, 204, 113, 0.2)'
+          : 'rgba(241, 196, 15, 0.18)';
+        badgeEl.style.border = isUnlimited
+          ? '1px solid rgba(46, 204, 113, 0.55)'
+          : '1px solid rgba(241, 196, 15, 0.55)';
+        badgeEl.style.color = isUnlimited ? '#7bed9f' : '#ffeaa7';
+      });
+    }
   },
 
   triggerDeploy() {
@@ -1419,6 +1452,12 @@ export const DeployScreen = {
     if (this.onBeforeDeploy) {
       this.onBeforeDeploy();
     }
+    this.botManager?.rebalanceAiSquadForPlayerRole?.({
+      team: this.selectedTeam,
+      squad: this.selectedSquad,
+      role: this.selectedClass,
+      squadDoctrineEnabled: this.player?.squadDoctrineEnabled
+    });
     let spawnVec = isJurassicDino
       ? this.world.spawns.US_BASE.clone().set(0, 0, -330)
       : isJurassicRussianCoalition || this.selectedTeam === 'RU'

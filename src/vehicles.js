@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=122';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=122';
+import { sound } from './audio.js?v=123';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=123';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=122';
-import { createVehicleMesh } from './models/vehicle-model.js?v=122';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=122';
-import { events, makeEventBridge } from './events.js?v=122';
+} from './assets/vehicle-defs.js?v=123';
+import { createVehicleMesh } from './models/vehicle-model.js?v=123';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=123';
+import { events, makeEventBridge } from './events.js?v=123';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=122';
+} from './core/StateMachines.js?v=123';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -30,12 +30,30 @@ function markShared(item) {
 
 const SHARED_WRECK_HULL_GEO = markShared(new THREE.BoxGeometry(3.4, 1.55, 6.2));
 const SHARED_WRECK_TURRET_GEO = markShared(new THREE.BoxGeometry(2.3, 0.85, 2.7));
+const SHARED_WRECK_BARREL_GEO = markShared(new THREE.CylinderGeometry(0.11, 0.13, 3.3, 7));
+const SHARED_WRECK_CAB_GEO = markShared(new THREE.BoxGeometry(2.25, 0.92, 2.35));
+const SHARED_AIR_FUSELAGE_GEO = markShared(new THREE.CylinderGeometry(0.56, 0.86, 7.8, 7));
+const SHARED_AIR_CARGO_FUSELAGE_GEO = markShared(new THREE.CylinderGeometry(1.15, 1.24, 10.2, 8));
+const SHARED_AIR_WING_GEO = markShared(new THREE.BoxGeometry(4.3, 0.16, 1.85));
+const SHARED_AIR_CARGO_WING_GEO = markShared(new THREE.BoxGeometry(5.6, 0.24, 1.95));
+const SHARED_AIR_TAIL_FIN_GEO = markShared(new THREE.BoxGeometry(0.16, 1.68, 1.45));
+const SHARED_AIR_NOZZLE_GEO = markShared(new THREE.CylinderGeometry(0.35, 0.44, 1.15, 8));
+const SHARED_AIR_B2_CENTER_GEO = markShared(new THREE.BoxGeometry(5.8, 0.42, 3.8));
+const SHARED_AIR_B2_WING_GEO = markShared(new THREE.BoxGeometry(4.8, 0.18, 2.2));
+const SHARED_AIR_SCORCH_GEO = markShared(new THREE.CircleGeometry(4.6, 12));
+SHARED_AIR_SCORCH_GEO.rotateX(-Math.PI / 2);
 const SHARED_WRECK_FIRE_GEO = markShared(new THREE.BoxGeometry(1.45, 1.25, 1.45));
+const SHARED_WRECK_SCORCH_MAT = markShared(
+  new THREE.MeshBasicMaterial({ color: 0x111315, transparent: true, opacity: 0.78 })
+);
 const SHARED_WRECK_HULL_MAT = markShared(
   new THREE.MeshLambertMaterial({ color: 0x1b1d20, flatShading: true })
 );
 const SHARED_WRECK_CHAR_MAT = markShared(
   new THREE.MeshLambertMaterial({ color: 0x26292d, flatShading: true })
+);
+const SHARED_WRECK_WOOD_CHAR_MAT = markShared(
+  new THREE.MeshLambertMaterial({ color: 0x3b2a1e, flatShading: true })
 );
 const SHARED_WRECK_FIRE_MAT = markShared(
   new THREE.MeshBasicMaterial({ color: 0xff6b1a, transparent: true, opacity: 0.78 })
@@ -1125,33 +1143,184 @@ export class VehicleManager {
     }
     const gY = this.world ? this.world.getGroundHeightAt(vehicle.pos.x, vehicle.pos.z) : vehicle.pos.y;
     const grp = new THREE.Group();
-    const hull = new THREE.Mesh(SHARED_WRECK_HULL_GEO, SHARED_WRECK_HULL_MAT);
-    hull.position.set(0, 0.78, 0);
-    const scaleX = vehicle.isAircraft ? 1.25 : vehicle.type === 'tank' ? 1.05 : 0.88;
-    const scaleZ = vehicle.isAircraft ? 1.35 : vehicle.type === 'tank' ? 1.05 : 0.9;
-    hull.scale.set(scaleX, 1.0, scaleZ);
-    grp.add(hull);
-
-    const turret = new THREE.Mesh(SHARED_WRECK_TURRET_GEO, SHARED_WRECK_CHAR_MAT);
-    turret.position.set(0.15, 1.65, -0.2);
-    turret.rotation.set(0.14, 0.38, -0.18); // Tilted blown-off turret / crumpled fuselage
-    grp.add(turret);
-
     const fireGlow = new THREE.Mesh(SHARED_WRECK_FIRE_GEO, SHARED_WRECK_FIRE_MAT);
-    fireGlow.position.set(0, 1.45, 0.35);
-    grp.add(fireGlow);
+
+    if (vehicle.isAircraft) {
+      const aRole = vehicle.aircraftRole || 'fighter';
+      grp.userData.wreckKind = 'aircraft';
+      grp.userData.aircraftRole = aRole;
+
+      // Ground crash scorch / skid crater disc
+      const scorch = new THREE.Mesh(SHARED_AIR_SCORCH_GEO, SHARED_WRECK_SCORCH_MAT);
+      scorch.position.set(0, 0.05, 0.4);
+      scorch.scale.set(aRole === 'gunship' || aRole === 'b2_spirit' ? 1.45 : 1.05, 1, 1.35);
+      grp.add(scorch);
+
+      if (aRole === 'b2_spirit') {
+        // Crashed Stealth Flying-Wing Wreck: nose-buried center body + sheared jagged delta wings (zero tail/turret!)
+        const centerWing = new THREE.Mesh(SHARED_AIR_B2_CENTER_GEO, SHARED_WRECK_HULL_MAT);
+        centerWing.name = 'aircraftWreckFuselage';
+        centerWing.position.set(0, 0.58, -0.2);
+        centerWing.rotation.set(-0.18, 0.08, 0.11);
+        grp.add(centerWing);
+
+        const leftWing = new THREE.Mesh(SHARED_AIR_B2_WING_GEO, SHARED_WRECK_CHAR_MAT);
+        leftWing.name = 'aircraftWreckWingL';
+        leftWing.position.set(-4.2, 0.85, 0.75);
+        leftWing.rotation.set(-0.12, 0.42, 0.22);
+        grp.add(leftWing);
+
+        const rightWing = new THREE.Mesh(SHARED_AIR_B2_WING_GEO, SHARED_WRECK_CHAR_MAT);
+        rightWing.name = 'aircraftWreckWingR';
+        rightWing.position.set(4.1, 0.24, 1.35); // Sheared starboard wing lying flat on ground
+        rightWing.rotation.set(0.05, -0.58, -0.08);
+        grp.add(rightWing);
+
+        fireGlow.position.set(-0.4, 0.95, 0.35);
+        fireGlow.scale.set(1.45, 1.1, 1.35);
+      } else if (aRole === 'gunship') {
+        // Crashed AC-130J / Tu-95MS Heavy Gunship Wreck: broken pressurized cargo tube + high wing + tall vertical tail fin
+        const cargoBody = new THREE.Mesh(SHARED_AIR_CARGO_FUSELAGE_GEO, SHARED_WRECK_HULL_MAT);
+        cargoBody.name = 'aircraftWreckFuselage';
+        cargoBody.position.set(0, 1.02, 0);
+        cargoBody.rotation.set(Math.PI / 2 - 0.14, 0.06, 0.12);
+        grp.add(cargoBody);
+
+        const portWing = new THREE.Mesh(SHARED_AIR_CARGO_WING_GEO, SHARED_WRECK_CHAR_MAT);
+        portWing.name = 'aircraftWreckWingL';
+        portWing.position.set(-3.4, 1.35, -0.35);
+        portWing.rotation.set(0.08, 0.12, 0.28);
+        grp.add(portWing);
+
+        const stbdWing = new THREE.Mesh(SHARED_AIR_CARGO_WING_GEO, SHARED_WRECK_CHAR_MAT);
+        stbdWing.name = 'aircraftWreckWingR';
+        stbdWing.position.set(3.8, 0.32, 0.65);
+        stbdWing.rotation.set(-0.06, -0.34, -0.14);
+        grp.add(stbdWing);
+
+        const tallFin = new THREE.Mesh(SHARED_AIR_TAIL_FIN_GEO, SHARED_WRECK_CHAR_MAT);
+        tallFin.name = 'aircraftWreckTailFin';
+        tallFin.position.set(0.18, 2.25, 4.15);
+        tallFin.scale.set(1.3, 1.45, 1.35);
+        tallFin.rotation.set(-0.16, 0.08, 0.15);
+        grp.add(tallFin);
+
+        fireGlow.position.set(-0.65, 1.65, -0.45);
+        fireGlow.scale.set(1.6, 1.35, 1.5);
+      } else if (aRole === 'wright_flyer') {
+        // Crashed 1903 Biplane Wreck: splintered upper/lower spruce-and-canvas wings + broken skids
+        const lowerWing = new THREE.Mesh(SHARED_AIR_WING_GEO, SHARED_WRECK_WOOD_CHAR_MAT);
+        lowerWing.name = 'aircraftWreckWingL';
+        lowerWing.position.set(0, 0.32, 0);
+        lowerWing.scale.set(1.55, 0.85, 0.9);
+        lowerWing.rotation.set(0.08, 0.14, -0.09);
+        grp.add(lowerWing);
+
+        const upperWing = new THREE.Mesh(SHARED_AIR_WING_GEO, SHARED_WRECK_CHAR_MAT);
+        upperWing.name = 'aircraftWreckFuselage';
+        upperWing.position.set(0.25, 0.88, -0.35);
+        upperWing.scale.set(1.48, 0.85, 0.9);
+        upperWing.rotation.set(-0.24, -0.18, 0.26);
+        grp.add(upperWing);
+
+        fireGlow.position.set(0, 0.82, 0.1);
+        fireGlow.scale.set(0.95, 0.9, 0.95);
+      } else {
+        // Crashed Jet Fighter / Bomber / A-10 CAS Wreck: nose-buried fuselage + swept wings + canted twin tail fins + jet nozzles!
+        const fuselage = new THREE.Mesh(SHARED_AIR_FUSELAGE_GEO, SHARED_WRECK_HULL_MAT);
+        fuselage.name = 'aircraftWreckFuselage';
+        fuselage.position.set(0, 0.72, 0.1);
+        fuselage.rotation.set(Math.PI / 2 - 0.22, 0.05, 0.14); // Nose buried at -12.6° into ground
+        grp.add(fuselage);
+
+        const leftWing = new THREE.Mesh(SHARED_AIR_WING_GEO, SHARED_WRECK_CHAR_MAT);
+        leftWing.name = 'aircraftWreckWingL';
+        leftWing.position.set(-2.35, 0.92, 0.35);
+        leftWing.rotation.set(-0.08, aRole === 'cas' ? 0.06 : 0.34, 0.26); // Tilted skyward
+        grp.add(leftWing);
+
+        const rightWing = new THREE.Mesh(SHARED_AIR_WING_GEO, SHARED_WRECK_CHAR_MAT);
+        rightWing.name = 'aircraftWreckWingR';
+        rightWing.position.set(2.65, 0.22, 1.05); // Sheared wing slab torn off on ground
+        rightWing.rotation.set(0.04, aRole === 'cas' ? -0.18 : -0.48, -0.11);
+        grp.add(rightWing);
+
+        for (const s of [-1, 1]) {
+          const tailFin = new THREE.Mesh(SHARED_AIR_TAIL_FIN_GEO, SHARED_WRECK_HULL_MAT);
+          tailFin.name = s < 0 ? 'aircraftWreckTailFinL' : 'aircraftWreckTailFinR';
+          tailFin.position.set(s * (aRole === 'cas' ? 1.15 : 0.58), 1.48, 3.05);
+          tailFin.rotation.set(-0.18, 0.05, s * -0.24 + 0.12);
+          grp.add(tailFin);
+
+          const nozzle = new THREE.Mesh(SHARED_AIR_NOZZLE_GEO, SHARED_WRECK_CHAR_MAT);
+          nozzle.position.set(
+            s * 0.42,
+            aRole === 'cas' ? 1.38 : 0.96,
+            aRole === 'cas' ? 1.85 : 3.65
+          );
+          nozzle.rotation.x = Math.PI / 2 - 0.2;
+          grp.add(nozzle);
+        }
+
+        fireGlow.position.set(0.1, 1.15, -0.35);
+        fireGlow.scale.set(1.25, 1.1, 1.25);
+      }
+      grp.add(fireGlow);
+    } else if (vehicle.type === 'humvee' || vehicle.isEmplacement) {
+      // Charred 4x4 Tactical Truck / Emplacement Wreck (NO tank turret!)
+      grp.userData.wreckKind = 'truck';
+      const chassis = new THREE.Mesh(SHARED_WRECK_HULL_GEO, SHARED_WRECK_HULL_MAT);
+      chassis.position.set(0, 0.62, 0);
+      chassis.scale.set(0.76, 0.72, 0.78);
+      grp.add(chassis);
+
+      const cab = new THREE.Mesh(SHARED_WRECK_CAB_GEO, SHARED_WRECK_CHAR_MAT);
+      cab.name = 'truckWreckCab';
+      cab.position.set(0, 1.24, 0.15);
+      cab.rotation.set(-0.06, 0.04, 0.08);
+      grp.add(cab);
+
+      fireGlow.position.set(0, 1.18, -1.15); // Burning front V8 engine bay
+      fireGlow.scale.set(0.92, 0.92, 0.92);
+      grp.add(fireGlow);
+    } else {
+      // Heavy Armored Tank / IFV / SPAAG Wreck: charred hull + blown-off tilted turret + snapped cannon barrel
+      grp.userData.wreckKind = 'armor';
+      const hull = new THREE.Mesh(SHARED_WRECK_HULL_GEO, SHARED_WRECK_HULL_MAT);
+      hull.position.set(0, 0.78, 0);
+      const scaleX = vehicle.type === 'tank' ? 1.05 : 0.88;
+      const scaleZ = vehicle.type === 'tank' ? 1.05 : 0.9;
+      hull.scale.set(scaleX, 1.0, scaleZ);
+      grp.add(hull);
+
+      const turret = new THREE.Mesh(SHARED_WRECK_TURRET_GEO, SHARED_WRECK_CHAR_MAT);
+      turret.name = 'tankWreckTurret';
+      turret.position.set(0.15, 1.65, -0.2);
+      turret.rotation.set(0.14, 0.38, -0.18);
+      grp.add(turret);
+
+      const barrel = new THREE.Mesh(SHARED_WRECK_BARREL_GEO, SHARED_WRECK_HULL_MAT);
+      barrel.name = 'tankWreckBarrel';
+      barrel.position.set(0.72, 1.48, -2.05);
+      barrel.rotation.set(Math.PI / 2 + 0.18, 0, -0.36); // Drooping snapped main cannon barrel
+      grp.add(barrel);
+
+      fireGlow.position.set(0, 1.45, 0.35);
+      grp.add(fireGlow);
+    }
 
     grp.position.set(vehicle.pos.x, gY, vehicle.pos.z);
-    grp.rotation.set(0.05, vehicle.yaw || 0, -0.06);
+    grp.rotation.set(vehicle.isAircraft ? -0.04 : 0.05, vehicle.yaw || 0, -0.06);
     this.scene.add(grp);
 
     const wreck = {
       id: `wreck_${vehicle.id}_${Date.now()}`,
+      wreckKind: grp.userData.wreckKind,
       mesh: grp,
       fireMesh: fireGlow,
       pos: new THREE.Vector3(vehicle.pos.x, gY, vehicle.pos.z),
-      radius: vehicle.isAircraft ? 3.8 : vehicle.type === 'tank' ? 3.2 : 2.7,
-      height: 2.35,
+      radius: vehicle.isAircraft ? 4.2 : vehicle.type === 'tank' ? 3.2 : 2.7,
+      height: vehicle.isAircraft ? 2.15 : 2.35,
       life: 20.0,
       maxLife: 20.0,
       smokeTimer: 0

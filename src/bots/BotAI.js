@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=122';
-import { BOT } from '../config.js?v=122';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=122';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=122';
-import { events } from '../events.js?v=122';
+import { sound } from '../audio.js?v=123';
+import { BOT } from '../config.js?v=123';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=123';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=123';
+import { events } from '../events.js?v=123';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -529,6 +529,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.fieldDressings = bot.maxFieldDressings || (bot.role === 'MEDIC' ? 9 : 2);
         bot.medicBagSupply = bot.maxMedicBagSupply || (bot.role === 'MEDIC' ? 600 : 0);
         bot.rpgRocketsLeft = bot.role === 'ENGINEER' ? (bot.maxRpgRockets || BOT.RPG_ROCKETS_PER_SPAWN || 2) : 0;
+        bot.samMissilesLeft = bot.hasManpads ? (BOT.SAM_MISSILES_PER_SPAWN || 1) : 0;
         bot.postReviveTimer = 0;
         bot.standUpProgress = 1.0;
         bot.weaponReadyTimer = 0;
@@ -1107,20 +1108,23 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
           : null;
 
         if (enemyAirList && enemyGroundList) {
-          for (let ai = 0; ai < enemyAirList.length; ai++) {
-            const veh = enemyAirList[ai];
-            if (veh.dead || (!veh.driver && !veh.aiPilotActive)) continue;
-            if (veh.isLowAltRadarMasked || (veh.airborneRadarTimer || 0) < 4.0) continue;
-            const isStealthPlane = veh.isStealthAircraft || veh.aircraftRole === 'b2_spirit';
-            if (isStealthPlane && (veh.flareActiveTimer || 0) > 0) continue;
-            const maxManpadsRange = isStealthPlane ? 380 * (veh.stealthFactor || 0.12) : 380;
-            const airDistSq = bot.pos.distanceToSquared(veh.pos);
-            if (
-              airDistSq < maxManpadsRange * maxManpadsRange &&
-              (!nearestArmor || !nearestArmor.isAircraft || airDistSq < nearestArmorDistSq)
-            ) {
-              nearestArmorDistSq = airDistSq;
-              nearestArmor = veh;
+          const canFireManpads = Boolean(bot.hasManpads && (bot.samMissilesLeft ?? 0) > 0);
+          if (canFireManpads) {
+            for (let ai = 0; ai < enemyAirList.length; ai++) {
+              const veh = enemyAirList[ai];
+              if (veh.dead || (!veh.driver && !veh.aiPilotActive)) continue;
+              if (veh.isLowAltRadarMasked || (veh.airborneRadarTimer || 0) < 4.0) continue;
+              const isStealthPlane = veh.isStealthAircraft || veh.aircraftRole === 'b2_spirit';
+              if (isStealthPlane && (veh.flareActiveTimer || 0) > 0) continue;
+              const maxManpadsRange = isStealthPlane ? 380 * (veh.stealthFactor || 0.12) : 380;
+              const airDistSq = bot.pos.distanceToSquared(veh.pos);
+              if (
+                airDistSq < maxManpadsRange * maxManpadsRange &&
+                (!nearestArmor || !nearestArmor.isAircraft || airDistSq < nearestArmorDistSq)
+              ) {
+                nearestArmorDistSq = airDistSq;
+                nearestArmor = veh;
+              }
             }
           }
           if (!nearestArmor) {
@@ -1128,10 +1132,10 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
               const veh = enemyGroundList[gi];
               if (veh.dead || veh.team === bot.team) continue;
               const isOccupied = Boolean(veh.driver || veh.npcDriver);
+              if (!isOccupied) continue; // Never waste scarce LAT RPG-7 rockets on empty parked vehicles!
               const dSq = bot.pos.distanceToSquared(veh.pos);
-              const effectiveDistSq = isOccupied ? dSq * 0.7 : dSq;
               if (
-                effectiveDistSq < nearestArmorDistSq &&
+                dSq < nearestArmorDistSq &&
                 this.canBotSeeTarget(bot, `veh_${veh.id}`, veh.pos, true)
               ) {
                 nearestArmorDistSq = dSq;
@@ -1140,13 +1144,12 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
             }
           }
         } else {
+          const canFireManpads = Boolean(bot.hasManpads && (bot.samMissilesLeft ?? 0) > 0);
           for (const veh of vehicleManager.vehicles) {
             if (veh.dead || veh.team === bot.team) continue;
             const isOccupied = Boolean(veh.driver || veh.npcDriver);
-            if (!isOccupied && (veh.isWarehouseBike || veh.type === 'bike' || veh.type === 'atv')) {
-              continue;
-            }
             if (veh.isAircraft) {
+              if (!canFireManpads) continue;
               if (!veh.driver && !veh.aiPilotActive) continue;
               if (veh.isLowAltRadarMasked || (veh.airborneRadarTimer || 0) < 4.0) continue;
               const isStealthPlane = veh.isStealthAircraft || veh.aircraftRole === 'b2_spirit';
@@ -1162,10 +1165,10 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
               }
               continue;
             }
+            if (!isOccupied) continue; // Only engage occupied/crewed enemy ground vehicles!
             const dSq = bot.pos.distanceToSquared(veh.pos);
-            const effectiveDistSq = isOccupied ? dSq * 0.7 : dSq;
             if (
-              effectiveDistSq < nearestArmorDistSq &&
+              dSq < nearestArmorDistSq &&
               this.canBotSeeTarget(bot, `veh_${veh.id}`, veh.pos, true)
             ) {
               nearestArmorDistSq = dSq;
@@ -2183,9 +2186,10 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         nearestEnemy.isVehicle &&
         bot.role === 'ENGINEER' &&
         isModernEra &&
-        (nearestEnemy.unit?.isAircraft || (bot.rpgRocketsLeft ?? 2) > 0)
+        ((nearestEnemy.unit?.isAircraft && bot.hasManpads && (bot.samMissilesLeft ?? 0) > 0) ||
+          (!nearestEnemy.unit?.isAircraft && (bot.rpgRocketsLeft ?? 2) > 0))
       ) {
-        if (canFireWeapon && bot.rpgCooldown <= 0 && horizDist > 10) {
+        if (canFireWeapon && bot.rpgCooldown <= 0 && horizDist > 14) {
           bot.rpgCooldown = BOT.RPG_COOLDOWN_BASE + Math.random() * BOT.RPG_COOLDOWN_RAND;
           this.botFireRpgAt(bot, nearestEnemy.unit, player);
         }
@@ -2499,9 +2503,11 @@ export function botFireRpgAt(bot, targetVehicle, player) {
     targetVehicle.pos.z
   );
 
-  // If targeting an enemy aircraft, fire a FIM-92 Stinger / 9K38 Igla Homing Surface-to-Air Missile!
+  // If targeting an enemy aircraft, fire a FIM-92 Stinger / 9K38 Igla Homing Surface-to-Air Missile (1 per spawn)!
   if (targetVehicle.isAircraft) {
-    bot.rpgCooldown = 18.0 + Math.random() * 6.0;
+    if (!bot.hasManpads || (bot.samMissilesLeft ?? 0) <= 0) return;
+    bot.samMissilesLeft = Math.max(0, (bot.samMissilesLeft ?? 1) - 1);
+    bot.rpgCooldown = 22.0 + Math.random() * 8.0;
     const dir = new THREE.Vector3().subVectors(targetCenter, start).normalize();
     const samMesh = new THREE.Mesh(SHARED_BOT_SAM_GEO, SHARED_BOT_SAM_MAT);
     samMesh.position.copy(start).addScaledVector(dir, 0.75);
