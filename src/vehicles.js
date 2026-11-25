@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=123';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=123';
+import { sound } from './audio.js?v=124';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=124';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=123';
-import { createVehicleMesh } from './models/vehicle-model.js?v=123';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=123';
-import { events, makeEventBridge } from './events.js?v=123';
+} from './assets/vehicle-defs.js?v=124';
+import { createVehicleMesh } from './models/vehicle-model.js?v=124';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=124';
+import { events, makeEventBridge } from './events.js?v=124';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=123';
+} from './core/StateMachines.js?v=124';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -118,9 +118,9 @@ export function initVehicleOrdnance(v) {
       maxPools = { slot0: 500, slot1: 6, slot2: 4 }; // 500× 20mm M61 Vulcan, 6× AIM-120D AMRAAM, 4× JDAM/GBU-28
     }
   } else if (v.type === 'tank') {
-    maxPools = { slot0: 24, slot1: 1200 }; // 24× 120mm/125mm Ready-Bustle/Carousel Shells, 1,200× Coax / .50 RWS MG
+    maxPools = { slot0: 24, slot1: 1200, slot2: 4 }; // 24× 120mm/125mm APFSDS/HE Shells, 1,200× Coax/.50 MG, 4× Gun-Launched ATGMs
   } else if (v.type === 'apc') {
-    maxPools = { slot0: 210, slot1: 1200 }; // 210× 25mm/30mm Dual-Bin Ready Autocannon, 1,200× Coax MG
+    maxPools = { slot0: 210, slot1: 1200, slot2: 6 }; // 210× 30mm Autocannon, 1,200× Coax MG, 6× Wire-Guided TOW-2B / Kornet ATGMs
   } else if (v.type === 'aa' || v.type === 'emplace_aa') {
     maxPools = { slot0: 600, slot1: 8 }; // 600× Radar AA Bursts, 8× Ready-Pod Stinger / 9M311 SAMs
   } else if (v.type === 'emplace_mortar') {
@@ -153,6 +153,11 @@ export function classifyWeaponBallistics(weaponName = '') {
       w.includes('HOWITZER') ||
       w.includes('RPG') ||
       w.includes('HEAT') ||
+      w.includes('TOW') ||
+      w.includes('KORNET') ||
+      w.includes('REFLEKS') ||
+      w.includes('LAHAT') ||
+      w.includes('ATGM') ||
       w.includes('APFSDS') ||
       w.includes('APHE') ||
       w.includes('MAVERICK') ||
@@ -394,36 +399,171 @@ export class VehicleManager {
   findAvailableBaseVehicle(team = 'US', vehKey = 'foot') {
     if (!vehKey || vehKey === 'foot' || vehKey === 'wright_flyer') return null;
     if (vehKey === 'b2_spirit' && !this.isB2UnlockedForTeam(team)) return null;
-    const bx = team === 'RU' ? (this.world?.ruBase?.x ?? 1500) : (this.world?.usBase?.x ?? -1500);
-    const bz = team === 'RU' ? (this.world?.ruBase?.z ?? 0) : (this.world?.usBase?.z ?? 0);
+    const bx =
+      team === 'RU'
+        ? (this.world?.spawns?.RU_BASE?.x ?? this.world?.ruBase?.x ?? 1520)
+        : (this.world?.spawns?.US_BASE?.x ?? this.world?.usBase?.x ?? -1520);
+    const bz =
+      team === 'RU'
+        ? (this.world?.spawns?.RU_BASE?.z ?? this.world?.ruBase?.z ?? 0)
+        : (this.world?.spawns?.US_BASE?.z ?? this.world?.usBase?.z ?? 0);
 
-    for (const v of this.vehicles || []) {
-      if (!v || v.dead || v.team !== team) continue;
-      if (v.driver || v.npcDriver || v.remoteDriverId || v.aiPilotActive) continue;
-      if (String(v.id || '').startsWith('secret_')) continue;
-
+    const matchesKey = (v) => {
+      if (!v || v.dead || v.isShotDown || v.team !== team) return false;
+      if (v.driver || v.remoteDriverId) return false; // Never take a human player's vehicle!
+      if (String(v.id || '').startsWith('secret_')) return false;
       if (v.isAircraft) {
-        if (v.aircraftRole === vehKey && !v.b2LockedUntilKills) {
-          return v;
-        }
-        continue;
+        return v.aircraftRole === vehKey && !v.b2LockedUntilKills;
       }
+      if (v.isEmplacement) return false;
+      if (vehKey === 'car') return v.type === 'humvee' || v.type === 'car';
+      return v.type === vehKey;
+    };
 
-      // Ground HQ pool unit parked within 260m of Main Base
-      const distToBase = Math.hypot((v.pos?.x || 0) - bx, (v.pos?.z || 0) - bz);
-      if (distToBase > 260) continue;
+    // Pass 1: Prefer an unoccupied vehicle parked directly inside Main Base HQ (<= 340m) or on the HQ Flight Line
+    for (const v of this.vehicles || []) {
+      if (!matchesKey(v)) continue;
+      if (v.npcDriver || v.aiPilotActive) continue;
+      if (!v.isAircraft) {
+        const distToBase = Math.hypot((v.pos?.x || 0) - bx, (v.pos?.z || 0) - bz);
+        if (distToBase > 340) continue;
+      }
+      return v;
+    }
 
-      if (vehKey === 'car') {
-        if (v.type === 'humvee' || v.type === 'car') return v;
-      } else if (v.type === vehKey) {
-        return v;
+    // Pass 2: Consistent Human Crew Priority at Main Base HQ (matches Combat Pilot <-> Armor Crewman <-> HQ Recon):
+    // Even if AI bots boarded HQ Motor Pool Tanks/IFVs/SPAAG/Humvees (or launched an AI sortie) while the human
+    // was on the Deploy Screen, any live non-destroyed fleet hull not used by another human is available for $0 HQ!
+    let bestAiCandidate = null;
+    let bestAiDist = Infinity;
+    for (const v of this.vehicles || []) {
+      if (!matchesKey(v)) continue;
+      const d = Math.hypot((v.pos?.x || 0) - bx, (v.pos?.z || 0) - bz);
+      if (d < bestAiDist) {
+        bestAiDist = d;
+        bestAiCandidate = v;
       }
     }
-    return null;
+    return bestAiCandidate;
+  }
+
+  getHqVehicleRebuildSeconds(team = 'US', vehKey = 'foot') {
+    if (!vehKey || vehKey === 'foot') return 0;
+    let minRem = Infinity;
+    for (const v of this.vehicles || []) {
+      if (!v || !v.dead || v.team !== team || v.b2LockedUntilKills) continue;
+      const isMatch = v.isAircraft
+        ? v.aircraftRole === vehKey
+        : vehKey === 'car'
+        ? v.type === 'humvee' || v.type === 'car'
+        : v.type === vehKey;
+      if (isMatch && typeof v.respawnTimer === 'number' && v.respawnTimer > 0) {
+        minRem = Math.min(minRem, v.respawnTimer);
+      }
+    }
+    return Number.isFinite(minRem) ? Math.max(1, Math.ceil(minRem)) : 0;
+  }
+
+  claimBaseVehicleForPlayerDeploy(player, team = 'US', vehKey = 'foot') {
+    const v = this.findAvailableBaseVehicle(team, vehKey);
+    if (!v || !player) return null;
+
+    const wasAiOccupied = Boolean(v.npcDriver || v.aiPilotActive);
+    if (v.npcDriver) {
+      const npc = v.npcDriver;
+      v.npcDriver = null;
+      npc.drivingVehicle = null;
+      if (npc.mesh && !npc.dead) {
+        npc.mesh.position.copy(npc.pos);
+        npc.mesh.visible = true;
+      }
+    }
+    if (Array.isArray(v.aiPassengers) && v.aiPassengers.length > 0) {
+      for (const pax of v.aiPassengers) {
+        if (pax) {
+          pax.ridingVehicle = null;
+          if (pax.mesh && !pax.dead) pax.mesh.visible = true;
+        }
+      }
+      v.aiPassengers.length = 0;
+    }
+    v.aiPilotActive = false;
+
+    const bx =
+      team === 'RU'
+        ? (this.world?.spawns?.RU_BASE?.x ?? this.world?.ruBase?.x ?? 1520)
+        : (this.world?.spawns?.US_BASE?.x ?? this.world?.usBase?.x ?? -1520);
+    const bz =
+      team === 'RU'
+        ? (this.world?.spawns?.RU_BASE?.z ?? this.world?.ruBase?.z ?? 0)
+        : (this.world?.spawns?.US_BASE?.z ?? this.world?.usBase?.z ?? 0);
+    const distFromHq = Math.hypot((v.pos?.x || 0) - bx, (v.pos?.z || 0) - bz);
+
+    // Ensure any reclaimed HQ fleet vehicle starts cleanly at Main Base HQ at 100% HP & 100% Ordnance!
+    v.hp = v.maxHp;
+    v.hullIntegrityPct = 100;
+    v.armorZones = { front: 100, left: 100, right: 100, rear: 100 };
+    v.eraBlocksIntact = v.maxEraBlocks || 0;
+    v.subsystems = { tracks: 'OK', turret: 'OK', engine: 'OK', optics: 'OK' };
+    v.isShotDown = false;
+    v.isStalling = false;
+    v.stallSinkVel = 0;
+    v.coaxHeat = 0;
+    v.coaxOverheated = false;
+    v.fireCooldown = 0;
+    v.coaxCooldown = 0;
+    this.rearmVehicleOrdnance(v);
+
+    if (wasAiOccupied || distFromHq > 240) {
+      const originPos = v.spawnPos
+        ? v.spawnPos.clone()
+        : new THREE.Vector3(bx + (team === 'RU' ? -56 : 56), 0, bz);
+      const targetYaw =
+        typeof v.spawnYaw === 'number' ? v.spawnYaw : team === 'RU' ? Math.PI / 2 : -Math.PI / 2;
+      if (v.isAircraft) {
+        const gY = this.world ? this.world.getGroundHeightAt(originPos.x, originPos.z) : 0;
+        v.pos.set(originPos.x, gY, originPos.z);
+        v.yaw = targetYaw;
+        v.pitch = 0;
+        v.roll = 0;
+        v.turretYaw = targetYaw;
+        v.throttle = 0;
+        v.forwardSpeed = 0;
+        v.flightFSM?.send(AIRCRAFT_FLIGHT_EVENTS.RESPAWN_RUNWAY);
+      } else {
+        const safePt = this.world?.findSafeVehicleSpawnPoint
+          ? this.world.findSafeVehicleSpawnPoint(
+              originPos.x,
+              originPos.z,
+              targetYaw,
+              v.hullHalfWidth || 1.95,
+              v.hullHalfLength || 3.55,
+              this.vehicles
+            )
+          : originPos;
+        const safeYaw = typeof safePt.safeYaw === 'number' ? safePt.safeYaw : targetYaw;
+        safePt.y = this.world ? this.world.getGroundHeightAt(safePt.x, safePt.z) : 0;
+        v.pos.copy(safePt);
+        v.yaw = safeYaw;
+        v.pitch = 0;
+        v.roll = 0;
+        v.turretYaw = safeYaw;
+        v.turretPitch = 0;
+        v.forwardSpeed = 0;
+      }
+      if (v.mesh) {
+        v.mesh.position.copy(v.pos);
+        v.mesh.rotation.set(0, v.yaw, 0, 'YXZ');
+        v.mesh.visible = true;
+      }
+    }
+    return v;
   }
 
   recordTeamKillAndCheckB2(team = 'US') {
     if (team !== 'US' && team !== 'RU') return false;
+    // Do NOT count background menu-preview AI skirmishes toward the 25-kill B-2 unlock before the player deploys!
+    if (this._suppressPreDeployKills) return false;
     if (!this.teamKills) this.teamKills = { US: 0, RU: 0 };
     if (!this.b2UnlockedByTeam) this.b2UnlockedByTeam = { US: false, RU: false };
     this.teamKills[team] = (this.teamKills[team] || 0) + 1;
@@ -698,6 +838,10 @@ export class VehicleManager {
       maxEraBlocks: cfg.type === 'tank' ? 6 : cfg.type === 'apc' ? 2 : 0,
       eraBlocksIntact: cfg.type === 'tank' ? 6 : cfg.type === 'apc' ? 2 : 0,
       subsystems: { tracks: 'OK', turret: 'OK', engine: 'OK', optics: 'OK' },
+      airframeParts: isPlane
+        ? { leftWing: 100, rightWing: 100, engines: 100, tail: 100, avionics: 100, cockpit: 100 }
+        : null,
+      lastAirframePart: null,
       lastHitZone: 'FRONT',
       lastHitDesc: '',
       climbOffsetY: 0,
@@ -1114,9 +1258,74 @@ export class VehicleManager {
       v.subsystems.engine = 'OK';
       v.subsystems.optics = 'OK';
     }
+    if (v.airframeParts) {
+      v.airframeParts.leftWing = 100;
+      v.airframeParts.rightWing = 100;
+      v.airframeParts.engines = 100;
+      v.airframeParts.tail = 100;
+      v.airframeParts.avionics = 100;
+      v.airframeParts.cockpit = 100;
+    }
     v.opticsGlitchTimer = 0;
     v.sensorGlitchTimer = 0;
     return rearmed;
+  }
+
+  /**
+   * Triggered when pressing `[R]` inside a ground vehicle:
+   * Immediately rearms ordnance & patches hull if inside a Friendly FOB, HQ Motor Pool, or `[7]` Field Ammo Stash,
+   * or displays clear tactical guidance if parked inside an uncaptured Neutral/Enemy FOB!
+   */
+  triggerManualVehicleRearm(v) {
+    if (!v || v.dead || v.isAircraft) return false;
+    const drv = v.driver;
+    if (v.inRearmZone) {
+      const didRearm = this.rearmVehicleOrdnance(v);
+      let didHeal = false;
+      if (v.hp < v.maxHp) {
+        v.hp = Math.min(v.maxHp, v.hp + 160);
+        v.hullIntegrityPct = Math.round((v.hp / Math.max(1, v.maxHp)) * 100);
+        didHeal = true;
+      }
+      sound.playReload?.();
+      if (drv?.onAwardXp) {
+        const lbl = v.activeSupplyLabel || 'VEHICLE LOGISTICS DEPOT';
+        drv.onAwardXp(
+          didRearm || didHeal ? 15 : 0,
+          didRearm || didHeal
+            ? `🛠️⛽ ${lbl}: ORDNANCE REARMED & HULL SERVICED!`
+            : `✅ ${lbl}: ORDNANCE & HULL ALREADY AT 100%!`
+        );
+      }
+      return true;
+    }
+
+    let uncapturedFob = null;
+    if (Array.isArray(this.world?.flags)) {
+      for (let fi = 0; fi < this.world.flags.length; fi++) {
+        const fl = this.world.flags[fi];
+        if (fl && Math.hypot(v.pos.x - fl.pos.x, v.pos.z - fl.pos.z) <= (fl.radius || 34) + 14) {
+          uncapturedFob = fl;
+          break;
+        }
+      }
+    }
+    sound.playEmptyClick?.();
+    if (drv?.onAwardXp) {
+      if (uncapturedFob && uncapturedFob.owner !== v.team) {
+        const progPct = Math.round(Math.abs(uncapturedFob.captureProgress || 0));
+        drv.onAwardXp(
+          0,
+          `⚠️ OBJ ${uncapturedFob.id} IS ${uncapturedFob.owner} (${progPct}%) — STAY IN CIRCLE TO CAPTURE FOB FIRST (OR DROP [7] AMMO STASH / RETURN TO HQ) TO RESUPPLY!`
+        );
+      } else {
+        drv.onAwardXp(
+          0,
+          '⛽ NO VEHICLE DEPOT HERE — DRIVE TO CAPTURED FRIENDLY FOB, HQ MOTOR POOL, OR DEPLOY [7] AMMO STASH TO REARM!'
+        );
+      }
+    }
+    return false;
   }
 
   /**
@@ -2255,11 +2464,13 @@ export class VehicleManager {
     weaponName,
     onKillFn,
     onAwardXp,
-    attackerPos = null
+    attackerPos = null,
+    hitPoint = null
   ) {
     vehicle.lastAppliedDamage = 0;
     vehicle.lastArmorRicochet = false;
     vehicle.lastSubsystemCrit = null;
+    vehicle.lastAirframePart = null;
     if (vehicle.dead) return false;
     if (vehicle.isShotDown) {
       vehicle.hp = 1;
@@ -2583,6 +2794,109 @@ export class VehicleManager {
           if (vehicle.subsystems) vehicle.subsystems.tracks = 'DAMAGED';
           armorNote = '30MM GAU-8 SKIRT DEFLECTION (-80% • TRACKS DAMAGED)';
         }
+        vehicle.lastHitDesc = armorNote;
+      }
+    }
+
+    // =========================================================================
+    // MODULAR 6-ZONE AIRFRAME COMPONENT DAMAGE (WINGS, ENGINES, TAIL, AVIONICS, COCKPIT)
+    // =========================================================================
+    if (vehicle.isAircraft && amount > 0) {
+      if (!vehicle.airframeParts) {
+        vehicle.airframeParts = {
+          leftWing: 100,
+          rightWing: 100,
+          engines: 100,
+          tail: 100,
+          avionics: 100,
+          cockpit: 100
+        };
+      }
+      const refPt = hitPoint || attackerPos;
+      let partKey = 'engines';
+      if (refPt && vehicle.pos) {
+        const invEuler = new THREE.Euler(
+          vehicle.pitch || 0,
+          vehicle.yaw || 0,
+          vehicle.roll || 0,
+          'YXZ'
+        );
+        const invQuat = new THREE.Quaternion().setFromEuler(invEuler).invert();
+        const localHit = new THREE.Vector3(
+          refPt.x - vehicle.pos.x,
+          refPt.y - vehicle.pos.y,
+          refPt.z - vehicle.pos.z
+        ).applyQuaternion(invQuat);
+
+        if (!hitPoint) {
+          // Directional aspect estimation when hit by splash/SAM without exact mesh ray point
+          localHit.normalize().multiplyScalar(3.2);
+        }
+
+        if (localHit.x < -1.35) {
+          partKey = 'leftWing';
+        } else if (localHit.x > 1.35) {
+          partKey = 'rightWing';
+        } else if (localHit.z < -2.15 && localHit.y > 0.55) {
+          partKey = 'cockpit';
+        } else if (localHit.z < -1.65) {
+          partKey = 'avionics';
+        } else if (localHit.z > 1.95 && (Math.abs(localHit.x) > 1.05 || localHit.y > 0.95)) {
+          partKey = 'tail';
+        } else {
+          partKey = 'engines';
+        }
+      }
+
+      const basePartLoss = Math.max(
+        4,
+        Math.round((amount / Math.max(1, vehicle.maxHp || 1500)) * (hitPoint ? 215 : 155))
+      );
+      vehicle.airframeParts[partKey] = Math.max(
+        0,
+        Math.round((vehicle.airframeParts[partKey] ?? 100) - basePartLoss)
+      );
+      // Heavy missile / flak AoE splash also peppers adjacent control surfaces & engines
+      if (!hitPoint && amount >= 180) {
+        const splashLoss = Math.max(6, Math.round(basePartLoss * 0.38));
+        for (const k of ['leftWing', 'rightWing', 'engines', 'tail']) {
+          if (k !== partKey) {
+            vehicle.airframeParts[k] = Math.max(
+              0,
+              Math.round((vehicle.airframeParts[k] ?? 100) - splashLoss)
+            );
+          }
+        }
+      }
+      vehicle.lastAirframePart = partKey;
+      const partLabelMap = {
+        leftWing: 'LEFT WING / AILERON',
+        rightWing: 'RIGHT WING / AILERON',
+        engines: 'TURBOFAN ENGINE',
+        tail: 'TAIL / ELEVATOR',
+        avionics: 'RADAR / AVIONICS',
+        cockpit: 'COCKPIT CANOPY'
+      };
+      const remPct = vehicle.airframeParts[partKey];
+      armorNote = `✈️ ${partLabelMap[partKey]} HIT (${remPct}%)`;
+      vehicle.lastHitZone = partKey.toUpperCase();
+      vehicle.lastHitDesc = armorNote;
+
+      if (partKey === 'avionics' && remPct < 45) {
+        vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 3.8);
+        vehicle.lastSubsystemCrit = 'SENSORS';
+      } else if (
+        partKey === 'cockpit' &&
+        vehicle.aircraftRole !== 'cas' &&
+        vehicle.driver &&
+        !vehicle.driver.dead &&
+        !vehicle.driver.downed &&
+        amount >= 18
+      ) {
+        const shrapnelDmg = Math.min(28, Math.max(5, Math.round(amount * 0.12)));
+        vehicle.driver.hp = Math.max(12, (vehicle.driver.hp || 100) - shrapnelDmg);
+        vehicle.driver.bleeding = true;
+        armorNote += ` • 🩸 PILOT GRAZED (-${shrapnelDmg} HP)`;
         vehicle.lastHitDesc = armorNote;
       }
     }
@@ -2976,6 +3290,7 @@ export class VehicleManager {
 
   update(dt, player = null, botManager = null, onDeployMenu = false) {
     if (player) this.lastPlayer = player;
+    this._suppressPreDeployKills = Boolean(onDeployMenu && (!player || (player.dead && (player.deaths || 0) === 0)));
     this.refreshTeamVehicleLists();
 
     // Update persistent 20s Burning 3D Vehicle Wrecks (fire flicker + smoke column + clean expiry)
@@ -3185,26 +3500,44 @@ export class VehicleManager {
             v.team === 'RU'
               ? this.world?.spawns?.RU_BASE || { x: 1520, z: 0 }
               : this.world?.spawns?.US_BASE || { x: -1520, z: 0 };
-          if (Math.hypot(v.pos.x - hqBase.x, v.pos.z - hqBase.z) <= 56) {
+          if (Math.hypot(v.pos.x - hqBase.x, v.pos.z - hqBase.z) <= 145) {
             inSupplyZone = true;
             supplyLabel = 'HQ MOTOR POOL DEPOT';
             repairMult = 1.4;
           } else if (Array.isArray(this.world?.flags)) {
             for (let fi = 0; fi < this.world.flags.length; fi++) {
               const fl = this.world.flags[fi];
-              if (fl && fl.owner === v.team && Math.hypot(v.pos.x - fl.pos.x, v.pos.z - fl.pos.z) <= 32) {
+              const fobRearmRad = (fl?.radius || 34) + 10;
+              if (fl && fl.owner === v.team && Math.hypot(v.pos.x - fl.pos.x, v.pos.z - fl.pos.z) <= fobRearmRad) {
                 inSupplyZone = true;
                 const hasEngStation = (fl.defenseStage || 0) >= 1;
                 supplyLabel = hasEngStation
                   ? `OBJ ${fl.id} ENGINEER VEHICLE SUPPLY STATION`
                   : `OBJ ${fl.id} FORWARD BASE DEPOT`;
-                repairMult = hasEngStation ? 1.65 : 1.0;
+                repairMult = hasEngStation ? 1.65 : 1.15;
+                break;
+              }
+            }
+          }
+          if (!inSupplyZone && Array.isArray(this.world?.ammoCrates)) {
+            for (let ci = 0; ci < this.world.ammoCrates.length; ci++) {
+              const crate = this.world.ammoCrates[ci];
+              if (
+                crate &&
+                (!crate.team || crate.team === v.team) &&
+                crate.pos &&
+                Math.hypot(v.pos.x - crate.pos.x, v.pos.z - crate.pos.z) <= 16.0
+              ) {
+                inSupplyZone = true;
+                supplyLabel = 'FIELD AMMO & VEHICLE LOGISTICS STASH [7]';
+                repairMult = 0.85;
                 break;
               }
             }
           }
         }
         v.inRearmZone = inSupplyZone;
+        v.activeSupplyLabel = inSupplyZone ? supplyLabel : '';
         if (inSupplyZone) {
           const prevHp = v.hp;
           if (v.hp < v.maxHp) {
@@ -4624,8 +4957,19 @@ export class VehicleManager {
         if (p.type === 'a2a_missile' && p.targetVehicle === v && p.mesh) {
           const dSq = p.mesh.position.distanceToSquared(v.pos);
           if (dSq < 320 * 320) {
-            v.flareActiveTimer = 4.2;
-            v.flareCooldown = v.aircraftRole === 'b2_spirit' ? 6.0 : 10.0;
+            // Only trigger passive auto-spoof on player gunships if an explicit DIRCM/Stealth pod is equipped,
+            // and use realistic 14s–18s AI flare reload windows so F-15 follow-up AIM-120D shots reliably splash targets!
+            if (v.driver === player && v.aircraftRole === 'gunship' && !v.hasExplicitAutoDircmPod) {
+              continue;
+            }
+            v.flareActiveTimer = 3.8;
+            v.flareCooldown = v.driver
+              ? v.aircraftRole === 'b2_spirit'
+                ? 9.0
+                : 12.0
+              : v.aircraftRole === 'b2_spirit'
+              ? 14.0
+              : 18.0;
             p.targetVehicle = null;
             this.world.spawnDebris(
               tmpVec3(v.pos.x, v.pos.y - 1.5, v.pos.z),
@@ -5100,8 +5444,8 @@ export class VehicleManager {
       this.world.projectiles.push({
         type: 'tank_shell',
         mesh: shellMesh,
-        vel: dir.clone().multiplyScalar(108),
-        gravity: 2.2,
+        vel: dir.clone().multiplyScalar(540),
+        gravity: 1.85,
         life: 3.5,
         owner: ownerObj
       });
@@ -5114,8 +5458,8 @@ export class VehicleManager {
       this.world.projectiles.push({
         type: 'autocannon',
         mesh: shellMesh,
-        vel: dir.clone().multiplyScalar(92),
-        gravity: 2.5,
+        vel: dir.clone().multiplyScalar(340),
+        gravity: 2.1,
         life: 3.0,
         owner: ownerObj
       });

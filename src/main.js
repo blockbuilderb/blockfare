@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=123';
-import { VehicleManager } from './vehicles.js?v=123';
-import { BotManager } from './bots.js?v=123';
-import { PlayerController } from './player.js?v=123';
-import { NetworkManager } from './network.js?v=123';
-import { UIManager } from './ui.js?v=123';
-import { TelemetryLogger } from './telemetry.js?v=123';
-import { sound } from './audio.js?v=123';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=123';
-import { events, makeEventBridge } from './events.js?v=123';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=123';
+import { VoxelWorld } from './world.js?v=124';
+import { VehicleManager } from './vehicles.js?v=124';
+import { BotManager } from './bots.js?v=124';
+import { PlayerController } from './player.js?v=124';
+import { NetworkManager } from './network.js?v=124';
+import { UIManager } from './ui.js?v=124';
+import { TelemetryLogger } from './telemetry.js?v=124';
+import { sound } from './audio.js?v=124';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=124';
+import { events, makeEventBridge } from './events.js?v=124';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=124';
 
 class BattleBitGame {
   constructor() {
@@ -86,7 +86,8 @@ class BattleBitGame {
     const isInitialMp =
       urlModeUpper === 'MULTIPLAYER' ||
       urlModeUpper === 'MP' ||
-      Boolean((initParams.get('room') || '').trim());
+      urlModeUpper === 'COOP' ||
+      Boolean((initParams.get('room') || initParams.get('r') || '').trim());
     const urlBotsUpper = (initParams.get('bots') || '').trim().toUpperCase();
     const initialBotsPerSide =
       urlBotsUpper === 'SQUAD_AI' || urlBotsUpper === '32'
@@ -116,7 +117,9 @@ class BattleBitGame {
       this.botManager,
       this.vehicleManager
     );
-    this.network = new NetworkManager(this.scene, this.world, this.player, this.botManager);
+    this.network = new NetworkManager(this.scene, this.world, this.player, this.botManager, {
+      gameMode: isInitialMp ? 'MULTIPLAYER' : 'SINGLEPLAYER'
+    });
     this.network.gameRef = this;
     this.ui = new UIManager(
       this.world,
@@ -1659,6 +1662,20 @@ class BattleBitGame {
 
     this.vehicleManager.update(dt, this.player, this.botManager, onDeployMenu);
 
+    if (this.player.dead) {
+      this.orbitAngle += dt * MATCH.ORBIT_SPEED;
+      this.camera.position.set(
+        Math.cos(this.orbitAngle) * MATCH.ORBIT_RADIUS_X,
+        MATCH.ORBIT_HEIGHT,
+        Math.sin(this.orbitAngle) * MATCH.ORBIT_RADIUS_Z
+      );
+      this.camera.lookAt(0, 4, 0);
+      this.camera.updateMatrixWorld();
+    } else {
+      this.player.update(dt);
+      this.camera.updateMatrixWorld();
+    }
+
     if (!preRoundWaitingToStart) {
       this.botManager.update(
         dt,
@@ -1718,18 +1735,6 @@ class BattleBitGame {
         const winner = this.ticketsUS >= this.ticketsRU ? 'US' : 'RU';
         this.triggerMatchVictory(winner);
       }
-    }
-
-    if (this.player.dead) {
-      this.orbitAngle += dt * MATCH.ORBIT_SPEED;
-      this.camera.position.set(
-        Math.cos(this.orbitAngle) * MATCH.ORBIT_RADIUS_X,
-        MATCH.ORBIT_HEIGHT,
-        Math.sin(this.orbitAngle) * MATCH.ORBIT_RADIUS_Z
-      );
-      this.camera.lookAt(0, 4, 0);
-    } else {
-      this.player.update(dt);
     }
 
     this.network.update(dt);

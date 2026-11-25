@@ -6,18 +6,18 @@ import {
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from '../weapons.js?v=123';
-import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=123';
-import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=123';
-import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=123';
-import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=123';
-import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=123';
-import { sound } from '../audio.js?v=123';
+} from '../weapons.js?v=124';
+import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=124';
+import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=124';
+import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=124';
+import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=124';
+import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=124';
+import { sound } from '../audio.js?v=124';
 import {
   ARMORY_CASE_STATES,
   ARMORY_CASE_EVENTS,
   createArmoryCaseRouletteFSM
-} from '../core/StateMachines.js?v=123';
+} from '../core/StateMachines.js?v=124';
 
 export const GunsmithModal = {
   formatCashAmount(val) {
@@ -181,6 +181,10 @@ export const GunsmithModal = {
                 opt.key !== 'foot' &&
                 spawningAtMainBase &&
                 Boolean(this.vehicleManager?.findAvailableBaseVehicle?.(team, opt.key));
+              const hqRebuildSec =
+                !hasFreeBase && spawningAtMainBase && opt.key !== 'foot'
+                  ? this.vehicleManager?.getHqVehicleRebuildSeconds?.(team, opt.key) || 0
+                  : 0;
               const q = this.player.getVehicleRequisitionQuote?.(opt.key) || {
                 totalCost: 0,
                 modSurcharge: 0,
@@ -202,7 +206,9 @@ export const GunsmithModal = {
                   : q.cooldownRem > 0
                   ? `⏳ ${q.cooldownRem}s • ⚡$${q.totalCost}`
                   : q.canAfford
-                  ? `⚡$${q.totalCost} DROP${q.modSurcharge > 0 ? ' ★' : ''}`
+                  ? `${hqRebuildSec > 0 ? `⏳HQ ${hqRebuildSec}s • ` : ''}⚡$${q.totalCost} DROP${q.modSurcharge > 0 ? ' ★' : ''}`
+                  : hqRebuildSec > 0
+                  ? `⏳ HQ ${hqRebuildSec}s (⚡$${q.totalCost})`
                   : `🔒 ⚡$${q.totalCost} (-$${q.shortBy})`;
               return `<button type="button" class="dep-veh-req-chip" data-vkey="${opt.key}" ${
                 locked ? 'data-locked="1"' : ''
@@ -280,11 +286,18 @@ export const GunsmithModal = {
         if (chip.dataset.locked === '1') {
           sound.playEmptyClick?.();
           const q = this.player.getVehicleRequisitionQuote?.(vKey) || { totalCost: 0, shortBy: 0, cooldownRem: 0 };
+          const hqWait = spawningAtMainBase
+            ? this.vehicleManager?.getHqVehicleRebuildSeconds?.(team, vKey) || 0
+            : 0;
           this.addXpNotification?.(
             0,
-            q.cooldownRem > 0
+            vKey === 'b2_spirit' && !b2Unlocked
+              ? `🔒 B-2 SPIRIT STEALTH BOMBER REQUIRES ${reqKills} TEAM KILLS (${kills}/${reqKills} KILLS)!`
+              : hqWait > 0
+              ? `⏳ ALL HQ ${vKey.toUpperCase()} UNITS DESTROYED — FREE HQ REBUILD IN ${hqWait}s (OR PAY ⚡$${q.totalCost} MATCH CASH)!`
+              : q.cooldownRem > 0
               ? `⏳ REQUISITION COOLDOWN: WAIT ${q.cooldownRem}s!`
-              : `🔒 NEED ⚡$${q.totalCost} MATCH CASH (SHORT BY ⚡$${q.shortBy} — EARN VIA CAPTURES, REVIVES, REPAIRS & KILLS!)`
+              : `🔒 FRONTLINE DROP NEEDS ⚡$${q.totalCost} MATCH CASH (SELECT MAIN BASE FOR $0 FREE HQ POOL OR EARN ⚡$${q.shortBy} MORE!)`
           );
           return;
         }
@@ -1774,6 +1787,15 @@ export const GunsmithModal = {
               ? ` • ${item.zoomLevels[0]}X⇄${item.zoomLevels[1]}X`
               : '';
 
+          const mountedGuns =
+            !isGearSlot && typeof this.player?.getWeaponsUsingUpgrade === 'function'
+              ? this.player.getWeaponsUsingUpgrade(grp.key, item.id)
+              : [];
+          const mountedInfo =
+            mountedGuns.length > 0
+              ? ` • ON: ${mountedGuns.slice(0, 3).join(', ')}${mountedGuns.length > 3 ? ` +${mountedGuns.length - 3}` : ''}`
+              : '';
+
           stashCellsHtml.push(`
             <div class="abi-stash-item ${grp.span}" style="background-color:${
               isEquipped ? 'rgba(46,204,113,0.16)' : 'rgba(16,25,36,0.94)'
@@ -1782,7 +1804,7 @@ export const GunsmithModal = {
                 <span class="abi-cell-tag">${grp.cellLabel}${stashTagExtra}</span>
                 <span style="font-size:9.5px;font-weight:900;color:${
                   isEquipped ? '#7bed9f' : isOwned ? '#74b9ff' : '#f1c40f'
-                };">${isEquipped ? 'MOUNTED' : item.price === 0 ? 'DEFAULT' : isOwned ? 'OWNED' : `$${item.price}`}</span>
+                };">${isEquipped ? 'MOUNTED' : item.price === 0 ? 'DEFAULT' : isOwned ? 'OWNED • ∞ GUNS' : `$${item.price}`}</span>
               </div>
               <div style="display:flex;align-items:center;gap:6px;margin:2px 0;">
                 ${
@@ -1796,24 +1818,31 @@ export const GunsmithModal = {
                 }
                 <div style="min-width:0;flex:1;">
                   <div style="font-size:10.5px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.shortName || item.name}</div>
-                  <div style="font-size:9px;color:#95a5a6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.desc}</div>
+                  <div style="font-size:9px;color:#95a5a6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${mountedInfo ? `<b style="color:#74b9ff;">${mountedInfo.slice(3)}</b> • ` : ''}${item.desc}</div>
                 </div>
               </div>
-              <button type="button" class="gunsmith-item-btn" data-cat="${grp.key}" data-id="${item.id}" data-weapon="${workbenchWeaponId}" style="
-                background:${isEquipped ? '#27ae60' : isOwned ? '#2980b9' : canAfford ? '#f39c12' : '#4b5563'};
-                color:${!isEquipped && !isOwned && canAfford ? '#111' : '#fff'};
-                border:none;border-radius:3px;padding:3px 6px;font-size:9px;font-weight:900;cursor:pointer;
-              ">
+              <div style="display:flex;gap:3px;">
+                <button type="button" class="gunsmith-item-btn" data-cat="${grp.key}" data-id="${item.id}" data-weapon="${workbenchWeaponId}" style="
+                  flex:1;background:${isEquipped ? '#27ae60' : isOwned ? '#2980b9' : canAfford ? '#f39c12' : '#4b5563'};
+                  color:${!isEquipped && !isOwned && canAfford ? '#111' : '#fff'};
+                  border:none;border-radius:3px;padding:3px 6px;font-size:9px;font-weight:900;cursor:pointer;
+                ">
+                  ${
+                    isEquipped
+                      ? `✓ ON ${isGearSlot ? 'OPERATOR' : baseWorkbenchDef.shortName}`
+                      : isOwned
+                      ? `MOUNT ON ${isGearSlot ? 'OPERATOR' : baseWorkbenchDef.shortName}`
+                      : canAfford
+                      ? `BUY & MOUNT ($${item.price})`
+                      : `NEED $${item.price}`
+                  }
+                </button>
                 ${
-                  isEquipped
-                    ? `✓ ON ${isGearSlot ? 'OPERATOR' : baseWorkbenchDef.shortName}`
-                    : isOwned
-                    ? `MOUNT ON ${isGearSlot ? 'OPERATOR' : baseWorkbenchDef.shortName}`
-                    : canAfford
-                    ? `BUY & MOUNT ($${item.price})`
-                    : `NEED $${item.price}`
+                  isOwned && !isGearSlot && item.price > 0
+                    ? `<button type="button" class="gs-mount-all-guns-btn" data-cat="${grp.key}" data-id="${item.id}" title="Mount ${item.shortName || item.name} across ALL owned guns simultaneously" style="background:rgba(0,210,211,0.22);border:1px solid #00d2d3;color:#81ecec;border-radius:3px;padding:3px 5px;font-size:8.5px;font-weight:900;cursor:pointer;flex-shrink:0;">⚡ ALL GUNS</button>`
+                    : ''
                 }
-              </button>
+              </div>
             </div>
           `);
         }
@@ -2250,23 +2279,40 @@ export const GunsmithModal = {
               badgesRowHtml = `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;">${pills.join('')}</div>`;
             }
 
+            const mountedGuns =
+              !isGearCat && typeof this.player?.getWeaponsUsingUpgrade === 'function'
+                ? this.player.getWeaponsUsingUpgrade(cat.key, item.id)
+                : [];
+            const mountedBadgeHtml =
+              mountedGuns.length > 0
+                ? `<div style="font-size:8.5px;font-weight:900;color:#74b9ff;margin-top:2px;">🔗 MOUNTED ON: ${mountedGuns.slice(0, 4).join(', ')}${mountedGuns.length > 4 ? ` +${mountedGuns.length - 4} MORE` : ''}</div>`
+                : '';
+
             return `
               <div style="background:${bgCol};border:1.5px solid ${borderCol};border-radius:5px;padding:7px 9px;display:flex;flex-direction:column;justify-content:space-between;gap:5px;">
                 <div>
                   <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
                     <span style="font-size:11.5px;font-weight:900;color:${isEquipped ? '#7bed9f' : '#fff'};">${item.name}</span>
                     <span style="font-size:10px;font-weight:900;color:${item.price === 0 ? '#95a5a6' : isOwned ? '#74b9ff' : '#f1c40f'};flex-shrink:0;">${
-              item.price === 0 ? 'FACTORY ($0)' : isOwned ? 'OWNED' : `$${item.price}`
+              item.price === 0 ? 'FACTORY ($0)' : isOwned ? 'OWNED • ∞ MULTI-GUN' : `$${item.price}`
             }</span>
                   </div>
                   ${badgesRowHtml}
+                  ${mountedBadgeHtml}
                   <div style="font-size:9.5px;color:#bdc3c7;margin-top:3px;line-height:1.3;">${item.desc}</div>
                 </div>
-                <button type="button" class="gunsmith-item-btn" data-cat="${cat.key}" data-id="${item.id}" data-weapon="${workbenchWeaponId}" style="background:${btnBg};color:${
+                <div style="display:flex;gap:4px;">
+                  <button type="button" class="gunsmith-item-btn" data-cat="${cat.key}" data-id="${item.id}" data-weapon="${workbenchWeaponId}" style="flex:1;background:${btnBg};color:${
               !isEquipped && !isOwned && canAfford ? '#111' : '#fff'
             };border:none;border-radius:4px;padding:5px 8px;font-size:9.5px;font-weight:900;cursor:pointer;letter-spacing:0.4px;">
-                  ${btnText}
-                </button>
+                    ${btnText}
+                  </button>
+                  ${
+                    isOwned && !isGearCat && item.price > 0
+                      ? `<button type="button" class="gs-mount-all-guns-btn" data-cat="${cat.key}" data-id="${item.id}" title="Mount ${item.shortName || item.name} across ALL owned guns simultaneously" style="background:rgba(0,210,211,0.22);border:1px solid #00d2d3;color:#81ecec;border-radius:4px;padding:5px 7px;font-size:9px;font-weight:900;cursor:pointer;flex-shrink:0;">⚡ ALL GUNS</button>`
+                      : ''
+                  }
+                </div>
               </div>
             `;
           })
@@ -3595,7 +3641,7 @@ export const GunsmithModal = {
         };color:${
           activeTab === 'attachments' ? '#7bed9f' : '#ecf0f1'
         };font-size:10.5px;font-weight:900;cursor:${workbenchAccess.allowed ? 'pointer' : 'not-allowed'};opacity:${workbenchAccess.allowed ? '1' : '0.45'};letter-spacing:0.4px;">
-          ${workbenchAccess.allowed ? '🔧' : '🔒'} 2. GUNSMITH (${basePrimaryDef.shortName})
+          ${workbenchAccess.allowed ? '🔧' : '🔒'} 2. GUNSMITH (${baseWorkbenchDef.shortName})
         </button>
         <button type="button" class="gs-tab-btn" data-tab="backpack" style="flex:1.1;padding:5px 7px;border-radius:5px;border:1.5px solid ${
           activeTab === 'backpack' ? '#2ecc71' : 'rgba(255,255,255,0.16)'
@@ -4182,6 +4228,7 @@ export const GunsmithModal = {
         const wepId = btn.dataset.weapon;
         const res = this.player.buyOrSelectWeapon(activeRole, slot, wepId);
         if (res && res.ok) {
+          this._gunsmithWeaponSlot = slot;
           if (typeof this.player.resupplyAll === 'function') {
             this.player.resupplyAll(true);
           }
@@ -4205,11 +4252,15 @@ export const GunsmithModal = {
       btn.addEventListener('click', () => {
         const cat = btn.dataset.cat;
         const itemId = btn.dataset.id;
-        const wepId = btn.dataset.weapon || primaryId;
+        const wepId = btn.dataset.weapon || workbenchWeaponId || primaryId;
         const res = this.player.buyOrEquipUpgrade(cat, itemId, wepId);
         if (res && res.ok) {
           const actionVerb = res.action === 'BOUGHT' ? 'PURCHASED & EQUIPPED' : 'EQUIPPED';
-          this.addXpNotification(0, `🔧 ${actionVerb}: ${res.item.name.toUpperCase()}`);
+          const targetName = WEAPON_DEFS[wepId]?.shortName || wepId.toUpperCase();
+          this.addXpNotification(
+            0,
+            `🔧 ${actionVerb} ON ${targetName}: ${res.item.name.toUpperCase()}`
+          );
           this._lastMagSignature = '';
           this.updateCashAndGunsmithHud();
         } else if (res && res.reason === 'INSUFFICIENT_FUNDS') {
@@ -4217,6 +4268,23 @@ export const GunsmithModal = {
             0,
             `⚠️ INSUFFICIENT FUNDS FOR ${res.item.name.toUpperCase()} ($${res.item.price}) — CLICK [+$500 GRANT] OR EARN KILLS!`
           );
+        }
+      });
+    });
+
+    modal.querySelectorAll('.gs-mount-all-guns-btn').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const cat = btn.dataset.cat;
+        const itemId = btn.dataset.id;
+        const res = this.player?.equipUpgradeOnAllOwnedWeapons?.(cat, itemId);
+        if (res && res.ok) {
+          this.addXpNotification(
+            0,
+            `⚡ MOUNTED ${res.item.name.toUpperCase()} ACROSS ALL ${res.count} OWNED FIREARMS!`
+          );
+          this._lastMagSignature = '';
+          this.updateCashAndGunsmithHud();
         }
       });
     });

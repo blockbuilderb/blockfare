@@ -746,8 +746,12 @@ body, html {
 /* Peripheral Hull Direction Ring around Gunner Reticle */
 #reticle-hull-ring {
   position: absolute;
+  top: 50%;
+  left: 50%;
   width: 150px;
   height: 150px;
+  margin-left: -75px;
+  margin-top: -75px;
   border-radius: 50%;
   border: 1px dashed rgba(241, 196, 15, 0.25);
   transform-origin: 50% 50%;

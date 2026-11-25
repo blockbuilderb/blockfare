@@ -7,11 +7,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=123';
-import { sound } from '../audio.js?v=123';
-import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=123';
-import { events } from '../events.js?v=123';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=123';
+} from '../weapons.js?v=124';
+import { sound } from '../audio.js?v=124';
+import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=124';
+import { events } from '../events.js?v=124';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=124';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',
@@ -1123,16 +1123,101 @@ export const GunsmithMethods = {
   getEquippedItem(category, weaponId = null) {
     this.ensureWarehouseStructures();
     const list = ATTACHMENT_CATALOG[category] || [];
-    let targetId = this.equippedUpgrades[category];
-    if (category !== 'vest' && category !== 'backpack' && category !== 'tacticalGear') {
-      const attMap = this.getWeaponAttachmentMap(
-        weaponId || this.getSelectedWeaponIdForClass(this.role, 'primary')
-      );
-      if (attMap && attMap[category]) {
-        targetId = attMap[category];
+    if (category === 'vest' || category === 'backpack' || category === 'tacticalGear') {
+      const gearId = this.equippedUpgrades[category];
+      return list.find((it) => it.id === gearId) || list[0] || null;
+    }
+    const resolvedWepId = weaponId || this.getSelectedWeaponIdForClass(this.role, 'primary');
+    const attMap = this.getWeaponAttachmentMap(resolvedWepId);
+    const targetId =
+      (attMap && attMap[category]) || DEFAULT_WEAPON_ATTACHMENTS[category] || list[0]?.id;
+    return list.find((it) => it.id === targetId) || list[0] || null;
+  },
+
+  getWeaponsUsingUpgrade(category, itemId) {
+    this.ensureWarehouseStructures();
+    if (
+      !category ||
+      !itemId ||
+      category === 'vest' ||
+      category === 'backpack' ||
+      category === 'tacticalGear' ||
+      DEFAULT_WEAPON_ATTACHMENTS[category] === itemId
+    ) {
+      return [];
+    }
+    const candidateIds = new Set(this.ownedWeapons || []);
+    for (const sel of Object.values(DEFAULT_CLASS_SELECTIONS)) {
+      if (sel.primary) candidateIds.add(sel.primary);
+      if (sel.secondary) candidateIds.add(sel.secondary);
+    }
+    for (const wId of Object.keys(this.weaponAttachments || {})) {
+      candidateIds.add(wId);
+    }
+    const names = [];
+    for (const wId of candidateIds) {
+      const def = WEAPON_DEFS[wId];
+      if (!def || def.type !== 'gun' || def.isPrimitiveOnly) continue;
+      const attMap = this.weaponAttachments?.[wId];
+      const curVal =
+        attMap && attMap[category]
+          ? attMap[category]
+          : category === 'optic' && (wId === 'sv98' || wId === 'awm')
+          ? wId === 'sv98'
+            ? 'sniper8x'
+            : 'nightforce_12x'
+          : DEFAULT_WEAPON_ATTACHMENTS[category];
+      if (curVal === itemId) {
+        names.push(def.shortName || def.name);
       }
     }
-    return list.find((it) => it.id === targetId) || list[0] || null;
+    return names;
+  },
+
+  equipUpgradeOnAllOwnedWeapons(category, itemId) {
+    this.ensureWarehouseStructures();
+    if (category === 'vest' || category === 'backpack' || category === 'tacticalGear') {
+      return this.buyOrEquipUpgrade(category, itemId);
+    }
+    const list = ATTACHMENT_CATALOG[category];
+    if (!Array.isArray(list)) return { ok: false, reason: 'INVALID_CATEGORY' };
+    const item = list.find((it) => it.id === itemId);
+    if (!item) return { ok: false, reason: 'ITEM_NOT_FOUND' };
+    if (!this.ownedUpgrades.has(item.id) && (item.price || 0) > 0) {
+      return { ok: false, reason: 'NOT_OWNED', item };
+    }
+    this.ownedUpgrades.add(item.id);
+
+    const targetIds = new Set(this.ownedWeapons || []);
+    for (const sel of Object.values(DEFAULT_CLASS_SELECTIONS)) {
+      if (sel.primary) targetIds.add(sel.primary);
+      if (sel.secondary) targetIds.add(sel.secondary);
+    }
+    for (const sel of Object.values(this.classLoadoutSelections || {})) {
+      if (sel?.primary) targetIds.add(sel.primary);
+      if (sel?.secondary) targetIds.add(sel.secondary);
+    }
+
+    const updatedWeaponIds = [];
+    for (const wId of targetIds) {
+      const def = WEAPON_DEFS[wId];
+      if (!def || def.type !== 'gun' || def.isPrimitiveOnly) continue;
+      const attMap = this.getWeaponAttachmentMap(wId);
+      attMap[category] = item.id;
+      updatedWeaponIds.push(wId);
+    }
+    this.syncActiveEquippedUpgrades();
+    this.saveGunsmithState();
+    this.applyCustomizationsToActiveLoadout(true);
+    sound.playReload?.();
+    this.emitCashUpdate(0, `MOUNTED ${item.shortName || item.name} ON ALL ${updatedWeaponIds.length} GUNS`);
+    return {
+      ok: true,
+      action: 'MOUNTED_ALL',
+      item,
+      count: updatedWeaponIds.length,
+      weaponIds: updatedWeaponIds
+    };
   },
 
   getUpgradeMods(weaponId = null) {
@@ -1394,9 +1479,8 @@ export const GunsmithMethods = {
         ? 34
         : sen.zoomFov || 46;
       v.lockRangeMult = sen.lockRangeMult || 1.0;
-      v.hasAutoDircm = Boolean(
-        cm.hasAutoDircm || isPilotRole || (isGunship && acGen.id === 'ac130j_2024') || isB2
-      );
+      v.hasExplicitAutoDircmPod = Boolean(cm.hasAutoDircm);
+      v.hasAutoDircm = Boolean(cm.hasAutoDircm);
       v.passiveRegenPerSec = isPilotRole ? 25 : isB2 ? 18 : 8;
       if (isB2 && v.mesh) {
         applyB2SpiritColorToMesh(v.mesh, this.b2SpiritColor, this.b2SpiritAccentColor);
@@ -1738,13 +1822,16 @@ export const GunsmithMethods = {
       this.ownedUpgrades.add(item.id);
     }
 
-    const targetWeaponId = weaponId || this.getSelectedWeaponIdForClass(this.role, 'primary');
+    const activePrimaryId = this.getSelectedWeaponIdForClass(this.role, 'primary');
+    const targetWeaponId = weaponId || activePrimaryId;
     if (category === 'vest' || category === 'backpack' || category === 'tacticalGear') {
       this.equippedUpgrades[category] = item.id;
     } else {
       const attMap = this.getWeaponAttachmentMap(targetWeaponId);
       attMap[category] = item.id;
-      this.equippedUpgrades[category] = item.id;
+      if (targetWeaponId === activePrimaryId) {
+        this.equippedUpgrades[category] = item.id;
+      }
     }
 
     this.saveGunsmithState();
@@ -1803,6 +1890,16 @@ export const GunsmithMethods = {
     } else if (reqId === 'combat_stim') {
       this.hp = this.maxHp || PLAYER.MAX_HP;
       this.bleeding = false;
+      this.armFractured = false;
+      this.legFractured = false;
+      this.limbHealth = {
+        head: 100,
+        thorax: 100,
+        leftArm: 100,
+        rightArm: 100,
+        leftLeg: 100,
+        rightLeg: 100
+      };
       this.suppressionLevel = 0;
       sound.playReload();
     } else if (reqId === 'emergency_uav') {
@@ -1845,6 +1942,16 @@ export const GunsmithMethods = {
     } else if (stockKey === 'medStims') {
       this.hp = this.maxHp || PLAYER.MAX_HP;
       this.bleeding = false;
+      this.armFractured = false;
+      this.legFractured = false;
+      this.limbHealth = {
+        head: 100,
+        thorax: 100,
+        leftArm: 100,
+        rightArm: 100,
+        leftLeg: 100,
+        rightLeg: 100
+      };
       this.bandages = (this.bandages || 3) + 2;
     } else if (stockKey === 'ammoPacks') {
       if (typeof this.resupplyAll === 'function') this.resupplyAll();

@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { events } from '../events.js?v=123';
+import { events } from '../events.js?v=124';
 
 function markShared(asset) {
   if (asset) {
@@ -138,6 +138,24 @@ export const ConquestSystem = {
       const fx = flag.pos.x;
       const fz = flag.pos.z;
 
+      const resolveUnitCapturePos = (u) => {
+        if (!u || u.dead) return null;
+        const veh =
+          (u.activeVehicle && !u.activeVehicle.dead ? u.activeVehicle : null) ||
+          (u.drivingVehicle && !u.drivingVehicle.dead ? u.drivingVehicle : null) ||
+          (u.ridingVehicle && !u.ridingVehicle.dead ? u.ridingVehicle : null);
+        if (veh) {
+          if (veh.isAircraft) {
+            const gY = typeof this.getGroundHeightAt === 'function'
+              ? this.getGroundHeightAt(veh.pos.x, veh.pos.z)
+              : 0;
+            if (veh.pos.y - gY > 22.0) return null;
+          }
+          return veh.pos;
+        }
+        return u.pos || null;
+      };
+
       const tallyUnit = (u, distSq) => {
         if (!u || u.dead) return;
         // CRITICAL: Downed / incapacitated / bleeding-out bodies MUST be 100% excluded
@@ -155,7 +173,10 @@ export const ConquestSystem = {
           return;
         }
 
-        // Active standing/fighting units only:
+        const cPos = resolveUnitCapturePos(u);
+        if (!cPos) return;
+
+        // Active standing/fighting units & ground armor crews:
         // Give the human player 5x capture weight (6x when right on the flagpole <=16m)
         const isInnerCore = distSq <= 256;
         const baseWeight = u === playerUnit ? (isInnerCore ? 6 : 5) : 1;
@@ -171,17 +192,27 @@ export const ConquestSystem = {
       };
 
       if (grid && units) {
-        if (playerUnit && !playerUnit.dead && playerUnit.pos) {
-          const pdx = playerUnit.pos.x - fx;
-          const pdz = playerUnit.pos.z - fz;
-          const pDistSq = pdx * pdx + pdz * pdz;
-          if (pDistSq <= radSq) {
-            tallyUnit(playerUnit, pDistSq);
+        if (playerUnit && !playerUnit.dead) {
+          const pPos = resolveUnitCapturePos(playerUnit);
+          if (pPos) {
+            const pdx = pPos.x - fx;
+            const pdz = pPos.z - fz;
+            const pDistSq = pdx * pdx + pdz * pdz;
+            if (pDistSq <= radSq) {
+              tallyUnit(playerUnit, pDistSq);
+            }
           }
         }
         grid.forEachInRadius(fx, fz, flag.radius, (bot, dSq) => {
           if (bot !== playerUnit) {
-            tallyUnit(bot, dSq);
+            const bPos = resolveUnitCapturePos(bot);
+            if (!bPos) return;
+            const bdx = bPos.x - fx;
+            const bdz = bPos.z - fz;
+            const effDSq = bPos === bot.pos ? dSq : bdx * bdx + bdz * bdz;
+            if (effDSq <= radSq) {
+              tallyUnit(bot, effDSq);
+            }
           }
         });
         if (remotePlayers && remotePlayers.size > 0) {
@@ -199,9 +230,11 @@ export const ConquestSystem = {
         for (let i = 0; i < units.length; i++) {
           const u = units[i];
           if (!u || u.dead) continue;
-          const dx = u.pos.x - fx;
+          const uPos = resolveUnitCapturePos(u);
+          if (!uPos) continue;
+          const dx = uPos.x - fx;
           if (dx > flag.radius || dx < -flag.radius) continue;
-          const dz = u.pos.z - fz;
+          const dz = uPos.z - fz;
           if (dz > flag.radius || dz < -flag.radius) continue;
           const distSq = dx * dx + dz * dz;
           if (distSq <= radSq) {

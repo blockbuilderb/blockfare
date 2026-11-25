@@ -1,13 +1,13 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=123';
-import { sound } from './audio.js?v=123';
-import { NETWORK } from './config.js?v=123';
-import { events, makeEventBridge } from './events.js?v=123';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=124';
+import { sound } from './audio.js?v=124';
+import { NETWORK } from './config.js?v=124';
+import { events, makeEventBridge } from './events.js?v=124';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=123';
-import { WebRtcTransport } from './network/WebRtcTransport.js?v=123';
+} from './core/StateMachines.js?v=124';
+import { WebRtcTransport } from './network/WebRtcTransport.js?v=124';
 
 function safeStorageGet(key) {
   try {
@@ -123,9 +123,11 @@ export class NetworkManager {
       this.relayWsUrl = normalizeRelayWsUrl(savedRelay || DEFAULT_CLOUD_RELAY_WS_URL);
     }
 
-    // Default to Online Room Mode ('MULTIPLAYER' in room FRUGIS-1):
-    // A 1-player room runs 1 You + 499 AI = 500 soldiers identically to Solo, while letting friends drop right in!
-    if (
+    // Default to Offline Solo ('SINGLEPLAYER', 1 You + 499 AI = 500 soldiers) unless Multiplayer
+    // is explicitly requested via URL (?mode=mp / ?r=ROOM), options.gameMode, or [O] Lobby!
+    if (options.gameMode === 'SINGLEPLAYER' || options.gameMode === 'MULTIPLAYER') {
+      this.gameMode = options.gameMode;
+    } else if (
       params.has('solo') ||
       params.has('offline') ||
       urlMode === 'SINGLEPLAYER' ||
@@ -133,8 +135,19 @@ export class NetworkManager {
       urlMode === 'OFFLINE'
     ) {
       this.gameMode = 'SINGLEPLAYER';
-    } else {
+    } else if (
+      urlMode === 'MULTIPLAYER' ||
+      urlMode === 'MP' ||
+      urlMode === 'COOP' ||
+      Boolean(urlRoom) ||
+      Boolean(urlRelay) ||
+      options.WebSocketImpl !== undefined ||
+      options.RTCPeerConnectionImpl !== undefined ||
+      options.relayWsUrl !== undefined
+    ) {
       this.gameMode = 'MULTIPLAYER';
+    } else {
+      this.gameMode = 'SINGLEPLAYER';
     }
 
     // Bot population preset: defaults to 'ULTRA_AI' (500P: Humans + AI = 500 total, 250v250)
@@ -244,8 +257,13 @@ export class NetworkManager {
     if (this.remotePlayers.size === 0) {
       return true;
     }
-    // Deterministic lowest-clientId tie-breaker when on symmetric Cloud/LAN WebSocket relay
-    for (const peerId of this.remotePlayers.keys()) {
+    const localDeployed = Boolean(this.player && !this.player.dead);
+    // Deterministic lowest-clientId tie-breaker among ACTIVE DEPLOYED peers first
+    // (an idle/undeployed tab sitting on the Deploy Screen can NEVER override an active player's Conquest flags or AI!)
+    for (const [peerId, rp] of this.remotePlayers.entries()) {
+      const peerDeployed = Boolean(rp && (!rp.dead || rp.downed));
+      if (localDeployed && !peerDeployed) continue;
+      if (!localDeployed && peerDeployed) return false;
       if (peerId < this.clientId) return false;
     }
     return true;
@@ -1016,10 +1034,25 @@ export class NetworkManager {
       }
     }
     if (Array.isArray(msg.flags) && Array.isArray(this.world?.flags)) {
+      const p = this.player;
+      const pAlive = Boolean(p && !p.dead && !p.downed);
+      const pPos =
+        pAlive && p.activeVehicle && !p.activeVehicle.dead ? p.activeVehicle.pos : pAlive ? p.pos : null;
       for (let i = 0; i < msg.flags.length; i++) {
         const sf = msg.flags[i];
         const localFlag = this.world.flags.find((fl) => fl.id === sf.id);
         if (localFlag) {
+          const playerCapturingHere =
+            Boolean(pPos && localFlag.pos) &&
+            Math.hypot(pPos.x - localFlag.pos.x, pPos.z - localFlag.pos.z) <= (localFlag.radius || 34);
+          if (playerCapturingHere && typeof sf.prog === 'number') {
+            const wantPositive = p.team === 'US';
+            const localProg = localFlag.captureProgress || 0;
+            // Never let a delayed remote sync snap local capture progress backward while player is actively capping!
+            if ((wantPositive && localProg > sf.prog) || (!wantPositive && localProg < sf.prog)) {
+              continue;
+            }
+          }
           localFlag.owner = sf.owner || localFlag.owner;
           if (typeof sf.prog === 'number') {
             localFlag.captureProgress = sf.prog;
@@ -1118,16 +1151,31 @@ export class NetworkManager {
       const [idx, x, y, z, yaw, hp, stateCode] = row;
       const b = bm.bots[idx];
       if (!b) continue;
-      b.pos.set(x, y, z);
+      const snapSq = (b.pos.x - x) ** 2 + (b.pos.z - z) ** 2;
+      if (snapSq > 14 * 14 || stateCode !== (b.dead ? 2 : b.downed ? 1 : 0)) {
+        b.pos.set(x, y, z);
+      } else {
+        b.pos.x += (x - b.pos.x) * 0.45;
+        b.pos.y = y;
+        b.pos.z += (z - b.pos.z) * 0.45;
+      }
       b.yaw = yaw;
       b.hp = hp;
       b.dead = stateCode === 2;
       b.downed = stateCode === 1;
+      b._remoteBotSyncUntil = performance.now() + 900;
       if (b.mesh) {
-        b.mesh.position.set(x, y, z);
+        b.mesh.position.copy(b.pos);
         b.mesh.rotation.x = b.downed ? -Math.PI / 2 : 0;
         b.mesh.rotation.y = yaw;
-        b.mesh.visible = !b.dead && !b.drivingVehicle && !b.ridingVehicle;
+        if (b.dead || b.drivingVehicle || b.ridingVehicle) {
+          b.mesh.visible = false;
+        } else {
+          b.ragdollTimer = 0;
+          if (!b.downed) b.bleedOutTimer = 0;
+          b.mesh._culledOffFrustum = false;
+          b.mesh.visible = true;
+        }
       }
     }
   }
@@ -1681,8 +1729,9 @@ export class NetworkManager {
       this.send(this.buildLocalStatePacket());
     }
 
-    // Room Host broadcasts 2 Hz Conquest ticket/clock/flag sync & 4 Hz Co-Op AI Bot sync when human peers are connected
-    if (this.remotePlayers.size > 0 && this.isRoomAuthority()) {
+    // Room Host broadcasts 2 Hz Conquest ticket/clock/flag sync & 4 Hz Co-Op AI Bot sync ONLY when actively deployed in-round!
+    const hostRoundActive = Boolean(!this.player || !this.player.dead || this.gameRef?.hasDeployedOnce);
+    if (this.remotePlayers.size > 0 && this.isRoomAuthority() && hostRoundActive) {
       this.conquestSyncTimer += dt;
       if (this.conquestSyncTimer >= 0.5) {
         this.conquestSyncTimer = 0;

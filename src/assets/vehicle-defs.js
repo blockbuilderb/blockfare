@@ -4,7 +4,7 @@
 // Positions stored as arrays [x, y, z] — y is computed at runtime via getGroundHeightAt.
 // =========================================================================
 
-import { VEHICLE_STATS } from '../config.js?v=123';
+import { VEHICLE_STATS } from '../config.js?v=124';
 
 export const VEHICLE_DEFS = [
   // ===================== US FLEET (Open Motor Pool Apron aligned with 28m Main Gate at x = -904..-884, z = -10..+10) =====================
@@ -273,6 +273,75 @@ export const VEHICLE_DEFS = [
       [195, 0, -96],
       [56, 0, -32]
     ]
+  },
+  // ===================== HQ MOTOR POOL RECON BIKES & 4×4 QUAD ATVS ($0 FREE AT MAIN BASE) =====================
+  {
+    id: 'us_hq_bike',
+    name: 'M1030M1 USMC MILITARY RECON ENDURO',
+    type: 'bike',
+    isBike: true,
+    isWarehouseBike: true,
+    bikeSubType: 'twostroke_250cc',
+    cc: 250,
+    team: 'US',
+    spawnPos: [-1484, 0, -6],
+    spawnYaw: -Math.PI / 2,
+    maxHp: VEHICLE_STATS.BIKE_250CC_2T.maxHp,
+    speed: VEHICLE_STATS.BIKE_250CC_2T.speed,
+    weaponType: 'hmg',
+    rpm: 850,
+    patrolPoints: [[-620, 0, -18]]
+  },
+  {
+    id: 'us_hq_atv',
+    name: 'POLARIS MV850 TACTICAL 4×4 QUAD ATV',
+    type: 'atv',
+    isAtv: true,
+    isWarehouseBike: true,
+    bikeSubType: 'atv_quad',
+    cc: 850,
+    team: 'US',
+    spawnPos: [-1484, 0, 6],
+    spawnYaw: -Math.PI / 2,
+    maxHp: VEHICLE_STATS.ATV_QUAD.maxHp,
+    speed: VEHICLE_STATS.ATV_QUAD.speed,
+    weaponType: 'hmg',
+    rpm: 850,
+    patrolPoints: [[-620, 0, 18]]
+  },
+  {
+    id: 'ru_hq_bike',
+    name: 'M1030M1 RECON ENDURO MOTORCYCLE',
+    type: 'bike',
+    isBike: true,
+    isWarehouseBike: true,
+    bikeSubType: 'twostroke_250cc',
+    cc: 250,
+    team: 'RU',
+    spawnPos: [1484, 0, 6],
+    spawnYaw: Math.PI / 2,
+    maxHp: VEHICLE_STATS.BIKE_250CC_2T.maxHp,
+    speed: VEHICLE_STATS.BIKE_250CC_2T.speed,
+    weaponType: 'hmg',
+    rpm: 850,
+    patrolPoints: [[620, 0, 18]]
+  },
+  {
+    id: 'ru_hq_atv',
+    name: 'RM-800 TACTICAL 4×4 QUAD ATV',
+    type: 'atv',
+    isAtv: true,
+    isWarehouseBike: true,
+    bikeSubType: 'atv_quad',
+    cc: 850,
+    team: 'RU',
+    spawnPos: [1484, 0, -6],
+    spawnYaw: Math.PI / 2,
+    maxHp: VEHICLE_STATS.ATV_QUAD.maxHp,
+    speed: VEHICLE_STATS.ATV_QUAD.speed,
+    weaponType: 'hmg',
+    rpm: 850,
+    patrolPoints: [[620, 0, -18]]
   },
 
   // ===================== US & RU COMBAT AIRCRAFT WINGS (PARKED ON OUTER SIDE APRON z = ∓138: BIGGEST IN BACK -> FASTEST IN FRONT!) =====================

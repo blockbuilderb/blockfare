@@ -568,6 +568,40 @@
   color: #74b9ff;
 }
 
+.vitals-top-flex {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+#vitals-paperdoll-wrap {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 12, 18, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  padding: 2px 3px;
+}
+
+.vitals-bars-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.vitals-bars-col .health-row:last-child {
+  margin-bottom: 0;
+}
+
+.badge.fracture {
+  background: rgba(230, 126, 34, 0.92);
+  color: #fff;
+  border: 1px solid #f39c12;
+  animation: pulseBleed 0.9s infinite alternate;
+}
+
 .badge.bleed {
   background: #c0392b;
   color: #fff;

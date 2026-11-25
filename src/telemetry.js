@@ -5,8 +5,8 @@
  * state snapshots. Streams structured JSON logs to `/api/telemetry` -> `logs/battle_telemetry.jsonl`
  * and `logs/latest_snapshot.json` for automated inspection and gameplay tuning.
  */
-import { TELEMETRY, MATCH } from './config.js?v=123';
-import { events } from './events.js?v=123';
+import { TELEMETRY, MATCH } from './config.js?v=124';
+import { events } from './events.js?v=124';
 
 export class TelemetryLogger {
   constructor(game) {

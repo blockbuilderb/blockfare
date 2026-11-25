@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=123';
-import { sound } from '../audio.js?v=123';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=123';
+import { VOXEL_SIZE } from '../world.js?v=124';
+import { sound } from '../audio.js?v=124';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=124';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=123';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=123';
-import { events, makeEventBridge } from '../events.js?v=123';
-import { GunsmithMethods } from './GunsmithState.js?v=123';
-import { FortificationMethods } from './FortificationBuilder.js?v=123';
-import { CommanderMethods } from './CommanderAbilities.js?v=123';
-import { VehicleControlMethods } from './VehicleControl.js?v=123';
-import { CombatMethods } from './PlayerCombat.js?v=123';
+} from '../utils/KeyboardShortcuts.js?v=124';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=124';
+import { events, makeEventBridge } from '../events.js?v=124';
+import { GunsmithMethods } from './GunsmithState.js?v=124';
+import { FortificationMethods } from './FortificationBuilder.js?v=124';
+import { CommanderMethods } from './CommanderAbilities.js?v=124';
+import { VehicleControlMethods } from './VehicleControl.js?v=124';
+import { CombatMethods } from './PlayerCombat.js?v=124';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=123';
+} from '../core/StateMachines.js?v=124';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -182,6 +182,18 @@ export class PlayerController {
     this.suppressionLevel = 0;       // 0–1 intensity
     this.suppressionDecayRate = PLAYER.SUPPRESSION_DECAY_RATE; // per second
     this.lastSuppressionHitTime = 0;
+
+    // Anatomical 6-Zone Human Limb Health & Fracture State (Tarkov / Arma ACE3 Trauma)
+    this.limbHealth = {
+      head: 100,
+      thorax: 100,
+      leftArm: 100,
+      rightArm: 100,
+      leftLeg: 100,
+      rightLeg: 100
+    };
+    this.armFractured = false;
+    this.legFractured = false;
 
     // Kill Streak / Multi-Kill Tracking
     this.killStreak = 0;
@@ -529,6 +541,12 @@ export class PlayerController {
 
     window.addEventListener('keydown', (e) => {
       this._modalCacheTime = 0;
+      if (e.code === 'AltLeft' || e.code === 'AltRight') {
+        this.keys[e.code] = true;
+        if (this.activeVehicle && this.activeVehicle.isAircraft) {
+          e.preventDefault();
+        }
+      }
       if (!hasAnyModifier(e) || shouldControlLeftCrouch(e)) {
         this.keys[e.code] = true;
       }
@@ -756,6 +774,8 @@ export class PlayerController {
       if (!hasAnyModifier(e) && e.code === 'KeyF' && !e.repeat) {
         if (this.activeVehicle && this.activeVehicle.aircraftRole === 'gunship') {
           this.lockGunshipOrbitAtCrosshair?.();
+        } else if (this.activeVehicle && this.activeVehicle.isAircraft) {
+          this.toggleAircraftSpiLock?.();
         } else if (!this.activeVehicle) {
           this.keyFHoldTime = 0;
           this._justOpenedLootByHold = false;
@@ -800,7 +820,12 @@ export class PlayerController {
         if (this.activeVehicle && this.activeVehicle.isAircraft && this.activeVehicle.aircraftRole === 'gunship') {
           // In AC-130 Gunship, [Q] = Climb UP & [Z] = Descend DOWN (Weapons use [1], [2], [3])!
         } else if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
-          const maxSlots = this.activeVehicle.isAircraft ? 3 : 2;
+          const maxSlots =
+            this.activeVehicle.isAircraft ||
+            this.activeVehicle.type === 'tank' ||
+            this.activeVehicle.type === 'apc'
+              ? 3
+              : 2;
           const nextSlot = ((this.activeVehicle.activeWeaponSlot || 0) + 1) % maxSlots;
           this.switchVehicleWeaponSlot(nextSlot);
         } else {
@@ -828,7 +853,11 @@ export class PlayerController {
       if (!hasAnyModifier(e) && e.code === 'KeyR' && !e.repeat) {
         if (this.activeVehicle && this.activeVehicle.aircraftRole === 'gunship') {
           this.toggleGunshipFlightMode?.();
-        } else if (!this.activeVehicle) {
+        } else if (this.activeVehicle && this.activeVehicle.isAircraft) {
+          this.toggleAircraftLevelAutopilot?.();
+        } else if (this.activeVehicle) {
+          this.vehicleManager?.triggerManualVehicleRearm?.(this.activeVehicle);
+        } else {
           this.keyRHoldTime = 0;
           this.startReload(false);
         }
@@ -1084,7 +1113,8 @@ export class PlayerController {
           return;
         }
         if (this.activeVehicle.type === 'tank' || this.activeVehicle.type === 'apc') {
-          const nextSlot = (this.activeVehicle.activeWeaponSlot || 0) === 0 ? 1 : 0;
+          const curSlot = this.activeVehicle.activeWeaponSlot || 0;
+          const nextSlot = e.deltaY > 0 ? (curSlot + 1) % 3 : (curSlot + 2) % 3;
           this.switchVehicleWeaponSlot(nextSlot);
         }
         return;
@@ -1175,17 +1205,32 @@ export class PlayerController {
       const sens = baseSens * vehOpticZoomScale;
       const dx = rawDx * sens;
       const dy = rawDy * sens;
-      const inAerobaticPlane = Boolean(
-        this.activeVehicle &&
-          this.activeVehicle.isAircraft &&
-          this.activeVehicle.aircraftRole !== 'gunship' &&
-          this.activeVehicle.aircraftRole !== 'b2_spirit'
+      const av = this.activeVehicle;
+      const inDecoupledAirLook = Boolean(
+        av &&
+          av.isAircraft &&
+          av.aircraftRole !== 'gunship' &&
+          (this.keys['AltLeft'] || this.keys['AltRight'] || e.altKey || av.levelAutopilot)
       );
-      if (inAerobaticPlane) {
-        // Invert horizontal yaw input when upside-down (cos(pitch) < 0) at the top of a 360° backflip loop!
-        const invSign = Math.cos(this.activeVehicle.pitch || 0) < -0.05 ? -1 : 1;
-        this.yaw -= dx * invSign;
-        this.pitch -= dy;
+      const inAerobaticPlane = Boolean(
+        av &&
+          av.isAircraft &&
+          av.aircraftRole !== 'gunship' &&
+          av.aircraftRole !== 'b2_spirit'
+      );
+      if (inDecoupledAirLook) {
+        // Decoupled Aircraft Free-Look ([ALT]) & LAAP Level-Hold Autopilot ([R]):
+        // Mouse freely aims camera/TGP (-85° straight down to +77° up, ±135° yaw) while plane flies level!
+        av.freeLookYaw = THREE.MathUtils.clamp((av.freeLookYaw || 0) - dx, -2.35, 2.35);
+        av.freeLookPitch = THREE.MathUtils.clamp((av.freeLookPitch || 0) - dy, -1.48, 1.35);
+      } else if (inAerobaticPlane) {
+        // Invert screen-to-world pitch/yaw naturally when flying upside-down via 180° roll or 360° vertical loop!
+        const loopInverted = Math.cos(av.pitch || 0) < -0.05;
+        const rollInverted = Math.cos(av.roll || 0) < -0.15;
+        const yawSign = (loopInverted ? -1 : 1) * (rollInverted ? -1 : 1);
+        const pitchSign = rollInverted ? -1 : 1;
+        this.yaw -= dx * yawSign;
+        this.pitch -= dy * pitchSign;
         while (this.pitch > Math.PI) this.pitch -= Math.PI * 2;
         while (this.pitch <= -Math.PI) this.pitch += Math.PI * 2;
       } else {
@@ -1368,6 +1413,17 @@ export class PlayerController {
     this.hp = PLAYER.HP;
     this.armor = this.maxArmor;
     this.bleeding = false;
+    this.beyondRescue = false;
+    this.armFractured = false;
+    this.legFractured = false;
+    this.limbHealth = {
+      head: 100,
+      thorax: 100,
+      leftArm: 100,
+      rightArm: 100,
+      leftLeg: 100,
+      rightLeg: 100
+    };
     this.bandages =
       (this.role === 'medic' ? 9 : 2) +
       (vestDef ? vestDef.bonusBandages : 0) +
@@ -1646,17 +1702,32 @@ export class PlayerController {
       this._fobAmmoTimer = 0;
     }
 
-    if (this.keys['KeyH'] && (this.bleeding || this.hp < PLAYER.MAX_HP) && this.bandages > 0) {
+    const hasFracture = Boolean(this.armFractured || this.legFractured);
+    if (
+      this.keys['KeyH'] &&
+      (this.bleeding || hasFracture || this.hp < PLAYER.MAX_HP) &&
+      this.bandages > 0
+    ) {
       this.bandageProgress += dt / (this.role === 'medic' ? PLAYER.BANDAGE_DURATION_MEDIC : PLAYER.BANDAGE_DURATION_OTHER);
       if (this.bandageProgress >= 1) {
         this.bandageProgress = 0;
         this.bleeding = false;
+        const splintedFracture = hasFracture;
+        this.armFractured = false;
+        this.legFractured = false;
+        if (this.limbHealth) {
+          for (const lk of Object.keys(this.limbHealth)) {
+            this.limbHealth[lk] = Math.min(100, Math.max(55, (this.limbHealth[lk] ?? 100) + 45));
+          }
+        }
         this.bandages--;
         this.hp = Math.min(PLAYER.MAX_HP, this.hp + (this.role === 'medic' ? PLAYER.BANDAGE_HEAL_MEDIC : PLAYER.BANDAGE_HEAL_OTHER));
         if (this.onAwardXp) {
           this.onAwardXp(
             15,
-            this.hp >= PLAYER.MAX_HP
+            splintedFracture
+              ? `🦴🏥 FRACTURE SPLINTED & BANDAGED (${Math.ceil(this.hp)}/100 HP)`
+              : this.hp >= PLAYER.MAX_HP
               ? '🏥 INJURIES FULLY BANDAGED (100/100 MAX HP)'
               : `BLEEDING STOPPED & HEALED (${Math.ceil(this.hp)}/100 HP)`
           );
@@ -2057,6 +2128,7 @@ export class PlayerController {
     const sprinting =
       !modalOpenNow &&
       this.keys['ShiftLeft'] &&
+      !this.legFractured &&
       !this.isAds &&
       !this.crouching &&
       !this.prone &&
@@ -2064,6 +2136,7 @@ export class PlayerController {
       (this.keys['KeyW'] || isMoving) &&
       !this.isFiring;
     const classSpdMult = this.classMoveSpeedMult || (CLASS_TRAITS[this.role]?.moveSpeedMult ?? 1.0);
+    const fractureMoveMult = this.legFractured ? 0.65 : 1.0;
     const rawBaseSpeed = this.parachuting
       ? 12.5
       : isDraggingBody
@@ -2077,7 +2150,9 @@ export class PlayerController {
       : this.isAds
       ? 4.6
       : 7.0;
-    const baseSpeed = this.parachuting ? rawBaseSpeed : rawBaseSpeed * classSpdMult;
+    const baseSpeed = this.parachuting
+      ? rawBaseSpeed
+      : rawBaseSpeed * classSpdMult * fractureMoveMult;
 
     // [Space]: Stand up from Prone/Crouch, Vault over low wall/window, or Auto-Bunnyhop (when bhopEnabled is ON)!
     const bodyHeightNow = this.prone ? 0.65 : this.crouching ? 1.15 : 1.7;
@@ -2349,10 +2424,10 @@ export class PlayerController {
       Math.min(1, dt * 11.5)
     );
 
-    // Suppression decay + micro-flinch when suppressed (Squad-style)
+    // Suppression decay + micro-flinch when suppressed or suffering an Arm Fracture!
     this.suppressionLevel = Math.max(0, this.suppressionLevel - this.suppressionDecayRate * dt);
-    if (this.suppressionLevel > 0.05) {
-      const flinchMag = this.suppressionLevel * 0.015;
+    if (this.suppressionLevel > 0.05 || this.armFractured) {
+      const flinchMag = (this.suppressionLevel * 0.015) + (this.armFractured ? 0.0042 : 0);
       this.swayX += (Math.random() - 0.5) * flinchMag;
       this.swayY += (Math.random() - 0.5) * flinchMag;
     }

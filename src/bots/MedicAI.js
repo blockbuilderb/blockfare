@@ -1,11 +1,11 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT } from '../config.js?v=123';
-import { tmpVec3 } from '../utils/VectorPool.js?v=123';
-import { events } from '../events.js?v=123';
+import { BOT } from '../config.js?v=124';
+import { tmpVec3 } from '../utils/VectorPool.js?v=124';
+import { events } from '../events.js?v=124';
 import {
   MEDIC_RESCUE_EVENTS,
   createMedicRescueFSM
-} from '../core/StateMachines.js?v=123';
+} from '../core/StateMachines.js?v=124';
 
 const REVIVE_PARTICLE_COLOR = new THREE.Color(0x2ecc71);
 const SHARED_SMOKE_PUFF_GEO = new THREE.BoxGeometry(1.5, 1.3, 1.5);
@@ -215,12 +215,27 @@ export function spawnRescueSmoke(pos) {
 }
 
 export function reviveBot(bot, isMedicRescuer = false) {
-  if (!bot || bot.isDinosaur || (!bot.downed && !bot.dead)) return false;
+  if (!bot || bot.isDinosaur || bot.beyondRescue || (!bot.downed && !bot.dead)) return false;
   this.clearBotRescueLinks(bot);
   bot.downed = false;
   bot.dead = false;
   bot.hp = isMedicRescuer ? BOT.HP : BOT.REVIVE_HP;
   bot.bleedOutTimer = 0;
+  if (isMedicRescuer) {
+    bot.armFractured = false;
+    bot.legFractured = false;
+    bot.limbHealth = {
+      head: 100,
+      thorax: 100,
+      leftArm: 100,
+      rightArm: 100,
+      leftLeg: 100,
+      rightLeg: 100
+    };
+  } else if (bot.limbHealth) {
+    bot.limbHealth.head = Math.max(bot.limbHealth.head || 0, 50);
+    bot.limbHealth.thorax = Math.max(bot.limbHealth.thorax || 0, 50);
+  }
   // Ensure a revived soldier is NEVER stuck inside a wall, corner, or building footprint!
   if (
     this.world &&

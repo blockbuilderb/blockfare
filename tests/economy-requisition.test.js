@@ -1,9 +1,9 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { ECONOMY, VEHICLE_STATS, SQUAD_KIT_CAPS } from '../src/config.js?v=123';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=123';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=123';
+import { ECONOMY, VEHICLE_STATS, SQUAD_KIT_CAPS, PROJECTILES } from '../src/config.js?v=124';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=124';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=124';
 import {
   VehicleManager,
   PITCH_LIMITS_CAR,
@@ -11,13 +11,14 @@ import {
   classifyWeaponBallistics,
   getVehicleSeatLayout,
   initVehicleOrdnance
-} from '../src/vehicles.js?v=123';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=123';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=123';
-import { sound } from '../src/audio/SoundManager.js?v=123';
-import { BotManager, SQUAD_9MAN_ROSTERS, evaluateCatastrophicKill } from '../src/bots.js?v=123';
-import { NetworkManager } from '../src/network.js?v=123';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=123';
+} from '../src/vehicles.js?v=124';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=124';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=124';
+import { sound } from '../src/audio/SoundManager.js?v=124';
+import { BotManager, SQUAD_9MAN_ROSTERS, evaluateCatastrophicKill } from '../src/bots.js?v=124';
+import { NetworkManager } from '../src/network.js?v=124';
+import { ConquestSystem } from '../src/world/ConquestSystem.js?v=124';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=124';
 
 function createEconomyPlayerHarness(overrides = {}) {
   const storage = new Map();
@@ -42,6 +43,8 @@ function createEconomyPlayerHarness(overrides = {}) {
     activeVehicle: null,
     world: { era: 'modern', getGroundHeightAt: () => 0 },
     vehicleManager: { getTeamKills: () => 30, isB2UnlockedForTeam: () => true },
+    buildMagArray: (clip = 30, res = 90) => Array.from({ length: Math.max(1, Math.round(res / Math.max(1, clip))) }, () => clip),
+    switchSlot: () => {},
     applyCustomizationsToActiveLoadout: () => {},
     syncCameraTransform: () => {},
     onAwardXp: () => {},
@@ -811,5 +814,174 @@ describe('Squad Caliber Penetration, Optics/Sensor Crits, Avionics FCS & Beyond-
       `Team-wide LAT Engineer ratio should be ~13% (got ${(teamEngineerRatio * 100).toFixed(1)}%)`
     );
     assert.ok(totalRecons >= 2, 'ECHO and ALPHA squads now field actual RECON marksmen');
+  });
+
+  test('v124: consistent $0 HQ vehicle pool for Armor Crew & Pilots, solo FOB tank capture/resupply, multi-gun scopes, AC-130 port sector, autopilot & localized damage', () => {
+    // 1. Offline Solo Default: NetworkManager without URL MP params starts in SINGLEPLAYER so cloud relay never hijacks solo FOB captures
+    const prevWin = globalThis.window;
+    globalThis.window = { location: { search: '', hostname: 'blockbuilderb.github.io', protocol: 'https:' } };
+    const soloNet = new NetworkManager({ team: 'US', pos: new THREE.Vector3() }, { bots: [] }, { voxels: new Map() });
+    assert.equal(soloNet.gameMode, 'SINGLEPLAYER');
+    assert.equal(soloNet.isMultiplayer(), false);
+    globalThis.window = prevWin;
+
+    // 2. Multi-Gun Shared Scope Equipping: one purchased optic equips across M4A1, AK-15 & MP-443 simultaneously without unequipping others!
+    const { player } = createEconomyPlayerHarness({ role: 'assault' });
+    player.warehouseCash = 15000;
+    player.ownedWeapons.add('m4a1');
+    player.ownedWeapons.add('ak15');
+    player.ownedWeapons.add('mp443');
+    assert.equal(player.buyOrEquipUpgrade('optic', 'holo', 'm4a1').ok, true);
+    assert.equal(player.buyOrEquipUpgrade('optic', 'holo', 'ak15').ok, true);
+    assert.equal(player.getEquippedItem('optic', 'm4a1')?.id, 'holo');
+    assert.equal(player.getEquippedItem('optic', 'ak15')?.id, 'holo');
+    assert.equal(player.getEquippedItem('optic', 'mp443')?.id, 'factory');
+    const mountAll = player.equipUpgradeOnAllOwnedWeapons('optic', 'holo');
+    assert.equal(mountAll.ok, true);
+    assert.equal(player.getEquippedItem('optic', 'mp443')?.id, 'holo');
+    assert.ok(player.getWeaponsUsingUpgrade('optic', 'holo').length >= 3);
+
+    // 2b. Hyper-Velocity APFSDS Tank Shell (780 m/s) vs. SACLOS Wire/Laser-Guided ATGM (Slot [3] on Tanks & IFVs)
+    assert.ok(PROJECTILES.TANK_SHELL.speed >= 700, 'Tank APFSDS shell flies at hyper-velocity (>=700 m/s)');
+    assert.ok(PROJECTILES.ATGM_TOW.turnRate >= 4.0 && PROJECTILES.ATGM_TOW.gravity === 0, 'TOW/Kornet ATGM is zero-gravity SACLOS guided');
+
+    // 3. Consistent $0 HQ Pool Boarding for Armor Crewman (even after AI bots board HQ Tanks!) + Pre-Deploy B-2 Kill Guard
+    const mockWorld = {
+      era: 'modern',
+      spawns: { US_BASE: new THREE.Vector3(-1520, 0, 0), RU_BASE: new THREE.Vector3(1520, 0, 0) },
+      flags: [{ id: 'A', owner: 'NEUTRAL', radius: 34, progress: 0, contested: false, pos: new THREE.Vector3(-420, 0, 0) }],
+      ammoCrates: [],
+      getTeamHex: () => 0x3498db,
+      getGroundHeightAt: () => 0,
+      spawnDebris: () => {},
+      spawnExplosionVisual: () => {}
+    };
+    Object.assign(mockWorld, ConquestSystem);
+    const vm = new VehicleManager(new THREE.Scene(), mockWorld);
+    vm._suppressPreDeployKills = true;
+    for (let i = 0; i < 30; i++) vm.recordTeamKillAndCheckB2('US');
+    assert.equal(vm.isB2UnlockedForTeam('US'), false, 'Pre-deploy background AI skirmishes must not unlock B-2 early');
+    vm._suppressPreDeployKills = false;
+
+    const aiBot = { name: 'CPL_BAKER', team: 'US', dead: false, downed: false, pos: new THREE.Vector3(-900, 0, 0), mesh: new THREE.Group() };
+    const hqTank = vm.spawnVehicle({
+      id: 'us_abrams_hq',
+      name: 'M1A2 ABRAMS MBT',
+      type: 'tank',
+      team: 'US',
+      spawnPos: new THREE.Vector3(-1456, 0, -5),
+      spawnYaw: -Math.PI / 2,
+      maxHp: 2100,
+      speed: 16,
+      weaponType: 'tank_cannon'
+    });
+    // Simulate AI bot boarding & driving the HQ tank out toward the frontline during deploy screen
+    hqTank.npcDriver = aiBot;
+    aiBot.drivingVehicle = hqTank;
+    hqTank.pos.set(-780, 0, -18);
+    hqTank.hp = 1650;
+
+    const availTank = vm.findAvailableBaseVehicle('US', 'tank');
+    assert.equal(availTank, hqTank, 'Human Armor Crewman at Main Base gets $0 HQ priority over AI-crewed fleet tank');
+    const claimedTank = vm.claimBaseVehicleForPlayerDeploy(player, 'US', 'tank');
+    assert.equal(claimedTank, hqTank);
+    assert.equal(hqTank.npcDriver, null);
+    assert.equal(aiBot.drivingVehicle, null);
+    assert.equal(hqTank.hp, 2100, 'Reclaimed HQ tank resets cleanly to 100% HP at Main Base');
+    assert.ok(Math.hypot(hqTank.pos.x - -1456, hqTank.pos.z - -5) < 25, 'Reclaimed HQ tank spawns cleanly at HQ Motor Pool');
+
+    // 4. Tank Captures Neutral FOB & Resupplies inside Captured FOB (or Friendly [7] Ammo Crate)
+    player.activeVehicle = hqTank;
+    hqTank.driver = player;
+    hqTank.pos.set(-412, 0, 4); // Inside Flag A (34m radius), while player.pos is still at (0,0,0)
+    player.pos.set(0, 0, 0);
+    for (let step = 0; step < 45; step++) {
+      mockWorld.updateFlags(0.5, player, []);
+    }
+    assert.equal(mockWorld.flags[0].owner, 'US', 'Player driving a Tank inside FOB radius captures the FOB solo');
+
+    hqTank.ordnancePools.slot0 = 4;
+    hqTank.hp = 1500;
+    const rearmRes = vm.triggerManualVehicleRearm(hqTank);
+    assert.equal(rearmRes, true, '[R] Manual Rearm inside captured friendly FOB refills tank shells & repairs hull');
+    assert.equal(hqTank.ordnancePools.slot0, hqTank.maxOrdnancePools.slot0);
+
+    // 5. Aircraft [R] LAAP Level-Hold Autopilot, [F] SPI Sight Lock, AC-130 Calibration & Modular 6-Zone Airframe Damage
+    const jet = vm.spawnVehicle({
+      id: 'us_f15_test',
+      name: 'F-15EX EAGLE',
+      type: 'plane',
+      isAircraft: true,
+      aircraftRole: 'fighter',
+      team: 'US',
+      spawnPos: new THREE.Vector3(-1436, 120, -138),
+      spawnYaw: -Math.PI / 2,
+      maxHp: 1500,
+      speed: 68
+    });
+    assert.ok(jet.airframeParts && jet.airframeParts.leftWing === 100 && jet.airframeParts.engines === 100);
+    // Strike left wing in local space (-X = left wing; at yaw = 0, local -X is world -X)
+    jet.yaw = 0;
+    jet.pitch = 0;
+    jet.roll = 0;
+    jet.pos.set(0, 120, 0);
+    vm.damageVehicle(
+      jet,
+      320,
+      'PANTSIR',
+      'RU',
+      '30MM AA AUTOCANNON',
+      null,
+      null,
+      new THREE.Vector3(0, 0, -200),
+      new THREE.Vector3(-4.5, 120, 0)
+    );
+    assert.equal(jet.lastAirframePart, 'leftWing');
+    assert.ok(jet.airframeParts.leftWing < 65, 'Left wing hit degrades leftWing integrity');
+    assert.equal(jet.airframeParts.rightWing, 100, 'Right wing stays intact on isolated left-wing cannon hit');
+
+    player.activeVehicle = jet;
+    jet.driver = player;
+    assert.equal(player.toggleAircraftLevelAutopilot(), true);
+    assert.equal(jet.levelAutopilot, true);
+
+    // AC-130 FCS Calibration: stationary tank 12m away from ground aim point must NOT yank shot sideways
+    const parkedEnemyTank = vm.spawnVehicle({
+      id: 'ru_parked_tank',
+      name: 'T-90M',
+      type: 'tank',
+      team: 'RU',
+      spawnPos: new THREE.Vector3(112, 0, 0),
+      spawnYaw: 0,
+      maxHp: 2100,
+      speed: 16
+    });
+    parkedEnemyTank.forwardSpeed = 0;
+    player.vehicleManager = vm;
+    const fcsSol = player.computeGunshipFcsSolution(
+      new THREE.Vector3(100, 0, 0),
+      new THREE.Vector3(0, 175, 0),
+      { aircraftRole: 'gunship' },
+      210,
+      2.2
+    );
+    assert.equal(fcsSol.trackedVehicle, null, 'AC-130 FCS never snaps sideways onto nearby stationary vehicles');
+    assert.equal(fcsSol.interceptPos.x, 100);
+
+    // 6. Soldier & Player Anatomical Limb Fractures + Catastrophic Unrevivable Break
+    const heavySniperHead = evaluateCatastrophicKill('M82 .50 BMG', 0, 0, () => 0.5, {
+      hitZone: 'head',
+      isHeadshot: true,
+      finalDamage: 220,
+      overkill: 120
+    });
+    assert.equal(heavySniperHead.beyondRescue, true, '.50 BMG headshot causes catastrophic unrevivable break');
+    const rifleArm = evaluateCatastrophicKill('M4A1 5.56MM', 0, 0, () => 0.01, {
+      hitZone: 'leftArm',
+      isHeadshot: false,
+      finalDamage: 34,
+      overkill: 5
+    });
+    assert.equal(rifleArm.beyondRescue, false, 'Standard 5.56mm arm finish remains revivable by Squad Medics');
   });
 });

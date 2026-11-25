@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MODERN BLOCKFARE — Multi-Era Voxel Combined Arms FPS</title>
-  <link rel="stylesheet" href="./style.css?v=123" />
+  <link rel="stylesheet" href="./style.css?v=124" />
   <script type="importmap">
     {
       "imports": {
@@ -276,13 +276,13 @@
           <text x="210" y="36" text-anchor="middle" fill="#ff6b81" font-family="Consolas, monospace" font-size="9.5" font-weight="900" letter-spacing="1.4">AFSOC EOTECH EXPS3 // HMD PYLON SIGHT</text>
           <!-- Glowing Laser-Red 68 MOA EOTech Holographic Ring + 12/3/6/9 Stadia Ticks + 1 MOA Dot -->
           <g filter="drop-shadow(0 0 5px #ff2e43)">
-            <circle cx="210" cy="164" r="54" fill="none" stroke="#ff2e43" stroke-width="2.6" stroke-dasharray="18 4" />
-            <line x1="210" y1="101" x2="210" y2="117" stroke="#ff2e43" stroke-width="2.8" />
-            <line x1="210" y1="211" x2="210" y2="227" stroke="#ff2e43" stroke-width="2.8" />
-            <line x1="147" y1="164" x2="163" y2="164" stroke="#ff2e43" stroke-width="2.8" />
-            <line x1="257" y1="164" x2="273" y2="164" stroke="#ff2e43" stroke-width="2.8" />
-            <circle cx="210" cy="164" r="2.6" fill="#ff4757" />
-            <circle cx="210" cy="182" r="1.8" fill="#ff6b81" />
+            <circle cx="210" cy="170" r="54" fill="none" stroke="#ff2e43" stroke-width="2.6" stroke-dasharray="18 4" />
+            <line x1="210" y1="107" x2="210" y2="123" stroke="#ff2e43" stroke-width="2.8" />
+            <line x1="210" y1="217" x2="210" y2="233" stroke="#ff2e43" stroke-width="2.8" />
+            <line x1="147" y1="170" x2="163" y2="170" stroke="#ff2e43" stroke-width="2.8" />
+            <line x1="257" y1="170" x2="273" y2="170" stroke="#ff2e43" stroke-width="2.8" />
+            <circle cx="210" cy="170" r="2.6" fill="#ff4757" />
+            <circle cx="210" cy="188" r="1.8" fill="#ff6b81" />
           </g>
           <text id="ac130-eotech-telemetry" x="210" y="285" text-anchor="middle" fill="#ff7675" font-family="Consolas, monospace" font-size="9.5" font-weight="900">EOTECH PYLON LOCK • [R] TRANSIT/ORBIT</text>
         </svg>
@@ -680,23 +680,47 @@
         </div>
 
         <div id="vitals-panel">
-          <!-- Vehicle Hull Armor Integrity Row (Shown when driving a Tank, APC, or Humvee) -->
-          <div id="vehicle-vitals-row" class="health-row veh-hull-row hidden">
-            <span class="hp-label veh-hull-label" id="veh-hull-tag">HULL</span>
-            <div class="hp-bar-bg veh-hull-bg">
-              <div id="veh-hull-bar-fill" style="width: 100%"></div>
+          <div class="vitals-top-flex">
+            <!-- Tactical Anatomy (Infantry) & Modular Airframe (Aircraft) Paper-Doll SVG -->
+            <div id="vitals-paperdoll-wrap" title="Localized Anatomy &amp; Airframe Integrity">
+              <svg id="soldier-limb-svg" viewBox="0 0 44 58" width="36" height="48">
+                <circle id="limb-svg-head" cx="22" cy="8" r="5.2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="limb-svg-thorax" x="15" y="15" width="14" height="18" rx="2.5" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="limb-svg-larm" x="8" y="16" width="5.5" height="17" rx="2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="limb-svg-rarm" x="30.5" y="16" width="5.5" height="17" rx="2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="limb-svg-lleg" x="15" y="35" width="6" height="20" rx="2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="limb-svg-rleg" x="23" y="35" width="6" height="20" rx="2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+              </svg>
+              <svg id="aircraft-dmg-svg" class="hidden" viewBox="0 0 56 56" width="42" height="46">
+                <polygon id="air-svg-avionics" points="28,3 24,13 32,13" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="air-svg-cockpit" x="24.5" y="13" width="7" height="9" rx="2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <polygon id="air-svg-lwing" points="24,20 4,31 4,36 24,31" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <polygon id="air-svg-rwing" points="32,20 52,31 52,36 32,31" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="air-svg-engines" x="23.5" y="22" width="9" height="17" rx="2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <polygon id="air-svg-tail" points="24,39 15,49 15,52 28,48 41,52 41,49 32,39" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+              </svg>
             </div>
-            <span id="veh-hull-value">1600</span>
-          </div>
-          <div class="health-row">
-            <span class="hp-label" id="crew-hp-label">HP</span>
-            <div class="hp-bar-bg">
-              <div id="hp-bar-fill" style="width: 100%"></div>
+            <div class="vitals-bars-col">
+              <!-- Vehicle Hull Armor Integrity Row (Shown when driving a Tank, APC, Aircraft, or Humvee) -->
+              <div id="vehicle-vitals-row" class="health-row veh-hull-row hidden">
+                <span class="hp-label veh-hull-label" id="veh-hull-tag">HULL</span>
+                <div class="hp-bar-bg veh-hull-bg">
+                  <div id="veh-hull-bar-fill" style="width: 100%"></div>
+                </div>
+                <span id="veh-hull-value">1600</span>
+              </div>
+              <div class="health-row">
+                <span class="hp-label" id="crew-hp-label">HP</span>
+                <div class="hp-bar-bg">
+                  <div id="hp-bar-fill" style="width: 100%"></div>
+                </div>
+                <span id="hp-value">100</span>
+              </div>
             </div>
-            <span id="hp-value">100</span>
           </div>
           <div class="status-badges">
             <span id="bleed-badge" class="badge bleed hidden">BLEEDING [HOLD H]</span>
+            <span id="fracture-badge" class="badge fracture hidden">🦴 FRACTURE [HOLD H]</span>
             <span id="armor-badge" class="badge armor-tag">ARMOR: 50</span>
             <span id="stance-badge" class="badge">STANDING</span>
             <span id="bandage-count-badge" class="badge">BANDAGES: 3</span>
@@ -1629,6 +1653,6 @@
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=123"></script>
+  <script type="module" src="./src/main.js?v=124"></script>
 </body>
 </html>

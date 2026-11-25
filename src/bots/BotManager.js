@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT, FORMATION, SQUAD_KIT_CAPS } from '../config.js?v=123';
-import { sound } from '../audio.js?v=123';
-import { tmpVec3 } from '../utils/VectorPool.js?v=123';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=123';
-import { events, makeEventBridge } from '../events.js?v=123';
+import { BOT, FORMATION, SQUAD_KIT_CAPS } from '../config.js?v=124';
+import { sound } from '../audio.js?v=124';
+import { tmpVec3 } from '../utils/VectorPool.js?v=124';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=124';
+import { events, makeEventBridge } from '../events.js?v=124';
 import {
   createSoldierMesh,
   updateSoldierEquippedWeapon,
   getDefaultWeaponIdForRole
-} from './SoldierMeshFactory.js?v=123';
-import { SightlineMethods } from './SightlineSystem.js?v=123';
-import { MedicAIMethods } from './MedicAI.js?v=123';
-import { BotAIMethods } from './BotAI.js?v=123';
+} from './SoldierMeshFactory.js?v=124';
+import { SightlineMethods } from './SightlineSystem.js?v=124';
+import { MedicAIMethods } from './MedicAI.js?v=124';
+import { BotAIMethods } from './BotAI.js?v=124';
 import {
   createBaseProtectionFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=123';
+} from '../core/StateMachines.js?v=124';
 
 const BOT_NAMES_US = [
   'SgtOkiDoki', 'WakistanVet', 'VoxelMedic', 'EagleOne', 'BlockBuster',
@@ -225,6 +225,60 @@ export class BotManager {
       totalOffX: Math.cos(sqSectorAngle) * sqStandoffDist + clusterOffX,
       totalOffZ: Math.sin(sqSectorAngle) * sqStandoffDist + clusterOffZ
     };
+  }
+
+  /**
+   * Returns a team-mirrored initial Conquest objective index so US (West) and RU (East)
+   * vanguard squads immediately assault their near-side & central FOBs (A, B, C vs E, D, C)
+   * instead of ignoring Flag A or marching 1,400m past neutral flags!
+   */
+  getInitialSquadFlagIndex(team = 'US', squadId = 'ALPHA', flagCount = 5) {
+    if (flagCount <= 0) return 0;
+    if (flagCount < 5) {
+      const def = SQUAD_DEFS.find((s) => s.id === squadId);
+      return (def ? def.defaultFlag : 0) % flagCount;
+    }
+    if (team === 'RU') {
+      if (squadId === 'ECHO' || squadId === 'BRAVO') return 4; // OBJ E
+      if (squadId === 'DELTA' || squadId === 'CHARLIE') return 3; // OBJ D
+      return 2; // ALPHA & FALCON -> OBJ C
+    }
+    // US Team (West):
+    if (squadId === 'ECHO' || squadId === 'BRAVO') return 0; // OBJ A
+    if (squadId === 'CHARLIE' || squadId === 'DELTA') return 1; // OBJ B
+    return 2; // ALPHA & FALCON -> OBJ C
+  }
+
+  /**
+   * Computes an objective waypoint offset guaranteed to sit INSIDE `flag.radius`
+   * (`<= 68%` of capture radius, clamped after building-footprint pushout) so attacking
+   * squads physically enter and capture FOBs instead of standing outside the 34m ring!
+   */
+  computeObjectiveCaptureOffset(b, flag, sp = null) {
+    const fPos = flag?.pos || { x: 0, z: 0 };
+    const capRad = Math.max(16, (flag?.radius || 34) - 4.5);
+    const spacing = sp || this.computeBotSpacingOffsets(b, 'FAN_OUT');
+    const maxSquadRing = Math.max(6, capRad * 0.56);
+    const ringDist = Math.min(spacing.objSqDist ?? 14, maxSquadRing);
+    const cScale = spacing.isClose ? 0.85 : 0.58;
+    const rawOffX = Math.cos(spacing.sqSectorAngle || 0) * ringDist + (spacing.clusterOffX || 0) * cScale;
+    const rawOffZ = Math.sin(spacing.sqSectorAngle || 0) * ringDist + (spacing.clusterOffZ || 0) * cScale;
+    const safeGoal = this.world?.pushOutOfBuildingFootprint
+      ? this.world.pushOutOfBuildingFootprint(fPos.x + rawOffX, fPos.z + rawOffZ, 2.0)
+      : { x: fPos.x + rawOffX, z: fPos.z + rawOffZ };
+    let dx = safeGoal.x - fPos.x;
+    let dz = safeGoal.z - fPos.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > capRad && dist > 0.01) {
+      const clampRatio = capRad / dist;
+      const clampedX = fPos.x + dx * clampRatio;
+      const clampedZ = fPos.z + dz * clampRatio;
+      if (!this.isPointBlocked || !this.isPointBlocked(clampedX, fPos.y || 0, clampedZ)) {
+        dx *= clampRatio;
+        dz *= clampRatio;
+      }
+    }
+    return { x: dx, z: dz };
   }
 
   getEffectiveSpacingMode(team = 'US', squadId = null) {
@@ -1188,8 +1242,13 @@ export class BotManager {
         : team === 'US'
         ? Math.PI / 2
         : -Math.PI / 2;
-    const defaultFlagIdx = squadDef.defaultFlag % this.world.flags.length;
-    const fPos = this.world.flags[defaultFlagIdx].pos;
+    const defaultFlagIdx = this.getInitialSquadFlagIndex(
+      team,
+      squadDef.id,
+      this.world.flags.length
+    );
+    const initFlag = this.world.flags[defaultFlagIdx];
+    const fPos = initFlag.pos;
     const spInit = this.computeBotSpacingOffsets(
       {
         squad: squadDef.id,
@@ -1206,11 +1265,12 @@ export class BotManager {
       'FAN_OUT'
     );
     const memberClusterOffset = new THREE.Vector3(spInit.clusterOffX, 0, spInit.clusterOffZ);
-    const safeOffset = this.world.pushOutOfBuildingFootprint(
-      fPos.x + spInit.totalOffX,
-      fPos.z + spInit.totalOffZ,
-      2.2
+    const capInitOff = this.computeObjectiveCaptureOffset(
+      { squad: squadDef.id, squadMemberIndex, team, role, era },
+      initFlag,
+      spInit
     );
+    const safeOffset = { x: fPos.x + capInitOff.x, z: fPos.z + capInitOff.z };
 
     const botHitMeshes = [];
     const bot = {
@@ -1251,6 +1311,16 @@ export class BotManager {
       aimPitch: 0,
       hp: role === 'TREX' ? 280 : role === 'TRICERATOPS' ? 185 : BOT.HP,
       maxHp: role === 'TREX' ? 280 : role === 'TRICERATOPS' ? 185 : BOT.MAX_HP,
+      limbHealth: {
+        head: 100,
+        thorax: 100,
+        leftArm: 100,
+        rightArm: 100,
+        leftLeg: 100,
+        rightLeg: 100
+      },
+      armFractured: false,
+      legFractured: false,
       hasHelmet: true,
       armorHp: BOT.ARMOR_HP,
       dead: false,
@@ -1907,6 +1977,23 @@ export class BotManager {
       }
     }
 
+    const rawDamage = amount;
+    const hitZone =
+      blastMeta?.hitZone ||
+      (isHeadshot ? 'head' : 'thorax');
+    if (!bot.limbHealth) {
+      bot.limbHealth = {
+        head: 100,
+        thorax: 100,
+        leftArm: 100,
+        rightArm: 100,
+        leftLeg: 100,
+        rightLeg: 100
+      };
+    }
+    const isArmHit = hitZone === 'leftArm' || hitZone === 'rightArm';
+    const isLegHit = hitZone === 'leftLeg' || hitZone === 'rightLeg';
+    // Limb hits (arms/legs) bypass chest plate armor and apply 0.82x/0.86x peripheral trauma + fracture!
     if (isHeadshot && bot.hasHelmet) {
       bot.hasHelmet = false;
       bot.mesh.userData.parts.helmet.visible = false;
@@ -1915,13 +2002,26 @@ export class BotManager {
       amount = Math.round(amount * 0.48);
       hitType = 'armor';
       if (onAwardXp && bot.team !== attackerTeam) onAwardXp(25, 'HELMET KNOCKED OFF');
-    } else if (!isHeadshot && bot.armorHp > 0) {
+    } else if (!isHeadshot && !isArmHit && !isLegHit && bot.armorHp > 0) {
       const absorbed = Math.min(bot.armorHp, Math.round(amount * 0.35));
       bot.armorHp -= absorbed;
       amount -= absorbed;
       hitType = 'armor';
+    } else if (isArmHit || isLegHit) {
+      amount = Math.max(1, Math.round(amount * (isArmHit ? 0.82 : 0.86)));
     }
 
+    const prevZoneHp = bot.limbHealth[hitZone] ?? 100;
+    const zoneLoss = Math.round(amount * (isArmHit || isLegHit ? 1.55 : isHeadshot ? 1.8 : 1.15));
+    const nextZoneHp = Math.max(0, prevZoneHp - zoneLoss);
+    bot.limbHealth[hitZone] = nextZoneHp;
+    const wasAlreadyBroken = prevZoneHp <= 0;
+    const limbJustBroke = nextZoneHp <= 0;
+    if (isArmHit && nextZoneHp <= 35) bot.armFractured = true;
+    if (isLegHit && nextZoneHp <= 35) bot.legFractured = true;
+    bot.lastHitZone = hitZone;
+
+    const overkill = Math.max(0, amount - Math.max(0, bot.hp));
     bot.hp -= amount;
     if (bot.hp <= 0) {
       const wasRescuing = Boolean(bot.rescueTarget || bot.rescueState);
@@ -2017,12 +2117,20 @@ export class BotManager {
         };
       }
 
-      // Squad-style Catastrophic Overpressure / Heavy Caliber "Dead-Dead" (Beyond Medic Rescue) + 3D Ragdoll Launch:
+      // Squad-style Catastrophic Overpressure / Heavy Caliber / Limb-Break "Dead-Dead" (Beyond Medic Rescue) + 3D Ragdoll Launch:
       const cat = evaluateCatastrophicKill(
         weaponName,
         blastMeta?.dist ?? 0,
         blastMeta?.radius ?? 0,
-        blastMeta?.rng || Math.random
+        blastMeta?.rng || Math.random,
+        {
+          hitZone,
+          isHeadshot: Boolean(isHeadshot),
+          rawDamage,
+          overkill,
+          limbBroken: limbJustBroke,
+          wasAlreadyBroken
+        }
       );
       if (cat.beyondRescue) {
         bot.dead = true;
@@ -2186,7 +2294,8 @@ export function evaluateCatastrophicKill(
   weaponName = '',
   distFromCenter = 0,
   blastRadius = 0,
-  rng = Math.random
+  rng = Math.random,
+  hitMeta = null
 ) {
   const w = String(weaponName || '').toUpperCase();
   if (
@@ -2305,6 +2414,55 @@ export function evaluateCatastrophicKill(
       upSpeed: 2.5 + jitter * 1.7,
       tier: 'AUTOCANNON'
     };
+  }
+
+  // Anatomical Limb / Vital Break ("Chance to Break -> Unrevivable KIA"):
+  // Triggered when heavy sniper / .50 BMG / slug calibers shatter Head/Thorax, or heavy overkill shatters a blacked (0%) zone!
+  if (hitMeta) {
+    const hz = hitMeta.hitZone || (hitMeta.isHeadshot ? 'head' : 'thorax');
+    const rawDmg = hitMeta.rawDamage || 0;
+    const overkill = hitMeta.overkill || 0;
+    const isHeavyBallistic =
+      w.includes('.50') ||
+      w.includes('12.7MM') ||
+      w.includes('HMG') ||
+      w.includes('CROWS') ||
+      w.includes('KORD') ||
+      w.includes('L96') ||
+      w.includes('AWP') ||
+      w.includes('SV-98') ||
+      w.includes('BARRETT') ||
+      w.includes('M82') ||
+      w.includes('.338') ||
+      w.includes('SNIPER') ||
+      w.includes('SLUG') ||
+      w.includes('CROSSBOW');
+    let breakChance = 0;
+    let breakTier = 'LIMB_BREAK';
+    if ((hz === 'head' || hitMeta.isHeadshot) && (isHeavyBallistic || rawDmg >= 78)) {
+      breakChance = 0.85;
+      breakTier = 'HEAD_SHATTER';
+    } else if (hz === 'thorax' && isHeavyBallistic && (rawDmg >= 82 || overkill >= 24)) {
+      breakChance = 0.52;
+      breakTier = 'THORAX_SHATTER';
+    } else if ((hz === 'head' || hz === 'thorax') && hitMeta.wasAlreadyBroken && overkill >= 25) {
+      breakChance = 0.48;
+      breakTier = 'VITAL_BREAK';
+    } else if (hitMeta.limbBroken && (isHeavyBallistic || overkill >= 42)) {
+      breakChance = 0.35;
+      breakTier = 'LIMB_SHATTER';
+    }
+    if (breakChance > 0) {
+      const roll = rng();
+      const jitter = rng();
+      return {
+        beyondRescue: roll < breakChance,
+        chance: breakChance,
+        hSpeed: 2.4 + jitter * 1.8,
+        upSpeed: 1.4 + jitter * 1.0,
+        tier: breakTier
+      };
+    }
   }
 
   return { beyondRescue: false, chance: 0, hSpeed: 0, upSpeed: 0, tier: 'REVIVABLE' };

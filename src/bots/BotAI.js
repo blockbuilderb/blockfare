@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=123';
-import { BOT } from '../config.js?v=123';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=123';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=123';
-import { events } from '../events.js?v=123';
+import { sound } from '../audio.js?v=124';
+import { BOT } from '../config.js?v=124';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=124';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=124';
+import { events } from '../events.js?v=124';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -383,9 +383,12 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
   const fullGaitDistSq = fullGaitDist * fullGaitDist;
   const halfRateGaitDistSq = Math.min(900, (ultraScale ? 38 : 48) * opticZoomMag) ** 2;
   // Sub-pixel 3D weapon assembly LOD (~26 child meshes per gun) & micro-gear LOD: hide beyond ~75m * zoomMag!
-  const gunLodDistSq = Math.min(1400, 75 * opticZoomMag) ** 2;
-  // Far limb/boot LOD (6 child meshes: upper/forearms + boots): hide beyond ~135m * zoomMag (~2,400 fewer draw calls at 500P)!
-  const farLimbLodDistSq = Math.min(1800, 135 * opticZoomMag) ** 2;
+  const gunLodDistSq = Math.min(1800, (playerInAircraft ? 180 : 85) * opticZoomMag) ** 2;
+  // Far limb/boot LOD: keep full 3D limbs visible up to 1,850m+ from aircraft optics so ground squads NEVER turn into tiny vanishing specks!
+  const farLimbLodDistSq = Math.min(
+    2600,
+    playerInAircraft ? Math.max(1450, 380 * opticZoomMag) : 185 * opticZoomMag
+  ) ** 2;
 
   for (let bIdx = 0; bIdx < this.bots.length; bIdx++) {
     const bot = this.bots[bIdx];
@@ -598,12 +601,13 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     const dzCam = bot.pos.z - camZ;
     const distSqCam = dxCam * dxCam + dyCam * dyCam + dzCam * dzCam;
     const dot3DUnnorm = dxCam * camFwdX + dyCam * camFwdY + dzCam * camFwdZ;
-    // True 3D behind-camera check (dot3D < -0.35 and >22m away) — safe at steep -85° AC-130 downward angles!
+    // True 3D behind-camera check — extra wide tolerance in banked aircraft/AC-130 views so ground infantry never flicker at screen edges!
+    const behindCosSq = playerInAircraft ? 0.52 : 0.16;
     const offFrustum =
       hasCam3D &&
-      distSqCam > 22 * 22 &&
+      distSqCam > (playerInAircraft ? 45 * 45 : 22 * 22) &&
       dot3DUnnorm < 0 &&
-      dot3DUnnorm * dot3DUnnorm > 0.1225 * distSqCam;
+      dot3DUnnorm * dot3DUnnorm > behindCosSq * distSqCam;
     const within3DRender = distSqCam <= maxRenderDistSq;
 
     // Apply 3D visibility & frustum matrix flag BEFORE early-return states (`downed`, `updateMedicRescue`, `trebuchet`)
@@ -916,13 +920,11 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.playerOrderFlagIndex >= 0
       ) {
         bot.targetFlagIndex = bot.playerOrderFlagIndex;
-        const fPos = this.world.flags[bot.targetFlagIndex].pos;
-        const rawX = fPos.x + sp.totalOffX;
-        const rawZ = fPos.z + sp.totalOffZ;
-        const safeGoal = this.world.pushOutOfBuildingFootprint(rawX, rawZ, 2.4);
-        bot.waypointOffset.set(safeGoal.x - fPos.x, 0, safeGoal.z - fPos.z);
+        const ordFlag = this.world.flags[bot.targetFlagIndex];
+        const capOff = this.computeObjectiveCaptureOffset(bot, ordFlag, sp);
+        bot.waypointOffset.set(capOff.x, 0, capOff.z);
       } else if (!bot.isSquadLeader) {
-        // Squad Members follow their Squad Leader's assigned objective in cohesive Rank-and-File Battle Line Array!
+        // Squad Members follow their Squad Leader's assigned objective and step INSIDE the capture zone!
         const squadLeaderBot =
           this.squadLeaders && this.squadLeaders[bot.team]
             ? this.squadLeaders[bot.team][bot.squad]
@@ -930,34 +932,55 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         if (squadLeaderBot && typeof squadLeaderBot.targetFlagIndex === 'number') {
           bot.targetFlagIndex = squadLeaderBot.targetFlagIndex;
         }
-        const fPos = this.world.flags[bot.targetFlagIndex].pos;
-        const rawX = fPos.x + sp.totalOffX;
-        const rawZ = fPos.z + sp.totalOffZ;
-        const safeGoal = this.world.pushOutOfBuildingFootprint(rawX, rawZ, 2.4);
-        bot.waypointOffset.set(safeGoal.x - fPos.x, 0, safeGoal.z - fPos.z);
+        const memFlag = this.world.flags[bot.targetFlagIndex];
+        const capOff = this.computeObjectiveCaptureOffset(bot, memFlag, sp);
+        bot.waypointOffset.set(capOff.x, 0, capOff.z);
       } else {
-        // Autonomous AI Assault Squad Leader selects the best unowned/contested objective for their squad
-        // (Only re-picks a new flag if the current target flag is already owned & uncontested!)
+        // Autonomous AI Assault Squad Leader selects the best unowned/contested objective for their squad:
+        // Re-evaluates if current flag is already captured & uncontested, OR if current flag is far cross-map (>620m)
+        // while a neutral/contested frontline flag right ahead is still uncaptured!
         const curFlag = this.world.flags[bot.targetFlagIndex];
-        if (!curFlag || (curFlag.owner === bot.team && !curFlag.contested)) {
+        const distCurFlag = curFlag
+          ? Math.hypot(curFlag.pos.x - bot.pos.x, curFlag.pos.z - bot.pos.z)
+          : Infinity;
+        const hasMuchCloserNeutral =
+          distCurFlag > 560 &&
+          this.world.flags.some(
+            (fl) =>
+              fl.owner === 'NEUTRAL' &&
+              Math.hypot(fl.pos.x - bot.pos.x, fl.pos.z - bot.pos.z) < distCurFlag * 0.62
+          );
+        if (!curFlag || (curFlag.owner === bot.team && !curFlag.contested) || hasMuchCloserNeutral) {
           const candidateFlags = this.world.flags
             .map((f, idx) => ({ f, idx }))
             .filter((item) => item.f.owner !== bot.team || item.f.contested);
           if (candidateFlags.length > 0) {
-            // Pick the closest frontline unowned/contested flag so the squad marches naturally as a line!
-            candidateFlags.sort(
-              (a, b) =>
-                Math.hypot(a.f.pos.x - bot.pos.x, a.f.pos.z - bot.pos.z) -
-                Math.hypot(b.f.pos.x - bot.pos.x, b.f.pos.z - bot.pos.z)
-            );
+            // Distribute squads across frontline unowned/contested flags weighted by distance & avoid all 6 squads piling onto 1 flag
+            const squadTargetingCounts = new Array(this.world.flags.length).fill(0);
+            const teamSLs = this.squadLeaders?.[bot.team] || {};
+            for (const sqKey of Object.keys(teamSLs)) {
+              if (sqKey === bot.squad) continue;
+              const otherSl = teamSLs[sqKey];
+              if (otherSl && !otherSl.dead && typeof otherSl.targetFlagIndex === 'number') {
+                squadTargetingCounts[otherSl.targetFlagIndex] =
+                  (squadTargetingCounts[otherSl.targetFlagIndex] || 0) + 1;
+              }
+            }
+            candidateFlags.sort((a, b) => {
+              const dA =
+                Math.hypot(a.f.pos.x - bot.pos.x, a.f.pos.z - bot.pos.z) +
+                (squadTargetingCounts[a.idx] || 0) * 185;
+              const dB =
+                Math.hypot(b.f.pos.x - bot.pos.x, b.f.pos.z - bot.pos.z) +
+                (squadTargetingCounts[b.idx] || 0) * 185;
+              return dA - dB;
+            });
             bot.targetFlagIndex = candidateFlags[0].idx;
           }
         }
-        const fPos = this.world.flags[bot.targetFlagIndex].pos;
-        const rawX = fPos.x + sp.totalOffX;
-        const rawZ = fPos.z + sp.totalOffZ;
-        const safeGoal = this.world.pushOutOfBuildingFootprint(rawX, rawZ, 2.4);
-        bot.waypointOffset.set(safeGoal.x - fPos.x, 0, safeGoal.z - fPos.z);
+        const slFlag = this.world.flags[bot.targetFlagIndex];
+        const capOff = this.computeObjectiveCaptureOffset(bot, slFlag, sp);
+        bot.waypointOffset.set(capOff.x, 0, capOff.z);
       }
     }
 
@@ -1699,48 +1722,70 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
           bot.leanDir = 0;
           desiredSpeed = 0;
         }
-      } else if (bot.tactic === 'ANCHOR_CROUCH') {
-        bot.isCrouching = true;
-        bot.leanDir = 0;
-        desiredSpeed = 0;
-      } else if (bot.tactic === 'COVER_PEEK') {
-        if (bot.tacticPhase === 0) {
+      } else {
+        // Objective Assault Bounding: if attacking an unowned/contested FOB and still OUTSIDE its capture zone,
+        // NEVER freeze permanently at 50m–68m! Keep bounding forward into the capture ring while firing!
+        const assaultFlag =
+          !bot.inFriendlyForwardBase && !bot.isGarrisonDefender
+            ? this.world.flags[bot.targetFlagIndex]
+            : null;
+        const distToCapCenter = assaultFlag
+          ? Math.hypot(bot.pos.x - assaultFlag.pos.x, bot.pos.z - assaultFlag.pos.z)
+          : 0;
+        const needsPushIntoFob = Boolean(
+          assaultFlag &&
+            (assaultFlag.owner !== bot.team || assaultFlag.contested) &&
+            distToCapCenter > (assaultFlag.radius || 34) * 0.78
+        );
+
+        if (needsPushIntoFob && nearestDistSq > 11 * 11) {
+          bot.isCrouching = false;
+          bot.leanDir = bot.tacticPhase === 1 ? bot.strafeDir : 0;
+          desiredDir.copy(toGoal).addScaledVector(perp, bot.strafeDir * 0.28).normalize();
+          desiredSpeed = bot.tacticPhase === 0 ? BOT.SPEED_COMBAT_MED : BOT.SPEED_COMBAT_SLOW;
+        } else if (bot.tactic === 'ANCHOR_CROUCH') {
           bot.isCrouching = true;
           bot.leanDir = 0;
           desiredSpeed = 0;
-        } else {
-          bot.isCrouching = false;
-          bot.leanDir = bot.strafeDir;
-          desiredSpeed = 0;
-        }
-      } else if (bot.tactic === 'ADVANCE_PAUSE') {
-        if (bot.tacticPhase === 0 && nearestDistSq > 16 * 16) {
+        } else if (bot.tactic === 'COVER_PEEK') {
+          if (bot.tacticPhase === 0) {
+            bot.isCrouching = true;
+            bot.leanDir = 0;
+            desiredSpeed = 0;
+          } else {
+            bot.isCrouching = false;
+            bot.leanDir = bot.strafeDir;
+            desiredSpeed = 0;
+          }
+        } else if (bot.tactic === 'ADVANCE_PAUSE') {
+          if (bot.tacticPhase === 0 && nearestDistSq > 16 * 16) {
+            bot.isCrouching = false;
+            bot.leanDir = 0;
+            desiredDir.copy(toEnemy);
+            desiredSpeed = BOT.SPEED_COMBAT_SLOW;
+          } else {
+            bot.isCrouching = bot.tacticPhase === 1;
+            bot.leanDir = 0;
+            desiredSpeed = 0;
+          }
+        } else if (bot.tactic === 'FLANK_RUSH') {
           bot.isCrouching = false;
           bot.leanDir = 0;
-          desiredDir.copy(toEnemy);
-          desiredSpeed = BOT.SPEED_COMBAT_SLOW;
+          if (nearestDistSq > 10 * 10) {
+            desiredDir.copy(toEnemy).addScaledVector(perp, 0.55).normalize();
+            desiredSpeed = BOT.SPEED_COMBAT_MED;
+          } else {
+            desiredSpeed = 0;
+          }
         } else {
-          bot.isCrouching = bot.tacticPhase === 1;
+          bot.isCrouching = false;
           bot.leanDir = 0;
-          desiredSpeed = 0;
-        }
-      } else if (bot.tactic === 'FLANK_RUSH') {
-        bot.isCrouching = false;
-        bot.leanDir = 0;
-        if (nearestDistSq > 10 * 10) {
-          desiredDir.copy(toEnemy).addScaledVector(perp, 0.55).normalize();
-          desiredSpeed = BOT.SPEED_COMBAT_MED;
-        } else {
-          desiredSpeed = 0;
-        }
-      } else {
-        bot.isCrouching = false;
-        bot.leanDir = 0;
-        if (bot.tacticPhase === 0 && distToGoal > 6) {
-          desiredDir.copy(toGoal);
-          desiredSpeed = 4.2;
-        } else {
-          desiredSpeed = 0;
+          if (bot.tacticPhase === 0 && distToGoal > 6) {
+            desiredDir.copy(toGoal);
+            desiredSpeed = 4.2;
+          } else {
+            desiredSpeed = 0;
+          }
         }
       }
     } else {
@@ -2084,12 +2129,24 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
           bot.stuckCount = (bot.stuckCount || 0) + 1;
           bot.avoidanceSign = -(bot.avoidanceSign || 1);
           bot.avoidanceTimer = 1.6;
-          if (bot.stuckCount >= 2) {
-            // Relocate cleanly to the nearest open coordinate in the desired direction
-            const stepOutX = bot.pos.x + desiredDir.x * 5.0 + (Math.random() - 0.5) * 3.0;
-            const stepOutZ = bot.pos.z + desiredDir.z * 5.0 + (Math.random() - 0.5) * 3.0;
-            const safePos = this.world.findSafeSpawnPoint(stepOutX, stepOutZ);
-            bot.pos.copy(safePos);
+          if (bot.stuckCount >= 3) {
+            // Smoothly sidestep 2.2m around wall/corner without long-distance teleporting!
+            const perpSideX = -desiredDir.z * (bot.avoidanceSign || 1);
+            const perpSideZ = desiredDir.x * (bot.avoidanceSign || 1);
+            const candX = bot.pos.x + desiredDir.x * 1.6 + perpSideX * 2.2;
+            const candZ = bot.pos.z + desiredDir.z * 1.6 + perpSideZ * 2.2;
+            if (!this.isPointBlocked(candX, bot.pos.y, candZ)) {
+              bot.pos.x = candX;
+              bot.pos.z = candZ;
+            } else if (bot.stuckCount >= 6) {
+              const safePos = this.world.findSafeSpawnPoint(
+                bot.pos.x + desiredDir.x * 3.2,
+                bot.pos.z + desiredDir.z * 3.2
+              );
+              if (Math.hypot(safePos.x - bot.pos.x, safePos.z - bot.pos.z) <= 12.0) {
+                bot.pos.copy(safePos);
+              }
+            }
             bot.velX = 0;
             bot.velZ = 0;
             bot.stuckCount = 0;

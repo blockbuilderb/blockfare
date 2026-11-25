@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=123';
-import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=123';
-import { events } from '../events.js?v=123';
+import { SQUAD_DEFS } from '../bots.js?v=124';
+import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=124';
+import { events } from '../events.js?v=124';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=123';
+} from '../core/StateMachines.js?v=124';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=123';
+} from '../utils/KeyboardShortcuts.js?v=124';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -20,18 +20,45 @@ export const DeployScreen = {
         classBtns.forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         this.selectedClass = btn.dataset.class;
-        if ((this.world?.era || 'modern') === 'modern' && this.player?.squadDoctrineEnabled !== false) {
-          const autoSquad =
-            this.selectedClass === 'pilot'
-              ? 'FALCON'
-              : this.selectedClass === 'armor'
-              ? 'BRAVO'
-              : null;
-          if (autoSquad) {
-            this.selectedSquad = autoSquad;
-            document.querySelectorAll('.squad-btn').forEach((sb) => {
-              sb.classList.toggle('active', sb.dataset.squad === autoSquad);
-            });
+        if ((this.world?.era || 'modern') === 'modern') {
+          if (this.player?.squadDoctrineEnabled !== false) {
+            const autoSquad =
+              this.selectedClass === 'pilot'
+                ? 'FALCON'
+                : this.selectedClass === 'armor'
+                ? 'BRAVO'
+                : null;
+            if (autoSquad) {
+              this.selectedSquad = autoSquad;
+              document.querySelectorAll('.squad-btn').forEach((sb) => {
+                sb.classList.toggle('active', sb.dataset.squad === autoSquad);
+              });
+            }
+          }
+          // Consistent HQ Vehicle Crew Auto-Selection:
+          // Selecting Armor Crewman or Combat Pilot at Main Base HQ automatically pre-selects an available $0 HQ Tank or Jet!
+          const atMainBase = !this.selectedSpawn || this.selectedSpawn === 'BASE';
+          const tm = this.selectedTeam || 'US';
+          if (atMainBase && this.vehicleManager?.findAvailableBaseVehicle) {
+            if (this.selectedClass === 'armor') {
+              const prefArmor = ['tank', 'apc', 'aa', 'car'].find((k) =>
+                this.vehicleManager.findAvailableBaseVehicle(tm, k)
+              );
+              if (prefArmor) {
+                this.selectedDeployVehicle = prefArmor;
+                this._deployVehDrawerOpen = true;
+              }
+            } else if (this.selectedClass === 'pilot') {
+              const prefAir = ['fighter', 'cas', 'gunship'].find((k) =>
+                this.vehicleManager.findAvailableBaseVehicle(tm, k)
+              );
+              if (prefAir) {
+                this.selectedDeployVehicle = prefAir;
+                this._deployVehDrawerOpen = true;
+              }
+            } else {
+              this.selectedDeployVehicle = 'foot';
+            }
           }
         }
         this.updateDeployClassTraitsCard?.();
@@ -1669,7 +1696,13 @@ export const DeployScreen = {
     this._deployVehDrawerOpen = false;
     if (reqVehKey !== 'foot' && this.vehicleManager) {
       const freeHqVeh = spawnedAtMainBase
-        ? this.vehicleManager.findAvailableBaseVehicle?.(this.selectedTeam, reqVehKey)
+        ? this.vehicleManager.claimBaseVehicleForPlayerDeploy
+          ? this.vehicleManager.claimBaseVehicleForPlayerDeploy(
+              this.player,
+              this.selectedTeam,
+              reqVehKey
+            )
+          : this.vehicleManager.findAvailableBaseVehicle?.(this.selectedTeam, reqVehKey)
         : null;
       if (freeHqVeh) {
         this.player.pos.copy(freeHqVeh.pos);

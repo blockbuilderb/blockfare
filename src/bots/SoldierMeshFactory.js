@@ -7,4 +7,4 @@ export {
   createSoldierMesh,
   updateSoldierEquippedWeapon,
   getDefaultWeaponIdForRole
-} from '../models/soldier-model.js?v=123';
+} from '../models/soldier-model.js?v=124';

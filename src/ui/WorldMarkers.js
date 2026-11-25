@@ -522,8 +522,9 @@ export const WorldMarkers = {
       // 1) True Hollow Circular CCIP / Gun Pipper Reticle Ring (Hidden in AC-130 Gunner Sight where CoD Reticle is exact bore-sight!)
       const hideCcipInGunshipSight = Boolean(
         activeAircraft &&
-          activeAircraft.aircraftRole === 'gunship' &&
-          (!activeAircraft.gunshipManualFlight || this.player.vehicleCameraMode === 'OPTIC_NOSE')
+          ((activeAircraft.aircraftRole === 'gunship' &&
+            (!activeAircraft.gunshipManualFlight || this.player.vehicleCameraMode === 'OPTIC_NOSE')) ||
+            (activeAircraft.aircraftRole === 'fighter' && activeAircraft.activeWeaponSlot === 1))
       );
       if (this.player.aircraftCcipPoint && (activeAircraft || isMortarEmplace) && !hideCcipInGunshipSight) {
         const ccipScr = projectToScreen(this.player.aircraftCcipPoint, 0.8);
@@ -531,20 +532,18 @@ export const WorldMarkers = {
           const refPos = activeVeh ? activeVeh.pos : this.player.pos;
           const ccipDist = Math.round(refPos.distanceTo(this.player.aircraftCcipPoint));
           const aRoleNow = activeAircraft ? activeAircraft.aircraftRole || activeAircraft.type : '';
+          const actSlotNow = activeAircraft ? activeAircraft.activeWeaponSlot || 0 : 0;
           const isCasPipe = aRoleNow === 'cas';
           const isBombOrMortar =
             isMortarEmplace ||
             (activeAircraft &&
               (aRoleNow === 'gunship' ||
                 aRoleNow === 'b2_spirit' ||
-                (aRoleNow === 'fighter' && activeAircraft.activeWeaponSlot === 2)));
-          const ringColor = isMortarEmplace
-            ? '#f1c40f'
-            : isCasPipe
-            ? '#7bed9f'
-            : isBombOrMortar
-            ? '#2ecc71'
-            : '#00d2d3';
+                (aRoleNow === 'fighter' && actSlotNow === 2) ||
+                (aRoleNow === 'cas' && actSlotNow === 2)));
+          // Always render Ground/Gravity-Drop Impact Pipper in crisp Emerald Green (#7bed9f / #2ecc71)
+          // so it is visually 100% distinct from the fixed Cyan (#00d2d3) Nose / Radar Seeker Crosshair!
+          const ringColor = isMortarEmplace ? '#f1c40f' : isBombOrMortar ? '#2ecc71' : '#7bed9f';
           const slot = this._acquireWorldMarkerSlot('airBox');
           this._configureMarkerSlot(slot, {
             x: ccipScr.x,
@@ -555,13 +554,13 @@ export const WorldMarkers = {
             iconText: '⊕',
             distText: isMortarEmplace
               ? `81MM IMPACT (${ccipDist}m)`
-              : isCasPipe
-              ? activeAircraft.activeWeaponSlot === 1
-                ? `CCIP RKT (${ccipDist}m)`
-                : `CCIP 30MM (${ccipDist}m)`
               : isBombOrMortar
-              ? `CCIP (${ccipDist}m)`
-              : `PIPPER (${ccipDist}m)`,
+              ? `BOMB IMPACT (${ccipDist}m)`
+              : isCasPipe
+              ? actSlotNow === 1
+                ? `ROCKET IMPACT (${ccipDist}m)`
+                : `30MM IMPACT (${ccipDist}m)`
+              : `GUN IMPACT (${ccipDist}m)`,
             distColor: ringColor,
             distWeight: '900'
           });

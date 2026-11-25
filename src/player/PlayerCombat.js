@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=123';
+import { sound } from '../audio.js?v=124';
 import {
   PLAYER,
   COMBAT,
@@ -8,10 +8,10 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=123';
-import { events } from '../events.js?v=123';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=123';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=123';
+} from '../config.js?v=124';
+import { events } from '../events.js?v=124';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=124';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=124';
 
 function markShared(asset) {
   if (asset) {
@@ -413,6 +413,13 @@ export const CombatMethods = {
       const healHp = item.healHp || 35;
       this.hp = Math.min(PLAYER.MAX_HP, this.hp + healHp);
       this.bleeding = false;
+      this.armFractured = false;
+      this.legFractured = false;
+      if (this.limbHealth) {
+        for (const lk of Object.keys(this.limbHealth)) {
+          this.limbHealth[lk] = Math.min(100, (this.limbHealth[lk] ?? 100) + 45);
+        }
+      }
       if (this.role === 'medic') {
         this.medicBagSupply = Math.min(
           this.maxMedicBagSupply || 600,
@@ -719,6 +726,16 @@ export const CombatMethods = {
           nearMedic.fieldDressings = Math.max(0, (nearMedic.fieldDressings ?? 9) - 1);
         }
         this.bleeding = false;
+        this.armFractured = false;
+        this.legFractured = false;
+        this.limbHealth = {
+          head: 100,
+          thorax: 100,
+          leftArm: 100,
+          rightArm: 100,
+          leftLeg: 100,
+          rightLeg: 100
+        };
         const neededHp = Math.max(0, PLAYER.MAX_HP - this.hp);
         const healedHp = Math.min(neededHp, nearMedic.medicBagSupply ?? 600);
         this.hp = Math.min(PLAYER.MAX_HP, this.hp + healedHp);
@@ -856,6 +873,16 @@ export const CombatMethods = {
     this.grenades =
       2 + (vestDef ? vestDef.bonusGrenades : 0) + (backpackDef ? backpackDef.bonusGrenades : 0);
     this.armor = this.maxArmor;
+    this.armFractured = false;
+    this.legFractured = false;
+    this.limbHealth = {
+      head: 100,
+      thorax: 100,
+      leftArm: 100,
+      rightArm: 100,
+      leftLeg: 100,
+      rightLeg: 100
+    };
     sound.playReload();
     if (!silentXp && this.onAwardXp) {
       this.onAwardXp(
@@ -1202,7 +1229,7 @@ export const CombatMethods = {
       return;
     }
 
-    const cohesionReloadMult = this.inSquadCohesion ? 0.82 : 1.0;
+    const cohesionReloadMult = (this.inSquadCohesion ? 0.82 : 1.0) * (this.armFractured ? 1.25 : 1.0);
     this.reloadWasEmpty = (cur.clip || 0) <= 0;
     this.reloading = true;
     this.fastReload = false;
@@ -2067,6 +2094,9 @@ export const CombatMethods = {
             )
           );
 
+          const hitZone =
+            bestBotHit.object?.userData?.hitZone ||
+            (isHeadshot ? 'head' : isUpperChest ? 'thorax' : 'leftLeg');
           const res = this.botManager.damageBot(
             bot,
             dmg,
@@ -2076,7 +2106,7 @@ export const CombatMethods = {
             isHeadshot,
             this.onKillEvent,
             this.onAwardXp,
-            { origin: this.activeVehicle?.pos || this.pos, dist: 0, radius: 0 }
+            { origin: this.activeVehicle?.pos || this.pos, dist: 0, radius: 0, hitZone }
           );
           if (res && res.ignoredDowned) {
             continue;
@@ -2110,21 +2140,28 @@ export const CombatMethods = {
           const hmStyle = res.killed ? 'kill' : res.hitType;
           sound.playHitmarker(hmStyle);
           const colTag = penIndex > 0 ? ` [COLLATERAL x${penIndex + 1}]` : '';
+          const breakTag = res.beyondRescue
+            ? ' • 💀 CATASTROPHIC BREAK!'
+            : res.fracturedLimb === 'leg'
+            ? ' • 🦴 LEG FRACTURED!'
+            : res.fracturedLimb === 'arm'
+            ? ' • 🦴 ARM FRACTURED!'
+            : '';
           const hmLabel = isFriendlyBot
             ? res.killed
               ? `⚠️ TEAMKILL! (-$0.10 / -10¢)`
               : `⚠️ FRIENDLY FIRE -${dmg}`
             : res.killed
             ? isHeadshot
-              ? `HEADSHOT KILL!${colTag}`
+              ? `HEADSHOT KILL!${colTag}${breakTag}`
               : bullet.wepDef?.isBoltSniper && isUpperChest
-              ? `🎯 SNIPER ONE-SHOT!${colTag}`
-              : `ELIMINATED!${colTag}`
+              ? `🎯 SNIPER ONE-SHOT!${colTag}${breakTag}`
+              : `ELIMINATED!${colTag}${breakTag}`
             : isHeadshot
             ? `HEADSHOT -${dmg}${colTag}`
             : res.hitType === 'armor'
             ? `ARMOR HIT -${dmg}${colTag}`
-            : `HIT -${dmg}${colTag}`;
+            : `HIT -${dmg}${colTag}${breakTag}`;
           if (this.onHitmarker) this.onHitmarker(hmStyle, hmLabel);
 
           if (this.onFloatingDamage) {
@@ -2193,7 +2230,8 @@ export const CombatMethods = {
               bullet.weaponLabel,
               this.onKillEvent,
               this.onAwardXp,
-              shooterPos
+              shooterPos,
+              hit.point
             );
             const actualDmg = typeof veh.lastAppliedDamage === 'number' ? veh.lastAppliedDamage : apDmg;
             if (this.onHitmarker) {
@@ -2210,10 +2248,8 @@ export const CombatMethods = {
                   actualDmg > 0 ? `🛡️ ARMOR RICOCHET -${actualDmg}` : '🛡️ NO PENETRATION (0 DMG)'
                 );
               } else if (actualDmg > 0 && veh.isAircraft) {
-                this.onHitmarker(
-                  'armor',
-                  bullet.isMountedMg ? `✈️ AIRFRAME HIT -${actualDmg}` : `✈️ AIRCRAFT HIT -${actualDmg}`
-                );
+                const partTag = veh.lastHitDesc || '✈️ AIRFRAME HIT';
+                this.onHitmarker('armor', `${partTag} (-${actualDmg})`);
               } else if (actualDmg > 0) {
                 this.onHitmarker(
                   'armor',
@@ -2304,13 +2340,14 @@ export const CombatMethods = {
             bullet.weaponLabel,
             this.onKillEvent,
             this.onAwardXp,
-            shooterPos
+            shooterPos,
+            _stepImpactPt
           );
           const actualAirDmg = typeof airV.lastAppliedDamage === 'number' ? airV.lastAppliedDamage : apDmg;
           if (this.onHitmarker && actualAirDmg > 0) {
             this.onHitmarker(
               'armor',
-              bullet.isMountedMg ? `✈️ AIRFRAME HIT -${actualAirDmg}` : 'AIRCRAFT HIT'
+              airV.lastHitDesc ? `${airV.lastHitDesc} (-${actualAirDmg})` : `✈️ AIRFRAME HIT -${actualAirDmg}`
             );
           }
           terminatedOnEntity = true;
@@ -2672,11 +2709,12 @@ export const CombatMethods = {
 
     this.world.projectiles.push({
       type: 'a2a_missile',
+      isPitbullActiveSeeker: true,
       mesh: samMesh,
       vel: dir.multiplyScalar(samCfg.speed),
       gravity: samCfg.gravity,
       life: samCfg.life,
-      turnRate: samCfg.turnRate,
+      turnRate: Math.max(6.8, samCfg.turnRate || 5.2),
       targetVehicle: lockedTarget || null,
       blastRadius: samCfg.blastRadius,
       blastDamage: samCfg.blastDamage,
@@ -3271,12 +3309,55 @@ export const CombatMethods = {
       amount = Math.max(1, Math.round(amount * (1 - dmgReduction)));
     }
 
-    // Body armor absorbs 35%–55% of incoming gunfire (based on equipped Tactical Vest) until depleted
-    if (this.armor > 0 && weaponName !== 'BLEED') {
+    // Determine Anatomical Hit Zone (`head`, `thorax`, `leftArm`, `rightArm`, `leftLeg`, `rightLeg`)
+    if (!this.limbHealth) {
+      this.limbHealth = {
+        head: 100,
+        thorax: 100,
+        leftArm: 100,
+        rightArm: 100,
+        leftLeg: 100,
+        rightLeg: 100
+      };
+    }
+    let hitZone = blastMeta?.hitZone || null;
+    if (!hitZone) {
+      if (isHeadshot) {
+        hitZone = 'head';
+      } else if (weaponName === 'FALL DAMAGE' || String(weaponName || '').includes('GROUND IMPACT')) {
+        hitZone = Math.random() < 0.5 ? 'leftLeg' : 'rightLeg';
+      } else if (weaponName === 'BLEED') {
+        hitZone = 'thorax';
+      } else {
+        const zRoll = typeof blastMeta?.zoneRoll === 'number' ? blastMeta.zoneRoll : Math.random();
+        if (zRoll < 0.52) hitZone = 'thorax';
+        else if (zRoll < 0.64) hitZone = 'leftArm';
+        else if (zRoll < 0.76) hitZone = 'rightArm';
+        else if (zRoll < 0.88) hitZone = 'leftLeg';
+        else hitZone = 'rightLeg';
+      }
+    }
+
+    // Body armor plate protects the THORAX (35%–55% absorption); unarmored arms, legs & head bypass chest plates!
+    if (this.armor > 0 && weaponName !== 'BLEED' && hitZone === 'thorax') {
       const ratio = this.armorAbsorbRatio || PLAYER.ARMOR_ABSORB_RATIO;
       const absorbed = Math.min(this.armor, Math.round(amount * ratio));
       this.armor -= absorbed;
       amount -= absorbed;
+    }
+
+    // Apply Localized Limb Trauma & Fracture Thresholds (<= 30% limb integrity triggers Fracture!)
+    if (weaponName !== 'BLEED' && this.limbHealth[hitZone] !== undefined) {
+      const limbMult = hitZone === 'head' ? 1.35 : hitZone === 'thorax' ? 1.0 : 1.45;
+      this.limbHealth[hitZone] = Math.max(
+        0,
+        Math.round(this.limbHealth[hitZone] - amount * limbMult)
+      );
+      if ((hitZone === 'leftArm' || hitZone === 'rightArm') && this.limbHealth[hitZone] <= 30) {
+        this.armFractured = true;
+      } else if ((hitZone === 'leftLeg' || hitZone === 'rightLeg') && this.limbHealth[hitZone] <= 30) {
+        this.legFractured = true;
+      }
     }
 
     this.hp -= amount;
@@ -3328,12 +3409,19 @@ export const CombatMethods = {
         pos: this.pos.clone()
       });
 
-      // Evaluate Squad-style Catastrophic "Dead-Dead" (Beyond Medic Rescue):
+      // Evaluate Squad-style Catastrophic "Dead-Dead" / Vital Anatomical Break (Beyond Medic Rescue):
+      const overkillAmt = Math.max(0, -this.hp);
       const cat = evaluateCatastrophicKill(
         weaponName,
         blastMeta?.dist ?? 0,
         blastMeta?.radius ?? 0,
-        blastMeta?.rng || Math.random
+        blastMeta?.rng || Math.random,
+        {
+          hitZone,
+          isHeadshot,
+          finalDamage: amount,
+          overkill: overkillAmt
+        }
       );
       this.beyondRescue = Boolean(cat.beyondRescue);
       if (this.beyondRescue && this.vel) {
@@ -3372,8 +3460,23 @@ export const CombatMethods = {
     // Squad 2-Stage Medical Treatment:
     // Stage 1: Field Dressing stabilizes the downed soldier at 35 HP and stops bleeding (-1 Field Dressing).
     // Stage 2: If rescued by a Medic, they immediately follow up with their Medic Bag to heal injuries to 100/100 HP!
-    this.hp = PLAYER.REVIVE_HP || 35;
+    this.hp = isMedicRescuer ? 100 : PLAYER.REVIVE_HP || 35;
     this.bleeding = false;
+    if (isMedicRescuer) {
+      this.armFractured = false;
+      this.legFractured = false;
+      this.limbHealth = {
+        head: 100,
+        thorax: 100,
+        leftArm: 100,
+        rightArm: 100,
+        leftLeg: 100,
+        rightLeg: 100
+      };
+    } else if (this.limbHealth) {
+      this.limbHealth.head = Math.max(this.limbHealth.head || 0, 50);
+      this.limbHealth.thorax = Math.max(this.limbHealth.thorax || 0, 50);
+    }
     this.viewModelGroup.visible = true;
     sound.playReload();
     if (this.onAwardXp) {

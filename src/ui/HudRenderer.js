@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=123';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=123';
+import { UI, getEraRoles } from '../config.js?v=124';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=124';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -153,9 +153,12 @@ export const HudRenderer = {
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;">
           <div><b>[W / S]</b> — Afterburner Boost / Airbrake Slowdown</div>
-          <div><b>Mouse / [↑ ↓]</b> — Pitch &amp; Full 360° Backflip Loops</div>
-          <div><b>[A / D]</b> — Coordinated Bank &amp; Turn</div>
-          <div><b>[C] Key</b> — Cycle 3P Chase / 1P Bubble Cockpit / Nose HUD</div>
+          <div><b>Mouse / [↑ ↓]</b> — Pitch &amp; Full 360° Loops / Inverted Flight</div>
+          <div><b>[A / D]</b> — Full 360° Roll (Release &gt;115° to Fly Upside-Down!)</div>
+          <div><b style="color:#7bed9f;">Hold [ALT]</b> — <b>Free-Look Around / Down</b> (Auto-Levels Plane)</div>
+          <div><b style="color:#f1c40f;">[R] Key</b> — <b>LAAP Level-Hold Autopilot</b> (Look Down &amp; Align CAS Runs!)</div>
+          <div><b style="color:#00d2d3;">[F] Key</b> — <b>Sight Stabilization (◆ TGP SPI)</b> Lock Ground Point</div>
+          <div><b>[C] Key</b> — Cycle 3P Chase / 1P Bubble Cockpit / Nose TGP</div>
           <div><b style="color:#ff6b81;">[Space] (Slot 1/2)</b> — <b>AIM-120D Shoot-and-Forget A2A</b> (1.1s Lock)</div>
           <div><b>[3] + LMB / Space</b> — Drop JDAM / GBU-28 onto CCIP Ring</div>
           <div><b>[N] Key</b> — Cycle Installed Sensor Pod (NVG / WHOT / BHOT IR)</div>
@@ -1607,6 +1610,62 @@ export const HudRenderer = {
       }
     }
 
+    // Update Tactical Soldier Limb & Modular Airframe Paper-Doll SVGs + Fracture Badge (dirty-checked!)
+    const soldierSvgEl = this.el('soldier-limb-svg');
+    const airSvgEl = this.el('aircraft-dmg-svg');
+    const fracBadgeEl = this.el('fracture-badge');
+    const zoneHex = (pct) =>
+      pct <= 0 ? '#2f3542' : pct <= 30 ? '#ff4757' : pct <= 65 ? '#ffa502' : pct <= 88 ? '#eccc68' : '#2ecc71';
+    if (soldierSvgEl && airSvgEl) {
+      const showAirDoll = Boolean(inAircraftVitals && activeVeh && activeVeh.airframeParts);
+      if (soldierSvgEl.classList.contains('hidden') !== showAirDoll) {
+        soldierSvgEl.classList.toggle('hidden', showAirDoll);
+      }
+      if (airSvgEl.classList.contains('hidden') === showAirDoll) {
+        airSvgEl.classList.toggle('hidden', !showAirDoll);
+      }
+      if (showAirDoll) {
+        const ap = activeVeh.airframeParts;
+        const airSig = `${ap.avionics}|${ap.cockpit}|${ap.leftWing}|${ap.rightWing}|${ap.engines}|${ap.tail}`;
+        if (airSvgEl._lastSig !== airSig) {
+          airSvgEl._lastSig = airSig;
+          this.el('air-svg-avionics')?.setAttribute('fill', zoneHex(ap.avionics ?? 100));
+          this.el('air-svg-cockpit')?.setAttribute('fill', zoneHex(ap.cockpit ?? 100));
+          this.el('air-svg-lwing')?.setAttribute('fill', zoneHex(ap.leftWing ?? 100));
+          this.el('air-svg-rwing')?.setAttribute('fill', zoneHex(ap.rightWing ?? 100));
+          this.el('air-svg-engines')?.setAttribute('fill', zoneHex(ap.engines ?? 100));
+          this.el('air-svg-tail')?.setAttribute('fill', zoneHex(ap.tail ?? 100));
+        }
+      } else if (this.player.limbHealth) {
+        const lh = this.player.limbHealth;
+        const limbSig = `${lh.head}|${lh.thorax}|${lh.leftArm}|${lh.rightArm}|${lh.leftLeg}|${lh.rightLeg}`;
+        if (soldierSvgEl._lastSig !== limbSig) {
+          soldierSvgEl._lastSig = limbSig;
+          this.el('limb-svg-head')?.setAttribute('fill', zoneHex(lh.head ?? 100));
+          this.el('limb-svg-thorax')?.setAttribute('fill', zoneHex(lh.thorax ?? 100));
+          this.el('limb-svg-larm')?.setAttribute('fill', zoneHex(lh.leftArm ?? 100));
+          this.el('limb-svg-rarm')?.setAttribute('fill', zoneHex(lh.rightArm ?? 100));
+          this.el('limb-svg-lleg')?.setAttribute('fill', zoneHex(lh.leftLeg ?? 100));
+          this.el('limb-svg-rleg')?.setAttribute('fill', zoneHex(lh.rightLeg ?? 100));
+        }
+      }
+    }
+    if (fracBadgeEl) {
+      const hasFrac = Boolean(!inAircraftVitals && (this.player.armFractured || this.player.legFractured));
+      if (fracBadgeEl.classList.contains('hidden') === hasFrac) {
+        fracBadgeEl.classList.toggle('hidden', !hasFrac);
+      }
+      if (hasFrac) {
+        const fracLbl =
+          this.player.armFractured && this.player.legFractured
+            ? '🦴 ARM+LEG FRACTURE [HOLD H]'
+            : this.player.legFractured
+            ? '🦴 LEG FRACTURE (-35% SPD) [HOLD H]'
+            : '🦴 ARM FRACTURE (+SWAY) [HOLD H]';
+        this._setText(fracBadgeEl, fracLbl);
+      }
+    }
+
     this._setText(this.hpValEl, Math.ceil(this.player.hp));
     this._setWidth(this.hpFillEl, `${Math.max(0, Math.round(this.player.hp))}%`);
     const isMedicTreating = Boolean(
@@ -1843,13 +1902,25 @@ export const HudRenderer = {
             this.fireModeEl,
             'ROOF .50 CAL CROWS / KORD RWS (+60° HIGH-ANGLE ELEVATION [LMB / SPACE]) • [F1–F3] SEATS'
           );
+        } else if (activeSlot === 2) {
+          const atgmLeft = activeVeh.ordnancePools?.slot2 ?? 4;
+          const maxAtgm = activeVeh.maxOrdnancePools?.slot2 || 4;
+          this._setText(
+            this.ammoClipEl,
+            activeVeh.fireCooldown > 0 ? `${activeVeh.fireCooldown.toFixed(1)}s` : `${atgmLeft}`
+          );
+          this._setText(this.ammoReserveEl, `/${maxAtgm} ATGM`);
+          this._setText(
+            this.fireModeEl,
+            '[3] LASER-GUIDED ATGM (STEERS TO CROSSHAIR [LMB]) • [1] APFSDS SABOT • [2] COAX'
+          );
         } else if (activeSlot === 1) {
           const coaxRds = activeVeh.ordnancePools?.slot1 ?? 1200;
           this._setText(this.ammoClipEl, activeVeh.coaxOverheated ? 'HOT' : `${coaxRds}`);
           this._setText(this.ammoReserveEl, '7.62 AP');
           this._setText(
             this.fireModeEl,
-            '[2] COAX 7.62MM MG (+20° MANTLET LIMIT) • [F3] COMMANDER .50 CAL RWS (+60° ELEV)'
+            '[2] COAX 7.62MM MG (+20° MANTLET LIMIT) • [3] GUIDED ATGM • [F3] ROOF .50 RWS'
           );
         } else {
           this._setText(
@@ -1862,11 +1933,11 @@ export const HudRenderer = {
           );
           this._setText(
             this.ammoReserveEl,
-            tankShells !== null ? `/${maxTankShells} APHE` : 'APHE'
+            tankShells !== null ? `/${maxTankShells} SABOT` : 'SABOT'
           );
           this._setText(
             this.fireModeEl,
-            '[1] MAIN CANNON [LMB] • COAX MG [SPACE / 2] • [F3] ROOF .50 CAL RWS (+60°)'
+            '[1] 780 M/S APFSDS SABOT [LMB] • [2/SPACE] COAX • [3] GUIDED ATGM • [F3] .50 RWS'
           );
         }
       } else if (activeVeh.weaponType === 'autocannon') {
@@ -1874,17 +1945,31 @@ export const HudRenderer = {
           activeVeh.ordnancePools && typeof activeVeh.ordnancePools.slot0 === 'number'
             ? activeVeh.ordnancePools.slot0
             : null;
-        this._setText(
-          this.ammoClipEl,
-          activeSlot === 1 ? 'COAX' : acShells !== null ? `${acShells}` : '30MM'
-        );
-        this._setText(this.ammoReserveEl, activeSlot === 1 ? 'BELT' : '30MM HE');
-        this._setText(
-          this.fireModeEl,
-          activeSlot === 1
-            ? '[2] 950 RPM 7.62MM AP COAX [LMB / SPACE] • [1] 30MM • [F1–F4] SEATS'
-            : '[1] 330 RPM 30MM HE [LMB] • COAX MG [SPACE / 2] • [F1–F4] SEATS'
-        );
+        if (activeSlot === 2) {
+          const towLeft = activeVeh.ordnancePools?.slot2 ?? 6;
+          const maxTow = activeVeh.maxOrdnancePools?.slot2 || 6;
+          this._setText(
+            this.ammoClipEl,
+            activeVeh.fireCooldown > 0 ? `${activeVeh.fireCooldown.toFixed(1)}s` : `${towLeft}`
+          );
+          this._setText(this.ammoReserveEl, `/${maxTow} TOW`);
+          this._setText(
+            this.fireModeEl,
+            '[3] WIRE-GUIDED TOW-2B / KORNET ATGM (STEERS TO CROSSHAIR [LMB]) • [1] 30MM'
+          );
+        } else {
+          this._setText(
+            this.ammoClipEl,
+            activeSlot === 1 ? 'COAX' : acShells !== null ? `${acShells}` : '30MM'
+          );
+          this._setText(this.ammoReserveEl, activeSlot === 1 ? 'BELT' : '30MM HE');
+          this._setText(
+            this.fireModeEl,
+            activeSlot === 1
+              ? '[2] 950 RPM 7.62MM AP COAX [LMB / SPACE] • [1] 30MM • [3] TOW ATGM'
+              : '[1] 460 M/S 30MM HE [LMB] • [2/SPACE] COAX MG • [3] WIRE-GUIDED TOW ATGM'
+          );
+        }
       } else {
         const hmgRds = activeVeh.ordnancePools?.slot0 ?? 400;
         this._setText(this.ammoClipEl, `${hmgRds}`);
@@ -1898,10 +1983,10 @@ export const HudRenderer = {
       this._setText(this.ammoReserveEl, cur.reserve);
       let fireModeStr;
       if (cur.def.type === 'stinger') {
-        const sTgt = this.player.stingerLockTarget;
+        const sTgt = this.player.stingerLockedTarget || this.player.stingerTrackingTarget;
         const sPct = Math.round((this.player.stingerLockProgress || 0) * 100);
         fireModeStr = sTgt
-          ? sPct >= 100
+          ? this.player.stingerLockedTarget
             ? `🔒 IR LOCKED ON ${sTgt.name.split(' ')[0]} — FIRE [LMB]! • [3] SWAP TO RPG-7 AT`
             : `📡 SEEKING ${sTgt.name.split(' ')[0]} (${sPct}%) • [3] SWAP TO RPG-7 AT`
           : 'IR ANTI-AIR SAM (AIM AT ENEMY JET) • PRESS [3] AGAIN TO SWAP TO RPG-7 AT';

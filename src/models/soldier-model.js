@@ -5,9 +5,9 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=123';
-import { WEAPON_DEFS } from '../assets/weapon-defs.js?v=123';
-import { createWeaponViewModel } from './weapon-model.js?v=123';
+import { TEXTURES } from '../assets/textures.js?v=124';
+import { WEAPON_DEFS } from '../assets/weapon-defs.js?v=124';
+import { createWeaponViewModel } from './weapon-model.js?v=124';
 
 export function getDefaultWeaponIdForRole(team = 'US', role = 'ASSAULT') {
   const r = String(role || 'ASSAULT').toUpperCase();
@@ -249,15 +249,19 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
   leftLegPivot.position.set(-0.14, -0.04, 0);
   const leftThigh = new THREE.Mesh(geos.thigh, uniformMat);
   leftThigh.position.y = -0.18;
+  leftThigh.userData.hitZone = 'leftLeg';
   const leftKneePad = new THREE.Mesh(geos.kneePad, bootMat);
   leftKneePad.position.set(0, -0.34, 0.1);
+  leftKneePad.userData.hitZone = 'leftLeg';
 
   const leftShinPivot = new THREE.Group();
   leftShinPivot.position.set(0, -0.36, 0);
   const leftShin = new THREE.Mesh(geos.shin, uniformMat);
   leftShin.position.y = -0.17;
+  leftShin.userData.hitZone = 'leftLeg';
   const leftBoot = new THREE.Mesh(geos.boot, bootMat);
   leftBoot.position.set(0, -0.34, 0.03);
+  leftBoot.userData.hitZone = 'leftLeg';
   leftShinPivot.add(leftShin, leftBoot);
   leftLegPivot.add(leftThigh, leftKneePad, leftShinPivot);
 
@@ -265,15 +269,19 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
   rightLegPivot.position.set(0.14, -0.04, 0);
   const rightThigh = new THREE.Mesh(geos.thigh, uniformMat);
   rightThigh.position.y = -0.18;
+  rightThigh.userData.hitZone = 'rightLeg';
   const rightKneePad = new THREE.Mesh(geos.kneePad, bootMat);
   rightKneePad.position.set(0, -0.34, 0.1);
+  rightKneePad.userData.hitZone = 'rightLeg';
 
   const rightShinPivot = new THREE.Group();
   rightShinPivot.position.set(0, -0.36, 0);
   const rightShin = new THREE.Mesh(geos.shin, uniformMat);
   rightShin.position.y = -0.17;
+  rightShin.userData.hitZone = 'rightLeg';
   const rightBoot = new THREE.Mesh(geos.boot, bootMat);
   rightBoot.position.set(0, -0.34, 0.03);
+  rightBoot.userData.hitZone = 'rightLeg';
   rightShinPivot.add(rightShin, rightBoot);
   rightLegPivot.add(rightThigh, rightKneePad, rightShinPivot);
 
@@ -285,10 +293,14 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
 
   const torso = new THREE.Mesh(geos.torso, uniformMat);
   torso.position.set(0, 0.34, 0);
+  torso.userData.isTorso = true;
+  torso.userData.hitZone = 'thorax';
 
   const vest = new THREE.Mesh(geos.vest, vestMat);
   vest.position.set(0, 0.36, 0);
   vest.userData.isArmor = true;
+  vest.userData.isTorso = true;
+  vest.userData.hitZone = 'thorax';
 
   const magPouches = [];
   for (const px of [-0.14, 0, 0.14]) {
@@ -352,18 +364,23 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
 
   const head = new THREE.Mesh(geos.head, skinMat);
   head.userData.isHead = true;
+  head.userData.hitZone = 'head';
 
   const balaclava = new THREE.Mesh(geos.balaclava, pouchMat);
   balaclava.position.set(0, -0.09, 0);
   balaclava.userData.isHead = true;
+  balaclava.userData.hitZone = 'head';
 
   const goggles = new THREE.Mesh(geos.goggles, gogglesMat);
   goggles.position.set(0, 0.03, 0.17);
+  goggles.userData.isHead = true;
+  goggles.userData.hitZone = 'head';
 
   const helmet = new THREE.Mesh(geos.helmet, helmetMat);
   helmet.position.set(0, 0.14, 0);
   helmet.userData.isHead = true;
   helmet.userData.isHelmet = true;
+  helmet.userData.hitZone = 'head';
 
   const nvgMount = new THREE.Mesh(geos.nvgMount, gunMat);
   nvgMount.position.set(0, 0.14, 0.22);
@@ -389,9 +406,11 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
   const leftUpper = new THREE.Mesh(geos.upperArm, uniformMat);
   leftUpper.position.set(0.05, -0.1, 0.12);
   leftUpper.rotation.set(-0.75, 0.35, 0);
+  leftUpper.userData.hitZone = 'leftArm';
   const leftFore = new THREE.Mesh(geos.forearm, uniformMat);
   leftFore.position.set(0.18, -0.16, 0.34);
   leftFore.rotation.set(-1.35, 0.52, 0);
+  leftFore.userData.hitZone = 'leftArm';
   leftArm.add(leftUpper, leftFore);
 
   const rightArm = new THREE.Group();
@@ -399,9 +418,11 @@ export function createSoldierMesh(team = 'US', role = 'ASSAULT', commandRank = '
   const rightUpper = new THREE.Mesh(geos.upperArm, uniformMat);
   rightUpper.position.set(-0.04, -0.1, 0.08);
   rightUpper.rotation.set(-0.65, -0.15, 0);
+  rightUpper.userData.hitZone = 'rightArm';
   const rightFore = new THREE.Mesh(geos.forearm, uniformMat);
   rightFore.position.set(-0.09, -0.15, 0.26);
   rightFore.rotation.set(-1.3, -0.12, 0);
+  rightFore.userData.hitZone = 'rightArm';
   rightArm.add(rightUpper, rightFore);
 
   const gunGroup = new THREE.Group();

@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=123';
-import { TERRAIN } from '../config.js?v=123';
-import { events } from '../events.js?v=123';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=123';
+import { sound } from '../audio.js?v=124';
+import { TERRAIN } from '../config.js?v=124';
+import { events } from '../events.js?v=124';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=124';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;
@@ -1425,10 +1425,48 @@ export const ProjectileManager = {
         }
       }
 
+      // SACLOS Wire / Laser-Guided ATGM (`atgm_missile` — TOW-2B / 9M133 Kornet / 9M119M Refleks):
+      // Accelerates via rocket motor (~118 -> 235 m/s) with zero gravity drop and smoothly steers toward the gunner's live crosshair!
+      if (proj.type === 'atgm_missile' && proj.isSaclosGuided) {
+        const curSpd = proj.vel.length();
+        const nextSpd = Math.min(proj.maxSpeed || 235, curSpd + (proj.accel || 115) * dt);
+        let guidePoint = proj.saclosTargetPos || null;
+        const owner = proj.owner;
+        if (!guidePoint && owner && !owner.dead && owner.activeVehicle === proj.sourceVehicle && owner.camera) {
+          const camPos = owner.camera.getWorldPosition(_projCurDir);
+          const camQuat = owner.camera.getWorldQuaternion(new THREE.Quaternion());
+          const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camQuat).normalize();
+          if (typeof owner.computeVehicleAimTarget === 'function') {
+            guidePoint = owner.computeVehicleAimTarget(camPos, camDir, proj.sourceVehicle, 950).point;
+          } else {
+            guidePoint = camPos.clone().addScaledVector(camDir, 450);
+          }
+        }
+        if (guidePoint) {
+          _projToTarget.copy(guidePoint).sub(proj.mesh.position);
+          if (_projToTarget.lengthSq() > 4) {
+            _projToTarget.normalize();
+            _projCurDir.copy(proj.vel).normalize();
+            const steerRate = Math.min(1, (proj.turnRate || 4.4) * dt);
+            _projCurDir.lerp(_projToTarget, steerRate).normalize();
+            proj.vel.copy(_projCurDir).multiplyScalar(nextSpd);
+            _projLookAt.copy(proj.mesh.position).add(_projCurDir);
+            proj.mesh.lookAt(_projLookAt);
+          } else {
+            proj.vel.normalize().multiplyScalar(nextSpd);
+          }
+        } else {
+          proj.vel.normalize().multiplyScalar(nextSpd);
+        }
+      }
+
       proj.vel.y -= proj.gravity * dt;
       proj.mesh.position.addScaledVector(proj.vel, dt);
       if (
-        (proj.type === 'jdam_bomb' || proj.type === 'gbu28_bomb' || proj.type === 'airstrike_bomb') &&
+        (proj.type === 'jdam_bomb' ||
+          proj.type === 'gbu28_bomb' ||
+          proj.type === 'airstrike_bomb' ||
+          proj.type === 'tank_shell') &&
         proj.vel.lengthSq() > 1
       ) {
         _projLookAt.copy(proj.mesh.position).add(proj.vel);
@@ -1439,6 +1477,7 @@ export const ProjectileManager = {
       const pType = proj.type;
       const isExplosiveDirect =
         pType === 'rpg' ||
+        pType === 'atgm_missile' ||
         pType === 'tank_shell' ||
         pType === 'autocannon' ||
         pType === 'airstrike_bomb' ||
@@ -1450,8 +1489,10 @@ export const ProjectileManager = {
         pType === 'ac130_40mm' ||
         pType === 'ac130_105mm';
 
-      // Distance-gated rocket/shell smoke trail emission (>= 2.2m between puffs)
-      if (isExplosiveDirect) {
+      // Distance-gated rocket/missile exhaust smoke trail emission (Tank APFSDS & 30mm kinetic shells fly clean with ZERO rocket smoke!)
+      const emitsRocketSmoke =
+        isExplosiveDirect && pType !== 'tank_shell' && pType !== 'autocannon';
+      if (emitsRocketSmoke) {
         if (proj._lastTrailX === undefined) {
           proj._lastTrailX = _projPrevPos.x;
           proj._lastTrailY = _projPrevPos.y;
@@ -1467,7 +1508,7 @@ export const ProjectileManager = {
             const isBrightTracer =
               pType === 'ac130_105mm' ||
               pType === 'ac130_40mm' ||
-              pType === 'tank_shell' ||
+              pType === 'atgm_missile' ||
               pType === 'a2a_missile';
             if (isBrightTracer && typeof this._spawnGlowSlot === 'function') {
               this._spawnGlowSlot(
@@ -1557,9 +1598,20 @@ export const ProjectileManager = {
               : v.type === 'apc' || v.type === 'aa'
               ? 3.1
               : 2.5;
-            const dx = curPos.x - vcx;
-            const dy = curPos.y - vcy;
-            const dz = curPos.z - vcz;
+            // Swept-segment closest-point check along [_projPrevPos, curPos] so 780 m/s hyper-velocity APFSDS tank shells NEVER tunnel past hulls!
+            const vx = vcx - _projPrevPos.x;
+            const vy = vcy - _projPrevPos.y;
+            const vz = vcz - _projPrevPos.z;
+            const tProj =
+              segLen > 0.001
+                ? Math.max(0, Math.min(segLen, vx * _projSegDir.x + vy * _projSegDir.y + vz * _projSegDir.z))
+                : 0;
+            const cx = _projPrevPos.x + _projSegDir.x * tProj;
+            const cy = _projPrevPos.y + _projSegDir.y * tProj;
+            const cz = _projPrevPos.z + _projSegDir.z * tProj;
+            const dx = cx - vcx;
+            const dy = cy - vcy;
+            const dz = cz - vcz;
             if (dx * dx + dy * dy + dz * dz <= hullRad * hullRad) {
               hitVehicle = true;
               curPos.set(vcx, vcy, vcz);
