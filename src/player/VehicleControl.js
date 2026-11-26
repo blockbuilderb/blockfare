@@ -1,8 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=135';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=135';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=135';
-import { events } from '../events.js?v=135';
+import { sound } from '../audio.js?v=136';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=136';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=136';
+import { getRideShortcutLabel } from '../utils/KeyboardShortcuts.js?v=136';
+import { events } from '../events.js?v=136';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +12,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=135';
+} from '../core/StateMachines.js?v=136';
 
 function markShared(asset) {
   if (asset) {
@@ -714,12 +715,13 @@ export const VehicleControlMethods = {
     });
     if (this.onAwardXp && !silent) {
       if (boardingAiRide && nearVehicle.rideTask) {
+        const rideHk = getRideShortcutLabel();
         if (nearVehicle.rideTask.phase === 'AWAITING_DEST') {
           this.onAwardXp(
             0,
             nearVehicle.isHelicopter
-              ? '🚁 ONBOARD AIRLIFT-1! PRESS [ALT+R] TO DESIGNATE YOUR DROP-OFF DESTINATION (SKYSCRAPER ROOF, OBJECTIVE, OR MAP SPOT)!'
-              : '🛡️ ONBOARD TRANSPORT! PRESS [ALT+R] TO DESIGNATE YOUR DROP-OFF DESTINATION!'
+              ? `🚁 ONBOARD AIRLIFT-1! PRESS [${rideHk}] TO DESIGNATE YOUR DROP-OFF DESTINATION (SKYSCRAPER ROOF, OBJECTIVE, OR MAP SPOT)!`
+              : `🛡️ ONBOARD TRANSPORT! PRESS [${rideHk}] TO DESIGNATE YOUR DROP-OFF DESTINATION!`
           );
           return true;
         }
@@ -727,8 +729,8 @@ export const VehicleControlMethods = {
         this.onAwardXp(
           0,
           nearVehicle.isHelicopter
-            ? `🚁 AIRLIFT BOARDED! AI PILOT FLYING TO ${destLbl} — AIM/FIRE DOOR GUNS, [ALT+R] CHANGE LZ, [F1] TAKE STICK, [E] DISEMBARK`
-            : `🛡️ TRANSPORT BOARDED! AI DRIVER EN ROUTE TO ${destLbl} — MAN TURRET, [ALT+R] CHANGE LZ, [F1] DRIVE MANUAL, [E] DISEMBARK`
+            ? `🚁 AIRLIFT BOARDED! AI PILOT FLYING TO ${destLbl} — AIM/FIRE DOOR GUNS, [${rideHk}] CHANGE LZ, [F1] TAKE STICK, [E] DISEMBARK`
+            : `🛡️ TRANSPORT BOARDED! AI DRIVER EN ROUTE TO ${destLbl} — MAN TURRET, [${rideHk}] CHANGE LZ, [F1] DRIVE MANUAL, [E] DISEMBARK`
         );
         return true;
       }

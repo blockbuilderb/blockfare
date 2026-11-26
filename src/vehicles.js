@@ -1,14 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=135';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=135';
+import { sound } from './audio.js?v=136';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=136';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=135';
-import { createVehicleMesh } from './models/vehicle-model.js?v=135';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=135';
-import { events, makeEventBridge } from './events.js?v=135';
+} from './assets/vehicle-defs.js?v=136';
+import { createVehicleMesh } from './models/vehicle-model.js?v=136';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=136';
+import { getRideShortcutLabel } from './utils/KeyboardShortcuts.js?v=136';
+import { events, makeEventBridge } from './events.js?v=136';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +22,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=135';
+} from './core/StateMachines.js?v=136';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -6775,11 +6776,12 @@ export class VehicleManager {
     if (!['heli', 'apc', 'truck', 'humvee'].includes(mode)) mode = 'heli';
     player.preferredRideMode = mode;
 
+    const rideHk = getRideShortcutLabel();
     const isPickupOnly = Boolean(opts.pickupOnly);
     const dest = isPickupOnly
       ? {
           pos: null,
-          label: '⏳ AWAITING DROP-OFF [ALT+R]',
+          label: `⏳ AWAITING DROP-OFF [${rideHk}]`,
           isRoof: false,
           pending: true
         }
@@ -7054,7 +7056,7 @@ export class VehicleManager {
     player.onAwardXp?.(
       0,
       dest.pending
-        ? `${modeTitle} INBOUND TO YOUR POSITION${roofNote}! (PRESS [E] TO BOARD • PRESS [ALT+R] NOW OR LATER TO SET DROP-OFF!)`
+        ? `${modeTitle} INBOUND TO YOUR POSITION${roofNote}! (PRESS [E] TO BOARD • PRESS [${rideHk}] NOW OR LATER TO SET DROP-OFF!)`
         : `${modeTitle} INBOUND FOR PICKUP → DEST: ${dest.label}${roofNote} (PRESS [E] WHEN IT ARRIVES!)`
     );
 

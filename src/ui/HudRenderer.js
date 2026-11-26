@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=135';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=135';
+import { UI, getEraRoles } from '../config.js?v=136';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=136';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -185,7 +185,7 @@ export const HudRenderer = {
               ['LMB / RMB / Shift', 'Fire Weapon / Hold RMB Scope (MacBook Trackpad: 2-Finger Tap, ⌃+Click, or [O] Key toggles Scope!) / Hold Breath'],
               ['[O] / [V] Keys', '[O] Toggle Scope On/Off (Laptop/Trackpad friendly!) • [V] Variable Zoom (1x ⇄ 4x/12x) or Inspect'],
               ['[V] / [C] (When Downed)', '[V] Toggle Optional Death Cam • [C] Switch Battlefield Zoom ⇄ Killer\'s Eyes POV'],
-              ['[Alt+R / ⌥+R] (2-Step Ride)', '1st [Alt+R]: Call Pickup to You (🚁 Heli, 🛡️ APC, 🚚 Truck, 🚙 Humvee) • 2nd [Alt+R]: Designate Drop-Off!'],
+              ['[⌥+R / Alt+R] (2-Step Ride)', 'Mac: Option(⌥)+R, Control(⌃)+R, or ⌘+R in-game (PC: Alt+R) — 1st press: Pickup Here • 2nd press: Set Drop-Off!'],
               ['[X] / [N] Keys', 'Cycle Scope Zeroing (100m–400m) / Toggle NVG or Thermal Scope Polarity (WHOT/BHOT)'],
               ['[R] / 2× [R] / [P]', 'Tactical Mag Swap / Emergency Speed-Drop Reload / Tarkov Bullet-by-Bullet Mag Pack']
             ]
@@ -1767,9 +1767,10 @@ export const HudRenderer = {
               strictDoc &&
               this.player.role !== 'armor'
           );
+          const rideKeyLbl = isMacPlatform() ? '⌥+R' : 'ALT+R';
           const vehPrompt = isRidePickup
             ? nearVeh.rideTask.destPending || !nearVeh.rideTask.destPos
-              ? `🚁 PRESS [E] TO BOARD RIDE (${nearVeh.name.split(' (')[0]}) • PRESS [ALT+R] TO SET DROP-OFF`
+              ? `🚁 PRESS [E] TO BOARD RIDE (${nearVeh.name.split(' (')[0]}) • PRESS [${rideKeyLbl}] TO SET DROP-OFF`
               : `🚁 PRESS [E] TO BOARD RIDE (${nearVeh.name.split(' (')[0]}) → ${
                   nearVeh.rideTask.destLabel || 'LZ'
                 }`
@@ -5836,30 +5837,32 @@ export const HudRenderer = {
     if (this._lastRideHudSig === sig) return;
     this._lastRideHudSig = sig;
 
+    const rideKey = isMacPlatform() ? '⌥+R' : 'Alt+R';
+    const rideKeyUpper = isMacPlatform() ? '⌥+R' : 'ALT+R';
     const icon = v.isHelicopter ? '🚁' : v.type === 'apc' ? '🛡️' : v.type === 'truck_transport' ? '🚚' : '🚙';
     let titleTxt = '';
     let subTxt = '';
     if (task.phase === 'APPROACHING_PICKUP') {
       titleTxt = `${icon} PICKUP INBOUND TO YOU (${distM}m)`;
       subTxt = isDestPending
-        ? 'WAIT FOR [E] BOARDING • PRESS [ALT+R] NOW OR AFTER BOARDING TO SET DROP-OFF!'
-        : `DROP-OFF: ${task.destLabel} • PRESS [E] WHEN IT ARRIVES ([ALT+R] CHANGE)`;
+        ? `WAIT FOR [E] BOARDING • PRESS [${rideKeyUpper}] NOW OR AFTER BOARDING TO SET DROP-OFF!`
+        : `DROP-OFF: ${task.destLabel} • PRESS [E] WHEN IT ARRIVES ([${rideKeyUpper}] CHANGE)`;
     } else if (task.phase === 'HOLDING_FOR_PICKUP') {
       titleTxt = `🟢 ${icon} RIDE AT YOUR POSITION (${distM}m)`;
       subTxt = isDestPending
-        ? 'WALK UP & PRESS [E] TO HOP IN — THEN PRESS [ALT+R] TO PICK DROP-OFF!'
+        ? `WALK UP & PRESS [E] TO HOP IN — THEN PRESS [${rideKeyUpper}] TO PICK DROP-OFF!`
         : `WALK UP & PRESS [E] TO BOARD → ${task.destLabel}`;
     } else if (task.phase === 'AWAITING_DEST') {
       titleTxt = `🟢 ${icon} ONBOARD — AWAITING DROP-OFF!`;
-      subTxt = 'PRESS [ALT+R] TO OPEN DROP-OFF MAP (OR [Q] PING ROOF + [ALT+R] / CLICK BELOW):';
+      subTxt = `PRESS [${rideKeyUpper}] TO OPEN DROP-OFF MAP (OR [Q] PING ROOF + [${rideKeyUpper}] / CLICK BELOW):`;
     } else if (task.phase === 'EN_ROUTE_TO_DEST') {
       titleTxt = `${icon} EN ROUTE → ${task.destLabel} (${distM}m)`;
       subTxt = onboard
-        ? 'AI CHAUFFEUR ACTIVE • [ALT+R] CHANGE DROP-OFF • [F1] TAKE MANUAL • [E] EXIT'
+        ? `AI CHAUFFEUR ACTIVE • [${rideKeyUpper}] CHANGE DROP-OFF • [F1] TAKE MANUAL • [E] EXIT`
         : 'AI TRANSPORT EN ROUTE';
     } else {
       titleTxt = `🎯 ARRIVED AT ${task.destLabel}!`;
-      subTxt = 'PRESS [E] TO STEP OUT ON ROOF/LZ — OR PRESS [ALT+R] FOR NEXT DROP-OFF:';
+      subTxt = `PRESS [E] TO STEP OUT ON ROOF/LZ — OR PRESS [${rideKeyUpper}] FOR NEXT DROP-OFF:`;
     }
 
     const modeSwitchHtml = !onboard
@@ -5874,7 +5877,7 @@ export const HudRenderer = {
       <div class="ride-hud-sub">${subTxt}</div>
       <div class="ride-hud-btns">
         ${modeSwitchHtml}
-        <button type="button" class="ride-lz-pill" data-open-map="1" title="Open Tactical Map to Click Any Drop-Off LZ [Alt+R]">🗺️ [Alt+R] MAP</button>
+        <button type="button" class="ride-lz-pill" data-open-map="1" title="Open Tactical Map to Click Any Drop-Off LZ [${rideKey}]">🗺️ [${rideKey}] MAP</button>
         <button type="button" class="ride-lz-pill" data-dest="OBJ_C_ROOF" title="Fly to Top of Downtown Objective C Skyscraper">🏢 C ROOF</button>
         <button type="button" class="ride-lz-pill" data-dest="A">🚩 A</button>
         <button type="button" class="ride-lz-pill" data-dest="B">🚩 B</button>

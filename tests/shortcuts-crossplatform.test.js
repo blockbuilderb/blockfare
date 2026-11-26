@@ -158,24 +158,41 @@ describe('2. Garrison order (Alt+G / ⌥+G / ⌃+G / ⌘+G) & sacred browser sho
     assert.equal(resolveGlobalCommandShortcut(ctrlG, { isMac: false, isPointerLocked: true }), null);
   });
 
-  test('Way 3 on Mac: ⌘ Command + G resolves to GARRISON on Mac ONLY when isPointerLocked === true', () => {
+  test('Way 3 on Mac: ⌘ Command + G and ⌘ Command + R resolve on Mac ONLY when isPointerLocked === true (preventing accidental mid-battle ⌘+R round wipe!)', () => {
     const cmdG = keyEvent({ metaKey: true, key: 'g', code: 'KeyG' });
+    const cmdR = keyEvent({ metaKey: true, key: 'r', code: 'KeyR' });
 
-    // Pointer-locked in active combat on Mac -> GARRISON
+    // Pointer-locked in active combat on Mac -> GARRISON & REQUEST_RIDE
     assert.equal(hasAnyModifier(cmdG), true);
     assert.equal(isCommandOrderModifier(cmdG, true, true), true);
     assert.deepEqual(resolveGlobalCommandShortcut(cmdG, { isMac: true, isPointerLocked: true }), {
       type: 'STRATEGIC_ORDER',
       action: 'GARRISON'
     });
+    assert.equal(isCommandOrderModifier(cmdR, true, true), true);
+    assert.deepEqual(
+      resolveGlobalCommandShortcut(cmdR, { isMac: true, isPointerLocked: true, commandRank: 'MEMBER' }),
+      { type: 'REQUEST_RIDE' }
+    );
 
-    // Unlocked cursor on Mac (menus, modals, browser find-next ⌘+G) -> null
+    // Unlocked cursor on Mac (Deploy screen, browser UI) or ⌘+Shift+R hard reload -> null
     assert.equal(isCommandOrderModifier(cmdG, true, false), false);
     assert.equal(resolveGlobalCommandShortcut(cmdG, { isMac: true, isPointerLocked: false }), null);
+    assert.equal(isCommandOrderModifier(cmdR, true, false), false);
+    assert.equal(resolveGlobalCommandShortcut(cmdR, { isMac: true, isPointerLocked: false }), null);
+    assert.equal(
+      resolveGlobalCommandShortcut(keyEvent({ metaKey: true, shiftKey: true, key: 'R', code: 'KeyR' }), {
+        isMac: true,
+        isPointerLocked: true
+      }),
+      null
+    );
 
-    // Windows Win+G (Xbox Game Bar) -> null even in pointer lock
+    // Windows Win+G (Xbox Game Bar) / Win+R (Run dialog) -> null even in pointer lock
     assert.equal(isCommandOrderModifier(cmdG, false, true), false);
     assert.equal(resolveGlobalCommandShortcut(cmdG, { isMac: false, isPointerLocked: true }), null);
+    assert.equal(isCommandOrderModifier(cmdR, false, true), false);
+    assert.equal(resolveGlobalCommandShortcut(cmdR, { isMac: false, isPointerLocked: true }), null);
 
     // Multi-modifier ⌘+⌥+G or ⌘+⌃+G -> null
     assert.equal(
@@ -194,9 +211,9 @@ describe('2. Garrison order (Alt+G / ⌥+G / ⌃+G / ⌘+G) & sacred browser sho
     );
   });
 
-  test('Sacred macOS browser shortcuts (⌘+R, ⌘+W, ⌘+Q, ⌘+T, ⌘+L, ⌘+1..5, etc.) return null even in pointer lock', () => {
+  test('Sacred macOS browser shortcuts (⌘+W, ⌘+Q, ⌘+T, ⌘+L, ⌘+Shift+R, ⌘+1..5, etc.) return null even in pointer lock', () => {
     const sacredCmdChords = [
-      { key: 'r', code: 'KeyR' }, // Reload page
+      { key: 'R', code: 'KeyR', shiftKey: true }, // Hard reload page (⌘+Shift+R)
       { key: 'w', code: 'KeyW' }, // Close tab
       { key: 'q', code: 'KeyQ' }, // Quit browser
       { key: 't', code: 'KeyT' }, // New tab
@@ -217,8 +234,8 @@ describe('2. Garrison order (Alt+G / ⌥+G / ⌃+G / ⌘+G) & sacred browser sho
       { key: '`', code: 'Backquote' } // Cycle app windows
     ];
 
-    for (const { key, code } of sacredCmdChords) {
-      const ev = keyEvent({ metaKey: true, key, code });
+    for (const { key, code, shiftKey } of sacredCmdChords) {
+      const ev = keyEvent({ metaKey: true, shiftKey: Boolean(shiftKey), key, code });
       assert.equal(
         isCommandOrderModifier(ev, true, true),
         false,

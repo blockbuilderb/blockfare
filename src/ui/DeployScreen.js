@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=135';
-import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=135';
-import { events } from '../events.js?v=135';
+import { SQUAD_DEFS } from '../bots.js?v=136';
+import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=136';
+import { events } from '../events.js?v=136';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=135';
+} from '../core/StateMachines.js?v=136';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=135';
+} from '../utils/KeyboardShortcuts.js?v=136';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -786,7 +786,31 @@ export const DeployScreen = {
           }
         }
 
-        // Cross-Platform Global Utility & Commander/Squad Order Shortcuts (Mac ⌥/⌃/⌘+G & Windows/Linux Alt+...)
+        // Protect active Mac matches from accidental `⌘+R` page reload even when the Ride Drop-Off Map (#command-modal)
+        // or HUD modal temporarily released pointer lock (`⌘+Shift+R` or Deploy Screen `⌘+R` still refreshes normally!)
+        if (
+          isMacPlatform() &&
+          e.metaKey &&
+          !e.altKey &&
+          !e.ctrlKey &&
+          !e.shiftKey &&
+          e.code === 'KeyR' &&
+          this.player &&
+          !(this.deployScreenEl && !this.deployScreenEl.classList.contains('hidden')) &&
+          !(this.victoryScreenEl && !this.victoryScreenEl.classList.contains('hidden'))
+        ) {
+          e.preventDefault();
+          if (!e.repeat && !this.player.dead) {
+            if (typeof this.handleRideShortcut === 'function') {
+              this.handleRideShortcut();
+            } else {
+              this.player.handleAltRRideAction?.(this);
+            }
+          }
+          return;
+        }
+
+        // Cross-Platform Global Utility & Commander/Squad Order Shortcuts (Mac ⌥/⌃/⌘+G/R & Windows/Linux Alt+...)
         const globalShortcut = resolveGlobalCommandShortcut(e, {
           isPointerLocked: Boolean(document.pointerLockElement),
           inGunship: Boolean(this.player?.activeVehicle?.aircraftRole === 'gunship'),

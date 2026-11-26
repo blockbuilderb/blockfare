@@ -59,6 +59,10 @@ export function getShortOrderModifierLabel(isMac = isMacPlatform()) {
   return isMac ? '⌥' : 'Alt';
 }
 
+export function getRideShortcutLabel(isMac = isMacPlatform()) {
+  return isMac ? '⌥+R' : 'Alt+R';
+}
+
 /**
  * True if any non-Shift modifier (`Alt`/`⌥`, `Ctrl`/`⌃`, `Cmd`/`⌘`) is held.
  * Single-key gameplay bindings (`G`, `R`, `F`, `C`, `1-9`, `0`, `WASD`, etc.)
@@ -76,13 +80,21 @@ export function hasAnyModifier(e) {
  * - macOS:
  *   1) `⌥ Option + Key` (`e.altKey && !e.metaKey`) — matched via physical `e.code` (ignoring `e.key === '©'`)
  *   2) `⌃ Control + Key` (`e.ctrlKey && !e.metaKey`) — conflict-free with macOS browser `⌘` shortcuts
- *   3) `⌘ Command + G` (`e.metaKey && e.code === 'KeyG'`) ONLY when actively pointer-locked in battle
- *      (never intercepts `⌘+R` reload, `⌘+W` close tab, `⌘+Q` quit, `⌘+T` new tab, `⌘+L` URL bar, etc.!)
+ *   3) `⌘ Command + G` or `⌘ Command + R` (`e.metaKey && !e.shiftKey`) ONLY when actively pointer-locked in battle
+ *      — prevents accidental `⌘+R` page reload from wiping an active 500-player match on Mac while letting `⌘+R`
+ *      request/designate your Ride (`⌘+Shift+R` or unlocked `⌘+R` on menus still reloads normally; never intercepts `⌘+W/Q/T/L`!)
  */
 export function isCommandOrderModifier(e, isMac = isMacPlatform(), isPointerLocked = false) {
   if (!e) return false;
   if (e.metaKey) {
-    return Boolean(isMac && isPointerLocked && !e.altKey && !e.ctrlKey && e.code === 'KeyG');
+    return Boolean(
+      isMac &&
+        isPointerLocked &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        !e.shiftKey &&
+        (e.code === 'KeyG' || e.code === 'KeyR')
+    );
   }
   if (isMac) {
     return Boolean(e.altKey || e.ctrlKey);

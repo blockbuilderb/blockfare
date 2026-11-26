@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SQUAD_DEFS } from '../bots.js?v=135';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=135';
+import { SQUAD_DEFS } from '../bots.js?v=136';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=136';
 
 export const CommandPanel = {
   setCommandScope(scope, opts = {}) {
@@ -807,6 +807,14 @@ export const CommandPanel = {
           const t = badge.getAttribute('title');
           if (t) badge.setAttribute('title', t.replace(/Alt\+/g, `${modShort}+`));
         });
+        const topRideBtn = document.getElementById('hud-ride-btn');
+        if (topRideBtn) {
+          topRideBtn.innerHTML = `🚁 <b>[${modShort}+R]</b> Ride`;
+          topRideBtn.setAttribute(
+            'title',
+            `1st [${modShort}+R] (Option+R / ⌃+R / ⌘+R in-game): Request Pickup at Your Position • 2nd [${modShort}+R]: Designate Drop-Off!`
+          );
+        }
         this._macLabelsSynced = true;
       }
     }
