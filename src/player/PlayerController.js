@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=134';
-import { sound } from '../audio.js?v=134';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=134';
+import { VOXEL_SIZE } from '../world.js?v=135';
+import { sound } from '../audio.js?v=135';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=135';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=134';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=134';
-import { events, makeEventBridge } from '../events.js?v=134';
-import { GunsmithMethods } from './GunsmithState.js?v=134';
-import { FortificationMethods } from './FortificationBuilder.js?v=134';
-import { CommanderMethods } from './CommanderAbilities.js?v=134';
-import { VehicleControlMethods } from './VehicleControl.js?v=134';
-import { CombatMethods } from './PlayerCombat.js?v=134';
+} from '../utils/KeyboardShortcuts.js?v=135';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=135';
+import { events, makeEventBridge } from '../events.js?v=135';
+import { GunsmithMethods } from './GunsmithState.js?v=135';
+import { FortificationMethods } from './FortificationBuilder.js?v=135';
+import { CommanderMethods } from './CommanderAbilities.js?v=135';
+import { VehicleControlMethods } from './VehicleControl.js?v=135';
+import { CombatMethods } from './PlayerCombat.js?v=135';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=134';
+} from '../core/StateMachines.js?v=135';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -138,6 +138,8 @@ export class PlayerController {
     this.thirdPersonVehicle = false;
     this.preferredAircraftRole = 'cas'; // 'cas' (A-10C / Su-25) | 'bomber' (F-15E / Su-34) | 'fighter' (F-22A / Su-57)
     this.preferredArmorOrderType = 'tank'; // 'tank' ($1,100) | 'apc' ($650) | 'aa' ($750)
+    this.preferredRideMode = 'heli'; // 'heli' | 'apc' | 'truck' | 'humvee'
+    this.activeRideVehicle = null;
     this.parachuting = false;
     this.parachuteCut = false;
     this.parachuteMesh = null;
@@ -414,6 +416,141 @@ export class PlayerController {
 
   toggleSquadDoctrineEnabled() {
     return this.setSquadDoctrineEnabled(!this.squadDoctrineEnabled);
+  }
+
+  /**
+   * Samples where the player's camera/scope is aiming up to 1,500m away so `[Alt+R]` Drop-Off
+   * can also target any building roof or ridge you were looking at!
+   */
+  sampleRideCrosshairPoint() {
+    if (!this.world || !this.camera) return null;
+    const origin = this.camera.position.clone();
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+    if (typeof this.world.raycastVoxel === 'function') {
+      const voxHit = this.world.raycastVoxel(origin, dir, 1500);
+      if (voxHit && voxHit.point && voxHit.point.distanceTo(this.pos) > 14) {
+        return { x: voxHit.point.x, y: voxHit.point.y, z: voxHit.point.z, isStructure: true };
+      }
+    }
+    for (let dist = 18; dist <= 1500; dist += dist < 250 ? 6 : 16) {
+      const px = origin.x + dir.x * dist;
+      const py = origin.y + dir.y * dist;
+      const pz = origin.z + dir.z * dist;
+      if (Math.abs(px) > 2350 || Math.abs(pz) > 1550) break;
+      const terrY = this.world.getGroundHeightAt(px, pz);
+      if (py <= terrY + 0.6) {
+        return { x: px, y: terrY, z: pz, isStructure: false };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Two-Step `[Alt+R]` (`[⌥+R]` on Mac) Tactical Ride Workflow:
+   * - 1st `[Alt+R]` (no active ride yet, on foot): Immediately dispatches pickup to YOUR CURRENT POSITION
+   *   (`pickupOnly: true` — no need to pick a destination yet!).
+   * - 2nd+ `[Alt+R]` (while ride is inbound, holding, onboard awaiting drop-off, or mid-trip):
+   *   * If you placed a fresh `[Q]` 3D Tactical Ping, locks that pinged rooftop/spot as your drop-off immediately!
+   *   * Otherwise opens the Tactical Drop-Off Selector (`openRideMapModal`) so you can click any rooftop, objective, or map spot!
+   */
+  handleAltRRideAction(ui = null) {
+    if (this.dead || this.downed || !this.vehicleManager?.requestPlayerRide) return null;
+    const curRide =
+      this.activeRideVehicle &&
+      !this.activeRideVehicle.dead &&
+      this.activeRideVehicle.rideTask?.active &&
+      this.activeRideVehicle.rideTask.phase !== 'RTB_DEPART'
+        ? this.activeRideVehicle
+        : null;
+    const inRideableVehicle = Boolean(
+      this.activeVehicle &&
+        !this.activeVehicle.dead &&
+        (this.activeVehicle.isHelicopter ||
+          this.activeVehicle.type === 'apc' ||
+          this.activeVehicle.type === 'truck_transport' ||
+          this.activeVehicle.type === 'humvee' ||
+          this.activeVehicle.type === 'car')
+    );
+
+    // STEP 1: On foot with no active ride -> "Pick me up right where I am!"
+    if (!curRide && !inRideableVehicle) {
+      return this.requestQuickTacticalRide({ pickupOnly: true });
+    }
+
+    // STEP 2: Ride is already inbound / waiting / onboard -> Designate Drop-Off!
+    const curTask = curRide?.rideTask || this.activeVehicle?.rideTask || null;
+    const hasFreshPing = Boolean(
+      this.activePing &&
+        this.activePing.timer > 0 &&
+        this.activePing.pos &&
+        this.activePing !== curTask?._consumedPingRef
+    );
+    if (hasFreshPing) {
+      const mode =
+        curTask?.transportMode ||
+        (this.activeVehicle?.isHelicopter
+          ? 'heli'
+          : this.activeVehicle?.type === 'apc'
+          ? 'apc'
+          : this.activeVehicle?.type === 'truck_transport'
+          ? 'truck'
+          : this.activeVehicle?.type === 'humvee' || this.activeVehicle?.type === 'car'
+          ? 'humvee'
+          : this.preferredRideMode || 'heli');
+      return this.vehicleManager.requestPlayerRide(this, {
+        transportMode: mode,
+        destX: this.activePing.pos.x,
+        destZ: this.activePing.pos.z,
+        preferRoof: mode === 'heli',
+        _consumedPingRef: this.activePing,
+        customLabel: `📍 PINGED LZ (${Math.round(this.activePing.pos.x)}, ${Math.round(this.activePing.pos.z)})`
+      });
+    }
+
+    this._lastRideCrosshairPoint = this.sampleRideCrosshairPoint();
+    const targetUi = ui || (typeof window !== 'undefined' ? window.game?.ui : null);
+    if (targetUi && typeof targetUi.openRideMapModal === 'function') {
+      targetUi.openRideMapModal();
+      return { ok: true, openedDropoffSelector: true };
+    }
+    return this.requestQuickTacticalRide();
+  }
+
+  /**
+   * Direct / Wheel / Context-Smart Ride Request (`[Y]` Wheel or programmatic calls):
+   */
+  requestQuickTacticalRide(opts = {}) {
+    if (this.dead || this.downed || !this.vehicleManager?.requestPlayerRide) return null;
+    const gndY = this.world ? this.world.getGroundHeightAt(this.pos.x, this.pos.z) : 0;
+    const onHighRoof = this.pos.y - gndY > 6.5;
+    const mode = opts.transportMode || (onHighRoof ? 'heli' : this.preferredRideMode || 'heli');
+    if (opts.pickupOnly) {
+      return this.vehicleManager.requestPlayerRide(this, {
+        ...opts,
+        pickupOnly: true,
+        transportMode: mode
+      });
+    }
+    if (
+      !opts.destKey &&
+      !Number.isFinite(opts.destX) &&
+      this.activePing &&
+      this.activePing.timer > 0 &&
+      this.activePing.pos
+    ) {
+      return this.vehicleManager.requestPlayerRide(this, {
+        transportMode: mode,
+        destX: this.activePing.pos.x,
+        destZ: this.activePing.pos.z,
+        preferRoof: mode === 'heli',
+        _consumedPingRef: this.activePing,
+        customLabel: `📍 PINGED LZ (${Math.round(this.activePing.pos.x)}, ${Math.round(this.activePing.pos.z)})`
+      });
+    }
+    return this.vehicleManager.requestPlayerRide(this, {
+      ...opts,
+      transportMode: mode
+    });
   }
 
   setDeathCamEnabled(val) {

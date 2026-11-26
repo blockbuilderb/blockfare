@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SQUAD_DEFS } from '../bots.js?v=134';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=134';
+import { SQUAD_DEFS } from '../bots.js?v=135';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=135';
 
 export const CommandPanel = {
   setCommandScope(scope, opts = {}) {
@@ -1071,12 +1071,54 @@ export const CommandPanel = {
     return true;
   },
 
-  _destroyCommandModal(modal) {
+  _destroyCommandModal(modal, relockPointer = false) {
     if (modal) modal.remove();
     if (this._domCache) {
       this._domCache.delete('command-modal');
       this._domCache.delete('cmd-tactical-map-canvas');
     }
+    if (
+      relockPointer &&
+      typeof document !== 'undefined' &&
+      !this.player?.dead &&
+      document.body?.requestPointerLock
+    ) {
+      try {
+        const p = document.body.requestPointerLock();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch (_) {}
+    }
+  },
+
+  handleRideShortcut() {
+    const deployOpen = this.deployScreenEl && !this.deployScreenEl.classList.contains('hidden');
+    const victoryOpen = this.victoryScreenEl && !this.victoryScreenEl.classList.contains('hidden');
+    if (deployOpen || victoryOpen || !this.player || this.player.dead) return;
+
+    if (this.isCommandModalVisible()) {
+      const modal = this.el('command-modal');
+      if (this.mapClickMode !== 'RIDE') {
+        this.mapClickMode = 'RIDE';
+        if (modal) this.renderCommandModalContent(modal);
+      } else {
+        this._destroyCommandModal(modal, true);
+      }
+      return;
+    }
+
+    const res = this.player.handleAltRRideAction?.(this);
+    this.updateRideStatusHud?.();
+    return res;
+  },
+
+  openRideMapModal() {
+    this.mapClickMode = 'RIDE';
+    const existing = this.el('command-modal');
+    if (existing && !existing.classList.contains('hidden')) {
+      this.renderCommandModalContent(existing);
+      return;
+    }
+    this.toggleCommandModal();
   },
 
   toggleCommandModal() {
@@ -1209,11 +1251,19 @@ export const CommandPanel = {
       .join('');
 
     const isModernEra = (this.world?.era || 'modern') === 'modern';
-    if (!isModernEra && this.mapClickMode === 'AIRSTRIKE') {
+    if (!isModernEra && (this.mapClickMode === 'AIRSTRIKE' || this.mapClickMode === 'RIDE')) {
       this.mapClickMode = 'ORDER';
     }
     const curPattern = this.player.airstrikePattern || 'A10_CAS';
     const isStrikeClickMode = isModernEra && this.mapClickMode === 'AIRSTRIKE';
+    const isRideClickMode = isModernEra && this.mapClickMode === 'RIDE';
+    const curRideMode = this.player.preferredRideMode || 'heli';
+    const hasActiveRide = Boolean(this.player.activeRideVehicle?.rideTask?.active);
+    const activeRideDesc = hasActiveRide
+      ? `${this.player.activeRideVehicle.rideTask.phase.replace(/_/g, ' ')} → ${
+          this.player.activeRideVehicle.rideTask.destLabel
+        }`
+      : 'NONE ACTIVE';
     const teamFunds = this.vehicleManager?.getTeamFunds ? this.vehicleManager.getTeamFunds(team) : 5000;
     const uavStatusLabel = this.player.uavActive
       ? `📡 UAV ACTIVE (${Math.ceil(this.player.uavTimer)}s • ${
@@ -1244,22 +1294,33 @@ export const CommandPanel = {
       </div>
 
       <div style="position:relative;background:#121c14;border:1.5px solid ${
-        isStrikeClickMode ? '#e74c3c' : 'rgba(241,196,15,0.45)'
+        isRideClickMode
+          ? '#00d2d3'
+          : isStrikeClickMode
+          ? '#e74c3c'
+          : 'rgba(241,196,15,0.45)'
       };border-radius:6px;padding:6px;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-size:11px;flex-wrap:wrap;gap:4px;">
-          <span style="color:${isStrikeClickMode ? '#ff7675' : '#f1c40f'};font-weight:900;">${
-            isStrikeClickMode
+          <span style="color:${
+            isRideClickMode ? '#7ef9ff' : isStrikeClickMode ? '#ff7675' : '#f1c40f'
+          };font-weight:900;">${
+            isRideClickMode
+              ? `🚁 RIDE LZ MODE (${curRideMode.toUpperCase()}) — CLICK ANY SKYSCRAPER ROOF OR POINT ON MAP TO REQUEST PICKUP & DROP-OFF!`
+              : isStrikeClickMode
               ? '💥 AIRSTRIKE TARGETING MODE — CLICK ANYWHERE ON MAP TO CALL STRIKE AT THOSE EXACT COORDINATES!'
               : `📍 FRUGIS RIVER VALLEY — CLICK OBJECTIVE A–E TO ORDER (${
                   this.player.commandScope === 'ALL' ? 'ALL 5 SQUADS' : playerSquadId + ' SQUAD'
-                }) OR RIGHT-CLICK TO STRIKE`
+                }) OR USE [🚁 CLICK: RIDE LZ]`
           }</span>
           <div style="display:flex;gap:4px;flex-wrap:wrap;">
             <button id="cmd-map-mode-order" style="background:${
-              !isStrikeClickMode ? '#27ae60' : 'rgba(255,255,255,0.12)'
+              !isStrikeClickMode && !isRideClickMode ? '#27ae60' : 'rgba(255,255,255,0.12)'
             };color:#fff;border:1px solid ${
-              !isStrikeClickMode ? '#2ecc71' : 'rgba(255,255,255,0.2)'
+              !isStrikeClickMode && !isRideClickMode ? '#2ecc71' : 'rgba(255,255,255,0.2)'
             };border-radius:3px;padding:2px 8px;font-size:10.5px;font-weight:900;cursor:pointer;">📍 CLICK: ORDER SQUADS</button>
+            <button id="cmd-map-mode-ride" style="display:${isModernEra ? '' : 'none'};background:${
+              isRideClickMode ? '#0097a7' : 'rgba(0,210,211,0.2)'
+            };color:#fff;border:1px solid #00d2d3;border-radius:3px;padding:2px 8px;font-size:10.5px;font-weight:900;cursor:pointer;">🚁 CLICK: RIDE LZ</button>
             <button id="cmd-map-mode-strike" style="display:${isModernEra ? '' : 'none'};background:${
               isStrikeClickMode ? '#c0392b' : 'rgba(231,76,60,0.22)'
             };color:#fff;border:1px solid #e74c3c;border-radius:3px;padding:2px 8px;font-size:10.5px;font-weight:900;cursor:pointer;">💥 CLICK: CALL AIRSTRIKE</button>
@@ -1278,6 +1339,65 @@ export const CommandPanel = {
         <canvas id="cmd-tactical-map-canvas" width="760" height="205" style="width:100%;height:205px;display:block;border-radius:4px;cursor:crosshair;"></canvas>
       </div>
 
+      <!-- PERSONAL RIDE, SNIPER ROOFTOP AIRLIFT & ARMORED TAXI DISPATCH (ALL RANKS & CLASSES!) -->
+      <div style="display:${
+        isModernEra ? '' : 'none'
+      };background:rgba(8,30,38,0.92);border:1.5px solid rgba(0,210,211,0.6);border-left:4px solid #00d2d3;border-radius:5px;padding:8px 10px;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
+          <div>
+            <span style="font-size:12.5px;font-weight:900;color:#7ef9ff;">🚁 TACTICAL RIDE &amp; SNIPER ROOFTOP AIRLIFT [${getShortOrderModifierLabel()}+R] (1ST [${getShortOrderModifierLabel()}+R] = PICK UP HERE • 2ND [${getShortOrderModifierLabel()}+R] = DROP-OFF):</span>
+            <span style="font-size:10.5px;color:#ffeaa7;margin-left:6px;font-weight:800;">STATUS: ${activeRideDesc}</span>
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;">
+            ${[
+              { id: 'heli', lbl: '🚁 Heli Airlift (Rooftops!)' },
+              { id: 'apc', lbl: '🛡️ Armored APC (8×8)' },
+              { id: 'truck', lbl: '🚚 6×6 Ammo Truck' },
+              { id: 'humvee', lbl: '🚙 Fast Humvee' }
+            ]
+              .map(
+                (m) =>
+                  `<button type="button" class="modal-ride-mode-btn" data-ride-mode="${
+                    m.id
+                  }" style="background:${
+                    curRideMode === m.id ? '#00cec9' : 'rgba(255,255,255,0.1)'
+                  };color:${curRideMode === m.id ? '#08141c' : '#ecf0f1'};border:1px solid ${
+                    curRideMode === m.id ? '#81ecec' : 'rgba(255,255,255,0.25)'
+                  };border-radius:3px;padding:3px 8px;font-size:10.5px;font-weight:900;cursor:pointer;">${
+                    m.lbl
+                  }</button>`
+              )
+              .join('')}
+          </div>
+        </div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
+          <span style="font-size:10.5px;color:#bdc3c7;font-weight:900;">DESIGNATE DROP-OFF (OR CLICK ANYWHERE ON MAP ABOVE):</span>
+          ${
+            !hasActiveRide
+              ? `<button type="button" id="modal-ride-pickup-only-btn" style="background:rgba(46,204,113,0.28);color:#7bed9f;border:1px solid #2ecc71;border-radius:4px;padding:4px 8px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Call pickup to your exact current position first — choose drop-off later with [${getShortOrderModifierLabel()}+R]!">📍 PICK UP HERE FIRST</button>`
+              : ''
+          }
+          ${
+            this.player._lastRideCrosshairPoint
+              ? `<button type="button" id="modal-ride-aim-btn" style="background:rgba(241,196,15,0.26);color:#ffeaa7;border:1px solid #f1c40f;border-radius:4px;padding:4px 8px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Drop off at the building roof or terrain spot your crosshair/scope was aiming at!">🎯 WHERE I WAS AIMING</button>`
+              : ''
+          }
+          <button type="button" class="modal-ride-dest-btn" data-dest="OBJ_C_ROOF" style="background:linear-gradient(135deg,#0097a7,#00cec9);color:#061218;border:1px solid #81ecec;border-radius:4px;padding:4px 9px;font-size:11px;font-weight:900;cursor:pointer;" title="Airlift directly onto the tallest Downtown Objective C Skyscraper Helipad Roof!">🏢 TOP OF OBJ C SKYSCRAPER</button>
+          ${['A', 'B', 'C', 'D', 'E']
+            .map(
+              (fid) =>
+                `<button type="button" class="modal-ride-dest-btn" data-dest="${fid}" style="background:rgba(0,210,211,0.16);color:#7ef9ff;border:1px solid rgba(0,210,211,0.5);border-radius:4px;padding:4px 8px;font-size:10.5px;font-weight:900;cursor:pointer;">🚩 OBJ ${fid}</button>`
+            )
+            .join('')}
+          <button type="button" class="modal-ride-dest-btn" data-dest="BASE" style="background:rgba(52,152,219,0.22);color:#74b9ff;border:1px solid #3498db;border-radius:4px;padding:4px 8px;font-size:10.5px;font-weight:900;cursor:pointer;">🏠 MAIN BASE</button>
+          ${
+            hasActiveRide
+              ? `<button type="button" id="modal-ride-cancel-btn" style="background:rgba(231,76,60,0.25);color:#ff7675;border:1px solid #e74c3c;border-radius:4px;padding:4px 8px;font-size:10.5px;font-weight:900;cursor:pointer;">❌ CANCEL RIDE</button>`
+              : ''
+          }
+        </div>
+      </div>
+
       <div style="background:rgba(241,196,15,0.1);border:1px solid rgba(241,196,15,0.45);border-radius:5px;padding:8px 10px;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <span style="font-size:12.5px;font-weight:900;color:#f1c40f;">⭐ FORCE COMMANDER ORDER — ALL 5 SQUADS (${aliveAll} FRIENDLY NPCs + ARMOR)</span>
@@ -1293,7 +1413,7 @@ export const CommandPanel = {
             .join('')}
           <button class="modal-sq-order-btn" data-scope="ALL" data-action="CHARGE" style="background:#c0392b;color:#fff;border:1px solid #ff7675;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Mount &amp; Blade All-Out Charge [${getShortOrderModifierLabel()}+C]">⚔️ ALL CHARGE</button>
           <button class="modal-sq-order-btn" data-scope="ALL" data-action="HOLD" style="background:#8e44ad;color:#fff;border:none;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Defend / Shield Wall [${getShortOrderModifierLabel()}+H]">🛡️ ALL DEFEND</button>
-          <button class="modal-sq-order-btn" data-scope="ALL" data-action="RETREAT" style="background:#2980b9;color:#fff;border:none;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Tactical Retreat / Fall Back [${getShortOrderModifierLabel()}+R]">🏳️ ALL RETREAT</button>
+          <button class="modal-sq-order-btn" data-scope="ALL" data-action="RETREAT" style="background:#2980b9;color:#fff;border:none;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Tactical Retreat / Fall Back [${getShortOrderModifierLabel()}+B]">🏳️ ALL RETREAT</button>
           <button class="modal-sq-order-btn" data-scope="ALL" data-action="FOLLOW" style="background:#27ae60;color:#fff;border:none;border-radius:4px;padding:5px 9px;font-size:10.5px;font-weight:900;cursor:pointer;">🏃 ALL FOLLOW</button>
           <button class="modal-sq-order-btn" data-scope="ALL" data-action="GARRISON" style="background:${
             this.botManager?.garrisonDoctrineEnabled?.[team] ? '#16a085' : 'rgba(255,255,255,0.12)'
@@ -1397,6 +1517,95 @@ export const CommandPanel = {
         this.renderCommandModalContent(modal);
       });
     }
+    const mapModeRideBtn = modal.querySelector('#cmd-map-mode-ride');
+    if (mapModeRideBtn) {
+      mapModeRideBtn.addEventListener('click', () => {
+        this.mapClickMode = 'RIDE';
+        this.renderCommandModalContent(modal);
+      });
+    }
+
+    modal.querySelectorAll('.modal-ride-mode-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const nextMode = btn.dataset.rideMode || 'heli';
+        this.player.preferredRideMode = nextMode;
+        this.mapClickMode = 'RIDE';
+        // If an unboarded pickup is already inbound with destPending, swap vehicle mode live!
+        const curRide = this.player.activeRideVehicle;
+        if (
+          curRide &&
+          curRide !== this.player.activeVehicle &&
+          curRide.rideTask?.active &&
+          curRide.rideTask.transportMode !== nextMode
+        ) {
+          this.vehicleManager?.requestPlayerRide?.(
+            this.player,
+            curRide.rideTask.destPending || !curRide.rideTask.destPos
+              ? { transportMode: nextMode, pickupOnly: true }
+              : {
+                  transportMode: nextMode,
+                  destX: curRide.rideTask.destPos.x,
+                  destZ: curRide.rideTask.destPos.z,
+                  preferRoof: nextMode === 'heli',
+                  customLabel: curRide.rideTask.destLabel
+                }
+          );
+          this.updateRideStatusHud?.();
+        }
+        this.renderCommandModalContent(modal);
+      });
+    });
+
+    const pickupOnlyBtn = modal.querySelector('#modal-ride-pickup-only-btn');
+    if (pickupOnlyBtn) {
+      pickupOnlyBtn.addEventListener('click', () => {
+        this.player.requestQuickTacticalRide?.({ pickupOnly: true });
+        this.updateRideStatusHud?.();
+        this._destroyCommandModal(modal, true);
+      });
+    }
+
+    const rideAimBtn = modal.querySelector('#modal-ride-aim-btn');
+    if (rideAimBtn) {
+      rideAimBtn.addEventListener('click', () => {
+        const aimPt = this.player._lastRideCrosshairPoint;
+        if (aimPt) {
+          const mode = this.player.preferredRideMode || 'heli';
+          this.vehicleManager?.requestPlayerRide?.(this.player, {
+            transportMode: mode,
+            destX: aimPt.x,
+            destZ: aimPt.z,
+            preferRoof: mode === 'heli'
+          });
+          this.updateRideStatusHud?.();
+        }
+        this._destroyCommandModal(modal, true);
+      });
+    }
+
+    modal.querySelectorAll('.modal-ride-dest-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const destKey = btn.dataset.dest || 'OBJ_C_ROOF';
+        const chosenMode =
+          destKey === 'OBJ_C_ROOF' ? 'heli' : this.player.preferredRideMode || 'heli';
+        this.vehicleManager?.requestPlayerRide?.(this.player, {
+          transportMode: chosenMode,
+          destKey,
+          preferRoof: chosenMode === 'heli'
+        });
+        this.updateRideStatusHud?.();
+        this._destroyCommandModal(modal, true);
+      });
+    });
+
+    const cancelRideBtn = modal.querySelector('#modal-ride-cancel-btn');
+    if (cancelRideBtn) {
+      cancelRideBtn.addEventListener('click', () => {
+        this.vehicleManager?.cancelPlayerRide?.(this.player);
+        this.addXpNotification?.(0, '❌ TACTICAL RIDE CANCELLED.');
+        this.renderCommandModalContent(modal);
+      });
+    }
 
     const mapScopeAllBtn = modal.querySelector('#cmd-map-scope-all');
     if (mapScopeAllBtn) {
@@ -1469,6 +1678,19 @@ export const CommandPanel = {
         const cy = ((e.clientY - rect.top) / rect.height) * mapCanvas.height;
         const wx = (cx / mapCanvas.width - 0.5) * 3480;
         const wz = (cy / mapCanvas.height - 0.5) * 2120;
+
+        if (this.mapClickMode === 'RIDE') {
+          const mode = this.player.preferredRideMode || 'heli';
+          this.vehicleManager?.requestPlayerRide?.(this.player, {
+            transportMode: mode,
+            destX: wx,
+            destZ: wz,
+            preferRoof: mode === 'heli'
+          });
+          this.updateRideStatusHud?.();
+          this._destroyCommandModal(modal, true);
+          return;
+        }
 
         let nearestFlag = null;
         let bestDist = Infinity;
@@ -1641,15 +1863,25 @@ export const CommandPanel = {
       <div style="color:#fff;font-size:11.5px;pointer-events:none;">COMMAND WHEEL [Y]</div>
       <div style="color:#2ecc71;pointer-events:none;">${scopeStr}</div>
       <div style="color:#95a5a6;font-size:9px;margin-bottom:4px;pointer-events:none;">PRESS [1-8] OR [- / +]</div>
-      <div style="display:flex;gap:4px;justify-content:center;">
+      <div style="display:flex;gap:4px;justify-content:center;margin-bottom:4px;">
         <button id="wheel-spacing-close" type="button" style="background:rgba(41,128,185,0.85);color:#fff;border:1px solid #3498db;border-radius:3px;padding:3px 6px;font-size:9.5px;font-weight:900;cursor:pointer;">[-] CLOSE</button>
         <button id="wheel-spacing-fan" type="button" style="background:rgba(39,174,96,0.85);color:#fff;border:1px solid #2ecc71;border-radius:3px;padding:3px 6px;font-size:9.5px;font-weight:900;cursor:pointer;">[+] FAN OUT</button>
       </div>
+      <button id="wheel-request-ride" type="button" style="background:rgba(0,206,201,0.88);color:#06131a;border:1px solid #81ecec;border-radius:3px;padding:3px 8px;font-size:9.5px;font-weight:900;cursor:pointer;">🚁 REQUEST RIDE</button>
     `;
     el.appendChild(center);
 
     document.body.appendChild(el);
     if (this._domCache) this._domCache.set('commo-rose', el);
+
+    const rideWheelBtn = el.querySelector('#wheel-request-ride');
+    if (rideWheelBtn) {
+      rideWheelBtn.addEventListener('click', () => {
+        this.closeCommoRose();
+        this.player?.handleAltRRideAction?.(this);
+        this.updateRideStatusHud?.();
+      });
+    }
 
     const closeSpBtn = el.querySelector('#wheel-spacing-close');
     if (closeSpBtn) {

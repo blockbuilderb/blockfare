@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=134';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=134';
+import { sound } from './audio.js?v=135';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=135';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=134';
-import { createVehicleMesh } from './models/vehicle-model.js?v=134';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=134';
-import { events, makeEventBridge } from './events.js?v=134';
+} from './assets/vehicle-defs.js?v=135';
+import { createVehicleMesh } from './models/vehicle-model.js?v=135';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=135';
+import { events, makeEventBridge } from './events.js?v=135';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=134';
+} from './core/StateMachines.js?v=135';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -1315,7 +1315,7 @@ export class VehicleManager {
 
   findNearestEnterable(pos, maxDist = 7.5, playerTeam = null) {
     let best = null;
-    let bestDist = maxDist;
+    let bestScore = Infinity;
     for (const v of this.vehicles) {
       if (v.dead) continue;
       const seatCount = v.seatNames ? v.seatNames.length : getVehicleSeatLayout(v).length;
@@ -1331,10 +1331,23 @@ export class VehicleManager {
       // Allow player to enter any unoccupied vehicle OR commandeer a friendly NPC-driven vehicle!
       if (v.npcDriver && playerTeam && v.team !== playerTeam) continue;
       if (v.isAircraft && v.aiPilotActive && playerTeam && v.team !== playerTeam) continue;
-      const effMax = v.isAircraft ? Math.max(maxDist, 10.5) : maxDist;
+      const isActiveRidePickup = Boolean(
+        v.rideTask && v.rideTask.active && v.rideTask.phase !== 'RTB_DEPART' && (!playerTeam || v.team === playerTeam)
+      );
+      const effMax = isActiveRidePickup && v.isHelicopter
+        ? Math.max(maxDist, 14.5)
+        : v.isAircraft
+        ? Math.max(maxDist, 10.5)
+        : isActiveRidePickup
+        ? Math.max(maxDist, 9.5)
+        : maxDist;
       const d = v.pos.distanceTo(pos);
-      if (d < effMax && d < bestDist + (v.isAircraft ? 3.5 : 0)) {
-        bestDist = d;
+      if (d >= effMax) continue;
+      // Prioritize player's requested Ride vehicle symmetrically regardless of array order!
+      const priorityBonus = isActiveRidePickup ? 12.0 : v.isAircraft ? 2.5 : 0;
+      const score = d - priorityBonus;
+      if (score < bestScore) {
+        bestScore = score;
         best = v;
       }
     }
@@ -4593,9 +4606,11 @@ export class VehicleManager {
       }
 
       // =====================================================================
-      // PHYSICAL NPC DRIVER CONTROL (ONLY when an NPC has walked to the vehicle and boarded it!)
+      // TACTICAL GROUND RIDE / CHAUFFEUR DISPATCH (UNBOARDED PICKUP & RTB)
       // =====================================================================
-      if (!v.driver && !v.remoteDriverId && v.npcDriver && v.patrolPoints && v.patrolPoints.length > 0) {
+      if (!v.driver && !v.remoteDriverId && v.rideTask && v.rideTask.active && !v.isAircraft) {
+        this.stepAiGroundRide(v, dt, player);
+      } else if (!v.driver && !v.remoteDriverId && v.npcDriver && v.patrolPoints && v.patrolPoints.length > 0) {
         let wp = v.patrolPoints[v.patrolIndex % v.patrolPoints.length];
         const drv = v.npcDriver;
         const vIdx = v.fleetIndex ?? Math.max(0, this.vehicles.indexOf(v));
@@ -5916,6 +5931,15 @@ export class VehicleManager {
       return;
     }
 
+    // Active Tactical Helicopter Ride / Airlift Dispatch (flying to player rooftop/ground pickup, holding at LZ, or departing RTB)
+    if (v.isHelicopter && v.rideTask && v.rideTask.active) {
+      this.stepAiHeliRide(v, dt, player);
+      v.turretYaw = v.yaw;
+      v.mesh.position.copy(v.pos);
+      v.mesh.rotation.set(v.pitch || 0, v.yaw || 0, v.roll || 0, 'YXZ');
+      return;
+    }
+
     // If an unmanned aircraft was shot down (or the pilot ejected via [E]), continue its burning Mayday spiral until it crashes into the ground!
     if (v.isShotDown) {
       v.shotDownTimer = (v.shotDownTimer || 14.0) - dt;
@@ -5977,16 +6001,21 @@ export class VehicleManager {
         player.pos.distanceToSquared(v.pos) <= 36 * 36
     );
     // Enemy aircraft auto-sortie; Friendly FALCON Air Wing jets/gunships ALSO scramble when ordered via FALCON / ALL Command!
+    // NOTE: Never hijack Transport Helicopters (`heli_transport`), active Ride helicopters (`v.rideTask?.active`),
+    // or helicopters parked by the player on a skyscraper rooftop (`v.parkedByPlayer`)!
     const shouldAutoSortie =
       !v.isSecretAircraft &&
+      !v.parkedByPlayer &&
+      !(v.rideTask && v.rideTask.active) &&
       (v.team !== playerTeam ||
         (hasActiveFalconOrder &&
           v.aircraftRole !== 'b2_spirit' &&
+          v.aircraftRole !== 'heli_transport' &&
           !(v.claimedByPlayer && (v.claimedByPlayerTimer || 0) > 0) &&
           !playerNearRunwayPlane));
 
     if (!shouldAutoSortie && v.aiPilotActive) {
-      // If player switched teams, ensure all friendly planes are parked on the friendly runway ready for walk-up boarding
+      // If player switched teams or Falcon order ended, return AI jets to friendly runway (never teleport player-parked rooftop helis!)
       v.aiPilotActive = false;
       if (v.flightFSM) {
         v.flightFSM.send(AIRCRAFT_FLIGHT_EVENTS.CANCEL_AI_SORTIE);
@@ -5994,9 +6023,11 @@ export class VehicleManager {
       v.forwardSpeed = 0;
       v.pitch = 0;
       v.roll = 0;
-      v.yaw = v.spawnYaw;
-      v.pos.copy(v.spawnPos);
-      v.pos.y = this.world.getGroundHeightAt(v.pos.x, v.pos.z);
+      if (!v.parkedByPlayer) {
+        v.yaw = v.spawnYaw;
+        v.pos.copy(v.spawnPos);
+        v.pos.y = this.world.getGroundHeightAt(v.pos.x, v.pos.z);
+      }
     } else if (!v.aiPilotActive && shouldAutoSortie && !onDeployMenu) {
       if (v.flightFSM && v.flightFSM.is(AIRCRAFT_FLIGHT_STATES.PARKED_RUNWAY)) {
         v.flightFSM.send(AIRCRAFT_FLIGHT_EVENTS.START_AI_PREFLIGHT);
@@ -6294,11 +6325,35 @@ export class VehicleManager {
         }
       }
     } else {
-      // Parked on the Airfield Runway
+      // Parked on the Airfield Runway, Helipad, OR High-Rise Skyscraper Rooftop!
+      // CRITICAL FIX: Helicopters must use 5-point rooftop/helipad support height (`getAircraftSupportHeightAt`)
+      // instead of `getGroundHeightAt` so landing & exiting on a 60m–100m Downtown FOB C skyscraper roof
+      // NEVER teleports the helicopter down into the ground floor!
       v.forwardSpeed *= Math.pow(0.05, dt);
       v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, dt * 5);
       v.roll = THREE.MathUtils.lerp(v.roll || 0, 0, dt * 5);
-      v.pos.y = this.world.getGroundHeightAt(v.pos.x, v.pos.z);
+      if (v.isHelicopter) {
+        v._heliVelX = (v._heliVelX || 0) * Math.pow(0.05, dt);
+        v._heliVelZ = (v._heliVelZ || 0) * Math.pow(0.05, dt);
+        const supportY = this.getAircraftSupportHeightAt(v.pos.x, v.pos.z, v.pos.y + 3.8, true);
+        if (v.heliHoverHold && v.pos.y > supportY + 0.35) {
+          const targetH = Math.max(supportY, v.heliHoverAlt ?? v.pos.y);
+          v.pos.y = THREE.MathUtils.lerp(v.pos.y, targetH, Math.min(1, dt * 3.0));
+          v._heliVelY = 0;
+        } else if (v.pos.y > supportY + 0.12) {
+          v._heliVelY = Math.max(-7.5, (v._heliVelY || 0) - 9.81 * dt);
+          v.pos.y = Math.max(supportY, v.pos.y + v._heliVelY * dt);
+          if (v.pos.y <= supportY + 0.02) {
+            v.pos.y = supportY;
+            v._heliVelY = 0;
+          }
+        } else {
+          v.pos.y = supportY;
+          v._heliVelY = 0;
+        }
+      } else {
+        v.pos.y = this.world.getGroundHeightAt(v.pos.x, v.pos.z);
+      }
       this.updateAircraftControlSurfacesAndVortices(v, dt, 0, 0, 0);
     }
 
@@ -6445,6 +6500,953 @@ export class VehicleManager {
         life: 2.4,
         owner: ownerObj
       });
+    }
+  }
+
+  // ===========================================================================
+  // ROOFTOP SUPPORT HEIGHT & MULTI-MODAL TACTICAL RIDE / EXTRACTION SYSTEM
+  // Supports: 'heli' (UH-60M / Mi-8 Rooftop Airlift), 'apc' (LAV-25 / BTR-82A),
+  //           'truck' (6x6 Troop & Ammo Truck), and 'humvee' (Up-Armored 4x4)
+  // ===========================================================================
+
+  getAircraftSupportHeightAt(wx, wz, refMaxY = 175, sampleSkids = false) {
+    const sampleColumn = (sx, sz) => {
+      const terrY = this.world ? this.world.getGroundHeightAt(sx, sz) : 0;
+      if (!this.world) return terrY;
+      let maxY = terrY;
+      const platforms = this.world.elevatedPlatforms;
+      if (Array.isArray(platforms)) {
+        for (let i = 0; i < platforms.length; i++) {
+          const p = platforms[i];
+          if (
+            sx >= p.minX &&
+            sx <= p.maxX &&
+            sz >= p.minZ &&
+            sz <= p.maxZ &&
+            p.topY > maxY &&
+            p.topY <= refMaxY
+          ) {
+            maxY = p.topY;
+          }
+        }
+      }
+      if (this.world.voxels && typeof this.world.worldToGrid === 'function') {
+        const g = this.world.worldToGrid(sx, terrY + 0.5, sz);
+        const maxDy = Math.min(126, Math.max(8, Math.ceil((refMaxY - terrY) / 1.25)));
+        for (let dy = 0; dy <= maxDy; dy++) {
+          const vox = this.world.getVoxel
+            ? this.world.getVoxel(g.gx, g.gy + dy, g.gz)
+            : this.world.voxels.get(this.world.key(g.gx, g.gy + dy, g.gz));
+          if (vox && !vox.isProp) {
+            const top = vox.maxY ?? terrY + (dy + 1) * 1.25;
+            if (top > maxY && top <= refMaxY) {
+              maxY = top;
+            }
+          }
+        }
+      }
+      return maxY;
+    };
+
+    let bestY = sampleColumn(wx, wz);
+    if (sampleSkids) {
+      const offsets = [
+        [1.5, 1.7],
+        [-1.5, 1.7],
+        [1.5, -1.7],
+        [-1.5, -1.7]
+      ];
+      for (let i = 0; i < offsets.length; i++) {
+        const sy = sampleColumn(wx + offsets[i][0], wz + offsets[i][1]);
+        if (sy > bestY) bestY = sy;
+      }
+    }
+    return bestY;
+  }
+
+  /**
+   * Finds the highest intact building rooftop near `(wx, wz)` within `searchRadius` meters
+   * so Helicopter Airlifts can land snipers directly on top of Downtown FOB C skyscrapers!
+   */
+  findTallestBuildingRoofNear(wx, wz, searchRadius = 145) {
+    if (!this.world) return null;
+    let best = null;
+    const rSq = searchRadius * searchRadius;
+    if (Array.isArray(this.world.buildings)) {
+      for (let i = 0; i < this.world.buildings.length; i++) {
+        const b = this.world.buildings[i];
+        if (!b || b.collapsed) continue;
+        const cx = Number.isFinite(b.centerWx)
+          ? b.centerWx
+          : Number.isFinite(b.cx)
+          ? b.cx
+          : ((b.minWx ?? b.minX ?? 0) + (b.maxWx ?? b.maxX ?? 0)) * 0.5;
+        const cz = Number.isFinite(b.centerWz)
+          ? b.centerWz
+          : Number.isFinite(b.cz)
+          ? b.cz
+          : ((b.minWz ?? b.minZ ?? 0) + (b.maxWz ?? b.maxZ ?? 0)) * 0.5;
+        const padX =
+          Number.isFinite(b.startGx) && Number.isFinite(b.width)
+            ? (b.startGx + Math.floor(b.width * 0.5)) * 1.25
+            : cx;
+        const padZ =
+          Number.isFinite(b.startGz) && Number.isFinite(b.depth)
+            ? (b.startGz + Math.floor(b.depth * 0.5)) * 1.25
+            : cz;
+        const dSq = (padX - wx) * (padX - wx) + (padZ - wz) * (padZ - wz);
+        if (dSq > rSq) continue;
+        const groundY = this.world.getGroundHeightAt(padX, padZ);
+        const roofY = this.getAircraftSupportHeightAt(padX, padZ, 185, true);
+        const hAbove = roofY - groundY;
+        if (hAbove < 6.5) continue;
+        if (!best || roofY > best.y + 0.5 || (Math.abs(roofY - best.y) <= 0.5 && dSq < best.dSq)) {
+          best = { x: padX, y: roofY, z: padZ, heightAboveGround: hAbove, dSq, building: b };
+        }
+      }
+    }
+    if (!best) {
+      const groundY = this.world.getGroundHeightAt(wx, wz);
+      const roofY = this.getAircraftSupportHeightAt(wx, wz, 185, true);
+      if (roofY - groundY >= 6.5) {
+        best = { x: wx, y: roofY, z: wz, heightAboveGround: roofY - groundY, dSq: 0, building: null };
+      }
+    }
+    return best;
+  }
+
+  resolveRideDestination(player, opts = {}) {
+    const team = player?.team || 'US';
+    const isHeli = (opts.transportMode || 'heli') === 'heli';
+    const destKey = String(opts.destKey || '').toUpperCase();
+
+    if (destKey === 'OBJ_C_ROOF' || destKey === 'C_ROOF') {
+      const flagC = this.world?.flags?.find((f) => f.id === 'C') || { pos: { x: 0, z: 0 } };
+      const roof = this.findTallestBuildingRoofNear(flagC.pos.x, flagC.pos.z, 175);
+      if (roof && isHeli) {
+        return {
+          pos: new THREE.Vector3(roof.x, roof.y, roof.z),
+          label: `🏢 OBJ C SKYSCRAPER ROOF (+${Math.round(roof.heightAboveGround)}M)`,
+          isRoof: true
+        };
+      }
+      const gy = this.world ? this.world.getGroundHeightAt(flagC.pos.x, flagC.pos.z) : 0;
+      return {
+        pos: new THREE.Vector3(flagC.pos.x, gy, flagC.pos.z),
+        label: '🚩 OBJECTIVE C (DOWNTOWN)',
+        isRoof: false
+      };
+    }
+
+    if (destKey === 'BASE' || destKey === 'HQ') {
+      const baseSpawn =
+        team === 'RU'
+          ? this.world?.spawns?.RU_BASE || { x: 1520, z: 0 }
+          : this.world?.spawns?.US_BASE || { x: -1520, z: 0 };
+      const gy = this.world ? this.world.getGroundHeightAt(baseSpawn.x, baseSpawn.z) : 0;
+      return {
+        pos: new THREE.Vector3(baseSpawn.x + (team === 'RU' ? -18 : 18), gy, baseSpawn.z),
+        label: `🏠 ${team} MAIN BASE HQ`,
+        isRoof: false
+      };
+    }
+
+    if (['A', 'B', 'C', 'D', 'E'].includes(destKey)) {
+      const fl = this.world?.flags?.find((f) => f.id === destKey);
+      if (fl) {
+        if (isHeli && opts.preferRoof) {
+          const roof = this.findTallestBuildingRoofNear(fl.pos.x, fl.pos.z, 125);
+          if (roof) {
+            return {
+              pos: new THREE.Vector3(roof.x, roof.y, roof.z),
+              label: `🏢 OBJ ${destKey} ROOFTOP (+${Math.round(roof.heightAboveGround)}M)`,
+              isRoof: true
+            };
+          }
+        }
+        const safeGnd =
+          !isHeli && this.world?.pushOutOfBuildingFootprint
+            ? this.world.pushOutOfBuildingFootprint(fl.pos.x + 12, fl.pos.z, 4.5)
+            : { x: fl.pos.x + (isHeli ? 0 : 12), z: fl.pos.z };
+        const gy = isHeli
+          ? this.getAircraftSupportHeightAt(safeGnd.x, safeGnd.z, 175, true)
+          : this.world
+          ? this.world.getGroundHeightAt(safeGnd.x, safeGnd.z)
+          : 0;
+        const gndBase = this.world ? this.world.getGroundHeightAt(safeGnd.x, safeGnd.z) : 0;
+        return {
+          pos: new THREE.Vector3(safeGnd.x, gy, safeGnd.z),
+          label: gy - gndBase > 6.5 ? `🏢 OBJ ${destKey} ROOF` : `🚩 OBJECTIVE ${destKey}`,
+          isRoof: gy - gndBase > 6.5
+        };
+      }
+    }
+
+    if (Number.isFinite(opts.destX) && Number.isFinite(opts.destZ)) {
+      const cx = THREE.MathUtils.clamp(opts.destX, -2350, 2350);
+      const cz = THREE.MathUtils.clamp(opts.destZ, -1550, 1550);
+      if (isHeli && opts.preferRoof !== false) {
+        const nearRoof = this.findTallestBuildingRoofNear(cx, cz, 32);
+        if (nearRoof) {
+          return {
+            pos: new THREE.Vector3(nearRoof.x, nearRoof.y, nearRoof.z),
+            label:
+              opts.customLabel ||
+              `🏢 ROOFTOP LZ (+${Math.round(nearRoof.heightAboveGround)}M)`,
+            isRoof: true
+          };
+        }
+        const supY = this.getAircraftSupportHeightAt(cx, cz, 175, true);
+        const gY = this.world ? this.world.getGroundHeightAt(cx, cz) : 0;
+        return {
+          pos: new THREE.Vector3(cx, supY, cz),
+          label:
+            opts.customLabel ||
+            (supY - gY > 6.5
+              ? `🏢 ROOFTOP LZ (+${Math.round(supY - gY)}M)`
+              : `📍 MAP LZ (${Math.round(cx)}, ${Math.round(cz)})`),
+          isRoof: supY - gY > 6.5
+        };
+      }
+      const pushed = this.world?.pushOutOfBuildingFootprint
+        ? this.world.pushOutOfBuildingFootprint(cx, cz, 4.5)
+        : { x: cx, z: cz };
+      const gy = this.world ? this.world.getGroundHeightAt(pushed.x, pushed.z) : 0;
+      return {
+        pos: new THREE.Vector3(pushed.x, gy, pushed.z),
+        label: opts.customLabel || `📍 GROUND LZ (${Math.round(pushed.x)}, ${Math.round(pushed.z)})`,
+        isRoof: false
+      };
+    }
+
+    // Smart Context-Aware Default Destination:
+    // - If player is near Objective C (or on C's skyscraper roof!) -> fly to nearest uncaptured/contested objective!
+    // - Otherwise (e.g., at Main Base as a Sniper!) -> fly straight to TOP OF OBJ C SKYSCRAPER ROOF (for Heli) or OBJ C!
+    const flagC = this.world?.flags?.find((f) => f.id === 'C');
+    const distToC = flagC && player ? Math.hypot(player.pos.x - flagC.pos.x, player.pos.z - flagC.pos.z) : 999;
+    if (distToC > 135) {
+      return this.resolveRideDestination(player, {
+        transportMode: isHeli ? 'heli' : opts.transportMode,
+        destKey: isHeli ? 'OBJ_C_ROOF' : 'C'
+      });
+    }
+    let nextFlag =
+      this.world?.flags?.find((f) => f.id !== 'C' && f.owner !== team) ||
+      this.world?.flags?.find((f) => f.id === 'D') ||
+      this.world?.flags?.[0];
+    return this.resolveRideDestination(player, {
+      transportMode: opts.transportMode,
+      destKey: nextFlag ? nextFlag.id : 'BASE',
+      preferRoof: isHeli
+    });
+  }
+
+  cancelPlayerRide(player) {
+    const v = player?.activeRideVehicle || this.vehicles.find((veh) => veh?.rideTask?.active);
+    if (!v || !v.rideTask) return false;
+    if (player && player.activeVehicle === v && (player.vehicleSeatIndex || 0) >= 1) {
+      // Player is inside: hand control or start gentle hover/stop
+      v.rideTask.active = false;
+    } else {
+      v.rideTask.phase = 'RTB_DEPART';
+      v.rideTask.departDelay = 0.2;
+    }
+    if (player) player.activeRideVehicle = null;
+    return true;
+  }
+
+  /**
+   * Dispatches an AI-piloted / AI-driven Transport (`'heli'`, `'apc'`, `'truck'`, `'humvee'`)
+   * to pick up `player` (from Main Base, open terrain, OR top of a tall skyscraper!) and carry
+   * them to `dest` (including rooftop sniper insertions at Downtown FOB C!).
+   */
+  requestPlayerRide(player, opts = {}) {
+    if (!player || player.dead || player.downed) return { ok: false, reason: 'PLAYER_DOWN' };
+    if ((this.world?.era || 'modern') !== 'modern') {
+      return { ok: false, reason: 'ERA_LOCKED' };
+    }
+
+    const team = player.team || 'US';
+    const isRU = team === 'RU';
+    const playerGndY = this.world ? this.world.getGroundHeightAt(player.pos.x, player.pos.z) : 0;
+    const playerOnHighRoof = player.pos.y - playerGndY > 6.5;
+
+    let mode = String(opts.transportMode || player.preferredRideMode || 'heli').toLowerCase();
+    if (!['heli', 'apc', 'truck', 'humvee'].includes(mode)) mode = 'heli';
+    player.preferredRideMode = mode;
+
+    const isPickupOnly = Boolean(opts.pickupOnly);
+    const dest = isPickupOnly
+      ? {
+          pos: null,
+          label: '⏳ AWAITING DROP-OFF [ALT+R]',
+          isRoof: false,
+          pending: true
+        }
+      : this.resolveRideDestination(player, { ...opts, transportMode: mode });
+
+    // 1. If player is ALREADY onboard an active Ride vehicle (or piloting/riding a matching transport), lock/redirect drop-off live!
+    if (player.activeVehicle && !player.activeVehicle.dead && !isPickupOnly) {
+      const curV = player.activeVehicle;
+      const curMatchesMode =
+        (mode === 'heli' && curV.isHelicopter) ||
+        (mode === 'apc' && curV.type === 'apc') ||
+        (mode === 'truck' && curV.type === 'truck_transport') ||
+        (mode === 'humvee' && (curV.type === 'humvee' || curV.type === 'car'));
+      if (curV.rideTask?.active || curMatchesMode) {
+        if ((player.vehicleSeatIndex || 0) === 0 && (curV.seatNames?.length || 2) > 1) {
+          // Move player into Passenger / Door-Gunner Seat [F2] so AI Chauffeur takes the controls!
+          if (Array.isArray(curV.crewSeats)) curV.crewSeats[0] = null;
+          player.vehicleSeatIndex = 1;
+          if (Array.isArray(curV.crewSeats)) curV.crewSeats[1] = player;
+          player.vehicleCameraMode = 'CHASE_3P';
+          player.thirdPersonVehicle = true;
+        }
+        curV.rideTask = {
+          active: true,
+          transportMode: mode,
+          phase: 'EN_ROUTE_TO_DEST',
+          pickupPos: curV.pos.clone(),
+          destPos: dest.pos.clone(),
+          destLabel: dest.label,
+          destIsRoof: Boolean(dest.isRoof),
+          destPending: false,
+          _consumedPingRef: opts._consumedPingRef || curV.rideTask?._consumedPingRef || null,
+          arrivedAnnounced: false,
+          pickupAnnounced: true,
+          departDelay: 0,
+          liftoffClearY: curV.pos.y + (curV.isHelicopter ? 16 : 0)
+        };
+        player.activeRideVehicle = curV;
+        sound.playRadioBeep?.(true);
+        player.onAwardXp?.(
+          0,
+          `${curV.isHelicopter ? '🚁 AIRLIFT-1' : '🛡️ CONVOY-1'}: DROP-OFF LOCKED → ${dest.label}!`
+        );
+        return { ok: true, vehicle: curV, dest, redirected: true };
+      }
+    }
+
+    // 1b. If an unboarded pickup vehicle of the SAME mode is ALREADY inbound/waiting, update its drop-off in-place without resetting approach!
+    if (
+      !isPickupOnly &&
+      player.activeRideVehicle &&
+      player.activeRideVehicle !== player.activeVehicle &&
+      !player.activeRideVehicle.dead &&
+      player.activeRideVehicle.rideTask?.active &&
+      player.activeRideVehicle.rideTask.phase !== 'RTB_DEPART' &&
+      player.activeRideVehicle.rideTask.transportMode === mode
+    ) {
+      const inboundV = player.activeRideVehicle;
+      inboundV.rideTask.destPos = dest.pos.clone();
+      inboundV.rideTask.destLabel = dest.label;
+      inboundV.rideTask.destIsRoof = Boolean(dest.isRoof);
+      inboundV.rideTask.destPending = false;
+      inboundV.rideTask.arrivedAnnounced = false;
+      if (opts._consumedPingRef) {
+        inboundV.rideTask._consumedPingRef = opts._consumedPingRef;
+      }
+      sound.playRadioBeep?.(true);
+      player.onAwardXp?.(
+        0,
+        `🎯 DROP-OFF DESIGNATED → ${dest.label}! (BOARD INBOUND RIDE WITH [E])`
+      );
+      return {
+        ok: true,
+        vehicle: inboundV,
+        dest,
+        pickupPos: inboundV.rideTask.pickupPos,
+        transportMode: mode,
+        updatedDropoff: true
+      };
+    }
+
+    // Cancel any previous unboarded ride vehicle (e.g. if switching transport mode)
+    if (player.activeRideVehicle && player.activeRideVehicle !== player.activeVehicle) {
+      const prev = player.activeRideVehicle;
+      if (prev.rideTask) prev.rideTask.active = false;
+      player.activeRideVehicle = null;
+    }
+
+    // 2. Find an available unoccupied friendly transport of the requested mode, or spawn a dedicated shuttle
+    let rideVeh = null;
+    if (mode === 'heli') {
+      rideVeh = this.vehicles.find(
+        (v) =>
+          v &&
+          !v.dead &&
+          v.team === team &&
+          v.isHelicopter &&
+          v.aircraftRole === 'heli_transport' &&
+          !v.driver &&
+          !v.remoteDriverId &&
+          !v.parkedByPlayer
+      );
+      if (!rideVeh) {
+        const sb = VEHICLE_STATS.HELI_TRANSPORT || { maxHp: 1750, speed: 68, maxSpeed: 82 };
+        rideVeh = this.spawnVehicle({
+          id: `ride_heli_${team.toLowerCase()}_${Date.now()}`,
+          name: isRU
+            ? 'MI-8AMTSH AIRLIFT-1 SHUTTLE (8 SEATS • DOOR GUNS)'
+            : 'UH-60M BLACK HAWK AIRLIFT-1 (8 SEATS • TWIN M134)',
+          type: 'plane',
+          isAircraft: true,
+          isHelicopter: true,
+          aircraftRole: 'heli_transport',
+          team,
+          spawnPos: new THREE.Vector3(isRU ? 1504 : -1504, 4, isRU ? 44 : -44),
+          spawnYaw: isRU ? Math.PI / 2 : -Math.PI / 2,
+          maxHp: sb.maxHp || 1750,
+          speed: sb.speed || 68,
+          minSpeed: 0,
+          maxSpeed: sb.maxSpeed || 82,
+          weaponType: 'heli_minigun',
+          rpm: VEHICLE_STATS.RPM_HELI_MINIGUN || 2000,
+          coaxRpm: 120,
+          patrolPoints: [new THREE.Vector3(0, 95, 0)]
+        });
+      }
+    } else {
+      const wantType = mode === 'apc' ? 'apc' : mode === 'truck' ? 'truck_transport' : 'humvee';
+      rideVeh = this.vehicles.find(
+        (v) =>
+          v &&
+          !v.dead &&
+          !v.isAircraft &&
+          !v.isEmplacement &&
+          v.team === team &&
+          (v.type === wantType || (wantType === 'humvee' && v.type === 'car')) &&
+          !v.driver &&
+          !v.remoteDriverId
+      );
+      if (rideVeh && rideVeh.npcDriver) {
+        rideVeh.npcDriver.drivingVehicle = null;
+        rideVeh.npcDriver = null;
+      }
+      if (!rideVeh) {
+        const statBlock =
+          wantType === 'apc'
+            ? VEHICLE_STATS.APC || { maxHp: 1450, speed: 21 }
+            : wantType === 'truck_transport'
+            ? VEHICLE_STATS.TRUCK_TRANSPORT || { maxHp: 1050, speed: 22 }
+            : VEHICLE_STATS.HUMVEE || { maxHp: 850, speed: 26 };
+        const nameStr =
+          wantType === 'apc'
+            ? isRU
+              ? 'BTR-82A ARMORED TRANSPORT (8 SEATS • 30MM)'
+              : 'LAV-25A2 ARMORED TRANSPORT (8 SEATS • 25MM)'
+            : wantType === 'truck_transport'
+            ? isRU
+              ? 'KAMAZ-5350 6×6 TROOP & AMMO SHUTTLE'
+              : 'M1083A1 6×6 TROOP & AMMO SHUTTLE'
+            : isRU
+            ? 'GAZ TIGR SCOUT TRANSPORT (.50 HMG)'
+            : 'M1151 HUMVEE SCOUT TRANSPORT (.50 HMG)';
+        rideVeh = this.spawnVehicle({
+          id: `ride_${mode}_${team.toLowerCase()}_${Date.now()}`,
+          name: nameStr,
+          type: wantType === 'humvee' ? 'humvee' : wantType,
+          isLogisticsTruck: wantType === 'truck_transport',
+          team,
+          spawnPos: new THREE.Vector3(isRU ? 1480 : -1480, 4, 24),
+          spawnYaw: isRU ? Math.PI / 2 : -Math.PI / 2,
+          maxHp: statBlock.maxHp,
+          speed: statBlock.speed,
+          weaponType: wantType === 'apc' ? 'autocannon' : 'hmg',
+          rpm: wantType === 'apc' ? 330 : 600,
+          coaxRpm: 650,
+          patrolPoints: [new THREE.Vector3(0, 0, 0)]
+        });
+      }
+    }
+
+    // 3. Compute safe Pickup LZ & position inbound shuttle ~55m–85m out if it was far away at HQ (~4–6s realistic arrival!)
+    let pickupPos;
+    const approachAngle = team === 'RU' ? 0.25 : Math.PI - 0.25;
+    if (mode === 'heli') {
+      const supY = this.getAircraftSupportHeightAt(player.pos.x, player.pos.z, player.pos.y + 8, true);
+      // Offset 4.5m on flat ground, or hover directly over/beside player on narrow high-rise roofs!
+      const offDist = playerOnHighRoof ? 3.2 : 5.5;
+      const px = player.pos.x + Math.cos(approachAngle) * offDist;
+      const pz = player.pos.z + Math.sin(approachAngle) * offDist;
+      const padSupY = this.getAircraftSupportHeightAt(px, pz, supY + 6, true);
+      const finalPx = Math.abs(padSupY - supY) <= 1.8 ? px : player.pos.x;
+      const finalPz = Math.abs(padSupY - supY) <= 1.8 ? pz : player.pos.z;
+      const finalPy = Math.abs(padSupY - supY) <= 1.8 ? padSupY : supY + 2.6;
+      pickupPos = new THREE.Vector3(finalPx, finalPy, finalPz);
+
+      if (rideVeh.pos.distanceTo(pickupPos) > 145) {
+        const sx = THREE.MathUtils.clamp(pickupPos.x + (isRU ? 82 : -82), -2400, 2400);
+        const sz = THREE.MathUtils.clamp(pickupPos.z + 28, -1600, 1600);
+        const sgY = this.getAircraftSupportHeightAt(sx, sz, 175, false);
+        rideVeh.pos.set(sx, Math.max(pickupPos.y + 26, sgY + 34), sz);
+        rideVeh.yaw = Math.atan2(-(pickupPos.x - sx), -(pickupPos.z - sz));
+        rideVeh.pitch = -0.14;
+        rideVeh.roll = 0;
+        rideVeh._heliVelX = -Math.sin(rideVeh.yaw) * 22;
+        rideVeh._heliVelY = -2.0;
+        rideVeh._heliVelZ = -Math.cos(rideVeh.yaw) * 22;
+        rideVeh.forwardSpeed = 22;
+        rideVeh.mesh.position.copy(rideVeh.pos);
+      }
+      rideVeh.heliHoverHold = false;
+      rideVeh.aiPilotActive = false;
+    } else {
+      const rawPx = player.pos.x + Math.cos(approachAngle) * 6.5;
+      const rawPz = player.pos.z + Math.sin(approachAngle) * 6.5;
+      const safeP = this.world?.pushOutOfBuildingFootprint
+        ? this.world.pushOutOfBuildingFootprint(rawPx, rawPz, 4.5)
+        : { x: rawPx, z: rawPz };
+      const pGy = this.world ? this.world.getGroundHeightAt(safeP.x, safeP.z) : 0;
+      pickupPos = new THREE.Vector3(safeP.x, pGy, safeP.z);
+
+      if (rideVeh.pos.distanceTo(pickupPos) > 110) {
+        const rawSx = THREE.MathUtils.clamp(pickupPos.x + (isRU ? 48 : -48), -2400, 2400);
+        const rawSz = THREE.MathUtils.clamp(pickupPos.z + 18, -1600, 1600);
+        const safeS = this.world?.pushOutOfBuildingFootprint
+          ? this.world.pushOutOfBuildingFootprint(rawSx, rawSz, 4.8)
+          : { x: rawSx, z: rawSz };
+        const sGy = this.world ? this.world.getGroundHeightAt(safeS.x, safeS.z) : 0;
+        rideVeh.pos.set(safeS.x, sGy, safeS.z);
+        rideVeh.yaw = Math.atan2(-(pickupPos.x - safeS.x), -(pickupPos.z - safeS.z));
+        rideVeh.forwardSpeed = 12;
+        rideVeh.mesh.position.copy(rideVeh.pos);
+      }
+    }
+
+    rideVeh.hp = Math.max(rideVeh.hp || rideVeh.maxHp, rideVeh.maxHp * 0.85);
+    rideVeh.dead = false;
+    rideVeh.isShotDown = false;
+    rideVeh.claimedByPlayer = true;
+    rideVeh.claimedByPlayerTimer = 90.0;
+    rideVeh.mesh.visible = true;
+    rideVeh.rideTask = {
+      active: true,
+      transportMode: mode,
+      phase: 'APPROACHING_PICKUP',
+      pickupPos,
+      destPos: dest.pos ? dest.pos.clone() : null,
+      destLabel: dest.label,
+      destIsRoof: Boolean(dest.isRoof),
+      destPending: Boolean(dest.pending),
+      _consumedPingRef: opts._consumedPingRef || player.activePing || null,
+      playerOnRoofPickup: playerOnHighRoof,
+      pickupAnnounced: false,
+      arrivedAnnounced: false,
+      departDelay: 0,
+      liftoffClearY: pickupPos.y + 16
+    };
+    player.activeRideVehicle = rideVeh;
+
+    sound.playRadioBeep?.(true);
+    const modeTitle =
+      mode === 'heli'
+        ? '🚁 AIRLIFT-1 (BLACK HAWK / MI-8)'
+        : mode === 'apc'
+        ? '🛡️ ARMOR TAXI (8×8 APC)'
+        : mode === 'truck'
+        ? '🚚 LOGISTICS CONVOY (6×6 TRUCK)'
+        : '🚙 RECON SHUTTLE (HUMVEE)';
+    const roofNote =
+      playerOnHighRoof && mode !== 'heli'
+        ? ' — PICKUP AT STREET BASE BELOW YOUR BUILDING!'
+        : '';
+    player.onAwardXp?.(
+      0,
+      dest.pending
+        ? `${modeTitle} INBOUND TO YOUR POSITION${roofNote}! (PRESS [E] TO BOARD • PRESS [ALT+R] NOW OR LATER TO SET DROP-OFF!)`
+        : `${modeTitle} INBOUND FOR PICKUP → DEST: ${dest.label}${roofNote} (PRESS [E] WHEN IT ARRIVES!)`
+    );
+
+    return { ok: true, vehicle: rideVeh, dest, pickupPos, transportMode: mode };
+  }
+
+  /**
+   * Smooth Newtonian Rotorcraft AI Pilot for Player Airlift Requests (`APPROACHING_PICKUP` ->
+   * `HOLDING_FOR_PICKUP` -> `EN_ROUTE_TO_DEST` -> `ARRIVED_AT_DEST` -> `RTB_DEPART`).
+   */
+  stepAiHeliRide(v, dt, player) {
+    const task = v.rideTask;
+    if (!task || !task.active) return;
+
+    if (typeof v._heliVelX !== 'number') v._heliVelX = 0;
+    if (typeof v._heliVelY !== 'number') v._heliVelY = 0;
+    if (typeof v._heliVelZ !== 'number') v._heliVelZ = 0;
+
+    // Keep pickup LZ gently tracking player if they shift slightly on the rooftop/pad while waiting
+    if (
+      (task.phase === 'APPROACHING_PICKUP' || task.phase === 'HOLDING_FOR_PICKUP') &&
+      player &&
+      !player.dead &&
+      !player.activeVehicle
+    ) {
+      const pSupY = this.getAircraftSupportHeightAt(player.pos.x, player.pos.z, player.pos.y + 6, true);
+      if (Math.hypot(player.pos.x - task.pickupPos.x, player.pos.z - task.pickupPos.z) < 26) {
+        const dxKeep = task.pickupPos.x - player.pos.x;
+        const dzKeep = task.pickupPos.z - player.pos.z;
+        const dKeep = Math.hypot(dxKeep, dzKeep);
+        if (dKeep > 6.5) {
+          task.pickupPos.x = player.pos.x + (dxKeep / dKeep) * 4.5;
+          task.pickupPos.z = player.pos.z + (dzKeep / dKeep) * 4.5;
+          const candSup = this.getAircraftSupportHeightAt(task.pickupPos.x, task.pickupPos.z, pSupY + 5, true);
+          task.pickupPos.y = Math.abs(candSup - pSupY) <= 1.8 ? candSup : pSupY + 2.4;
+        }
+      }
+    }
+
+    if (task.phase === 'RTB_DEPART') {
+      task.departDelay = Math.max(0, (task.departDelay || 0) - dt);
+      const curSupY = this.getAircraftSupportHeightAt(v.pos.x, v.pos.z, v.pos.y + 4, true);
+      if (task.departDelay > 0) {
+        v._heliVelX *= Math.pow(0.08, dt);
+        v._heliVelZ *= Math.pow(0.08, dt);
+        v._heliVelY = 0;
+        v.pos.y = Math.max(curSupY, v.pos.y);
+        v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, Math.min(1, dt * 4));
+        v.roll = THREE.MathUtils.lerp(v.roll || 0, 0, Math.min(1, dt * 4));
+        return;
+      }
+      // Climb +45m clear of skyscrapers and return toward friendly HQ helipad
+      const rtbX = v.team === 'RU' ? 1504 : -1504;
+      const rtbZ = v.team === 'RU' ? 44 : -44;
+      const dxR = rtbX - v.pos.x;
+      const dzR = rtbZ - v.pos.z;
+      const distR = Math.hypot(dxR, dzR);
+      if (distR < 35) {
+        task.active = false;
+        v.pos.set(rtbX, this.world ? this.world.getGroundHeightAt(rtbX, rtbZ) : 0, rtbZ);
+        v._heliVelX = 0;
+        v._heliVelY = 0;
+        v._heliVelZ = 0;
+        v.forwardSpeed = 0;
+        v.pitch = 0;
+        v.roll = 0;
+        if (player && player.activeRideVehicle === v) player.activeRideVehicle = null;
+        return;
+      }
+      const desYaw = Math.atan2(-dxR, -dzR);
+      let yErr = desYaw - (v.yaw || 0);
+      while (yErr > Math.PI) yErr -= Math.PI * 2;
+      while (yErr < -Math.PI) yErr += Math.PI * 2;
+      v.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(yErr * 1.5, -1.1, 1.1) * dt;
+      v.pitch = THREE.MathUtils.lerp(v.pitch || 0, -0.22, Math.min(1, dt * 2.5));
+      v.roll = THREE.MathUtils.lerp(v.roll || 0, THREE.MathUtils.clamp(yErr * 0.5, -0.35, 0.35), Math.min(1, dt * 3));
+      const spd = 48;
+      v._heliVelX = THREE.MathUtils.lerp(v._heliVelX, -Math.sin(v.yaw) * spd, Math.min(1, dt * 1.8));
+      v._heliVelZ = THREE.MathUtils.lerp(v._heliVelZ, -Math.cos(v.yaw) * spd, Math.min(1, dt * 1.8));
+      v._heliVelY = THREE.MathUtils.clamp((Math.max(curSupY + 38, 95) - v.pos.y) * 1.4, -5, 8.5);
+      v.pos.x += v._heliVelX * dt;
+      v.pos.y += v._heliVelY * dt;
+      v.pos.z += v._heliVelZ * dt;
+      v.forwardSpeed = Math.hypot(v._heliVelX, v._heliVelZ);
+      return;
+    }
+
+    // Player boarded before designating a drop-off (`[Alt+R]`): hold a steady ready-hover right above the pad!
+    if (task.phase === 'AWAITING_DEST' || ((task.phase === 'EN_ROUTE_TO_DEST' || task.phase === 'ARRIVED_AT_DEST') && !task.destPos)) {
+      const holdSupY = this.getAircraftSupportHeightAt(v.pos.x, v.pos.z, v.pos.y + 6.0, true);
+      const readyHoverY = holdSupY + 3.2;
+      v._heliVelX *= Math.pow(0.06, dt);
+      v._heliVelZ *= Math.pow(0.06, dt);
+      v._heliVelY = THREE.MathUtils.lerp(
+        v._heliVelY,
+        THREE.MathUtils.clamp((readyHoverY - v.pos.y) * 2.0, -3.0, 5.5),
+        Math.min(1, dt * 4.5)
+      );
+      v.pos.x += v._heliVelX * dt;
+      v.pos.z += v._heliVelZ * dt;
+      v.pos.y = Math.max(holdSupY, v.pos.y + v._heliVelY * dt);
+      v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, Math.min(1, dt * 4.0));
+      v.roll = THREE.MathUtils.lerp(v.roll || 0, 0, Math.min(1, dt * 4.0));
+      v.forwardSpeed = Math.hypot(v._heliVelX, v._heliVelZ);
+      if (!v.velVector) v.velVector = new THREE.Vector3();
+      v.velVector.set(v._heliVelX, v._heliVelY, v._heliVelZ);
+      if (v.mesh?.userData) {
+        v._rotorSpinSpeed = 29.0;
+        const dRot = v._rotorSpinSpeed * dt;
+        if (v.mesh.userData.mainRotorHub) v.mesh.userData.mainRotorHub.rotation.y += dRot;
+        if (v.mesh.userData.coaxUpperRotorHub) v.mesh.userData.coaxUpperRotorHub.rotation.y -= dRot;
+        if (v.mesh.userData.tailRotorHub) v.mesh.userData.tailRotorHub.rotation.x += dRot * 1.85;
+      }
+      return;
+    }
+
+    const isGoingToDest = task.phase === 'EN_ROUTE_TO_DEST' || task.phase === 'ARRIVED_AT_DEST';
+    const targetLz = isGoingToDest ? task.destPos : task.pickupPos;
+    const dx = targetLz.x - v.pos.x;
+    const dz = targetLz.z - v.pos.z;
+    const horizDist = Math.hypot(dx, dz);
+    const lzSupportY = this.getAircraftSupportHeightAt(targetLz.x, targetLz.z, Math.max(targetLz.y, v.pos.y) + 8, true);
+    const desiredTouchY = Math.max(targetLz.y, lzSupportY);
+
+    // Check obstacle clearance immediately ahead so the helicopter climbs cleanly over Downtown skyscrapers!
+    const lookAheadDist = Math.min(horizDist, 42);
+    const dirX = horizDist > 0.5 ? dx / horizDist : -Math.sin(v.yaw || 0);
+    const dirZ = horizDist > 0.5 ? dz / horizDist : -Math.cos(v.yaw || 0);
+    const midObsY =
+      horizDist > 14
+        ? Math.max(
+            this.getAircraftSupportHeightAt(v.pos.x, v.pos.z, 175, true),
+            this.getAircraftSupportHeightAt(
+              v.pos.x + dirX * lookAheadDist,
+              v.pos.z + dirZ * lookAheadDist,
+              175,
+              false
+            )
+          )
+        : desiredTouchY;
+
+    // Initial vertical liftoff clearance when departing from a rooftop or enclosed courtyard
+    const needInitialClimb =
+      isGoingToDest &&
+      horizDist > 18 &&
+      v.pos.y < (task.liftoffClearY || desiredTouchY) - 2.0;
+
+    // Smooth Cruise -> Approach Flare -> Vertical Cushion Touchdown Speed Profile
+    const maxCruise = v.speed || 66;
+    const desiredHorizSpd = needInitialClimb
+      ? 4.0
+      : horizDist > 120
+      ? maxCruise
+      : horizDist > 22
+      ? THREE.MathUtils.lerp(8.5, maxCruise, (horizDist - 22) / 98)
+      : horizDist > 0.35
+      ? Math.max(0.85, horizDist * 0.55)
+      : 0;
+
+    if (horizDist > 2.0) {
+      const desYaw = Math.atan2(-dx, -dz);
+      let yErr = desYaw - (v.yaw || 0);
+      while (yErr > Math.PI) yErr -= Math.PI * 2;
+      while (yErr < -Math.PI) yErr += Math.PI * 2;
+      v.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(yErr * 1.9, -1.25, 1.25) * dt;
+      v.roll = THREE.MathUtils.lerp(
+        v.roll || 0,
+        THREE.MathUtils.clamp(yErr * 0.55, -0.38, 0.38),
+        Math.min(1, dt * 3.5)
+      );
+    } else {
+      v.roll = THREE.MathUtils.lerp(v.roll || 0, 0, Math.min(1, dt * 5.0));
+    }
+
+    const curHorizSpd = Math.hypot(v._heliVelX, v._heliVelZ);
+    const desVx = horizDist > 0.4 ? dirX * desiredHorizSpd : 0;
+    const desVz = horizDist > 0.4 ? dirZ * desiredHorizSpd : 0;
+    const maxHorizAccel = curHorizSpd > desiredHorizSpd + 3 ? 13.5 : 10.5;
+    const dvx = desVx - v._heliVelX;
+    const dvz = desVz - v._heliVelZ;
+    const dvLen = Math.hypot(dvx, dvz);
+    if (dvLen > maxHorizAccel * dt && dvLen > 0.001) {
+      v._heliVelX += (dvx / dvLen) * maxHorizAccel * dt;
+      v._heliVelZ += (dvz / dvLen) * maxHorizAccel * dt;
+    } else {
+      v._heliVelX = desVx;
+      v._heliVelZ = desVz;
+    }
+
+    // Realistic visual cyclic nose pitch: tilts nose down when accelerating/cruising, flares nose UP when braking into LZ!
+    const isFlareBraking = horizDist < 90 && curHorizSpd > desiredHorizSpd + 2.2;
+    const targetPitch =
+      horizDist <= 3.0 && curHorizSpd < 2.0
+        ? 0
+        : isFlareBraking
+        ? THREE.MathUtils.clamp((curHorizSpd - desiredHorizSpd) * 0.032, 0.08, 0.34)
+        : -THREE.MathUtils.clamp((desiredHorizSpd / Math.max(30, maxCruise)) * 0.32, 0, 0.34);
+    v.pitch = THREE.MathUtils.lerp(v.pitch || 0, targetPitch, Math.min(1, dt * 3.6));
+
+    // Altitude profile: clear obstacles en route, then descend smoothly onto rooftop / ground pad
+    const safeCruiseY = Math.max(midObsY + 18, desiredTouchY + 22, 58);
+    const targetAlt = needInitialClimb
+      ? Math.max(task.liftoffClearY, midObsY + 14)
+      : horizDist > 55
+      ? safeCruiseY
+      : horizDist > 10
+      ? THREE.MathUtils.lerp(desiredTouchY + 3.2, safeCruiseY, (horizDist - 10) / 45)
+      : desiredTouchY;
+
+    const altErr = targetAlt - v.pos.y;
+    const maxClimb = 11.2;
+    const maxSink = horizDist < 12 && Math.abs(altErr) < 6 ? 2.4 : 7.5;
+    const desVy = THREE.MathUtils.clamp(altErr * 1.85, -maxSink, maxClimb);
+    v._heliVelY = THREE.MathUtils.lerp(v._heliVelY, desVy, Math.min(1, dt * 4.2));
+
+    v.pos.x = THREE.MathUtils.clamp(v.pos.x + v._heliVelX * dt, -2400, 2400);
+    v.pos.z = THREE.MathUtils.clamp(v.pos.z + v._heliVelZ * dt, -1650, 1650);
+    const curSupportY = this.getAircraftSupportHeightAt(v.pos.x, v.pos.z, v.pos.y + 4.0, true);
+    v.pos.y = Math.max(curSupportY, v.pos.y + v._heliVelY * dt);
+    if (v.pos.y <= curSupportY + 0.04 && targetAlt <= curSupportY + 0.25) {
+      v.pos.y = curSupportY;
+      v._heliVelY = 0;
+    }
+    v.forwardSpeed = Math.hypot(v._heliVelX, v._heliVelZ);
+    if (!v.velVector) v.velVector = new THREE.Vector3();
+    v.velVector.set(v._heliVelX, v._heliVelY, v._heliVelZ);
+
+    // Spin 3D Main & Tail Rotors
+    if (v.mesh?.userData) {
+      v._rotorSpinSpeed = 29.0;
+      const dRot = v._rotorSpinSpeed * dt;
+      if (v.mesh.userData.mainRotorHub) v.mesh.userData.mainRotorHub.rotation.y += dRot;
+      if (v.mesh.userData.coaxUpperRotorHub) v.mesh.userData.coaxUpperRotorHub.rotation.y -= dRot;
+      if (v.mesh.userData.tailRotorHub) v.mesh.userData.tailRotorHub.rotation.x += dRot * 1.85;
+    }
+
+    // Phase Arrival Checks & Radio Callouts
+    const vertDist = Math.abs(v.pos.y - desiredTouchY);
+    if (!isGoingToDest && horizDist <= 5.5 && vertDist <= 4.5) {
+      task.phase = 'HOLDING_FOR_PICKUP';
+      if (!task.pickupAnnounced) {
+        task.pickupAnnounced = true;
+        sound.playRadioBeep?.(true);
+        player?.onAwardXp?.(
+          0,
+          `🚁 AIRLIFT-1 ON STATION! WALK UP & PRESS [E] TO BOARD FOR ${task.destLabel}!`
+        );
+      }
+    } else if (isGoingToDest && horizDist <= 3.2 && vertDist <= 1.8 && v.forwardSpeed < 2.5) {
+      task.phase = 'ARRIVED_AT_DEST';
+      v._heliVelX = 0;
+      v._heliVelZ = 0;
+      v.forwardSpeed = 0;
+      v.pitch = 0;
+      v.roll = 0;
+      if (!task.arrivedAnnounced) {
+        task.arrivedAnnounced = true;
+        sound.playRadioBeep?.(true);
+        player?.onAwardXp?.(
+          25,
+          `🚁🎯 AIRLIFT TOUCHDOWN AT ${task.destLabel}! PRESS [E] TO STEP OUT ON ROOF/LZ (OR [K] FOR NEXT LZ)!`
+        );
+      }
+    }
+  }
+
+  /**
+   * Bridge-aware & Building-avoiding AI Ground Chauffeur for Armored APC, 6x6 Supply Truck & Humvee Rides!
+   */
+  stepAiGroundRide(v, dt, player) {
+    const task = v.rideTask;
+    if (!task || !task.active) return;
+
+    if (task.phase === 'RTB_DEPART') {
+      task.departDelay = Math.max(0, (task.departDelay || 0) - dt);
+      v.forwardSpeed = 0;
+      if (task.departDelay <= 0) {
+        task.active = false;
+        if (player && player.activeRideVehicle === v) player.activeRideVehicle = null;
+      }
+      return;
+    }
+
+    if (task.phase === 'AWAITING_DEST' || ((task.phase === 'EN_ROUTE_TO_DEST' || task.phase === 'ARRIVED_AT_DEST') && !task.destPos)) {
+      v.forwardSpeed = 0;
+      const gY = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : v.pos.y;
+      v.pos.y = gY;
+      return;
+    }
+
+    const isGoingToDest = task.phase === 'EN_ROUTE_TO_DEST' || task.phase === 'ARRIVED_AT_DEST';
+    const rawGoal = isGoingToDest ? task.destPos : task.pickupPos;
+
+    // Route cleanly across the nearest bridge if crossing the central river (`|x| < 34`)
+    let targetX = rawGoal.x;
+    let targetZ = rawGoal.z;
+    if (Math.sign(v.pos.x) !== Math.sign(targetX) && Math.abs(v.pos.x) > 34) {
+      const bridgeZ = Math.abs(v.pos.z) < 220 ? 0 : v.pos.z > 0 ? 400 : -400;
+      if (Math.abs(v.pos.z - bridgeZ) > 26) {
+        targetX = Math.sign(v.pos.x) * 42;
+        targetZ = bridgeZ;
+      }
+    }
+
+    const dx = targetX - v.pos.x;
+    const dz = targetZ - v.pos.z;
+    const dist = Math.hypot(dx, dz);
+    const goalDist = Math.hypot(rawGoal.x - v.pos.x, rawGoal.z - v.pos.z);
+    const stopRadius = isGoingToDest ? 7.5 : 6.5;
+
+    if (goalDist <= stopRadius) {
+      const brakeStep = 14.0 * dt;
+      v.forwardSpeed =
+        Math.abs(v.forwardSpeed || 0) <= brakeStep
+          ? 0
+          : v.forwardSpeed - Math.sign(v.forwardSpeed) * brakeStep;
+      if (Math.abs(v.forwardSpeed) < 0.4) {
+        v.forwardSpeed = 0;
+        if (!isGoingToDest) {
+          task.phase = 'HOLDING_FOR_PICKUP';
+          if (!task.pickupAnnounced) {
+            task.pickupAnnounced = true;
+            sound.playRadioBeep?.(true);
+            player?.onAwardXp?.(
+              0,
+              `🛡️ TRANSPORT READY FOR PICKUP! PRESS [E] TO BOARD FOR ${task.destLabel}!`
+            );
+          }
+        } else {
+          task.phase = 'ARRIVED_AT_DEST';
+          if (!task.arrivedAnnounced) {
+            task.arrivedAnnounced = true;
+            sound.playRadioBeep?.(true);
+            player?.onAwardXp?.(
+              25,
+              `🛡️🎯 ARRIVED AT ${task.destLabel}! PRESS [E] TO DISEMBARK (OR [K] TO PICK NEXT LZ)!`
+            );
+          }
+        }
+      }
+    } else {
+      let desiredYaw = Math.atan2(-dx, -dz);
+      if (this.world?.isVehicleBoxBlocked) {
+        const lookDist = (v.hullHalfLength || 3.2) + 7.0;
+        const tx = v.pos.x - Math.sin(desiredYaw) * lookDist;
+        const tz = v.pos.z - Math.cos(desiredYaw) * lookDist;
+        if (this.world.isVehicleBoxBlocked(tx, tz, desiredYaw, v.hullHalfWidth || 1.75, 2.2, 1.0)) {
+          for (const off of [0.55, -0.55, 1.05, -1.05, 1.5, -1.5]) {
+            const ay = desiredYaw + off;
+            const ax = v.pos.x - Math.sin(ay) * lookDist;
+            const az = v.pos.z - Math.cos(ay) * lookDist;
+            if (!this.world.isVehicleBoxBlocked(ax, az, ay, v.hullHalfWidth || 1.75, 2.2, 0.9)) {
+              desiredYaw = ay;
+              break;
+            }
+          }
+        }
+      }
+      let yDiff = desiredYaw - (v.yaw || 0);
+      while (yDiff > Math.PI) yDiff -= Math.PI * 2;
+      while (yDiff < -Math.PI) yDiff += Math.PI * 2;
+      const maxTurn = 1.65 * dt;
+      v.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(yDiff, -maxTurn, maxTurn);
+
+      const topSpd = v.speed || 22;
+      const desSpd =
+        goalDist < 28
+          ? THREE.MathUtils.lerp(5.5, topSpd, goalDist / 28)
+          : Math.abs(yDiff) > 0.7
+          ? topSpd * 0.52
+          : topSpd;
+      const curSpd = v.forwardSpeed || 0;
+      const accelStep = (curSpd < desSpd ? 6.8 : 11.5) * dt;
+      v.forwardSpeed =
+        Math.abs(desSpd - curSpd) <= accelStep
+          ? desSpd
+          : curSpd + Math.sign(desSpd - curSpd) * accelStep;
+    }
+
+    // When unboarded (`!v.driver`), `VehicleManager.update` steps position below line 5209;
+    // when player is onboard (`v.driver === player`), step hull position cleanly here!
+    if (v.driver === player && Math.abs(v.forwardSpeed || 0) > 0.02) {
+      const nextX = THREE.MathUtils.clamp(v.pos.x - Math.sin(v.yaw) * v.forwardSpeed * dt, -2550, 2550);
+      const nextZ = THREE.MathUtils.clamp(v.pos.z - Math.cos(v.yaw) * v.forwardSpeed * dt, -1700, 1700);
+      const safeNext = this.world?.pushOutOfBuildingFootprint
+        ? this.world.pushOutOfBuildingFootprint(nextX, nextZ, (v.hullHalfWidth || 1.75) + 0.4)
+        : { x: nextX, z: nextZ };
+      v.pos.x = safeNext.x;
+      v.pos.z = safeNext.z;
+      v.pos.y = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : v.pos.y;
+      v.mesh.position.copy(v.pos);
+      v.mesh.rotation.set(v.pitch || 0, v.yaw || 0, v.roll || 0, 'YXZ');
     }
   }
 }

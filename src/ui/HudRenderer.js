@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=134';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=134';
+import { UI, getEraRoles } from '../config.js?v=135';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=135';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -185,6 +185,7 @@ export const HudRenderer = {
               ['LMB / RMB / Shift', 'Fire Weapon / Hold RMB Scope (MacBook Trackpad: 2-Finger Tap, ⌃+Click, or [O] Key toggles Scope!) / Hold Breath'],
               ['[O] / [V] Keys', '[O] Toggle Scope On/Off (Laptop/Trackpad friendly!) • [V] Variable Zoom (1x ⇄ 4x/12x) or Inspect'],
               ['[V] / [C] (When Downed)', '[V] Toggle Optional Death Cam • [C] Switch Battlefield Zoom ⇄ Killer\'s Eyes POV'],
+              ['[Alt+R / ⌥+R] (2-Step Ride)', '1st [Alt+R]: Call Pickup to You (🚁 Heli, 🛡️ APC, 🚚 Truck, 🚙 Humvee) • 2nd [Alt+R]: Designate Drop-Off!'],
               ['[X] / [N] Keys', 'Cycle Scope Zeroing (100m–400m) / Toggle NVG or Thermal Scope Polarity (WHOT/BHOT)'],
               ['[R] / 2× [R] / [P]', 'Tactical Mag Swap / Emergency Speed-Drop Reload / Tarkov Bullet-by-Bullet Mag Pack']
             ]
@@ -345,7 +346,7 @@ export const HudRenderer = {
             items: [
               ['[K] or [CapsLock]', 'Open Interactive Tactical Map, Squad Roster & Right-Click Precision Airstrike'],
               ['Hold [Y] (+ 1..8)', 'Open Radial Command Wheel (Attack A–E, Follow, Defend, Scope, Spacing)'],
-              [macOrdersLabel, 'Direct Orders: [1–5] Obj A–E • [F] Follow • [H] Defend • [C] Charge • [G] Garrison • [R] Retreat'],
+              [macOrdersLabel, 'Direct Orders: [1–5] Obj A–E • [F] Follow • [H] Defend • [C] Charge • [G] Garrison • [B] Retreat'],
               ['[- / =] (Minus / Plus)', 'Squad Spacing: Stay Close [- ] vs. Fan Out Wide [=]'],
               ['[U] / [J] / [Shift+J]', 'Launch MQ-9 UAV Scan [U] • Call CAS/Artillery at Crosshair [J] • Cycle Strike Type [Shift+J]'],
               ['[9] / [Shift+9]', 'Request Combat Aircraft / Heavy Armor Drop [9] • Cycle Requested Vehicle [Shift+9]']
@@ -872,6 +873,7 @@ export const HudRenderer = {
 
     // Downed State Overlay & Optional Forensic Death Cam HUD
     this.updateDeathCamHud?.(dt);
+    this.updateRideStatusHud?.(dt);
     if (this.player.downed) {
       const dcActive = Boolean(
         this.player.deathCamEnabled && this.player.lastDeathReport?.hasKillerOrigin
@@ -1748,17 +1750,30 @@ export const HudRenderer = {
         } else if (nearVeh) {
           const isModernEra = (this.world?.era || 'modern') === 'modern';
           const strictDoc = this.player.squadDoctrineEnabled !== false;
+          const isRidePickup = Boolean(nearVeh.rideTask && nearVeh.rideTask.active);
           const needsPilot = Boolean(
-            nearVeh.isAircraft && isModernEra && strictDoc && this.player.role !== 'pilot'
+            nearVeh.isAircraft &&
+              nearVeh.aircraftRole !== 'heli_transport' &&
+              !isRidePickup &&
+              isModernEra &&
+              strictDoc &&
+              this.player.role !== 'pilot'
           );
           const needsArmor = Boolean(
             !nearVeh.isAircraft &&
+              !isRidePickup &&
               (nearVeh.type === 'tank' || nearVeh.type === 'apc' || nearVeh.type === 'aa') &&
               isModernEra &&
               strictDoc &&
               this.player.role !== 'armor'
           );
-          const vehPrompt = needsPilot
+          const vehPrompt = isRidePickup
+            ? nearVeh.rideTask.destPending || !nearVeh.rideTask.destPos
+              ? `🚁 PRESS [E] TO BOARD RIDE (${nearVeh.name.split(' (')[0]}) • PRESS [ALT+R] TO SET DROP-OFF`
+              : `🚁 PRESS [E] TO BOARD RIDE (${nearVeh.name.split(' (')[0]}) → ${
+                  nearVeh.rideTask.destLabel || 'LZ'
+                }`
+            : needsPilot
             ? `🔒 ${nearVeh.name} — REQUIRES [COMBAT PILOT] LICENSE! (SWITCH AT BASE/FOB [L] OR TOGGLE DOCTRINE OFF)`
             : needsArmor
             ? `🔒 ${nearVeh.name} — REQUIRES [ARMOR CREWMAN] LICENSE! (SWITCH AT BASE/FOB [L] OR TOGGLE DOCTRINE OFF)`
@@ -5777,6 +5792,142 @@ export const HudRenderer = {
         this.player?.finishPostDeathCam?.();
       });
     }
+  },
+
+  updateRideStatusHud() {
+    if (!this.player || !this.hudEl) return;
+    let el = this.el('ride-status-hud');
+    const v = this.player.activeRideVehicle;
+    const task = v && !v.dead && v.rideTask && v.rideTask.active ? v.rideTask : null;
+    const show = Boolean(
+      !this.player.dead &&
+        !this.player.downed &&
+        task &&
+        task.phase !== 'RTB_DEPART'
+    );
+
+    if (!show) {
+      if (el && !el.classList.contains('hidden')) {
+        el.classList.add('hidden');
+      }
+      this._lastRideHudSig = '';
+      return;
+    }
+
+    if (!el && typeof document !== 'undefined') {
+      el = document.createElement('div');
+      el.id = 'ride-status-hud';
+      this.hudEl.appendChild(el);
+      if (this._domCache) this._domCache.set('ride-status-hud', el);
+    }
+    if (!el) return;
+    if (el.classList.contains('hidden')) {
+      el.classList.remove('hidden');
+    }
+
+    const onboard = this.player.activeVehicle === v;
+    const isDestPending = Boolean(task.destPending || !task.destPos);
+    const refTarget =
+      (task.phase === 'EN_ROUTE_TO_DEST' || task.phase === 'ARRIVED_AT_DEST') && task.destPos
+        ? task.destPos
+        : this.player.pos;
+    const distM = Math.max(0, Math.round(v.pos.distanceTo(refTarget)));
+    const sig = `${task.phase}|${task.transportMode}|${task.destLabel}|${isDestPending ? 1 : 0}|${onboard ? 1 : 0}|${Math.floor(distM / 3)}`;
+    if (this._lastRideHudSig === sig) return;
+    this._lastRideHudSig = sig;
+
+    const icon = v.isHelicopter ? '🚁' : v.type === 'apc' ? '🛡️' : v.type === 'truck_transport' ? '🚚' : '🚙';
+    let titleTxt = '';
+    let subTxt = '';
+    if (task.phase === 'APPROACHING_PICKUP') {
+      titleTxt = `${icon} PICKUP INBOUND TO YOU (${distM}m)`;
+      subTxt = isDestPending
+        ? 'WAIT FOR [E] BOARDING • PRESS [ALT+R] NOW OR AFTER BOARDING TO SET DROP-OFF!'
+        : `DROP-OFF: ${task.destLabel} • PRESS [E] WHEN IT ARRIVES ([ALT+R] CHANGE)`;
+    } else if (task.phase === 'HOLDING_FOR_PICKUP') {
+      titleTxt = `🟢 ${icon} RIDE AT YOUR POSITION (${distM}m)`;
+      subTxt = isDestPending
+        ? 'WALK UP & PRESS [E] TO HOP IN — THEN PRESS [ALT+R] TO PICK DROP-OFF!'
+        : `WALK UP & PRESS [E] TO BOARD → ${task.destLabel}`;
+    } else if (task.phase === 'AWAITING_DEST') {
+      titleTxt = `🟢 ${icon} ONBOARD — AWAITING DROP-OFF!`;
+      subTxt = 'PRESS [ALT+R] TO OPEN DROP-OFF MAP (OR [Q] PING ROOF + [ALT+R] / CLICK BELOW):';
+    } else if (task.phase === 'EN_ROUTE_TO_DEST') {
+      titleTxt = `${icon} EN ROUTE → ${task.destLabel} (${distM}m)`;
+      subTxt = onboard
+        ? 'AI CHAUFFEUR ACTIVE • [ALT+R] CHANGE DROP-OFF • [F1] TAKE MANUAL • [E] EXIT'
+        : 'AI TRANSPORT EN ROUTE';
+    } else {
+      titleTxt = `🎯 ARRIVED AT ${task.destLabel}!`;
+      subTxt = 'PRESS [E] TO STEP OUT ON ROOF/LZ — OR PRESS [ALT+R] FOR NEXT DROP-OFF:';
+    }
+
+    const modeSwitchHtml = !onboard
+      ? `<button type="button" class="ride-lz-pill" data-switch-mode="heli" style="${task.transportMode === 'heli' ? 'border-color:#fff;' : ''}" title="Switch Pickup to Helicopter Airlift">🚁</button>
+         <button type="button" class="ride-lz-pill" data-switch-mode="apc" style="${task.transportMode === 'apc' ? 'border-color:#fff;' : ''}" title="Switch Pickup to Armored APC">🛡️</button>
+         <button type="button" class="ride-lz-pill" data-switch-mode="truck" style="${task.transportMode === 'truck' ? 'border-color:#fff;' : ''}" title="Switch Pickup to 6×6 Supply Truck">🚚</button>
+         <button type="button" class="ride-lz-pill" data-switch-mode="humvee" style="${task.transportMode === 'humvee' ? 'border-color:#fff;' : ''}" title="Switch Pickup to Fast Humvee">🚙</button>`
+      : '';
+
+    el.innerHTML = `
+      <div class="ride-hud-title">${titleTxt}</div>
+      <div class="ride-hud-sub">${subTxt}</div>
+      <div class="ride-hud-btns">
+        ${modeSwitchHtml}
+        <button type="button" class="ride-lz-pill" data-open-map="1" title="Open Tactical Map to Click Any Drop-Off LZ [Alt+R]">🗺️ [Alt+R] MAP</button>
+        <button type="button" class="ride-lz-pill" data-dest="OBJ_C_ROOF" title="Fly to Top of Downtown Objective C Skyscraper">🏢 C ROOF</button>
+        <button type="button" class="ride-lz-pill" data-dest="A">🚩 A</button>
+        <button type="button" class="ride-lz-pill" data-dest="B">🚩 B</button>
+        <button type="button" class="ride-lz-pill" data-dest="C">🚩 C</button>
+        <button type="button" class="ride-lz-pill" data-dest="D">🚩 D</button>
+        <button type="button" class="ride-lz-pill" data-dest="E">🚩 E</button>
+        <button type="button" class="ride-lz-pill" data-dest="BASE">🏠 BASE</button>
+        <button type="button" class="ride-lz-pill cancel" data-cancel="1" title="Cancel Ride">✕</button>
+      </div>
+    `;
+
+    el.querySelectorAll('.ride-lz-pill').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (btn.dataset.cancel) {
+          this.vehicleManager?.cancelPlayerRide?.(this.player);
+          this._lastRideHudSig = '';
+          this.updateRideStatusHud();
+          return;
+        }
+        if (btn.dataset.openMap) {
+          this.openRideMapModal?.();
+          return;
+        }
+        if (btn.dataset.switchMode) {
+          const nextMode = btn.dataset.switchMode;
+          this.vehicleManager?.requestPlayerRide?.(
+            this.player,
+            isDestPending
+              ? { transportMode: nextMode, pickupOnly: true }
+              : {
+                  transportMode: nextMode,
+                  destX: task.destPos.x,
+                  destZ: task.destPos.z,
+                  preferRoof: nextMode === 'heli',
+                  customLabel: task.destLabel
+                }
+          );
+          this._lastRideHudSig = '';
+          this.updateRideStatusHud();
+          return;
+        }
+        const dKey = btn.dataset.dest || 'OBJ_C_ROOF';
+        const mode = dKey === 'OBJ_C_ROOF' ? 'heli' : task.transportMode || 'heli';
+        this.vehicleManager?.requestPlayerRide?.(this.player, {
+          transportMode: mode,
+          destKey: dKey,
+          preferRoof: mode === 'heli'
+        });
+        this._lastRideHudSig = '';
+        this.updateRideStatusHud();
+      });
+    });
   }
 };
 

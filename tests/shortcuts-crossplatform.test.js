@@ -260,11 +260,18 @@ describe('3. Commander & Squad chords on Windows (Alt+...), Mac (⌥ Unicode & �
       expected: { type: 'STRATEGIC_ORDER', action: 'HOLD' }
     },
     {
-      label: 'Retreat (R)',
+      label: 'Retreat / Fall Back (B)',
+      code: 'KeyB',
+      pcKey: 'b',
+      macOptKey: '∫',
+      expected: { type: 'STRATEGIC_ORDER', action: 'RETREAT' }
+    },
+    {
+      label: 'Personal Ride Pickup & Drop-Off (R)',
       code: 'KeyR',
       pcKey: 'r',
       macOptKey: '®',
-      expected: { type: 'STRATEGIC_ORDER', action: 'RETREAT' }
+      expected: { type: 'REQUEST_RIDE' }
     },
     {
       label: 'Follow (F)',

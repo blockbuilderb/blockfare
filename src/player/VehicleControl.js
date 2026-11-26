@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=134';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=134';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=134';
-import { events } from '../events.js?v=134';
+import { sound } from '../audio.js?v=135';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=135';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=135';
+import { events } from '../events.js?v=135';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +11,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=134';
+} from '../core/StateMachines.js?v=135';
 
 function markShared(asset) {
   if (asset) {
@@ -203,6 +203,11 @@ export const VehicleControlMethods = {
     v.crewSeats[seatIndex] = this;
     if (seatIndex === 0 && !v.remoteDriverId) {
       v.driver = this;
+      // Taking Seat [F1] Pilot/Driver cancels AI Chauffeur Ride control and hands 100% manual stick/wheel to the player!
+      if (v.rideTask && v.rideTask.active) {
+        v.rideTask.active = false;
+        if (this.activeRideVehicle === v) this.activeRideVehicle = null;
+      }
     }
 
     const seatRole = seatNames[seatIndex];
@@ -263,13 +268,14 @@ export const VehicleControlMethods = {
     // 1. Exit vehicle or eject from aircraft if currently piloting
     if (this.activeVehicle) {
       const v = this.activeVehicle;
+      const wasActiveRide = Boolean(v.rideTask && v.rideTask.active);
       const groundH = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
       const supportY = v.isHelicopter
-        ? Math.max(groundH, this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z, v.pos.y + 3.0))
+        ? this.getHeliSupportHeightAt(v.pos.x, v.pos.z, v.pos.y + 3.5)
         : groundH;
       const heliClearanceAboveSupport = v.pos.y - supportY;
       const isHeliRooftopOrFastRope = Boolean(
-        v.isHelicopter && !v.isShotDown && heliClearanceAboveSupport <= 22.0
+        v.isHelicopter && !v.isShotDown && heliClearanceAboveSupport <= 24.0
       );
       const isAirbornePlane = Boolean(
         v.isAircraft &&
@@ -306,7 +312,9 @@ export const VehicleControlMethods = {
             const paxSupY = v.isHelicopter
               ? Math.max(
                   this.world ? this.world.getGroundHeightAt(dropX, dropZ) : groundH,
-                  this.getAircraftObstacleHeightAt(dropX, dropZ, v.pos.y + 3.0)
+                  this.vehicleManager?.getAircraftSupportHeightAt
+                    ? this.vehicleManager.getAircraftSupportHeightAt(dropX, dropZ, v.pos.y + 3.0, false)
+                    : this.getAircraftObstacleHeightAt(dropX, dropZ, v.pos.y + 3.0)
                 )
               : groundH;
             const useCenterRoof = v.isHelicopter && Math.abs(paxSupY - supportY) > 1.8;
@@ -345,27 +353,48 @@ export const VehicleControlMethods = {
 
       if (isAirbornePlane) {
         v.aiPilotActive = !v.isShotDown;
+        if (wasActiveRide && v.rideTask) {
+          v.rideTask.phase = 'RTB_DEPART';
+          v.rideTask.departDelay = 1.5;
+        }
         this.activateParachuteEject(v.pos);
       } else if (isHeliRooftopOrFastRope) {
-        // Rooftop Step-Out or Low-Hover Fast-Rope Insertion (< 22m above roof/ground — zero fall damage & never steps off roof edge!)
-        if (heliClearanceAboveSupport > 2.2) {
+        // Rooftop Step-Out or Low-Hover Fast-Rope Insertion (< 24m above roof/ground — zero fall damage & never steps off roof edge!)
+        v.parkedByPlayer = !wasActiveRide;
+        if (wasActiveRide && v.rideTask) {
+          // AI Airlift Pilot holds steady for 6.5s while you step clear on the rooftop, then departs cleanly!
+          v.rideTask.phase = 'RTB_DEPART';
+          v.rideTask.departDelay = 6.5;
+        } else if (heliClearanceAboveSupport > 2.2) {
           v.heliHoverHold = true;
           v.heliHoverAlt = v.pos.y;
           v.aiPilotActive = false;
+        } else {
+          // Landed on rooftop or pad: rest solidly on `supportY` so it NEVER falls through the skyscraper!
+          v.pos.y = supportY;
+          v._heliVelX = 0;
+          v._heliVelY = 0;
+          v._heliVelZ = 0;
+          v.forwardSpeed = 0;
+          v.heliHoverHold = false;
+          v.aiPilotActive = false;
+          if (v.mesh) v.mesh.position.copy(v.pos);
         }
         const rightX = Math.cos(v.yaw || 0);
         const rightZ = -Math.sin(v.yaw || 0);
         let safeOutX = v.pos.x;
         let safeOutZ = v.pos.z;
         let safeOutY = supportY;
-        for (const sideDist of [2.1, -2.1, 0]) {
+        for (const sideDist of [2.4, -2.4, 0]) {
           const cx = v.pos.x + rightX * sideDist;
           const cz = v.pos.z + rightZ * sideDist;
           const cy = Math.max(
             this.world ? this.world.getGroundHeightAt(cx, cz) : groundH,
-            this.getAircraftObstacleHeightAt(cx, cz, v.pos.y + 3.0)
+            this.vehicleManager?.getAircraftSupportHeightAt
+              ? this.vehicleManager.getAircraftSupportHeightAt(cx, cz, v.pos.y + 4.0, false)
+              : this.getAircraftObstacleHeightAt(cx, cz, v.pos.y + 4.0)
           );
-          if (Math.abs(cy - supportY) <= 1.6) {
+          if (Math.abs(cy - supportY) <= 1.8) {
             safeOutX = cx;
             safeOutZ = cz;
             safeOutY = cy;
@@ -386,8 +415,15 @@ export const VehicleControlMethods = {
           );
         }
       } else {
+        if (wasActiveRide && v.rideTask) {
+          v.rideTask.phase = 'RTB_DEPART';
+          v.rideTask.departDelay = 5.5;
+        }
         const exitOffsetX = v.type === 'bike' || v.type === 'atv' ? 2.1 : 3.6;
-        this.pos.copy(v.pos).add(new THREE.Vector3(exitOffsetX, 0.35, 0));
+        const outX = v.pos.x + exitOffsetX;
+        const outZ = v.pos.z;
+        const outGroundY = this.world ? this.world.getGroundHeightAt(outX, outZ) : v.pos.y;
+        this.pos.set(outX, Math.max(outGroundY, v.pos.y) + 0.35, outZ);
       }
       return;
     }
@@ -480,6 +516,7 @@ export const VehicleControlMethods = {
         }
       } else if (
         strictDoctrine &&
+        !(nearVehicle.rideTask && nearVehicle.rideTask.active) &&
         (nearVehicle.type === 'tank' || nearVehicle.type === 'apc' || nearVehicle.type === 'aa') &&
         this.role !== 'armor'
       ) {
@@ -537,6 +574,12 @@ export const VehicleControlMethods = {
     if (!Array.isArray(nearVehicle.crewSeats) || nearVehicle.crewSeats.length !== seatNames.length) {
       nearVehicle.crewSeats = new Array(seatNames.length).fill(null);
     }
+    const boardingAiRide = Boolean(
+      nearVehicle.rideTask &&
+        nearVehicle.rideTask.active &&
+        nearVehicle.rideTask.phase !== 'RTB_DEPART' &&
+        seatNames.length > 1
+    );
     if (boardingRemoteDriven) {
       const assignedSeat = !nearVehicle.remoteGunnerId && seatNames.length > 1 ? 1 : Math.min(seatNames.length - 1, 2);
       this.vehicleSeatIndex = assignedSeat;
@@ -547,11 +590,23 @@ export const VehicleControlMethods = {
           `💺 BOARDED ALLY ${nearVehicle.name.split(' (')[0]} AS [F${assignedSeat + 1}] ${seatNames[assignedSeat]}!`
         );
       }
+    } else if (boardingAiRide) {
+      // Board as Passenger / Door-Gunner (`[F2]`) so your AI Pilot / AI Driver flies/drives you to your requested destination!
+      const paxSeat = Math.min(seatNames.length - 1, 1);
+      this.vehicleSeatIndex = paxSeat;
+      nearVehicle.crewSeats[paxSeat] = this;
+      nearVehicle.driver = this;
+      nearVehicle.aiPilotActive = false;
+      const awaitingDropoff = Boolean(nearVehicle.rideTask.destPending || !nearVehicle.rideTask.destPos);
+      nearVehicle.rideTask.phase = awaitingDropoff ? 'AWAITING_DEST' : 'EN_ROUTE_TO_DEST';
+      nearVehicle.rideTask.arrivedAnnounced = false;
+      this.activeRideVehicle = nearVehicle;
     } else {
       this.vehicleSeatIndex = 0;
       nearVehicle.crewSeats[0] = this;
       nearVehicle.driver = this;
       nearVehicle.aiPilotActive = false;
+      nearVehicle.parkedByPlayer = false;
     }
     if (nearVehicle.isAircraft) {
       const gH = this.world ? this.world.getGroundHeightAt(nearVehicle.pos.x, nearVehicle.pos.z) : 0;
@@ -617,6 +672,10 @@ export const VehicleControlMethods = {
         this.yaw = nearVehicle.yaw || 0;
         this.pitch = -0.05;
       }
+    } else if (boardingAiRide) {
+      // Default to 3rd-Person Chase View when riding an AI Transport so you can watch the helicopter/APC carry you across the map!
+      this.vehicleCameraMode = 'CHASE_3P';
+      this.thirdPersonVehicle = true;
     } else if (nearVehicle.isAircraft || nearVehicle.type === 'bike' || nearVehicle.type === 'atv') {
       this.vehicleCameraMode = 'CHASE_3P';
       this.thirdPersonVehicle = true;
@@ -654,6 +713,25 @@ export const VehicleControlMethods = {
       }
     });
     if (this.onAwardXp && !silent) {
+      if (boardingAiRide && nearVehicle.rideTask) {
+        if (nearVehicle.rideTask.phase === 'AWAITING_DEST') {
+          this.onAwardXp(
+            0,
+            nearVehicle.isHelicopter
+              ? '🚁 ONBOARD AIRLIFT-1! PRESS [ALT+R] TO DESIGNATE YOUR DROP-OFF DESTINATION (SKYSCRAPER ROOF, OBJECTIVE, OR MAP SPOT)!'
+              : '🛡️ ONBOARD TRANSPORT! PRESS [ALT+R] TO DESIGNATE YOUR DROP-OFF DESTINATION!'
+          );
+          return true;
+        }
+        const destLbl = nearVehicle.rideTask.destLabel || 'DESIGNATED LZ';
+        this.onAwardXp(
+          0,
+          nearVehicle.isHelicopter
+            ? `🚁 AIRLIFT BOARDED! AI PILOT FLYING TO ${destLbl} — AIM/FIRE DOOR GUNS, [ALT+R] CHANGE LZ, [F1] TAKE STICK, [E] DISEMBARK`
+            : `🛡️ TRANSPORT BOARDED! AI DRIVER EN ROUTE TO ${destLbl} — MAN TURRET, [ALT+R] CHANGE LZ, [F1] DRIVE MANUAL, [E] DISEMBARK`
+        );
+        return true;
+      }
       const customBadge = nearVehicle.customLoadoutLabel ? ` [${nearVehicle.customLoadoutLabel}]` : '';
       const isMotoOrAtv = nearVehicle.type === 'bike' || nearVehicle.type === 'atv';
       const boostName = nearVehicle.isElectric
@@ -2058,8 +2136,15 @@ export const VehicleControlMethods = {
     if (!isMortar && this.ccipMarkerMesh) this.ccipMarkerMesh.visible = false;
 
     const seatIdx = this.vehicleSeatIndex || 0;
-    const isHullDriver = seatIdx === 0 && !v.remoteDriverId;
+    const isAiChauffeuredRide = Boolean(
+      v.rideTask && v.rideTask.active && seatIdx >= 1 && !v.remoteDriverId
+    );
+    const isHullDriver = seatIdx === 0 && !v.remoteDriverId && !isAiChauffeuredRide;
     const canControlTurret = (seatIdx === 0 && !v.remoteGunnerId) || seatIdx === 1;
+
+    if (isAiChauffeuredRide && this.vehicleManager?.stepAiGroundRide) {
+      this.vehicleManager.stepAiGroundRide(v, dt, this);
+    }
 
     const accel =
       v.isEmplacement || !isHullDriver
@@ -2097,6 +2182,8 @@ export const VehicleControlMethods = {
 
     if (v.isEmplacement) {
       v.forwardSpeed = 0;
+    } else if (isAiChauffeuredRide) {
+      // Hull velocity & steering already stepped by `stepAiGroundRide(v, dt, this)`!
     } else if (isMotoOrAtv) {
       // =======================================================================
       // REALISTIC PROGRESSIVE MOTORCYCLE / 2-STROKE / E-MOTO / ATV ACCELERATION
@@ -3974,13 +4061,16 @@ export const VehicleControlMethods = {
   },
 
   /**
-   * Returns the highest obstacle Y (terrain + any standing building/tower/castle voxels) at (wx, wz).
+   * Returns the highest obstacle Y (terrain + any standing building/tower/castle voxels up to 155m!) at (wx, wz).
    */
   getAircraftObstacleHeightAt(wx, wz, aircraftY = 0) {
     const terrY = this.world ? this.world.getGroundHeightAt(wx, wz) : 0;
     if (!this.world || !this.world.voxels) return terrY;
-    if (aircraftY > 130.0 && Math.abs(wx) < 2000 && Math.abs(wz) < 1300) {
+    if (aircraftY > 175.0 && Math.abs(wx) < 2000 && Math.abs(wz) < 1300) {
       return terrY;
+    }
+    if (this.vehicleManager && typeof this.vehicleManager.getAircraftSupportHeightAt === 'function') {
+      return this.vehicleManager.getAircraftSupportHeightAt(wx, wz, 175.0, false);
     }
     let maxY = terrY;
     const platforms = this.world.elevatedPlatforms;
@@ -3996,7 +4086,7 @@ export const VehicleControlMethods = {
     const gx = g.gx;
     const baseGy = g.gy;
     const gz = g.gz;
-    for (let dy = 0; dy <= 84; dy++) {
+    for (let dy = 0; dy <= 122; dy++) {
       const vox = this.world.getVoxel(gx, baseGy + dy, gz);
       if (vox && !vox.isProp) {
         const top = vox.maxY ?? terrY + (dy + 1) * 1.25;
@@ -4004,6 +4094,31 @@ export const VehicleControlMethods = {
       }
     }
     return maxY;
+  },
+
+  /**
+   * Samples 5-point helicopter skid/gear support height (center + 4 landing skids) so helicopters
+   * land and stay solidly parked on tall Downtown FOB C skyscraper roofs without ever falling through
+   * roof stairwell cutouts or edges!
+   */
+  getHeliSupportHeightAt(wx, wz, refMaxY = 160) {
+    if (this.vehicleManager && typeof this.vehicleManager.getAircraftSupportHeightAt === 'function') {
+      return this.vehicleManager.getAircraftSupportHeightAt(wx, wz, refMaxY, true);
+    }
+    const groundH = this.world ? this.world.getGroundHeightAt(wx, wz) : 0;
+    let bestY = Math.max(groundH, this.getAircraftObstacleHeightAt(wx, wz, refMaxY));
+    for (const [sxOff, szOff] of [
+      [1.5, 1.7],
+      [-1.5, 1.7],
+      [1.5, -1.7],
+      [-1.5, -1.7]
+    ]) {
+      const sampleY = this.getAircraftObstacleHeightAt(wx + sxOff, wz + szOff, refMaxY);
+      if (sampleY > bestY && sampleY <= refMaxY) {
+        bestY = sampleY;
+      }
+    }
+    return bestY;
   },
 
   /**
@@ -4221,26 +4336,29 @@ export const VehicleControlMethods = {
       const engFracH = apH ? THREE.MathUtils.clamp((apH.engines ?? 100) / 100, 0.25, 1) : 1.0;
       const tailFracH = apH ? THREE.MathUtils.clamp((apH.tail ?? 100) / 100, 0.35, 1) : 1.0;
 
+      // If riding as a Passenger / Door-Gunner (`[F2+]`) in an AI Airlift Helicopter, let `stepAiHeliRide` fly!
+      if (
+        v.rideTask &&
+        v.rideTask.active &&
+        (this.vehicleSeatIndex || 0) >= 1 &&
+        !v.remoteDriverId &&
+        this.vehicleManager?.stepAiHeliRide
+      ) {
+        this.vehicleManager.stepAiHeliRide(v, dt, this);
+        v.turretYaw = this.yaw;
+        v.turretPitch = this.pitch;
+        if ((v.sensorGlitchTimer || 0) > 0) v.sensorGlitchTimer = Math.max(0, v.sensorGlitchTimer - dt);
+        if ((v.opticsGlitchTimer || 0) > 0) v.opticsGlitchTimer = Math.max(0, v.opticsGlitchTimer - dt);
+        _airQuatYaw.setFromAxisAngle(_axisY, v.yaw || 0);
+        _airQuatPitch.setFromAxisAngle(_axisX, v.pitch || 0);
+        _airQuatRoll.setFromAxisAngle(_axisZ, v.roll || 0);
+        _airQuatCombined.copy(_airQuatYaw).multiply(_airQuatPitch).multiply(_airQuatRoll);
+        v.mesh.position.copy(v.pos);
+        v.mesh.quaternion.copy(_airQuatCombined);
+        this.pos.copy(v.pos);
+      } else {
       // Sample support height across center + landing skids/wheels so rooftop touchdowns are rock-solid
-      let heliSupportY = Math.max(
-        groundH,
-        this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z, v.pos.y + 3.2)
-      );
-      for (const [sxOff, szOff] of [
-        [1.5, 1.7],
-        [-1.5, 1.7],
-        [1.5, -1.7],
-        [-1.5, -1.7]
-      ]) {
-        const sampleY = this.getAircraftObstacleHeightAt(
-          v.pos.x + sxOff,
-          v.pos.z + szOff,
-          v.pos.y + 3.2
-        );
-        if (sampleY > heliSupportY && sampleY <= v.pos.y + 1.8) {
-          heliSupportY = sampleY;
-        }
-      }
+      const heliSupportY = this.getHeliSupportHeightAt(v.pos.x, v.pos.z, v.pos.y + 3.5);
       const onPadOrRoof = v.pos.y <= heliSupportY + 0.55;
       const isHeliPilot = (this.vehicleSeatIndex || 0) === 0 && !v.remoteDriverId;
       if (!isHeliPilot && !v.remoteDriverId && !onPadOrRoof) {
@@ -4640,11 +4758,12 @@ export const VehicleControlMethods = {
       v.pos.x = candX;
       v.pos.z = candZ;
       const newGndH = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
-      let nextSupportY = Math.max(
-        newGndH,
-        this.getAircraftObstacleHeightAt(v.pos.x, v.pos.z, Math.max(v.pos.y, candY) + 3.0)
+      let nextSupportY = this.getHeliSupportHeightAt(
+        v.pos.x,
+        v.pos.z,
+        Math.max(v.pos.y, candY) + 3.5
       );
-      if (nextSupportY > v.pos.y + 2.2) {
+      if (nextSupportY > v.pos.y + 2.6) {
         nextSupportY = newGndH;
       }
 
@@ -4724,6 +4843,7 @@ export const VehicleControlMethods = {
       }
       // Low-flying Nap-of-the-Earth (NOE < 28m AGL) masks helicopters from enemy radar SAMs!
       v.isLowAltRadarMasked = curHeliAgl < 28.0 || v.airborneRadarTimer < 3.5;
+      }
     } else {
       // =========================================================================
       // 1. REALISTIC NON-INSTANT THROTTLE & PROGRESSIVE ENGINE SPOOL ACCELERATION

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MODERN BLOCKFARE — Multi-Era Voxel Combined Arms FPS</title>
-  <link rel="stylesheet" href="./style.css?v=134" />
+  <link rel="stylesheet" href="./style.css?v=135" />
   <script type="importmap">
     {
       "imports": {
@@ -570,6 +570,8 @@
         <span>&bull;</span>
         <span style="color:#74b9ff;font-weight:800;cursor:pointer;pointer-events:auto;" onclick="window.game && window.game.ui && window.game.ui.toggleCommandModal()"><b>[K]</b> Map</span>
         <span>&bull;</span>
+        <span id="hud-ride-btn" style="color:#00d2d3;font-weight:900;cursor:pointer;pointer-events:auto;" onclick="window.game && window.game.ui && (window.game.ui.handleRideShortcut ? window.game.ui.handleRideShortcut() : window.game.ui.openRideMapModal())" title="1st [Alt+R / ⌥+R]: Request Pickup at Your Position • 2nd [Alt+R / ⌥+R]: Designate Drop-Off Destination!">🚁 <b>[Alt+R]</b> Ride</span>
+        <span>&bull;</span>
         <span><b>[TAB]</b> Stats</span>
         <span>&bull;</span>
         <span id="hud-manual-btn" style="color:#7bed9f;font-weight:900;cursor:pointer;pointer-events:auto;" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp()" title="Open Field &amp; Flight Controls Manual [? / F1]">📖 <b>[? / F1]</b> Help</span>
@@ -653,7 +655,7 @@
           <div id="cmd-tactical-row" class="cmd-tactical-row">
             <button type="button" class="cmd-order-btn cmd-tac-btn" data-action="CHARGE" title="Mount &amp; Blade All-Out Charge: War horn + synchronized battle cries + full-speed shock assault into enemy lines! [Alt+C]">⚔️ CHARGE <span class="cmd-hk">[Alt+C]</span></button>
             <button type="button" class="cmd-order-btn cmd-tac-btn" data-action="HOLD" title="Defend / Shield Wall: Lock shields &amp; hold defensive line (-35% incoming frontal damage in Medieval Era) [Alt+H]">🛡️ DEFEND <span class="cmd-hk">[Alt+H]</span></button>
-            <button type="button" class="cmd-order-btn cmd-tac-btn cmd-only-ctrl" data-action="RETREAT" title="Tactical Retreat / Fall Back: Sound retreat horn &amp; withdraw in order to nearest friendly Rear Base / Keep with covering fire [Alt+R]">🏳️ RETREAT <span class="cmd-hk">[Alt+R]</span></button>
+            <button type="button" class="cmd-order-btn cmd-tac-btn cmd-only-ctrl" data-action="RETREAT" title="Tactical Retreat / Fall Back: Sound retreat horn &amp; withdraw in order to nearest friendly Rear Base / Keep with covering fire [Alt+B]">🏳️ RETREAT <span class="cmd-hk">[Alt+B]</span></button>
             <button type="button" class="cmd-order-btn cmd-tac-btn" data-action="FOLLOW" title="Order forces to Rally &amp; Follow You [Alt+F or Hold Y -> 6]">🏃 FOLLOW <span class="cmd-hk">[Alt+F]</span></button>
             <button type="button" class="cmd-order-btn cmd-tac-btn cmd-only-ctrl active" data-action="GARRISON" title="Click or press [Alt+G] to toggle Garrison Doctrine ON/OFF: When ON, leaves 1 Squad at each Captured Forward Base as Defense; when OFF, all 5 Squads push the frontline!">🏰 GARRISON: ON <span class="cmd-hk">[Alt+G]</span></button>
             <button type="button" class="cmd-order-btn cmd-tac-btn cmd-only-ctrl active" data-action="AUTO" title="Click or press [Alt+A] to toggle Autonomous AI Squad Leaders ON/OFF: When ON, AI Squad Leaders autonomously attack/defend objectives; when OFF, squads hold position and wait for your direct orders!">🤖 AI: ON <span class="cmd-hk">[Alt+A]</span></button>
@@ -1692,6 +1694,6 @@
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=134"></script>
+  <script type="module" src="./src/main.js?v=135"></script>
 </body>
 </html>

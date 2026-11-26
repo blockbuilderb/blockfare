@@ -2,24 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
 
-import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=134';
-import { VEHICLE_STATS } from '../src/config.js?v=134';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=134';
-import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=134';
-import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=134';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=134';
-import { createWeaponViewModel } from '../src/models/weapon-model.js?v=134';
-import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=134';
-import { BotManager } from '../src/bots/BotManager.js?v=134';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=134';
-import { CombatMethods } from '../src/player/PlayerCombat.js?v=134';
-import { PlayerController } from '../src/player/PlayerController.js?v=134';
-import { SoundManager } from '../src/audio/SoundManager.js?v=134';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=134';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=134';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=134';
-import { BotAIMethods } from '../src/bots/BotAI.js?v=134';
-import { updateMedicRescue } from '../src/bots/MedicAI.js?v=134';
+import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=135';
+import { VEHICLE_STATS } from '../src/config.js?v=135';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=135';
+import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=135';
+import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=135';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=135';
+import { createWeaponViewModel } from '../src/models/weapon-model.js?v=135';
+import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=135';
+import { BotManager } from '../src/bots/BotManager.js?v=135';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=135';
+import { CombatMethods } from '../src/player/PlayerCombat.js?v=135';
+import { PlayerController } from '../src/player/PlayerController.js?v=135';
+import { SoundManager } from '../src/audio/SoundManager.js?v=135';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=135';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=135';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=135';
+import { BotAIMethods } from '../src/bots/BotAI.js?v=135';
+import { updateMedicRescue } from '../src/bots/MedicAI.js?v=135';
 
 function buildPilotHarness(role = 'fighter', team = 'US') {
   const scene = new THREE.Scene();
@@ -1315,6 +1315,197 @@ test('v133: Optional Forensic Death Cam — Realism OFF Default, 3D Shot Trace, 
     assert.equal(cam.fov, 75, 'Finishing post-death cam restores 75 deg FOV');
   } finally {
     globalThis.localStorage = prevStorage;
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('v135: Rooftop Helicopter Persistence (No Disappearing Through Skyscrapers) & Multi-Modal Tactical Ride / Airlift System', () => {
+  const scene = new THREE.Scene();
+  const world = new VoxelWorld(scene, FRUGIS_RIVER_MAP);
+  const vm = new VehicleManager(scene, world);
+  const bm = new BotManager(scene, world, 32, 'US');
+  const cam = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 3500);
+
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  globalThis.document = {
+    pointerLockElement: null,
+    activeElement: null,
+    body: { requestPointerLock: () => Promise.resolve() },
+    addEventListener: () => {},
+    getElementById: () => null,
+    querySelectorAll: () => [],
+    exitPointerLock: () => {}
+  };
+  globalThis.window = {
+    addEventListener: () => {},
+    focus: () => {},
+    game: { matchEnded: false, ui: {} }
+  };
+
+  try {
+    const player = new PlayerController(cam, scene, world, bm, vm);
+    player.deploy('US', 'recon', new THREE.Vector3(-1520, 4, 0));
+
+    // 1. Find Downtown Objective C's tallest intact skyscraper roof (> 40m high!)
+    const flagC = world.flags.find((f) => f.id === 'C');
+    assert.ok(flagC, 'Objective C exists');
+    const cRoof = vm.findTallestBuildingRoofNear(flagC.pos.x, flagC.pos.z, 175);
+    assert.ok(
+      cRoof && cRoof.heightAboveGround >= 35,
+      `Found tall Downtown FOB C skyscraper roof (+${cRoof?.heightAboveGround?.toFixed(1)}m)`
+    );
+
+    // 2. Land a UH-60M Black Hawk directly on top of the tall FOB C skyscraper and press [E] to exit:
+    //    Verify the helicopter STAYS ON THE ROOF across 120 simulation frames (never drops to ground y=0..4m!)
+    const uh60 = vm.vehicles.find(
+      (v) => v.team === 'US' && v.isHelicopter && v.aircraftRole === 'heli_transport'
+    );
+    assert.ok(uh60, 'US UH-60M transport helicopter exists');
+    uh60.pos.set(cRoof.x, cRoof.y + 0.1, cRoof.z);
+    uh60._heliVelX = 0;
+    uh60._heliVelY = 0;
+    uh60._heliVelZ = 0;
+    player.enterVehicle(uh60, true);
+    assert.equal(player.activeVehicle?.id, uh60.id);
+
+    // Activate a FALCON Commander order too, ensuring AI orders NEVER hijack or teleport our parked rooftop heli!
+    bm.commanderOrders.US = { action: 'OBJECTIVE', flagId: 'D', flagIndex: 3, timer: 60 };
+
+    // Step out onto the skyscraper roof via [E] (`handleVehicleAndDragKey`)
+    player.handleVehicleAndDragKey();
+    assert.equal(player.activeVehicle?.id ?? null, null, 'Sniper stepped out onto skyscraper roof');
+    assert.ok(
+      Math.abs(player.pos.y - cRoof.y) < 2.2,
+      `Sniper stands safely on skyscraper roof (expected ~${cRoof.y.toFixed(1)}m, got ${player.pos.y.toFixed(1)}m)`
+    );
+
+    for (let f = 0; f < 120; f++) {
+      vm.update(1 / 60, player, bm, false, cam);
+    }
+    assert.equal(uh60.dead, false, 'Parked rooftop helicopter is alive');
+    assert.equal(uh60.mesh.visible, true, 'Parked rooftop helicopter mesh remains visible');
+    assert.ok(
+      Math.abs(uh60.pos.y - cRoof.y) < 1.0,
+      `Parked helicopter stays on ${cRoof.y.toFixed(1)}m skyscraper roof instead of disappearing to ground (got y=${uh60.pos.y.toFixed(2)}m)`
+    );
+
+    // 3. Test Two-Step [Alt+R] Ride Workflow:
+    //    Step 3a (1st Alt+R): Sniper at Main Base presses [Alt+R] -> Pickup-Only Black Hawk flies to Sniper (`destPending === true`)!
+    //    Step 3b: Sniper boards via [E] BEFORE choosing drop-off -> Helicopter enters `AWAITING_DEST` ready-hover!
+    //    Step 3c (2nd Alt+R): Sniper designates drop-off (first via [Q] Ping + [Alt+R], then redirected to Top of OBJ C Skyscraper)!
+    assert.deepEqual(
+      resolveGlobalCommandShortcut(
+        { code: 'KeyR', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false },
+        { isMac: false, inAircraft: false, commandRank: 'MEMBER' }
+      ),
+      { type: 'REQUEST_RIDE' },
+      'Alt+R resolves to REQUEST_RIDE for Squad Member Snipers'
+    );
+    assert.deepEqual(
+      resolveGlobalCommandShortcut(
+        { code: 'KeyR', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false },
+        { isMac: false, inAircraft: true, commandRank: 'MEMBER' }
+      ),
+      { type: 'REQUEST_RIDE' },
+      'Alt+R ALSO resolves to REQUEST_RIDE while sitting inside an Airlift Helicopter'
+    );
+
+    uh60.parkedByPlayer = false;
+    player.pos.set(-1510, world.getGroundHeightAt(-1510, 0), 0);
+    const mockUi = {
+      openedModalCount: 0,
+      openRideMapModal() {
+        this.openedModalCount++;
+      }
+    };
+
+    // 1st [Alt+R]: Request pickup right where Sniper is standing (no drop-off destination yet!)
+    const heliRideRes = player.handleAltRRideAction(mockUi);
+    assert.equal(heliRideRes.ok, true, '1st [Alt+R] dispatches pickup to Sniper position');
+    assert.equal(heliRideRes.dest.pending, true, '1st [Alt+R] leaves drop-off pending (`AWAITING DROP-OFF`)');
+    const airliftHeli = heliRideRes.vehicle;
+    assert.equal(airliftHeli.rideTask.destPending, true);
+
+    // Advance AI pickup approach until helicopter arrives at Sniper's pickup LZ
+    for (let step = 0; step < 360 && airliftHeli.rideTask.phase === 'APPROACHING_PICKUP'; step++) {
+      vm.update(1 / 30, player, bm, false, cam);
+    }
+    assert.equal(airliftHeli.rideTask.phase, 'HOLDING_FOR_PICKUP', 'Airlift helicopter arrives & holds for pickup');
+    assert.equal(
+      vm.findNearestEnterable(player.pos, 7.5, 'US')?.id,
+      airliftHeli.id,
+      'Airlift helicopter is enterable via [E]'
+    );
+
+    // Sniper presses [E] to board BEFORE choosing a drop-off: enters Seat [F2] in `AWAITING_DEST` ready-hover!
+    player.handleVehicleAndDragKey();
+    assert.equal(player.activeVehicle?.id, airliftHeli.id, 'Sniper boarded Airlift helicopter');
+    assert.ok(player.vehicleSeatIndex >= 1, 'Sniper placed in passenger/door-gunner seat while AI pilots');
+    assert.equal(airliftHeli.rideTask.phase, 'AWAITING_DEST', 'AI Pilot holds steady in AWAITING_DEST until drop-off is set');
+    for (let step = 0; step < 30; step++) {
+      player.updateVehicleControl(1 / 30);
+      vm.update(1 / 30, player, bm, false, cam);
+    }
+    assert.equal(airliftHeli.rideTask.phase, 'AWAITING_DEST', 'Remains holding until 2nd [Alt+R] sets drop-off');
+
+    // 2nd [Alt+R] without a [Q] ping opens the Drop-Off Map Selector!
+    const secondPressModal = player.handleAltRRideAction(mockUi);
+    assert.equal(secondPressModal.openedDropoffSelector, true, '2nd [Alt+R] opens Drop-Off Map Selector');
+    assert.equal(mockUi.openedModalCount, 1);
+
+    // Also verify [Q] Ping + 2nd [Alt+R] locks drop-off directly to the pinged skyscraper roof!
+    player.activePing = {
+      pos: new THREE.Vector3(cRoof.x, cRoof.y, cRoof.z),
+      timer: 12.0,
+      label: 'OBJ C ROOF'
+    };
+    const pingLockRes = player.handleAltRRideAction(mockUi);
+    assert.equal(pingLockRes.ok, true, '[Q] Ping + [Alt+R] locks drop-off without opening modal');
+    assert.equal(airliftHeli.rideTask.destPending, false);
+    assert.equal(airliftHeli.rideTask.phase, 'EN_ROUTE_TO_DEST', 'AI Pilot departs for OBJ C Rooftop');
+    assert.equal(airliftHeli.rideTask.destIsRoof, true, 'Targets Objective C skyscraper rooftop');
+
+    // Simulate flight across the 1.5km map to Objective C Skyscraper Roof
+    for (let step = 0; step < 1800 && airliftHeli.rideTask.phase !== 'ARRIVED_AT_DEST'; step++) {
+      player.updateVehicleControl(1 / 30);
+      vm.update(1 / 30, player, bm, false, cam);
+    }
+    assert.equal(airliftHeli.rideTask.phase, 'ARRIVED_AT_DEST', 'AI Pilot lands on Objective C Skyscraper Roof');
+    assert.ok(
+      Math.abs(airliftHeli.pos.y - cRoof.y) < 2.2,
+      `Airlift touched down on skyscraper roof (~${cRoof.y.toFixed(1)}m, got ${airliftHeli.pos.y.toFixed(1)}m)`
+    );
+
+    // 4. Sniper is NOW on top of Objective C Skyscraper Roof, steps out [E], and later requests ANOTHER ride
+    //    from the C Roof to Objective D!
+    player.handleVehicleAndDragKey();
+    assert.equal(player.activeVehicle?.id ?? null, null, 'Sniper disembarked on Objective C roof');
+    const roofPickupRes = vm.requestPlayerRide(player, {
+      transportMode: 'heli',
+      destKey: 'D'
+    });
+    assert.equal(roofPickupRes.ok, true, 'Sniper can request rooftop extraction from C Roof to Objective D');
+    assert.ok(
+      Math.abs(roofPickupRes.pickupPos.y - cRoof.y) < 3.5,
+      'Helicopter pickup LZ locks onto the high-rise rooftop elevation where Sniper is standing'
+    );
+
+    // 5. Verify Ground Armored APC (`'apc'`) & 6x6 Truck (`'truck'`) Ride Requests also dispatch & chauffeur cleanly!
+    player.pos.set(-1490, world.getGroundHeightAt(-1490, 15), 15);
+    const apcRideRes = vm.requestPlayerRide(player, {
+      transportMode: 'apc',
+      destKey: 'A'
+    });
+    assert.equal(apcRideRes.ok, true, 'Armored APC Ride request succeeds');
+    assert.equal(apcRideRes.vehicle.type, 'apc');
+    for (let step = 0; step < 300 && apcRideRes.vehicle.rideTask.phase === 'APPROACHING_PICKUP'; step++) {
+      vm.update(1 / 30, player, bm, false, cam);
+    }
+    assert.equal(apcRideRes.vehicle.rideTask.phase, 'HOLDING_FOR_PICKUP', 'Armored APC pulls up and holds for pickup');
+  } finally {
+    world.dispose();
     globalThis.document = prevDoc;
     globalThis.window = prevWin;
   }

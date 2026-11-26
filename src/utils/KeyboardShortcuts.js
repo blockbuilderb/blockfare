@@ -184,6 +184,11 @@ export function resolveGlobalCommandShortcut(e, ctx = {}) {
     return { type: 'CYCLE_ATMOS' };
   }
 
+  // 1b. Universal Personal Ride Pickup & Deferred Drop-Off (`Alt+R` on PC, `⌥+R` or `⌃+R` on Mac; `Alt+T` alias — works for ALL ranks AND while onboard aircraft/vehicles!)
+  if (cmdMod && !e.shiftKey && (e.code === 'KeyR' || ( !isAltFreeLookConflict && e.code === 'KeyT' ))) {
+    return { type: 'REQUEST_RIDE' };
+  }
+
   // 2. Commander & Squad Strategic Orders (`Alt+...` on PC, `⌥+...` or `⌃+...` on Mac, or Numpad — Commander/SL only, disabled on `Alt` while flying!)
   if (allowCmdModOrder && e.code === 'KeyG') {
     return { type: 'STRATEGIC_ORDER', action: 'GARRISON' };
@@ -191,7 +196,7 @@ export function resolveGlobalCommandShortcut(e, ctx = {}) {
   if (allowCmdModOrder && e.code === 'KeyC') {
     return { type: 'STRATEGIC_ORDER', action: 'CHARGE' };
   }
-  if (allowCmdModOrder && e.code === 'KeyR') {
+  if (allowCmdModOrder && (e.code === 'KeyB' || (e.shiftKey && e.code === 'KeyR'))) {
     return { type: 'STRATEGIC_ORDER', action: 'RETREAT' };
   }
   if ((allowCmdModOrder && e.code === 'KeyF') || (allowNumpadOrder && !anyMod && !e.shiftKey && e.code === 'Numpad6')) {

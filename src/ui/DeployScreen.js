@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=134';
-import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=134';
-import { events } from '../events.js?v=134';
+import { SQUAD_DEFS } from '../bots.js?v=135';
+import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=135';
+import { events } from '../events.js?v=135';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=134';
+} from '../core/StateMachines.js?v=135';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=134';
+} from '../utils/KeyboardShortcuts.js?v=135';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -847,6 +847,13 @@ export const DeployScreen = {
               case 'SPACING':
                 this.issueHudFormationSpacing(globalShortcut.spacingMode);
                 break;
+              case 'REQUEST_RIDE':
+                if (typeof this.handleRideShortcut === 'function') {
+                  this.handleRideShortcut();
+                } else {
+                  this.player?.handleAltRRideAction?.(this);
+                }
+                break;
             }
           }
           return;
@@ -874,11 +881,17 @@ export const DeployScreen = {
           return;
         }
         if (!hasAnyModifier(e) && e.code === 'KeyO') {
-          e.preventDefault();
-          if (!e.repeat) {
-            this.toggleMultiplayerModal();
+          const deployOpen =
+            this.deployScreenEl && !this.deployScreenEl.classList.contains('hidden');
+          const mpEl = this.el('multiplayer-modal');
+          const mpOpen = Boolean(mpEl && !mpEl.classList.contains('hidden'));
+          if (deployOpen || mpOpen || e.shiftKey || !this.player || this.player.dead) {
+            e.preventDefault();
+            if (!e.repeat) {
+              this.toggleMultiplayerModal();
+            }
+            return;
           }
-          return;
         }
         if (
           !hasAnyModifier(e) &&
