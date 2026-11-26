@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=133';
-import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=133';
-import { events } from '../events.js?v=133';
+import { SQUAD_DEFS } from '../bots.js?v=134';
+import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=134';
+import { events } from '../events.js?v=134';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=133';
+} from '../core/StateMachines.js?v=134';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=133';
+} from '../utils/KeyboardShortcuts.js?v=134';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -1975,6 +1975,8 @@ export const DeployScreen = {
     }
     const dcHudEl = this.el('death-cam-hud');
     if (dcHudEl) dcHudEl.classList.add('hidden');
+    const dcMarkersEl = this.el('death-cam-markers');
+    if (dcMarkersEl) dcMarkersEl.classList.add('hidden');
     if (this.player) {
       this.player.deathCamPostTimer = 0;
       this.player.clearDeathCamVisuals?.();

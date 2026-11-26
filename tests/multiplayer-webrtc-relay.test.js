@@ -4,12 +4,12 @@ import * as THREE from '../vendor/three.module.js';
 import {
   WebRtcTransport,
   buildDeterministicRoomInfoHash
-} from '../src/network/WebRtcTransport.js?v=133';
+} from '../src/network/WebRtcTransport.js?v=134';
 import {
   NetworkManager,
   normalizeRelayWsUrl,
   deriveRelayHttpOrigin
-} from '../src/network.js?v=133';
+} from '../src/network.js?v=134';
 import {
   BattleRoomCore as BattleRoom,
   createWorkerHandler
@@ -492,7 +492,7 @@ describe('NetworkManager Unified Relay + Vehicle/Aircraft + Conquest Sync', () =
   });
 
   test('BotManager.syncHumanTeamCounts retires dead AI immediately and defers live AI retirement until natural death', async () => {
-    const { BotManager } = await import('../src/bots/BotManager.js?v=133');
+    const { BotManager } = await import('../src/bots/BotManager.js?v=134');
     const scene = new THREE.Scene();
     const voxels = new Map();
     const world = {

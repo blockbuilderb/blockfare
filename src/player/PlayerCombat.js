@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=133';
+import { sound } from '../audio.js?v=134';
 import {
   PLAYER,
   COMBAT,
@@ -8,10 +8,10 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=133';
-import { events } from '../events.js?v=133';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=133';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=133';
+} from '../config.js?v=134';
+import { events } from '../events.js?v=134';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=134';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=134';
 
 function markShared(asset) {
   if (asset) {
@@ -57,16 +57,24 @@ const _hitBodyColor = new THREE.Color(0xd63031);
 const _hitVehColor = new THREE.Color(0xf1c40f);
 const _hitGroundColor = new THREE.Color(0x6b7c59);
 
-// Shared Cached Optional Death Cam 3D Trajectory & Origin Beacon Assets
-const _deathTraceCoreGeo = markShared(new THREE.CylinderGeometry(0.045, 0.045, 1, 8, 1, true));
-const _deathTraceGlowGeo = markShared(new THREE.CylinderGeometry(0.16, 0.16, 1, 8, 1, true));
-const _deathOriginDiamondGeo = markShared(new THREE.OctahedronGeometry(0.55, 0));
-const _deathImpactRingGeo = markShared(new THREE.RingGeometry(0.22, 0.4, 16));
+// Shared Cached Optional Death Cam 3D Trajectory, Animated Bullet Tracer & X-Ray Silhouettes
+const _deathTraceCoreGeo = markShared(new THREE.CylinderGeometry(0.032, 0.032, 1, 8, 1, true));
+const _deathTraceGlowGeo = markShared(new THREE.CylinderGeometry(0.12, 0.12, 1, 8, 1, true));
+const _deathOriginDiamondGeo = markShared(new THREE.OctahedronGeometry(0.52, 0));
+const _deathImpactRingGeo = markShared(new THREE.RingGeometry(0.24, 0.44, 20));
+const _deathBulletHeadGeo = markShared(new THREE.SphereGeometry(0.24, 10, 8));
+const _deathBulletWakeGeo = markShared(new THREE.ConeGeometry(0.22, 2.4, 8, 1, true));
+const _deathVicHeadGeo = markShared(new THREE.BoxGeometry(0.38, 0.38, 0.38));
+const _deathVicTorsoGeo = markShared(new THREE.BoxGeometry(0.52, 0.66, 0.28));
+const _deathVicArmGeo = markShared(new THREE.BoxGeometry(0.18, 0.62, 0.18));
+const _deathVicLegGeo = markShared(new THREE.BoxGeometry(0.21, 0.68, 0.22));
+const _deathKillerVehBoxGeo = markShared(new THREE.BoxGeometry(3.6, 2.3, 5.8));
+
 const _deathTraceCoreMat = markShared(
   new THREE.MeshBasicMaterial({
-    color: 0xff3b30,
+    color: 0xff5252,
     transparent: true,
-    opacity: 0.95,
+    opacity: 0.55,
     depthWrite: false
   })
 );
@@ -74,8 +82,64 @@ const _deathTraceGlowMat = markShared(
   new THREE.MeshBasicMaterial({
     color: 0xff7675,
     transparent: true,
-    opacity: 0.28,
+    opacity: 0.18,
     side: THREE.DoubleSide,
+    depthWrite: false
+  })
+);
+const _deathBulletHeadMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xfff3b0,
+    transparent: true,
+    opacity: 0.98,
+    depthTest: false,
+    depthWrite: false
+  })
+);
+const _deathBulletWakeMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xff4757,
+    transparent: true,
+    opacity: 0.78,
+    side: THREE.DoubleSide,
+    depthTest: false,
+    depthWrite: false
+  })
+);
+const _deathVictimCyanMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0x00d2d3,
+    transparent: true,
+    opacity: 0.44,
+    depthTest: false,
+    depthWrite: false
+  })
+);
+const _deathVictimHitMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xff2e43,
+    transparent: true,
+    opacity: 0.92,
+    depthTest: false,
+    depthWrite: false
+  })
+);
+const _deathKillerXrayMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xff5e2b,
+    transparent: true,
+    opacity: 0.52,
+    depthTest: false,
+    depthWrite: false
+  })
+);
+const _deathKillerWireMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xff9f43,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.92,
+    depthTest: false,
     depthWrite: false
   })
 );
@@ -94,7 +158,7 @@ const _deathImpactMat = markShared(
     color: 0xf1c40f,
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.92,
     depthTest: false,
     depthWrite: false
   })
@@ -102,6 +166,7 @@ const _deathImpactMat = markShared(
 const _deathUpAxis = new THREE.Vector3(0, 1, 0);
 const _deathSegVec = new THREE.Vector3();
 const _deathMidPos = new THREE.Vector3();
+const _deathLiveKillerTmp = new THREE.Vector3();
 
 const _COMPASS_DIRS_8 = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 const _HIT_ZONE_LABELS = {
@@ -3523,6 +3588,8 @@ export const CombatMethods = {
       this.downedWeapon = weaponName;
       this.viewModelGroup.visible = false;
       this._deathCamBlend = 0;
+      this._deathCamAge = 0;
+      this.deathCamMode = 'ZOOM';
       if (this.deathCamEnabled && this.lastDeathReport?.hasKillerOrigin) {
         this.syncDeathCamVisuals(true);
       } else {
@@ -3674,6 +3741,9 @@ export const CombatMethods = {
       this.pos.y + hitHeight,
       this.pos.z
     );
+    const victimFeetPos = new THREE.Vector3(this.pos.x, this.pos.y, this.pos.z);
+    const victimStance = this.prone ? 'prone' : this.crouching ? 'crouch' : 'stand';
+    const victimYaw = this.yaw || 0;
 
     let killerOriginPos = null;
     const rawOrigin = attackerPos || resolved.livePos;
@@ -3732,10 +3802,44 @@ export const CombatMethods = {
       bearingCompass,
       killerOriginPos,
       victimSnapshotPos,
+      victimFeetPos,
+      victimStance,
+      victimYaw,
       hasKillerOrigin,
       timestamp: typeof performance !== 'undefined' ? performance.now() : Date.now()
     };
     return this.lastDeathReport;
+  },
+
+  _createAnatomySilhouetteGroup(baseMat, wireMat = null) {
+    const g = new THREE.Group();
+    const parts = {
+      head: new THREE.Mesh(_deathVicHeadGeo, baseMat),
+      thorax: new THREE.Mesh(_deathVicTorsoGeo, baseMat),
+      leftArm: new THREE.Mesh(_deathVicArmGeo, baseMat),
+      rightArm: new THREE.Mesh(_deathVicArmGeo, baseMat),
+      leftLeg: new THREE.Mesh(_deathVicLegGeo, baseMat),
+      rightLeg: new THREE.Mesh(_deathVicLegGeo, baseMat)
+    };
+    parts.leftLeg.position.set(-0.14, 0.34, 0);
+    parts.rightLeg.position.set(0.14, 0.34, 0);
+    parts.thorax.position.set(0, 1.02, 0);
+    parts.leftArm.position.set(-0.37, 1.02, 0);
+    parts.rightArm.position.set(0.37, 1.02, 0);
+    parts.head.position.set(0, 1.56, 0);
+    for (const k of Object.keys(parts)) {
+      parts[k].renderOrder = 996;
+      g.add(parts[k]);
+      if (wireMat) {
+        const w = new THREE.Mesh(parts[k].geometry, wireMat);
+        w.position.copy(parts[k].position);
+        w.scale.setScalar(1.04);
+        w.renderOrder = 997;
+        g.add(w);
+      }
+    }
+    g.userData.parts = parts;
+    return g;
   },
 
   syncDeathCamVisuals(active = true) {
@@ -3754,13 +3858,61 @@ export const CombatMethods = {
       originBeacon.renderOrder = 999;
       const impactRing = new THREE.Mesh(_deathImpactRingGeo, _deathImpactMat);
       impactRing.renderOrder = 998;
-      grp.add(coreBeam, glowBeam, originBeacon, impactRing);
-      grp.userData = { coreBeam, glowBeam, originBeacon, impactRing };
+
+      // War Thunder-style Animated Bullet / Shell Tracer flying from Shooter -> Victim Hit Zone
+      const bulletGroup = new THREE.Group();
+      const bulletHead = new THREE.Mesh(_deathBulletHeadGeo, _deathBulletHeadMat);
+      bulletHead.renderOrder = 1000;
+      const bulletWake = new THREE.Mesh(_deathBulletWakeGeo, _deathBulletWakeMat);
+      bulletWake.position.set(0, -1.2, 0);
+      bulletWake.renderOrder = 999;
+      bulletGroup.add(bulletHead, bulletWake);
+
+      // Victim 3D Cyan Silhouette ("📍 YOU") with Fatal Hit Zone glowing bright crimson!
+      const victimSilhouette = this._createAnatomySilhouetteGroup(_deathVictimCyanMat, null);
+
+      // Killer 3D X-Ray Orange-Red Silhouette ("🎯 KILLER" — visible through windows, trees & smoke!)
+      const killerSoldierSil = this._createAnatomySilhouetteGroup(
+        _deathKillerXrayMat,
+        _deathKillerWireMat
+      );
+      const killerVehSil = new THREE.Mesh(_deathKillerVehBoxGeo, _deathKillerWireMat);
+      killerVehSil.renderOrder = 997;
+
+      grp.add(
+        coreBeam,
+        glowBeam,
+        originBeacon,
+        impactRing,
+        bulletGroup,
+        victimSilhouette,
+        killerSoldierSil,
+        killerVehSil
+      );
+      grp.userData = {
+        coreBeam,
+        glowBeam,
+        originBeacon,
+        impactRing,
+        bulletGroup,
+        victimSilhouette,
+        killerSoldierSil,
+        killerVehSil
+      };
       this._deathCamTraceGroup = grp;
     }
 
     const grp = this._deathCamTraceGroup;
-    const { coreBeam, glowBeam, originBeacon, impactRing } = grp.userData;
+    const {
+      coreBeam,
+      glowBeam,
+      originBeacon,
+      impactRing,
+      bulletGroup,
+      victimSilhouette,
+      killerSoldierSil,
+      killerVehSil
+    } = grp.userData;
     const orig = report.killerOriginPos;
     const dest = report.victimSnapshotPos;
 
@@ -3769,7 +3921,7 @@ export const CombatMethods = {
     _deathMidPos.addVectors(orig, dest).multiplyScalar(0.5);
     _deathSegVec.divideScalar(segLen);
 
-    const beamThickness = Math.min(3.4, Math.max(0.85, segLen / 85));
+    const beamThickness = Math.min(2.8, Math.max(0.8, segLen / 95));
     coreBeam.position.copy(_deathMidPos);
     coreBeam.scale.set(beamThickness, segLen, beamThickness);
     coreBeam.quaternion.setFromUnitVectors(_deathUpAxis, _deathSegVec);
@@ -3778,12 +3930,87 @@ export const CombatMethods = {
     glowBeam.scale.set(beamThickness, segLen, beamThickness);
     glowBeam.quaternion.copy(coreBeam.quaternion);
 
-    const beaconScale = Math.min(4.8, Math.max(0.95, segLen / 52));
+    // Animated Bullet Tracer loops cleanly along the shot trajectory every 1.25s
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const elapsedSec = Math.max(0, (nowMs - (report.timestamp || nowMs)) / 1000);
+    const cycleT = (elapsedSec % 1.25) / 1.25;
+    const travelT = Math.min(1, cycleT / 0.86);
+    bulletGroup.position.lerpVectors(orig, dest, travelT);
+    bulletGroup.quaternion.copy(coreBeam.quaternion);
+    const tracerScale = Math.min(3.6, Math.max(0.95, segLen / 58));
+    bulletGroup.scale.setScalar(tracerScale);
+    bulletGroup.visible = segLen >= 2.0;
+
+    const beaconScale = Math.min(4.2, Math.max(0.9, segLen / 56));
     originBeacon.position.copy(orig);
     originBeacon.scale.setScalar(beaconScale);
 
+    const pulse = 1 + 0.22 * Math.sin(elapsedSec * 9.0);
     impactRing.position.copy(dest);
+    impactRing.scale.setScalar(pulse * Math.min(2.4, Math.max(0.9, segLen / 75)));
     impactRing.lookAt(orig);
+
+    // Position Victim 3D Cyan Silhouette ("📍 YOU") with crimson highlighted hit zone
+    if (victimSilhouette && report.victimFeetPos) {
+      victimSilhouette.position.copy(report.victimFeetPos);
+      victimSilhouette.rotation.set(0, report.victimYaw || 0, 0);
+      const stanceScaleY =
+        report.victimStance === 'prone' ? 0.35 : report.victimStance === 'crouch' ? 0.68 : 1.0;
+      victimSilhouette.scale.set(1, stanceScaleY, 1);
+      const vParts = victimSilhouette.userData.parts;
+      if (vParts) {
+        for (const zoneKey of Object.keys(vParts)) {
+          vParts[zoneKey].material =
+            zoneKey === report.hitZone ? _deathVictimHitMat : _deathVictimCyanMat;
+        }
+      }
+      victimSilhouette.visible = true;
+    }
+
+    // Position Killer 3D X-Ray Orange-Red Silhouette ("🎯 KILLER")
+    const inKillerPov = this.deathCamMode === 'KILLER_POV';
+    if (typeof this.getLiveKillerFocusPos === 'function') {
+      this.getLiveKillerFocusPos(_deathLiveKillerTmp);
+    } else {
+      _deathLiveKillerTmp.copy(orig);
+    }
+    const isVehKiller =
+      report.killerKind === 'vehicle' ||
+      report.killerKind === 'aircraft' ||
+      Boolean(report.killerVehicle);
+    if (inKillerPov) {
+      // Hide killer X-ray mesh when camera is directly inside killer's 1st-person eyes!
+      killerSoldierSil.visible = false;
+      killerVehSil.visible = false;
+      originBeacon.visible = false;
+    } else if (isVehKiller) {
+      killerSoldierSil.visible = false;
+      killerVehSil.visible = true;
+      originBeacon.visible = true;
+      const veh = report.killerVehicle;
+      if (veh && veh.pos) {
+        killerVehSil.position.set(veh.pos.x, veh.pos.y + 1.25, veh.pos.z);
+        killerVehSil.rotation.set(veh.pitch || 0, veh.yaw || 0, veh.roll || 0, 'YXZ');
+      } else {
+        killerVehSil.position.copy(_deathLiveKillerTmp);
+        killerVehSil.rotation.set(0, 0, 0);
+      }
+    } else {
+      killerVehSil.visible = false;
+      killerSoldierSil.visible = true;
+      originBeacon.visible = true;
+      const unit = report.killerUnit;
+      if (unit && !unit.dead && unit.pos) {
+        killerSoldierSil.position.copy(unit.pos);
+        killerSoldierSil.rotation.set(0, unit.yaw || 0, 0);
+      } else {
+        killerSoldierSil.position.set(orig.x, orig.y - 1.46, orig.z);
+        killerSoldierSil.rotation.set(0, Math.atan2(dest.x - orig.x, dest.z - orig.z), 0);
+      }
+      // Subtle silhouette scale boost at extreme sniper distances so the human figure stays legible!
+      const silBoost = Math.min(2.15, Math.max(1.03, segLen / 135));
+      killerSoldierSil.scale.setScalar(silBoost);
+    }
 
     grp.visible = true;
     if (grp.parent !== this.scene) {
@@ -3866,8 +4093,8 @@ export const CombatMethods = {
     this.suppressionLevel = 0;
     this.respawnTimer = this.respawnDelay; // Start respawn countdown
     if (this.deathCamEnabled && this.lastDeathReport?.hasKillerOrigin) {
-      this.deathCamPostMax = 3.8;
-      this.deathCamPostTimer = 3.8;
+      this.deathCamPostMax = 4.2;
+      this.deathCamPostTimer = 4.2;
       this.syncDeathCamVisuals(true);
     } else {
       this.deathCamPostTimer = 0;

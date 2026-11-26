@@ -2,24 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
 
-import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=133';
-import { VEHICLE_STATS } from '../src/config.js?v=133';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=133';
-import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=133';
-import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=133';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=133';
-import { createWeaponViewModel } from '../src/models/weapon-model.js?v=133';
-import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=133';
-import { BotManager } from '../src/bots/BotManager.js?v=133';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=133';
-import { CombatMethods } from '../src/player/PlayerCombat.js?v=133';
-import { PlayerController } from '../src/player/PlayerController.js?v=133';
-import { SoundManager } from '../src/audio/SoundManager.js?v=133';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=133';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=133';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=133';
-import { BotAIMethods } from '../src/bots/BotAI.js?v=133';
-import { updateMedicRescue } from '../src/bots/MedicAI.js?v=133';
+import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=134';
+import { VEHICLE_STATS } from '../src/config.js?v=134';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=134';
+import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=134';
+import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=134';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=134';
+import { createWeaponViewModel } from '../src/models/weapon-model.js?v=134';
+import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=134';
+import { BotManager } from '../src/bots/BotManager.js?v=134';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=134';
+import { CombatMethods } from '../src/player/PlayerCombat.js?v=134';
+import { PlayerController } from '../src/player/PlayerController.js?v=134';
+import { SoundManager } from '../src/audio/SoundManager.js?v=134';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=134';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=134';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=134';
+import { BotAIMethods } from '../src/bots/BotAI.js?v=134';
+import { updateMedicRescue } from '../src/bots/MedicAI.js?v=134';
 
 function buildPilotHarness(role = 'fighter', team = 'US') {
   const scene = new THREE.Scene();
@@ -1179,8 +1179,14 @@ test('v133: Optional Forensic Death Cam — Realism OFF Default, 3D Shot Trace, 
     assert.equal(memStore.get('bb_death_cam_enabled'), 'true', 'Persists preference to localStorage');
     const traceGrp = scene.getObjectByName('DeathCamShotTrace');
     assert.ok(traceGrp && traceGrp.visible, '3D Shot Trajectory Group attaches to scene immediately when toggled ON');
+    assert.ok(
+      traceGrp.userData.victimSilhouette?.visible &&
+        traceGrp.userData.killerSoldierSil?.visible &&
+        traceGrp.userData.bulletGroup?.visible,
+      'Renders 3D Cyan Victim Silhouette, 3D Orange Killer X-Ray Silhouette, and Animated Bullet Tracer'
+    );
 
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 95; i++) {
       player.update(1 / 60);
     }
     assert.equal(sniperBot.mesh.visible, true, 'Distant culled sniper mesh forced visible during Death Cam');
@@ -1192,8 +1198,24 @@ test('v133: Optional Forensic Death Cam — Realism OFF Default, 3D Shot Trace, 
       .normalize();
     assert.ok(
       camFwd.dot(toKiller) > 0.97,
-      `Downed Death Cam smoothly points directly at killer (dot=${camFwd.dot(toKiller).toFixed(4)})`
+      `Battlefield-style Zoom Death Cam smoothly frames killer without 180 deg cut (dot=${camFwd.dot(toKiller).toFixed(4)})`
     );
+
+    // 2b. Pressing [C] toggles to Call of Duty-style Killer's 1st-Person Sights POV looking back at Victim!
+    player.toggleDeathCamMode();
+    assert.equal(player.deathCamMode, 'KILLER_POV');
+    player.update(1 / 60);
+    assert.ok(
+      cam.position.distanceTo(player.lastDeathReport.killerOriginPos) < 0.05,
+      'KILLER_POV places camera right at killer firing sights'
+    );
+    const povFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
+    const kToVictim = new THREE.Vector3()
+      .subVectors(player.lastDeathReport.victimSnapshotPos, cam.position)
+      .normalize();
+    assert.ok(povFwd.dot(kToVictim) > 0.99, 'KILLER_POV aims directly at victim hit point');
+    player.toggleDeathCamMode();
+    assert.equal(player.deathCamMode, 'ZOOM');
 
     // 3. Revive cleans up 3D trajectory & restores FOV
     player.beyondRescue = false;
@@ -1201,21 +1223,81 @@ test('v133: Optional Forensic Death Cam — Realism OFF Default, 3D Shot Trace, 
     assert.equal(scene.getObjectByName('DeathCamShotTrace'), undefined, 'Revive removes 3D trace from scene');
     assert.equal(cam.fov, 75, 'Revive restores 75 deg FOV');
 
-    // 4. Finalizing death with Death Cam ON engages 3.8s Over-The-Shoulder Killer Replay
+    // 3b. MacBook Laptop Trackpad ADS Verification:
+    //     - Quick Two-Finger Tap (<240ms mousedown + mouseup) TOGGLES scope open & closed!
+    //     - Browser `contextmenu` gesture (without mousedown) ALSO toggles scope!
+    //     - `[O]` keyboard shortcut toggles scope!
+    //     - Desktop Mouse Hold (>=240ms) still releases scope on mouseup!
+    const mousedownHandlers = winListeners.get('mousedown') || [];
+    const mouseupHandlers = winListeners.get('mouseup') || [];
+    const ctxMenuHandlers = winListeners.get('contextmenu') || [];
+    const keydownHandlers = winListeners.get('keydown') || [];
+
+    assert.equal(player.isAds, false);
+    // Simulate MacBook Two-Finger Tap #1 (mousedown button=2, then instant mouseup 15ms later)
+    for (const fn of mousedownHandlers) {
+      fn({ button: 2, target: null, preventDefault: () => {} });
+    }
+    for (const fn of mouseupHandlers) {
+      fn({ button: 2 });
+    }
+    assert.equal(
+      player.isAds,
+      true,
+      'MacBook two-finger tap #1 opens ADS scope and KEEPS it open after fingers lift!'
+    );
+
+    // Simulate MacBook Two-Finger Tap #2 -> closes ADS scope
+    for (const fn of mousedownHandlers) {
+      fn({ button: 2, target: null, preventDefault: () => {} });
+    }
+    for (const fn of mouseupHandlers) {
+      fn({ button: 2 });
+    }
+    assert.equal(player.isAds, false, 'MacBook two-finger tap #2 closes ADS scope cleanly');
+
+    // Simulate Safari/macOS `contextmenu`-only two-finger tap (when >220ms after last mousedown)
+    player._lastRightMouseDownAt = 0;
+    for (const fn of ctxMenuHandlers) {
+      fn({ target: null, preventDefault: () => {} });
+    }
+    assert.equal(player.isAds, true, 'Safari/macOS contextmenu two-finger tap toggles ADS scope ON');
+
+    // Simulate `[O]` keyboard scope toggle
+    for (const fn of keydownHandlers) {
+      fn({ code: 'KeyO', repeat: false, altKey: false, ctrlKey: false, metaKey: false, preventDefault: () => {} });
+    }
+    assert.equal(player.isAds, false, '[O] keyboard shortcut toggles ADS scope OFF');
+
+    // Simulate Desktop Mouse RMB Hold (>= 240ms) -> closes on release
+    for (const fn of mousedownHandlers) {
+      fn({ button: 2, target: null, preventDefault: () => {} });
+    }
+    assert.equal(player.isAds, true);
+    player._lastRightMouseDownAt -= 400; // Held for 400ms
+    for (const fn of mouseupHandlers) {
+      fn({ button: 2 });
+    }
+    assert.equal(player.isAds, false, 'Desktop RMB hold >=240ms still closes scope immediately on release');
+
+    // 4. Finalizing death with Death Cam ON keeps smooth continuous killer zoom (zero jarring 180 deg flip!)
     player.takeDamage(220, sniperBot.name, 'RU', 'SV-98 7.62×54mmR', null, sniperBot.pos.clone(), true);
     player.finalizeDeath();
     assert.equal(player.dead, true);
-    assert.ok(Math.abs(player.deathCamPostTimer - 3.8) < 0.01, 'Starts 3.8s post-death killer replay timer');
+    assert.ok(Math.abs(player.deathCamPostTimer - 4.2) < 0.01, 'Starts 4.2s post-death replay timer');
+    player._deathCamAge = 1.6;
+    player._deathCamBlend = 1.0;
     player.updateDeathCamCamera(1 / 60, true);
-    const replayDistToKiller = cam.position.distanceTo(sniperBot.pos);
+    const postFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
+    const postToKiller = new THREE.Vector3()
+      .subVectors(player.getLiveKillerFocusPos(new THREE.Vector3()), cam.position)
+      .normalize();
     assert.ok(
-      replayDistToKiller < 12,
-      `Post-death replay positions camera over killer's shoulder (dist=${replayDistToKiller.toFixed(2)}m)`
+      postFwd.dot(postToKiller) > 0.97,
+      'Post-death camera preserves continuous compass orientation toward killer without 180 deg flip'
     );
-    assert.equal(cam.fov, 56, 'Post-death killer perspective uses 56 deg tactical FOV');
 
     // 5. Pressing [Space] during Post-Death Replay skips straight to Deploy Screen & cleans up everything
-    const keydownHandlers = winListeners.get('keydown') || [];
     for (const fn of keydownHandlers) {
       fn({
         code: 'Space',

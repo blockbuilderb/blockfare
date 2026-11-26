@@ -1,9 +1,9 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { ECONOMY, VEHICLE_STATS, SQUAD_KIT_CAPS, PROJECTILES } from '../src/config.js?v=133';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=133';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=133';
+import { ECONOMY, VEHICLE_STATS, SQUAD_KIT_CAPS, PROJECTILES } from '../src/config.js?v=134';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=134';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=134';
 import {
   VehicleManager,
   PITCH_LIMITS_CAR,
@@ -11,14 +11,14 @@ import {
   classifyWeaponBallistics,
   getVehicleSeatLayout,
   initVehicleOrdnance
-} from '../src/vehicles.js?v=133';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=133';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=133';
-import { sound } from '../src/audio/SoundManager.js?v=133';
-import { BotManager, SQUAD_9MAN_ROSTERS, evaluateCatastrophicKill } from '../src/bots.js?v=133';
-import { NetworkManager } from '../src/network.js?v=133';
-import { ConquestSystem } from '../src/world/ConquestSystem.js?v=133';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=133';
+} from '../src/vehicles.js?v=134';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=134';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=134';
+import { sound } from '../src/audio/SoundManager.js?v=134';
+import { BotManager, SQUAD_9MAN_ROSTERS, evaluateCatastrophicKill } from '../src/bots.js?v=134';
+import { NetworkManager } from '../src/network.js?v=134';
+import { ConquestSystem } from '../src/world/ConquestSystem.js?v=134';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=134';
 
 function createEconomyPlayerHarness(overrides = {}) {
   const storage = new Map();

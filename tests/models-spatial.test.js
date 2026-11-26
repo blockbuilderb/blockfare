@@ -7,10 +7,10 @@ import {
   createSoldierMesh,
   updateSoldierEquippedWeapon
 } from '../src/models/soldier-model.js';
-import { createWeaponViewModel } from '../src/models/weapon-model.js?v=133';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=133';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=133';
-import { TerrainGenerator } from '../src/world/TerrainGenerator.js?v=133';
+import { createWeaponViewModel } from '../src/models/weapon-model.js?v=134';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=134';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=134';
+import { TerrainGenerator } from '../src/world/TerrainGenerator.js?v=134';
 import { SpatialGrid2D } from '../src/utils/SpatialGrid2D.js';
 
 /**

@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=133';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=133';
+import { UI, getEraRoles } from '../config.js?v=134';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=134';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -182,9 +182,9 @@ export const HudRenderer = {
               ['WASD + Shift', 'Move & Tactical Sprint'],
               ['Space / C / Z', 'Jump & Ledge Vault / Toggle Crouch / Toggle Prone'],
               ['Tap Q / RMB + E', '3D Tactical Ping (Tap Q) • Lean Left (Hold Q) / Lean Right (RMB + E)'],
-              ['LMB / RMB / Shift', 'Fire Weapon / ADS Scope / Hold Breath (steadies sniper sway)'],
-              ['[V] Key', 'Toggle Variable Scope Zoom (1x ⇄ 4x/6x/12x), Canted Red-Dot, or Weapon Inspect'],
-              ['[V] (When Downed)', 'Toggle Optional Forensic Death Cam, 3D Shot Trace & Killer Replay (OFF by default)'],
+              ['LMB / RMB / Shift', 'Fire Weapon / Hold RMB Scope (MacBook Trackpad: 2-Finger Tap, ⌃+Click, or [O] Key toggles Scope!) / Hold Breath'],
+              ['[O] / [V] Keys', '[O] Toggle Scope On/Off (Laptop/Trackpad friendly!) • [V] Variable Zoom (1x ⇄ 4x/12x) or Inspect'],
+              ['[V] / [C] (When Downed)', '[V] Toggle Optional Death Cam • [C] Switch Battlefield Zoom ⇄ Killer\'s Eyes POV'],
               ['[X] / [N] Keys', 'Cycle Scope Zeroing (100m–400m) / Toggle NVG or Thermal Scope Polarity (WHOT/BHOT)'],
               ['[R] / 2× [R] / [P]', 'Tactical Mag Swap / Emergency Speed-Drop Reload / Tarkov Bullet-by-Bullet Mag Pack']
             ]
@@ -5562,6 +5562,7 @@ export const HudRenderer = {
     const dcEl = this.el('death-cam-hud');
     if (!dcEl || !this.player) return;
 
+    let markersEl = this.el('death-cam-markers');
     const report = this.player.lastDeathReport;
     const isDownedDc = Boolean(this.player.downed && this.player.deathCamEnabled && report);
     const isPostReplayDc = Boolean(
@@ -5575,12 +5576,29 @@ export const HudRenderer = {
       if (!dcEl.classList.contains('hidden')) {
         dcEl.classList.add('hidden');
       }
+      if (markersEl && !markersEl.classList.contains('hidden')) {
+        markersEl.classList.add('hidden');
+      }
       this._lastDeathCamSig = '';
       return;
     }
 
     if (dcEl.classList.contains('hidden')) {
       dcEl.classList.remove('hidden');
+    }
+    if (!markersEl && typeof document !== 'undefined' && dcEl.parentElement) {
+      markersEl = document.createElement('div');
+      markersEl.id = 'death-cam-markers';
+      markersEl.innerHTML = `
+        <div id="dc-float-killer" class="dc-float-killer hidden"></div>
+        <div id="dc-float-you" class="dc-float-you hidden"></div>
+        <div id="dc-pov-reticle" class="dc-pov-reticle hidden"></div>
+      `;
+      dcEl.parentElement.appendChild(markersEl);
+      if (this._domCache) this._domCache.set('death-cam-markers', markersEl);
+    }
+    if (markersEl && markersEl.classList.contains('hidden')) {
+      markersEl.classList.remove('hidden');
     }
 
     const esc = (s) =>
@@ -5590,77 +5608,175 @@ export const HudRenderer = {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
 
+    const inKillerPov = this.player.deathCamMode === 'KILLER_POV';
     const liveHp = Math.max(0, Math.round(report.killerLiveHp ?? report.killerHp ?? 0));
     const liveMaxHp = Math.max(1, Math.round(report.killerLiveMaxHp ?? report.killerMaxHp ?? 100));
     const hpPct = Math.min(100, Math.max(0, Math.round((liveHp / liveMaxHp) * 100)));
     const postSec = isPostReplayDc ? Math.max(0, this.player.deathCamPostTimer).toFixed(1) : '';
-    const sig = `${isPostReplayDc ? 'POST' : 'DOWN'}|${report.timestamp}|${liveHp}|${postSec}`;
+    const distRounded = Math.max(1, Math.round(report.distanceM || 0));
+
+    const hitPlainMap = {
+      head: 'Headshot',
+      thorax: 'Hit in the Chest',
+      leftArm: 'Hit in the Left Arm',
+      rightArm: 'Hit in the Right Arm',
+      leftLeg: 'Hit in the Left Leg',
+      rightLeg: 'Hit in the Right Leg'
+    };
+    const hitPlain = hitPlainMap[report.hitZone] || 'Hit';
+
+    // Update 2D Floating Screen-Space Callout Tags ("🎯 KILLER" & "📍 YOU") every frame!
+    if (markersEl && this.player.camera && report.hasKillerOrigin) {
+      const killerFloatEl = markersEl.querySelector('#dc-float-killer');
+      const youFloatEl = markersEl.querySelector('#dc-float-you');
+      const povRetEl = markersEl.querySelector('#dc-pov-reticle');
+      const vw = (typeof window !== 'undefined' && window.innerWidth) || 1280;
+      const vh = (typeof window !== 'undefined' && window.innerHeight) || 720;
+
+      if (!this._dcProjVecA) {
+        this._dcProjVecA = report.victimSnapshotPos.clone();
+        this._dcProjVecB = report.victimSnapshotPos.clone();
+      }
+
+      if (povRetEl) {
+        povRetEl.classList.toggle('hidden', !inKillerPov);
+      }
+
+      // 1) Floating "🎯 KILLER" card pinned directly over the glowing orange-red Killer!
+      if (killerFloatEl) {
+        if (inKillerPov) {
+          killerFloatEl.classList.add('hidden');
+        } else {
+          const kPos = this.player.getLiveKillerFocusPos(this._dcProjVecA);
+          this._dcProjVecB.set(kPos.x, kPos.y + 0.72, kPos.z).project(this.player.camera);
+          let sx = (this._dcProjVecB.x * 0.5 + 0.5) * vw;
+          let sy = (-this._dcProjVecB.y * 0.5 + 0.5) * vh;
+          if (this._dcProjVecB.z > 1) {
+            sx = vw - sx;
+            sy = vh * 0.52;
+          }
+          sx = Math.min(vw - 110, Math.max(110, sx));
+          sy = Math.min(vh - 140, Math.max(168, sy));
+          killerFloatEl.style.left = `${sx.toFixed(1)}px`;
+          killerFloatEl.style.top = `${sy.toFixed(1)}px`;
+          killerFloatEl.classList.remove('hidden');
+          const kCardSig = `${report.timestamp}|${liveHp}|${distRounded}`;
+          if (killerFloatEl._lastSig !== kCardSig) {
+            killerFloatEl._lastSig = kCardSig;
+            killerFloatEl.innerHTML = `
+              <div class="dc-fk-tag">🎯 KILLED YOU • ${distRounded}m AWAY</div>
+              <div class="dc-fk-name">${esc(report.killerName)}</div>
+              <div class="dc-fk-sub">${esc(report.killerRoleLabel)} • ${esc(report.weaponName)}</div>
+              <div class="dc-fk-hp-bg"><div class="dc-fk-hp-fill" style="width:${hpPct}%"></div></div>
+            `;
+          }
+        }
+      }
+
+      // 2) Floating "📍 YOU" card pinned over your 3D cyan silhouette when visible on screen!
+      if (youFloatEl && report.victimSnapshotPos) {
+        const vTopY = (report.victimFeetPos ? report.victimFeetPos.y : report.victimSnapshotPos.y) + 1.92;
+        this._dcProjVecB
+          .set(report.victimSnapshotPos.x, vTopY, report.victimSnapshotPos.z)
+          .project(this.player.camera);
+        const onScreen =
+          this._dcProjVecB.z > 0 &&
+          this._dcProjVecB.z < 1 &&
+          Math.abs(this._dcProjVecB.x) <= 0.94 &&
+          Math.abs(this._dcProjVecB.y) <= 0.9;
+        if (onScreen) {
+          const vx = (this._dcProjVecB.x * 0.5 + 0.5) * vw;
+          const vy = Math.max(155, (-this._dcProjVecB.y * 0.5 + 0.5) * vh);
+          youFloatEl.style.left = `${vx.toFixed(1)}px`;
+          youFloatEl.style.top = `${vy.toFixed(1)}px`;
+          youFloatEl.classList.remove('hidden');
+          const ySig = `${report.timestamp}|${inKillerPov ? 1 : 0}`;
+          if (youFloatEl._lastSig !== ySig) {
+            youFloatEl._lastSig = ySig;
+            youFloatEl.innerHTML = `<div class="dc-fy-title">📍 ${
+              inKillerPov ? 'YOU WERE HERE' : 'YOU'
+            } (${report.isHeadshot ? '💀 HEADSHOT' : esc(hitPlain.toUpperCase())})</div>`;
+          }
+        } else {
+          youFloatEl.classList.add('hidden');
+        }
+      }
+    }
+
+    const sig = `${isPostReplayDc ? 'POST' : 'DOWN'}|${inKillerPov ? 'POV' : 'ZOOM'}|${report.timestamp}|${liveHp}|${postSec}`;
     if (this._lastDeathCamSig === sig) return;
     this._lastDeathCamSig = sig;
 
-    const phaseText = isPostReplayDc
-      ? `🎥 KILLER PERSPECTIVE REPLAY (${postSec}s)`
-      : '🎥 OPTIONAL FORENSIC DEATH CAM • 3D SHOT TRAJECTORY';
-    const hintText = isPostReplayDc
-      ? '[SPACE / ESC] SKIP TO DEPLOY • [V] TURN OFF'
-      : '[V] TURN OFF (REALISM)';
-
-    const teamCode = report.killerTeam === 'US' ? 'US' : report.killerTeam === 'RU' ? 'RU' : '';
-    const teamPillHtml = teamCode
-      ? `<span class="dc-team-pill ${teamCode === 'US' ? 'us' : 'ru'}">${teamCode}</span>`
-      : '';
-
-    const distText = report.hasKillerOrigin
-      ? `${Math.round(report.distanceM)}m • ${report.bearingDeg}° ${esc(report.bearingCompass)}`
-      : 'SELF / POINT-BLANK';
     const elevVal = report.elevDeltaM || 0;
-    const elevText = !report.hasKillerOrigin
-      ? 'LOCAL IMPACT'
-      : elevVal >= 6
-      ? `▲ +${elevVal}m HIGH GROUND`
-      : elevVal <= -6
-      ? `▼ ${elevVal}m BELOW YOU`
-      : `● LEVEL (${elevVal >= 0 ? '+' : ''}${elevVal}m)`;
+    const vantagePhrase = !report.hasKillerOrigin
+      ? 'at close range'
+      : elevVal >= 8
+      ? `from high ground (+${elevVal}m above you, e.g. rooftop/ridge)`
+      : elevVal <= -8
+      ? `from lower ground (${elevVal}m below you)`
+      : `from ${distRounded}m ${esc(report.bearingCompass)}`;
 
-    const hitBadge = `${report.isHeadshot ? '💀 ' : '🎯 '}${esc(report.hitZoneLabel)} (-${report.fatalDamage})`;
+    const storyHtml = !report.hasKillerOrigin
+      ? `💥 <b class="dc-hl-hit">You died</b> from <b class="dc-hl-wep">${esc(report.weaponName)}</b>.`
+      : `${report.isHeadshot ? '💀' : '💥'} <b class="dc-hl-hit">${esc(
+          hitPlain
+        )} from ${distRounded}m away</b> — <b class="dc-hl-killer">${esc(
+          report.killerName
+        )}</b> (${esc(report.killerRoleLabel)}) shot you ${vantagePhrase} using <b class="dc-hl-wep">${esc(
+          report.weaponName
+        )}</b>.`;
 
     dcEl.innerHTML = `
-      <div class="dc-header-row">
-        <span class="dc-phase-badge">${phaseText}</span>
-        <span class="dc-controls-hint">${hintText}</span>
+      <div class="dc-story-line">${storyHtml}</div>
+      <div class="dc-legend-row">
+        <span class="dc-legend-pill">🟧 <b>Orange Glow</b> = Killer (${liveHp}/${liveMaxHp} HP)</span>
+        <span class="dc-legend-pill">🟦 <b>Cyan Figure</b> = Where You Got Hit</span>
+        <span class="dc-legend-pill">🟡 <b>Moving Tracer</b> = Bullet Flight Path</span>
       </div>
-      <div class="dc-killer-row">
-        <div class="dc-killer-id">
-          ${teamPillHtml}
-          <span>${esc(report.killerName)}</span>
-          <span class="dc-role-pill">${esc(report.killerRoleLabel)}</span>
+      <div class="dc-actions-row">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button type="button" id="dc-mode-btn" class="dc-action-btn ${
+            inKillerPov ? 'pov-active' : ''
+          }">
+            📷 [C] View: ${
+              inKillerPov
+                ? "Killer's Sights (Switch to Battlefield Zoom)"
+                : "Battlefield Zoom (Switch to Killer's Sights)"
+            }
+          </button>
+          <button type="button" id="dc-off-btn" class="dc-action-btn">
+            🪖 [V] Turn Off Death Cam
+          </button>
         </div>
-        <div class="dc-hp-box" title="Killer Remaining Health">
-          <div class="dc-hp-bar-bg">
-            <div class="dc-hp-bar-fill" style="width:${hpPct}%"></div>
-          </div>
-          <span class="dc-hp-txt">${liveHp}/${liveMaxHp} HP</span>
-        </div>
-      </div>
-      <div class="dc-grid">
-        <div class="dc-cell">
-          <div class="dc-cell-lbl">FATAL WEAPON</div>
-          <div class="dc-cell-val" title="${esc(report.weaponName)}">${esc(report.weaponName)}</div>
-        </div>
-        <div class="dc-cell">
-          <div class="dc-cell-lbl">HIT ANATOMY</div>
-          <div class="dc-cell-val ${report.isHeadshot ? 'hs' : ''}">${hitBadge}</div>
-        </div>
-        <div class="dc-cell">
-          <div class="dc-cell-lbl">RANGE &amp; BEARING</div>
-          <div class="dc-cell-val">${distText}</div>
-        </div>
-        <div class="dc-cell">
-          <div class="dc-cell-lbl">SHOOTER VANTAGE</div>
-          <div class="dc-cell-val ${elevVal >= 6 ? 'elev-high' : ''}">${elevText}</div>
-        </div>
+        ${
+          isPostReplayDc
+            ? `<button type="button" id="dc-skip-btn" class="dc-action-btn" style="border-color:#f1c40f;color:#ffeaa7;">⏭️ [SPACE] Skip (${postSec}s)</button>`
+            : `<span style="font-size:11px;font-weight:800;color:#95a5a6;">Awaiting Medic or Hold [SPACE] to Give Up</span>`
+        }
       </div>
     `;
+
+    const modeBtn = dcEl.querySelector('#dc-mode-btn');
+    if (modeBtn) {
+      modeBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.player?.toggleDeathCamMode?.();
+      });
+    }
+    const offBtn = dcEl.querySelector('#dc-off-btn');
+    if (offBtn) {
+      offBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.player?.toggleDeathCamEnabled?.();
+      });
+    }
+    const skipBtn = dcEl.querySelector('#dc-skip-btn');
+    if (skipBtn) {
+      skipBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.player?.finishPostDeathCam?.();
+      });
+    }
   }
 };
 

@@ -2,9 +2,9 @@
 // ASSETS & DATA BARREL EXPORT (src/assets/index.js)
 // ============================================================================
 
-export { WEAPON_DEFS, CLASS_LOADOUTS } from './weapon-defs.js?v=133';
-export { ATTACHMENT_CATALOG } from './attachment-defs.js?v=133';
-export { VEHICLE_DEFS, AIRCRAFT_SPEED_RESEARCH } from './vehicle-defs.js?v=133';
-export { VOXEL_SIZE, MAT_DEFS } from './voxel-materials.js?v=133';
-export { TEXTURES } from './textures.js?v=133';
-export { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from './gunsmith-svg.js?v=133';
+export { WEAPON_DEFS, CLASS_LOADOUTS } from './weapon-defs.js?v=134';
+export { ATTACHMENT_CATALOG } from './attachment-defs.js?v=134';
+export { VEHICLE_DEFS, AIRCRAFT_SPEED_RESEARCH } from './vehicle-defs.js?v=134';
+export { VOXEL_SIZE, MAT_DEFS } from './voxel-materials.js?v=134';
+export { TEXTURES } from './textures.js?v=134';
+export { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from './gunsmith-svg.js?v=134';

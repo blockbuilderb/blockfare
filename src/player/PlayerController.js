@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=133';
-import { sound } from '../audio.js?v=133';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=133';
+import { VOXEL_SIZE } from '../world.js?v=134';
+import { sound } from '../audio.js?v=134';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=134';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=133';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=133';
-import { events, makeEventBridge } from '../events.js?v=133';
-import { GunsmithMethods } from './GunsmithState.js?v=133';
-import { FortificationMethods } from './FortificationBuilder.js?v=133';
-import { CommanderMethods } from './CommanderAbilities.js?v=133';
-import { VehicleControlMethods } from './VehicleControl.js?v=133';
-import { CombatMethods } from './PlayerCombat.js?v=133';
+} from '../utils/KeyboardShortcuts.js?v=134';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=134';
+import { events, makeEventBridge } from '../events.js?v=134';
+import { GunsmithMethods } from './GunsmithState.js?v=134';
+import { FortificationMethods } from './FortificationBuilder.js?v=134';
+import { CommanderMethods } from './CommanderAbilities.js?v=134';
+import { VehicleControlMethods } from './VehicleControl.js?v=134';
+import { CombatMethods } from './PlayerCombat.js?v=134';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=133';
+} from '../core/StateMachines.js?v=134';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -214,8 +214,13 @@ export class PlayerController {
     } catch (_) {}
     this.lastDeathReport = null;
     this.deathCamPostTimer = 0;
-    this.deathCamPostMax = 3.8;
+    this.deathCamPostMax = 4.2;
+    this.deathCamMode = 'ZOOM'; // 'ZOOM' (Battlefield Silhouette Zoom) | 'KILLER_POV' (CoD Killer's Eyes / Scope)
     this._deathCamBlend = 0;
+    this._deathCamAge = 0;
+    this._lastRightMouseDownAt = 0;
+    this._adsWasOpenOnRightDown = false;
+    this._rightMouseHeld = false;
     this._deathCamFocusVec = new THREE.Vector3();
     this._deathCamLookVec = new THREE.Vector3();
     this._deathCamShotDir = new THREE.Vector3();
@@ -442,11 +447,89 @@ export class PlayerController {
       this.onAwardXp(
         0,
         nextVal
-          ? '🎥 OPTIONAL DEATH CAM: ON (3D SHOT TRAJECTORY, KILLER ZOOM & POST-DEATH REPLAY)'
+          ? '🎥 OPTIONAL DEATH CAM: ON (KILLER SILHOUETTE ZOOM, BULLET FLIGHT & [C] KILLER POV)'
           : '🪖 OPTIONAL DEATH CAM: OFF (REALISTIC MODE — NO KILLER POSITION OR SHOT TRACE)'
       );
     }
     return nextVal;
+  }
+
+  toggleDeathCamMode() {
+    this.deathCamMode = this.deathCamMode === 'KILLER_POV' ? 'ZOOM' : 'KILLER_POV';
+    sound.playEmptyClick?.();
+    if (this.deathCamEnabled && (this.downed || (this.dead && this.deathCamPostTimer > 0))) {
+      this.syncDeathCamVisuals?.(true);
+    }
+    if (typeof window !== 'undefined' && window.game?.ui) {
+      window.game.ui._lastDeathCamSig = '';
+      window.game.ui.updateDeathCamHud?.(0);
+    }
+    return this.deathCamMode;
+  }
+
+  toggleAdsScope() {
+    if (this.dead || this.downed) return false;
+    if (this.activeVehicle) {
+      this.isAds = !this.isAds;
+      sound.playEmptyClick?.();
+      return this.isAds;
+    }
+    if (this.reloading || this.slowReloading) return false;
+    const cur = this.currentWeapon?.();
+    if (cur && cur.def?.type === 'c4') {
+      this.detonateC4?.();
+      return false;
+    }
+    if (cur && cur.def?.type === 'hammer') {
+      this.useHammer?.(true);
+      return false;
+    }
+    this.isAds = !this.isAds;
+    sound.playEmptyClick?.();
+    return this.isAds;
+  }
+
+  handleSecondaryAimDown() {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    this._lastRightMouseDownAt = now;
+    this._rightMouseHeld = true;
+    this._adsWasOpenOnRightDown = Boolean(this.isAds);
+
+    if (this.activeVehicle) {
+      if (!this.isAds) this.isAds = true;
+      return;
+    }
+    const cur = this.currentWeapon?.();
+    if (cur && cur.def?.type === 'c4') {
+      this.detonateC4();
+      this._rightMouseHeld = false;
+      return;
+    }
+    if (cur && cur.def?.type === 'hammer') {
+      this.useHammer(true);
+      this._rightMouseHeld = false;
+      return;
+    }
+    if (!this.isAds) {
+      this.isAds = true;
+    }
+  }
+
+  handleSecondaryAimUp() {
+    if (!this._rightMouseHeld) return;
+    this._rightMouseHeld = false;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const heldMs = Math.max(0, now - (this._lastRightMouseDownAt || 0));
+
+    // Hybrid ADS (Desktop Mouse Hold + MacBook Two-Finger Trackpad Tap Toggle!):
+    // - Held >= 240ms: Classic Hold-to-ADS — releasing Right-Click closes scope immediately.
+    // - Quick Tap < 240ms: Two-Finger Trackpad Tap / Click-to-Toggle —
+    //   1st tap keeps scope OPEN so you can aim with 1 finger & click to shoot; 2nd tap closes scope!
+    if (heldMs >= 240) {
+      this.isAds = false;
+    } else if (this._adsWasOpenOnRightDown) {
+      this.isAds = false;
+    }
   }
 
   resetDeathCamFov() {
@@ -521,93 +604,96 @@ export class PlayerController {
 
     const focusPos = this.getLiveKillerFocusPos(this._deathCamFocusVec);
     this.ensureDeathCamTargetVisible();
+    this._deathCamAge = (this._deathCamAge || 0) + dt;
 
-    if (!isPostDeath) {
-      // Phase 1 (Downed): Smoothly turn victim camera toward killer + auto-zoom FOV + 3D trajectory line
-      const pivotPos = new THREE.Vector3(this.pos.x, this.pos.y + 1.02, this.pos.z);
-      if (typeof this.resolveCameraWallCollision === 'function') {
-        const safeCam = this.resolveCameraWallCollision(
-          new THREE.Vector3(this.pos.x, this.pos.y + 0.55, this.pos.z),
-          pivotPos,
-          0.32
-        );
-        this.camera.position.copy(safeCam);
-      } else {
-        this.camera.position.copy(pivotPos);
-      }
+    const victimPos = report.victimSnapshotPos || this.pos;
 
-      const baseEuler = new THREE.Euler(
-        Math.min(Math.PI / 2 - 0.05, this.pitch),
-        this.yaw,
-        PLAYER.EYE_HEIGHT_DOWNED,
-        'YXZ'
-      );
-      this._deathCamBaseQuat.setFromEuler(baseEuler);
-
-      this._deathCamLookMat.lookAt(this.camera.position, focusPos, new THREE.Vector3(0, 1, 0));
-      this._deathCamTargetQuat.setFromRotationMatrix(this._deathCamLookMat);
-
-      this._deathCamBlend = Math.min(1, (this._deathCamBlend || 0) + dt * 3.4);
-      const smoothT = 1 - Math.pow(1 - this._deathCamBlend, 3);
-      this.camera.quaternion.copy(this._deathCamBaseQuat).slerp(this._deathCamTargetQuat, smoothT);
-
-      const distToKiller = Math.max(1, this.camera.position.distanceTo(focusPos));
-      const zoomFactor = Math.min(3.15, Math.max(1.0, distToKiller / 28));
-      const targetFov = Math.min(68, Math.max(24, 75 / zoomFactor));
+    // Mode B (`[C]` Killer's 1st-Person Scope / Eyes POV — Call of Duty style sightline check!)
+    if (this.deathCamMode === 'KILLER_POV') {
+      const povOrig = report.killerOriginPos || focusPos;
+      this.camera.position.copy(povOrig);
+      this.camera.lookAt(victimPos);
+      const distToVic = Math.max(1, povOrig.distanceTo(victimPos));
+      const povZoom = Math.min(3.4, Math.max(1.15, distToVic / 26));
+      const targetPovFov = Math.min(62, Math.max(22, 75 / povZoom));
       const curFov = this.camera.fov || 75;
-      const nextFov = curFov + (targetFov - curFov) * Math.min(1, dt * 6.5);
+      const nextFov = curFov + (targetPovFov - curFov) * Math.min(1, dt * 9.0);
       if (Math.abs(nextFov - curFov) > 0.02) {
         this.camera.fov = nextFov;
-        if (typeof this.camera.updateProjectionMatrix === 'function') {
-          this.camera.updateProjectionMatrix();
-        }
+        this.camera.updateProjectionMatrix?.();
       }
       this.camera.updateMatrixWorld();
       return true;
     }
 
-    // Phase 2 (Post-Death 3.8s Replay): Over-The-Shoulder 3rd-Person Killer Vantage Replay
-    const victimPos = report.victimSnapshotPos || this.pos;
-    this._deathCamShotDir.subVectors(victimPos, focusPos);
-    const shotDist = Math.max(1, this._deathCamShotDir.length());
-    this._deathCamShotDir.divideScalar(shotDist);
+    // Mode A (Default `'ZOOM'` — Battlefield + War Thunder Continuous Pull-Back & Killer Silhouette Zoom):
+    // 1. Pulls camera slightly behind & above YOUR 3D cyan hit-silhouette (`📍 YOU`) so low walls/grass
+    //    NEVER block your view and you immediately see your own body + incoming bullet direction!
+    // 2. Smoothly zooms onto the glowing orange-red Killer (`🎯 KILLER`) with ZERO jarring 180° teleport!
+    this._deathCamShotDir.subVectors(focusPos, victimPos);
+    const totalShotDist = Math.max(1, this._deathCamShotDir.length());
+    this._deathCamShotDir.divideScalar(totalShotDist);
 
-    const isAirKiller = report.killerKind === 'aircraft' || Boolean(report.killerVehicle?.isAircraft);
-    const isVehKiller = report.killerKind === 'vehicle' || Boolean(report.killerVehicle && !isAirKiller);
-    const backDist = isAirKiller ? 18.5 : isVehKiller ? 9.5 : 3.8;
-    const upLift = isAirKiller ? 4.8 : isVehKiller ? 3.2 : 1.15;
-    const sideOffset = isAirKiller ? 2.8 : isVehKiller ? 1.8 : 0.85;
+    const pullBackT = Math.min(1, (this._deathCamAge || 0) / 0.75);
+    const easePull = 1 - Math.pow(1 - pullBackT, 3);
+    const backFromVictim = 3.2 * easePull;
+    const upAboveVictim = 1.15 + 1.35 * easePull;
 
-    this._deathCamRightVec.set(-this._deathCamShotDir.z, 0, this._deathCamShotDir.x);
-    if (this._deathCamRightVec.lengthSq() > 0.0001) {
-      this._deathCamRightVec.normalize();
-    } else {
-      this._deathCamRightVec.set(1, 0, 0);
-    }
-
-    const desiredCam = new THREE.Vector3(
-      focusPos.x - this._deathCamShotDir.x * backDist + this._deathCamRightVec.x * sideOffset,
-      focusPos.y - this._deathCamShotDir.y * (backDist * 0.35) + upLift,
-      focusPos.z - this._deathCamShotDir.z * backDist + this._deathCamRightVec.z * sideOffset
+    const anchorOrigin = new THREE.Vector3(victimPos.x, victimPos.y + 0.35, victimPos.z);
+    const desiredPullCam = new THREE.Vector3(
+      victimPos.x - this._deathCamShotDir.x * backFromVictim,
+      (report.victimFeetPos ? report.victimFeetPos.y : this.pos.y) + upAboveVictim,
+      victimPos.z - this._deathCamShotDir.z * backFromVictim
     );
+    // During post-death (`isPostDeath`), gently glide slightly closer along the sightline without ever flipping 180°!
+    if (isPostDeath && totalShotDist > 16) {
+      const postFrac = Math.min(
+        0.35,
+        Math.max(0, 1 - (this.deathCamPostTimer || 0) / (this.deathCamPostMax || 4.2)) * 0.35
+      );
+      desiredPullCam.lerp(focusPos, postFrac);
+    }
     if (this.world && typeof this.world.getGroundHeightAt === 'function') {
-      const groundY = this.world.getGroundHeightAt(desiredCam.x, desiredCam.z);
-      if (Number.isFinite(groundY)) {
-        desiredCam.y = Math.max(desiredCam.y, groundY + 1.15);
+      const gy = this.world.getGroundHeightAt(desiredPullCam.x, desiredPullCam.z);
+      if (Number.isFinite(gy)) {
+        desiredPullCam.y = Math.max(desiredPullCam.y, gy + 1.35);
       }
     }
-    if (!isAirKiller && typeof this.resolveCameraWallCollision === 'function') {
-      const safeReplayCam = this.resolveCameraWallCollision(focusPos, desiredCam, 0.42);
-      this.camera.position.copy(safeReplayCam);
+    if (typeof this.resolveCameraWallCollision === 'function') {
+      const safeCam = this.resolveCameraWallCollision(anchorOrigin, desiredPullCam, 0.38);
+      this.camera.position.copy(safeCam);
     } else {
-      this.camera.position.copy(desiredCam);
+      this.camera.position.copy(desiredPullCam);
     }
 
-    // Look past the killer down the 3D shot trajectory toward the player's impact point
-    this._deathCamLookVec.lerpVectors(focusPos, victimPos, 0.58);
-    this.camera.lookAt(this._deathCamLookVec);
-    if (Math.abs((this.camera.fov || 75) - 56) > 0.05) {
-      this.camera.fov = 56;
+    // Frame both YOUR hit-silhouette (first 0.7s) and then smoothly center onto the Killer!
+    const focusBlend = Math.min(1, Math.max(0.28, (this._deathCamAge || 0) / 0.95));
+    this._deathCamLookVec.lerpVectors(victimPos, focusPos, focusBlend);
+
+    const baseEuler = new THREE.Euler(
+      Math.min(Math.PI / 2 - 0.05, this.pitch),
+      this.yaw,
+      0,
+      'YXZ'
+    );
+    this._deathCamBaseQuat.setFromEuler(baseEuler);
+    this._deathCamLookMat.lookAt(this.camera.position, this._deathCamLookVec, new THREE.Vector3(0, 1, 0));
+    this._deathCamTargetQuat.setFromRotationMatrix(this._deathCamLookMat);
+
+    this._deathCamBlend = Math.min(1, (this._deathCamBlend || 0) + dt * 3.8);
+    const smoothT = 1 - Math.pow(1 - this._deathCamBlend, 3);
+    this.camera.quaternion.copy(this._deathCamBaseQuat).slerp(this._deathCamTargetQuat, smoothT);
+
+    // Hold wider FOV for the first 0.55s so you see YOUR body + bullet impact, then optically zoom onto Killer!
+    const distToKiller = Math.max(1, this.camera.position.distanceTo(focusPos));
+    const zoomRamp = Math.min(1, Math.max(0, ((this._deathCamAge || 0) - 0.45) / 1.1));
+    const maxZoomFactor = Math.min(3.25, Math.max(1.0, distToKiller / 26));
+    const curZoomFactor = 1.0 + (maxZoomFactor - 1.0) * zoomRamp;
+    const targetFov = Math.min(68, Math.max(23, 75 / curZoomFactor));
+    const curFov = this.camera.fov || 75;
+    const nextFov = curFov + (targetFov - curFov) * Math.min(1, dt * 5.5);
+    if (Math.abs(nextFov - curFov) > 0.02) {
+      this.camera.fov = nextFov;
       if (typeof this.camera.updateProjectionMatrix === 'function') {
         this.camera.updateProjectionMatrix();
       }
@@ -619,6 +705,8 @@ export class PlayerController {
   finishPostDeathCam() {
     this.deathCamPostTimer = 0;
     this._deathCamBlend = 0;
+    this._deathCamAge = 0;
+    this.deathCamMode = 'ZOOM';
     this.clearDeathCamVisuals?.();
     this.resetDeathCamFov();
     if (typeof window !== 'undefined' && window.game && this.dead && !window.game.matchEnded) {
@@ -867,6 +955,11 @@ export class PlayerController {
           this.toggleDeathCamEnabled();
           return;
         }
+        if (!e.repeat && !hasAnyModifier(e) && e.code === 'KeyC' && this.deathCamEnabled) {
+          e.preventDefault();
+          this.toggleDeathCamMode();
+          return;
+        }
         if (
           !e.repeat &&
           (e.code === 'Space' ||
@@ -1033,10 +1126,17 @@ export class PlayerController {
           }
         }
       }
-      if (this.downed && !hasAnyModifier(e) && e.code === 'KeyV' && !e.repeat) {
-        e.preventDefault();
-        this.toggleDeathCamEnabled();
-        return;
+      if (this.downed && !hasAnyModifier(e) && !e.repeat) {
+        if (e.code === 'KeyV') {
+          e.preventDefault();
+          this.toggleDeathCamEnabled();
+          return;
+        }
+        if (e.code === 'KeyC' && this.deathCamEnabled) {
+          e.preventDefault();
+          this.toggleDeathCamMode();
+          return;
+        }
       }
       if (this.downed) return;
 
@@ -1159,6 +1259,11 @@ export class PlayerController {
           this.keyRHoldTime = 0;
           this.startReload(false);
         }
+      }
+      // [O] Toggle Weapon Scope / Vehicle Gunner Optic (MacBook & Laptop Trackpad-Friendly 1-Key ADS!)
+      if (!hasAnyModifier(e) && e.code === 'KeyO' && !e.repeat) {
+        e.preventDefault();
+        this.toggleAdsScope();
       }
       if (!hasAnyModifier(e) && e.code === 'KeyP' && !e.repeat && !this.activeVehicle) {
         if (this.slowReloading) {
@@ -1610,38 +1715,58 @@ export class PlayerController {
         return;
       }
 
+      const isMacCtrlClick =
+        isMacPlatform() && e.button === 0 && e.ctrlKey && !e.metaKey && !e.altKey;
       if (e.button === 1) {
         e.preventDefault();
         this.triggerTacticalPing();
         return;
       }
-      if (e.button === 0) {
+      if (e.button === 2 || isMacCtrlClick) {
+        e.preventDefault();
+        this.handleSecondaryAimDown();
+      } else if (e.button === 0) {
         this.isFiring = true;
         if (!this.activeVehicle) {
           this.tryFireSingle();
-        }
-      } else if (e.button === 2) {
-        if (this.activeVehicle) {
-          this.isAds = true;
-          return;
-        }
-        const cur = this.currentWeapon();
-        if (cur && cur.def.type === 'c4') {
-          this.detonateC4();
-        } else if (cur && cur.def.type === 'hammer') {
-          this.useHammer(true);
-        } else {
-          this.isAds = true;
         }
       }
     });
 
     window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.isFiring = false;
-      if (e.button === 2) this.isAds = false;
+      if (e.button === 0 && !this._rightMouseHeld) {
+        this.isFiring = false;
+      }
+      if (e.button === 2 || (this._rightMouseHeld && e.button === 0)) {
+        this.handleSecondaryAimUp();
+      }
     });
 
-    window.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      // macOS Trackpad Two-Finger Tap Fallback:
+      // In Safari/Chrome on MacBooks with "Tap to click", a two-finger tap can synthesize `contextmenu`
+      // without holding `mousedown(button: 2)` (or before Pointer Lock is engaged). Toggle ADS Scope cleanly!
+      if (this.dead || this.downed || this.isModalOpen()) return;
+      const clickedUi =
+        e.target &&
+        typeof e.target.closest === 'function' &&
+        e.target.closest(
+          '#gunsmith-modal, #command-modal, #mp-invite-modal, #multiplayer-modal, #settings-modal, #controls-overlay, #deploy-screen, #victory-screen, button, input, select, label, .hud-clickable'
+        );
+      if (clickedUi) return;
+      if (document.pointerLockElement !== document.body) {
+        try {
+          window.focus?.();
+          const p = document.body.requestPointerLock?.();
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+        } catch (_) {}
+      }
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now - (this._lastRightMouseDownAt || 0) > 220) {
+        this.toggleAdsScope();
+      }
+    });
   }
 
   getActiveOpticType() {
