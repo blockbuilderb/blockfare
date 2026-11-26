@@ -4,8 +4,8 @@
 // panning, distance air-absorption filtering, and procedural sub-bass layers.
 // ============================================================================
 
-import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=127';
-import { AUDIO } from '../config.js?v=127';
+import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=132';
+import { AUDIO } from '../config.js?v=132';
 
 const AUDIO_STORAGE_KEY = 'bb_audio_settings_v1';
 
@@ -1522,51 +1522,73 @@ export class SoundManager {
       const abBoost = wHeld ? 0.25 : 0;
       const power = Math.min(1.25, spool * 0.55 + thr * 0.45 + abBoost);
 
-      if (nodes.coreOsc.type !== 'sawtooth') nodes.coreOsc.type = 'sawtooth';
-      if (role === 'wright_flyer') {
-        // 1903 4-cylinder chugging piston engine + twin chain-driven wooden propellers
-        this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 34 + power * 28, now, 0.06);
-        this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 190 + power * 180, now, 0.06);
-        this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.24, now, 0.06);
-        this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 10 + power * 9, now, 0.06);
-        this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.11, now, 0.06);
-        this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 140 + power * 95, now, 0.06);
-        this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.03, now, 0.06);
-        this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 260 + power * 220, now, 0.06);
-        this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.14 + spdNorm * 0.14, now, 0.06);
-      } else if (role === 'gunship') {
-        // AC-130J / Tu-95MS 4-Engine Turboprop Drone + Blade-Pass Hum
-        this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 64 + power * 36, now, 0.07);
-        this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 240 + power * 210, now, 0.07);
-        this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.26, now, 0.07);
-        this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 19 + power * 10, now, 0.07);
-        this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.09, now, 0.07);
-        this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 360 + power * 240, now, 0.07);
-        this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.045, now, 0.07);
-        this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 310 + power * 290, now, 0.07);
-        this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.2 + power * 0.16, now, 0.07);
-      } else if (role === 'cas') {
-        // A-10C / Su-25 High-Bypass Twin-Turbofan Whine + Jet Roar
-        this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 78 + power * 58, now, 0.06);
-        this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 310 + power * 340, now, 0.06);
-        this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.2, now, 0.06);
-        this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 28 + power * 16, now, 0.06);
-        this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.035, now, 0.06);
-        this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 390 + power * 420, now, 0.06);
-        this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.07 + power * 0.04, now, 0.06);
-        this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 380 + power * 520, now, 0.06);
-        this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.24 + power * 0.22, now, 0.06);
+      const isHeliAudio = Boolean(
+        v.isHelicopter || role === 'heli_transport' || role === 'heli_attack'
+      );
+      if (isHeliAudio) {
+        // UH-60M Black Hawk / Mi-8AMTSh & AH-64E Apache / Ka-52 Dedicated Turboshaft + Main-Rotor Blade-Slap Audio:
+        // Deep 18–22 Hz rhythmic "whop-whop-whop" blade-pass LFO modulation (`bladeDepth = 0.24`),
+        // warm 52–68 Hz rotor downwash thump (`triangle` core), and subtle GE T700 turboshaft whine — ZERO jet afterburner roar!
+        if (nodes.coreOsc.type !== 'triangle') nodes.coreOsc.type = 'triangle';
+        const heliCollective = wHeld ? 0.22 : 0;
+        const heliPower = Math.min(1.15, 0.42 + thr * 0.42 + spdNorm * 0.22 + heliCollective);
+        const bladeRateHz = role === 'heli_attack' ? 19.5 + heliPower * 3.2 : 17.2 + heliPower * 3.0;
+        this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 48 + heliPower * 20, now, 0.06);
+        this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 165 + heliPower * 125, now, 0.06);
+        this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.28, now, 0.06);
+        this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', bladeRateHz, now, 0.05);
+        this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.24 + spdNorm * 0.05, now, 0.05);
+        this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 520 + heliPower * 165, now, 0.07);
+        this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.022 + heliPower * 0.014, now, 0.07);
+        this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 195 + heliPower * 135, now, 0.06);
+        this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.14 + heliPower * 0.1, now, 0.06);
       } else {
-        // F-15EX / F-22A / Su-57 / B-2A Spirit Low-Bypass Afterburning Turbofan
-        this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 72 + power * 68, now, 0.06);
-        this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 290 + power * 420, now, 0.06);
-        this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.21 + (wHeld ? 0.08 : 0), now, 0.06);
-        this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 32 + power * 18, now, 0.06);
-        this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.025, now, 0.06);
-        this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 480 + power * 540, now, 0.06);
-        this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.055 + power * 0.035, now, 0.06);
-        this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 340 + power * 640 + (wHeld ? 240 : 0), now, 0.06);
-        this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.26 + power * 0.24 + (wHeld ? 0.14 : 0), now, 0.06);
+        if (nodes.coreOsc.type !== 'sawtooth') nodes.coreOsc.type = 'sawtooth';
+        if (role === 'wright_flyer') {
+          // 1903 4-cylinder chugging piston engine + twin chain-driven wooden propellers
+          this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 34 + power * 28, now, 0.06);
+          this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 190 + power * 180, now, 0.06);
+          this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.24, now, 0.06);
+          this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 10 + power * 9, now, 0.06);
+          this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.11, now, 0.06);
+          this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 140 + power * 95, now, 0.06);
+          this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.03, now, 0.06);
+          this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 260 + power * 220, now, 0.06);
+          this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.14 + spdNorm * 0.14, now, 0.06);
+        } else if (role === 'gunship') {
+          // AC-130J / Tu-95MS 4-Engine Turboprop Drone + Blade-Pass Hum
+          this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 64 + power * 36, now, 0.07);
+          this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 240 + power * 210, now, 0.07);
+          this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.26, now, 0.07);
+          this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 19 + power * 10, now, 0.07);
+          this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.09, now, 0.07);
+          this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 360 + power * 240, now, 0.07);
+          this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.045, now, 0.07);
+          this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 310 + power * 290, now, 0.07);
+          this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.2 + power * 0.16, now, 0.07);
+        } else if (role === 'cas') {
+          // A-10C / Su-25 High-Bypass Twin-Turbofan Whine + Jet Roar
+          this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 78 + power * 58, now, 0.06);
+          this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 310 + power * 340, now, 0.06);
+          this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.2, now, 0.06);
+          this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 28 + power * 16, now, 0.06);
+          this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.035, now, 0.06);
+          this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 390 + power * 420, now, 0.06);
+          this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.07 + power * 0.04, now, 0.06);
+          this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 380 + power * 520, now, 0.06);
+          this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.24 + power * 0.22, now, 0.06);
+        } else {
+          // F-15EX / F-22A / Su-57 / B-2A Spirit Low-Bypass Afterburning Turbofan
+          this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 72 + power * 68, now, 0.06);
+          this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 290 + power * 420, now, 0.06);
+          this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.21 + (wHeld ? 0.08 : 0), now, 0.06);
+          this._setAirParam(nodes.bladeLfo.frequency, 'bladeFreq', 32 + power * 18, now, 0.06);
+          this._setAirParam(nodes.bladeDepth.gain, 'bladeDepth', 0.025, now, 0.06);
+          this._setAirParam(nodes.whineOsc.frequency, 'whineFreq', 480 + power * 540, now, 0.06);
+          this._setAirParam(nodes.whineGain.gain, 'whineGain', 0.055 + power * 0.035, now, 0.06);
+          this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 340 + power * 640 + (wHeld ? 240 : 0), now, 0.06);
+          this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.26 + power * 0.24 + (wHeld ? 0.14 : 0), now, 0.06);
+        }
       }
 
       const targetSelfVol = Math.min(0.42, (0.16 + power * 0.18 + (wHeld ? 0.06 : 0)) * catMult);
@@ -1589,9 +1611,21 @@ export class SoundManager {
       const radialVel = (dx * vx + dz * vz) * invD; // negative = approaching, positive = receding
       const doppler = Math.max(0.68, Math.min(1.42, 1.0 - radialVel / 220));
 
-      this._setAirParam(nodes.extOsc.frequency, 'extOsc', 92 * doppler, now, 0.07);
-      this._setAirParam(nodes.extLp.frequency, 'extLp', (280 + (1 - distRatio) * 520) * doppler, now, 0.07);
-      this._setAirParam(nodes.extNoiseBp.frequency, 'extBp', (360 + (1 - distRatio) * 480) * doppler, now, 0.07);
+      const extIsHeli = Boolean(
+        nearestExtPlane.isHelicopter ||
+          nearestExtPlane.aircraftRole === 'heli_transport' ||
+          nearestExtPlane.aircraftRole === 'heli_attack'
+      );
+      if (extIsHeli) {
+        const chopPulse = 0.72 + 0.28 * Math.sin(now * 20.0 * Math.PI * 2);
+        this._setAirParam(nodes.extOsc.frequency, 'extOsc', 56 * doppler, now, 0.05);
+        this._setAirParam(nodes.extLp.frequency, 'extLp', (165 + (1 - distRatio) * 190) * doppler, now, 0.05);
+        this._setAirParam(nodes.extNoiseBp.frequency, 'extBp', (210 + (1 - distRatio) * 210) * doppler * chopPulse, now, 0.04);
+      } else {
+        this._setAirParam(nodes.extOsc.frequency, 'extOsc', 92 * doppler, now, 0.07);
+        this._setAirParam(nodes.extLp.frequency, 'extLp', (280 + (1 - distRatio) * 520) * doppler, now, 0.07);
+        this._setAirParam(nodes.extNoiseBp.frequency, 'extBp', (360 + (1 - distRatio) * 480) * doppler, now, 0.07);
+      }
 
       if (nodes.extPanner) {
         const rightX = Math.cos(listenerYaw);
@@ -1614,6 +1648,7 @@ export class SoundManager {
       t === 'bike' ||
       t === 'atv' ||
       t === 'humvee' ||
+      t === 'truck_transport' ||
       t === 'apc' ||
       t === 'aa' ||
       t === 'tank'

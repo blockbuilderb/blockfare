@@ -18,7 +18,7 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=127';
+import { TEXTURES } from '../assets/textures.js?v=132';
 
 // Cached shared geometries & materials for 1st-person Spec-Ops Operator Arms, Watch & Articulated Tactical Gloves
 const _fpArmGeos = {
@@ -1594,13 +1594,13 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       bipodR.rotation.z = 0.28;
       group.add(bipodL, bipodR);
 
-      // LMG side carry handle bar & grip cylinder
+      // LMG side carry handle bar & grip cylinder — folded down/right below receiver rail so ADS sight picture is 100% unobstructed!
       const carryGrip = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.011, 0.011, 0.068, 8),
+        new THREE.CylinderGeometry(0.01, 0.01, 0.056, 8),
         accentMat
       );
-      carryGrip.rotation.z = Math.PI / 2;
-      carryGrip.position.set(0.042, 0.062, -0.34);
+      carryGrip.rotation.z = -0.42;
+      carryGrip.position.set(0.054, 0.022, -0.34);
       group.add(carryGrip);
     } else if (isSniper) {
       // SV-98 / AWM .338 folding front bipod + spherical bolt handle knob + rear monopod spike

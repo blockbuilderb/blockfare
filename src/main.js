@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=127';
-import { VehicleManager } from './vehicles.js?v=127';
-import { BotManager } from './bots.js?v=127';
-import { PlayerController } from './player.js?v=127';
-import { NetworkManager } from './network.js?v=127';
-import { UIManager } from './ui.js?v=127';
-import { TelemetryLogger } from './telemetry.js?v=127';
-import { sound } from './audio.js?v=127';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=127';
-import { events, makeEventBridge } from './events.js?v=127';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=127';
+import { VoxelWorld } from './world.js?v=132';
+import { VehicleManager } from './vehicles.js?v=132';
+import { BotManager } from './bots.js?v=132';
+import { PlayerController } from './player.js?v=132';
+import { NetworkManager } from './network.js?v=132';
+import { UIManager } from './ui.js?v=132';
+import { TelemetryLogger } from './telemetry.js?v=132';
+import { sound } from './audio.js?v=132';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=132';
+import { events, makeEventBridge } from './events.js?v=132';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=132';
 
 class BattleBitGame {
   constructor() {
@@ -155,10 +155,12 @@ class BattleBitGame {
     }
 
     window.addEventListener('resize', () => this.onResize());
-    this.uncappedFps = true;
+    // Default to smooth VSync requestAnimationFrame pacing to prevent WebGL command-queue saturation & stutter;
+    // Uncapped MessageChannel mode remains opt-in via Settings / localStorage ('bb_uncapped_fps' === 'true').
+    this.uncappedFps = false;
     try {
       const savedUncapped = localStorage.getItem('bb_uncapped_fps');
-      if (savedUncapped === 'false') this.uncappedFps = false;
+      if (savedUncapped === 'true') this.uncappedFps = true;
     } catch (_) {}
     this._framePending = false;
     if (typeof MessageChannel !== 'undefined') {
@@ -1397,6 +1399,7 @@ class BattleBitGame {
     const isHydraRocket = /HYDRA|S-8|POD/i.test(weaponLabel);
     const isAc130Howitzer = /105MM|HOWITZER/i.test(weaponLabel);
     const isAc130Bofors = /40MM|BOFORS/i.test(weaponLabel);
+    const isIfvAutocannon = /M242|BUSHMASTER|2A72|30MM AUTOCANNON/i.test(weaponLabel);
     const isHeavyAerialBomb = /JDAM|GBU|CARPET|MK-82|FAB-250|MOP|FOAB|AIRSTRIKE/i.test(weaponLabel);
     for (const v of this.vehicleManager.vehicles) {
       if (v.dead) continue;
@@ -1405,6 +1408,10 @@ class BattleBitGame {
         ? v.type === 'tank'
           ? 4.2
           : 3.6
+        : isIfvAutocannon
+        ? v.type === 'tank'
+          ? 3.8
+          : 4.5
         : radius * (isHeavyBarrage ? 2.0 : 1.75) + (v.type === 'tank' ? 2.0 : 1.0);
       if (dist <= maxArmorBlast) {
         const falloff = isRpgHeat
@@ -1424,7 +1431,7 @@ class BattleBitGame {
             : 1.65
           : isHydraRocket
           ? v.type === 'tank'
-            ? 0.85
+            ? 0.34
             : 1.15
           : isAc130Howitzer
           ? v.type === 'tank'
@@ -1434,6 +1441,12 @@ class BattleBitGame {
           ? v.type === 'tank'
             ? 0.38
             : 1.15
+          : isIfvAutocannon
+          ? v.type === 'tank'
+            ? 0.42
+            : v.type === 'apc' || v.type === 'aa'
+            ? 0.92
+            : 1.25
           : isRpgHeat
           ? v.type === 'tank'
             ? 1.0
@@ -1462,12 +1475,17 @@ class BattleBitGame {
             shooterPos
           );
           if (isPlayerOwner) {
-            const bdaTag =
-              v.lastBdaHitmarker ||
-              (destroyed
-                ? `${v.type === 'tank' ? 'TANK' : 'VEHICLE'} DESTROYED`
-                : `${v.type === 'tank' ? 'TANK' : 'VEHICLE'} HIT`);
-            this.ui.showHitmarker(destroyed ? 'kill' : 'armor', bdaTag);
+            const actualDealt = typeof v.lastAppliedDamage === 'number' ? v.lastAppliedDamage : dmg;
+            if (destroyed || actualDealt > 0) {
+              const bdaTag =
+                v.lastBdaHitmarker ||
+                (destroyed
+                  ? `${v.type === 'tank' ? 'TANK' : 'VEHICLE'} DESTROYED`
+                  : `${v.type === 'tank' ? 'TANK' : 'VEHICLE'} HIT`);
+              this.ui.showHitmarker(destroyed ? 'kill' : 'armor', bdaTag);
+            } else if (v.lastArmorRicochet) {
+              this.ui.showHitmarker('armor', v.lastHitDesc || '🛡️ NO PENETRATION (0 DMG)');
+            }
           }
           if (destroyed && !isPlayerOwner && owner && typeof owner.kills === 'number') {
             owner.kills++;
@@ -1687,7 +1705,7 @@ class BattleBitGame {
       );
     }
 
-    this.vehicleManager.update(dt, this.player, this.botManager, onDeployMenu);
+    this.vehicleManager.update(dt, this.player, this.botManager, onDeployMenu, this.camera);
 
     if (this.player.dead) {
       this.orbitAngle += dt * MATCH.ORBIT_SPEED;

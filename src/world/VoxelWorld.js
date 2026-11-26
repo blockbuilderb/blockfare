@@ -1,20 +1,39 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=127';
-import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=127';
-import { getMapDefinition } from '../maps/index.js?v=127';
-import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=127';
-import { events, makeEventBridge } from '../events.js?v=127';
-import { TerrainGenerator } from './TerrainGenerator.js?v=127';
-import { BuildingFactory } from './BuildingFactory.js?v=127';
-import { ConquestSystem } from './ConquestSystem.js?v=127';
-import { ProjectileManager } from './ProjectileManager.js?v=127';
-import { WeatherSystem } from './WeatherSystem.js?v=127';
+import { TEXTURES } from '../assets/textures.js?v=132';
+import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=132';
+import { getMapDefinition } from '../maps/index.js?v=132';
+import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=132';
+import { events, makeEventBridge } from '../events.js?v=132';
+import { TerrainGenerator } from './TerrainGenerator.js?v=132';
+import { BuildingFactory } from './BuildingFactory.js?v=132';
+import { ConquestSystem } from './ConquestSystem.js?v=132';
+import { ProjectileManager } from './ProjectileManager.js?v=132';
+import { WeatherSystem } from './WeatherSystem.js?v=132';
 
 export { VOXEL_SIZE, MAT_DEFS };
 
-// Pre-allocated reusable instances for zero-allocation hot paths
+// Pre-allocated reusable instances & growable chunk-meshing scratch buffers (zero GC churn)
 const _tempColor = new THREE.Color();
 const _rayBoxHit = new THREE.Vector3();
+
+const CHUNK_SHIFT = 7; // 128x128 voxels = 160m x 160m frustum-culled spatial sectors (~38 draw calls map-wide)
+const CHUNK_MASK = (1 << CHUNK_SHIFT) - 1;
+let _scratchQuadCap = 16384;
+let _scratchPos = new Float32Array(_scratchQuadCap * 12);
+let _scratchNorm = new Float32Array(_scratchQuadCap * 12);
+let _scratchCol = new Float32Array(_scratchQuadCap * 12);
+let _scratchUv = new Float32Array(_scratchQuadCap * 8);
+
+function ensureScratchQuadCapacity(minQuads) {
+  if (minQuads <= _scratchQuadCap) return;
+  while (_scratchQuadCap < minQuads) {
+    _scratchQuadCap *= 2;
+  }
+  _scratchPos = new Float32Array(_scratchQuadCap * 12);
+  _scratchNorm = new Float32Array(_scratchQuadCap * 12);
+  _scratchCol = new Float32Array(_scratchQuadCap * 12);
+  _scratchUv = new Float32Array(_scratchQuadCap * 8);
+}
 
 function disposeMaterialSafe(mat) {
   if (!mat) return;
@@ -38,12 +57,17 @@ export class VoxelWorld {
     this.voxels = new Map(); // 31-bit Smi integer key -> voxel record
     this._hasOverflowVoxels = false;
     this.instancedBatches = {};
+    this._voxelChunks = new Map();
+    this._dirtyVoxelChunkKeys = new Set();
+    this._voxelMutationEpoch = 1;
     this.debrisParticles = [];
     this.projectiles = [];
     this.ammoCrates = [];
     this.lootPacks = [];
     this.buildings = [];
     this.containers = [];
+    this.climbableLadders = [];
+    this.elevatedPlatforms = [];
     this._ownedWorldObjects = [];
     this._buildingWorld = false;
 
@@ -109,16 +133,10 @@ export class VoxelWorld {
     this.buildEnvironment();
     this._buildingWorld = false;
 
-    for (const batch of Object.values(this.instancedBatches)) {
-      if (batch.count > 0) {
-        batch.mesh.instanceMatrix.clearUpdateRanges();
-        batch.mesh.instanceMatrix.needsUpdate = true;
-        if (batch.mesh.instanceColor) {
-          batch.mesh.instanceColor.clearUpdateRanges();
-          batch.mesh.instanceColor.needsUpdate = true;
-        }
-      }
+    for (const chunkKey of this._voxelChunks.keys()) {
+      this._dirtyVoxelChunkKeys.add(chunkKey);
     }
+    this.flushDirtyVoxelChunks();
 
     this.buildConquestFlags();
     if (typeof this.buildSkyClouds === 'function') {
@@ -173,7 +191,6 @@ export class VoxelWorld {
   }
 
   initInstancedBatches() {
-    _tempColor.setRGB(1, 1, 1);
     for (const [type, def] of Object.entries(MAT_DEFS)) {
       const mat = new THREE.MeshStandardMaterial({
         color: 0xffffff,
@@ -183,39 +200,244 @@ export class VoxelWorld {
         metalness: type.startsWith('container') ? 0.35 : 0.05
       });
 
-      const mesh = new THREE.InstancedMesh(this.sharedBoxGeo, mat, def.maxInstances);
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.setColorAt(0, _tempColor);
-      if (mesh.instanceColor) {
-        mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
-      }
-      mesh.frustumCulled = false;
-      mesh.matrixAutoUpdate = false;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.count = 0;
-      this.scene.add(mesh);
-
       this.instancedBatches[type] = {
-        mesh,
+        mesh: null,
+        material: mat,
         def,
+        maxInstances: def.maxInstances,
         count: 0,
         freeIds: []
       };
     }
   }
 
-  _markMatrixDirty(batch, instanceId) {
-    if (!this._buildingWorld && batch && batch.mesh) {
-      batch.mesh.instanceMatrix.addUpdateRange(instanceId * 16, 16);
-      batch.mesh.instanceMatrix.needsUpdate = true;
+  _chunkKey(cx, cz) {
+    return ((cx + 2048) & 0xffff) | (((cz + 2048) & 0xffff) << 16);
+  }
+
+  _getOrCreateVoxelChunk(cx, cz) {
+    const ck = this._chunkKey(cx, cz);
+    let chunk = this._voxelChunks.get(ck);
+    if (!chunk) {
+      chunk = {
+        cx,
+        cz,
+        key: ck,
+        voxelsByType: Object.create(null),
+        meshesByType: Object.create(null)
+      };
+      this._voxelChunks.set(ck, chunk);
+    }
+    return chunk;
+  }
+
+  _markVoxelChunkDirty(gx, gz, includeSeamNeighbors = false) {
+    if (this._buildingWorld) return;
+    const cx = gx >> CHUNK_SHIFT;
+    const cz = gz >> CHUNK_SHIFT;
+    const ck = this._chunkKey(cx, cz);
+    if (this._voxelChunks.has(ck)) {
+      this._dirtyVoxelChunkKeys.add(ck);
+    }
+    if (includeSeamNeighbors) {
+      const lx = gx & CHUNK_MASK;
+      const lz = gz & CHUNK_MASK;
+      if (lx === 0) {
+        const nk = this._chunkKey(cx - 1, cz);
+        if (this._voxelChunks.has(nk)) this._dirtyVoxelChunkKeys.add(nk);
+      } else if (lx === CHUNK_MASK) {
+        const nk = this._chunkKey(cx + 1, cz);
+        if (this._voxelChunks.has(nk)) this._dirtyVoxelChunkKeys.add(nk);
+      }
+      if (lz === 0) {
+        const nk = this._chunkKey(cx, cz - 1);
+        if (this._voxelChunks.has(nk)) this._dirtyVoxelChunkKeys.add(nk);
+      } else if (lz === CHUNK_MASK) {
+        const nk = this._chunkKey(cx, cz + 1);
+        if (this._voxelChunks.has(nk)) this._dirtyVoxelChunkKeys.add(nk);
+      }
     }
   }
 
-  _markColorDirty(batch, instanceId) {
-    if (!this._buildingWorld && batch && batch.mesh && batch.mesh.instanceColor) {
-      batch.mesh.instanceColor.addUpdateRange(instanceId * 3, 3);
-      batch.mesh.instanceColor.needsUpdate = true;
+  /**
+   * Rebuilds ONLY spatial 40m×40m voxel chunks dirtied since the last flush, emitting strictly
+   * exposed exterior faces (`!hasVoxel(neighbor)`) with baked BattleBit directional shading,
+   * vertical lower-edge AO, damage darkening, and per-chunk GPU frustum culling (`frustumCulled = true`).
+   */
+  flushDirtyVoxelChunks() {
+    if (!this._dirtyVoxelChunkKeys || this._dirtyVoxelChunkKeys.size === 0) return;
+    for (const ck of this._dirtyVoxelChunkKeys) {
+      const chunk = this._voxelChunks.get(ck);
+      if (chunk) {
+        this._rebuildSingleVoxelChunk(chunk);
+      }
+    }
+    this._dirtyVoxelChunkKeys.clear();
+  }
+
+  _rebuildSingleVoxelChunk(chunk) {
+    const h = VOXEL_SIZE * 0.5;
+    const types = Object.keys(chunk.voxelsByType);
+    for (let tIdx = 0; tIdx < types.length; tIdx++) {
+      const type = types[tIdx];
+      const list = chunk.voxelsByType[type];
+      const existingMesh = chunk.meshesByType[type] || null;
+      if (!list || list.length === 0) {
+        if (existingMesh) {
+          if (this.scene) this.scene.remove(existingMesh);
+          existingMesh.geometry?.dispose();
+          chunk.meshesByType[type] = null;
+        }
+        continue;
+      }
+
+      ensureScratchQuadCapacity(list.length * 6);
+      let quadCount = 0;
+
+      const emitQuad = (
+        x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3,
+        nx, ny, nz,
+        rTop, gTop, bTop, rBot, gBot, bBot
+      ) => {
+        const pOff = quadCount * 12;
+        _scratchPos[pOff] = x0; _scratchPos[pOff + 1] = y0; _scratchPos[pOff + 2] = z0;
+        _scratchPos[pOff + 3] = x1; _scratchPos[pOff + 4] = y1; _scratchPos[pOff + 5] = z1;
+        _scratchPos[pOff + 6] = x2; _scratchPos[pOff + 7] = y2; _scratchPos[pOff + 8] = z2;
+        _scratchPos[pOff + 9] = x3; _scratchPos[pOff + 10] = y3; _scratchPos[pOff + 11] = z3;
+
+        _scratchNorm[pOff] = nx; _scratchNorm[pOff + 1] = ny; _scratchNorm[pOff + 2] = nz;
+        _scratchNorm[pOff + 3] = nx; _scratchNorm[pOff + 4] = ny; _scratchNorm[pOff + 5] = nz;
+        _scratchNorm[pOff + 6] = nx; _scratchNorm[pOff + 7] = ny; _scratchNorm[pOff + 8] = nz;
+        _scratchNorm[pOff + 9] = nx; _scratchNorm[pOff + 10] = ny; _scratchNorm[pOff + 11] = nz;
+
+        _scratchCol[pOff] = rBot; _scratchCol[pOff + 1] = gBot; _scratchCol[pOff + 2] = bBot;
+        _scratchCol[pOff + 3] = rBot; _scratchCol[pOff + 4] = gBot; _scratchCol[pOff + 5] = bBot;
+        _scratchCol[pOff + 6] = rTop; _scratchCol[pOff + 7] = gTop; _scratchCol[pOff + 8] = bTop;
+        _scratchCol[pOff + 9] = rTop; _scratchCol[pOff + 10] = gTop; _scratchCol[pOff + 11] = bTop;
+
+        const uOff = quadCount * 8;
+        _scratchUv[uOff] = 0; _scratchUv[uOff + 1] = 0;
+        _scratchUv[uOff + 2] = 1; _scratchUv[uOff + 3] = 0;
+        _scratchUv[uOff + 4] = 1; _scratchUv[uOff + 5] = 1;
+        _scratchUv[uOff + 6] = 0; _scratchUv[uOff + 7] = 1;
+        quadCount++;
+      };
+
+      for (let i = 0; i < list.length; i++) {
+        const v = list[i];
+        const gx = v.gx;
+        const gy = v.gy;
+        const gz = v.gz;
+        const x0 = v.minX;
+        const x1 = v.maxX;
+        const y0 = v.minY;
+        const y1 = v.maxY;
+        const z0 = v.minZ;
+        const z1 = v.maxZ;
+        const dmg = v._dmgBrightness ?? 1.0;
+        const br = v.baseColor.r * dmg;
+        const bg = v.baseColor.g * dmg;
+        const bb = v.baseColor.b * dmg;
+
+        // +Y Top Face (light = 1.05)
+        if (!this.hasVoxel(gx, gy + 1, gz)) {
+          const r = br * 1.05, g = bg * 1.05, b = bb * 1.05;
+          emitQuad(x0, y1, z1, x1, y1, z1, x1, y1, z0, x0, y1, z0, 0, 1, 0, r, g, b, r, g, b);
+        }
+        // -Y Bottom Face (light = 0.72; skip underground buried floor bottoms below gy <= -1 unless above river)
+        if ((gy >= 0 || Math.abs(gx) < 32) && !this.hasVoxel(gx, gy - 1, gz)) {
+          const r = br * 0.72, g = bg * 0.72, b = bb * 0.72;
+          emitQuad(x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1, 0, -1, 0, r, g, b, r, g, b);
+        }
+        // +Z Front Face (light = 1.00, lower-edge AO * 0.94)
+        if (!this.hasVoxel(gx, gy, gz + 1)) {
+          emitQuad(
+            x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1,
+            0, 0, 1,
+            br, bg, bb, br * 0.94, bg * 0.94, bb * 0.94
+          );
+        }
+        // -Z Back Face (light = 0.89, lower-edge AO * 0.94)
+        if (!this.hasVoxel(gx, gy, gz - 1)) {
+          const rt = br * 0.89, gt = bg * 0.89, bt = bb * 0.89;
+          emitQuad(
+            x1, y0, z0, x0, y0, z0, x0, y1, z0, x1, y1, z0,
+            0, 0, -1,
+            rt, gt, bt, rt * 0.94, gt * 0.94, bt * 0.94
+          );
+        }
+        // +X Right Face (light = 1.00, lower-edge AO * 0.94)
+        if (!this.hasVoxel(gx + 1, gy, gz)) {
+          emitQuad(
+            x1, y0, z1, x1, y0, z0, x1, y1, z0, x1, y1, z1,
+            1, 0, 0,
+            br, bg, bb, br * 0.94, bg * 0.94, bb * 0.94
+          );
+        }
+        // -X Left Face (light = 0.89, lower-edge AO * 0.94)
+        if (!this.hasVoxel(gx - 1, gy, gz)) {
+          const rt = br * 0.89, gt = bg * 0.89, bt = bb * 0.89;
+          emitQuad(
+            x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0,
+            -1, 0, 0,
+            rt, gt, bt, rt * 0.94, gt * 0.94, bt * 0.94
+          );
+        }
+      }
+
+      if (quadCount === 0) {
+        if (existingMesh) {
+          if (this.scene) this.scene.remove(existingMesh);
+          existingMesh.geometry?.dispose();
+          chunk.meshesByType[type] = null;
+        }
+        continue;
+      }
+
+      const vertCount = quadCount * 4;
+      const posArr = _scratchPos.slice(0, quadCount * 12);
+      const normArr = _scratchNorm.slice(0, quadCount * 12);
+      const colArr = _scratchCol.slice(0, quadCount * 12);
+      const uvArr = _scratchUv.slice(0, quadCount * 8);
+      const idxArr =
+        vertCount <= 65535
+          ? new Uint16Array(quadCount * 6)
+          : new Uint32Array(quadCount * 6);
+      for (let q = 0; q < quadCount; q++) {
+        const b = q * 4;
+        const io = q * 6;
+        idxArr[io] = b;
+        idxArr[io + 1] = b + 1;
+        idxArr[io + 2] = b + 2;
+        idxArr[io + 3] = b;
+        idxArr[io + 4] = b + 2;
+        idxArr[io + 5] = b + 3;
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(normArr, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
+      geo.setAttribute('uv', new THREE.BufferAttribute(uvArr, 2));
+      geo.setIndex(new THREE.BufferAttribute(idxArr, 1));
+      geo.computeBoundingSphere();
+
+      const batch = this.instancedBatches[type] || this.instancedBatches.brick;
+      if (existingMesh) {
+        existingMesh.geometry?.dispose();
+        existingMesh.geometry = geo;
+      } else if (batch && batch.material) {
+        const mesh = new THREE.Mesh(geo, batch.material);
+        mesh.name = 'VoxelSectorChunk';
+        mesh.frustumCulled = true;
+        mesh.matrixAutoUpdate = false;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        if (this.scene) this.scene.add(mesh);
+        chunk.meshesByType[type] = mesh;
+      } else {
+        geo.dispose();
+      }
     }
   }
 
@@ -294,25 +516,14 @@ export class VoxelWorld {
     const existing = this.voxels.get(k);
     if (existing) return existing;
 
-    const batch = this.instancedBatches[type] || this.instancedBatches.brick;
-    let instanceId;
-    if (batch.freeIds.length > 0) {
-      instanceId = batch.freeIds.pop();
-    } else {
-      if (batch.count >= batch.def.maxInstances) return null;
-      instanceId = batch.count++;
-      batch.mesh.count = batch.count;
-    }
+    const resolvedType = this.instancedBatches[type] ? type : 'brick';
+    const batch = this.instancedBatches[resolvedType];
+    if (batch.count >= batch.def.maxInstances) return null;
+    const instanceId = batch.count++;
 
     const wx = gx * VOXEL_SIZE;
     const wy = gy * VOXEL_SIZE + VOXEL_SIZE * 0.5;
     const wz = gz * VOXEL_SIZE;
-
-    this.dummy.position.set(wx, wy, wz);
-    this.dummy.scale.set(1, 1, 1);
-    this.dummy.rotation.set(0, 0, 0);
-    this.dummy.updateMatrix();
-    batch.mesh.setMatrixAt(instanceId, this.dummy.matrix);
 
     // Subtle cohesive BattleBit tonal variation + ground-contact ambient occlusion
     let shade = 0.98 + (((gx * 73 + gy * 31 + gz * 17) & 7) / 7) * 0.04;
@@ -320,25 +531,30 @@ export class VoxelWorld {
       shade *= 0.94; // Ground foundation contact shadow
     }
     const baseColor = new THREE.Color(batch.def.color).multiplyScalar(shade);
-    batch.mesh.setColorAt(instanceId, baseColor);
-
-    this._markMatrixDirty(batch, instanceId);
-    this._markColorDirty(batch, instanceId);
 
     const half = VOXEL_SIZE * 0.5;
     const wPos = new THREE.Vector3(wx, wy, wz);
+    const chunk = this._getOrCreateVoxelChunk(gx >> CHUNK_SHIFT, gz >> CHUNK_SHIFT);
+    let chunkList = chunk.voxelsByType[resolvedType];
+    if (!chunkList) {
+      chunkList = [];
+      chunk.voxelsByType[resolvedType] = chunkList;
+    }
     const voxel = {
       key: k,
       gx,
       gy,
       gz,
-      type,
+      type: resolvedType,
       isProp: Boolean(isProp),
       isFortification: Boolean(isFortification),
       instanceId,
       hp: isProp ? MAT_HP.PROP : batch.def.hp,
       maxHp: isProp ? MAT_HP.PROP : batch.def.hp,
       baseColor,
+      _dmgBrightness: 1.0,
+      _chunkList: chunkList,
+      _chunkIdx: chunkList.length,
       pos: wPos,
       minX: wx - half,
       maxX: wx + half,
@@ -348,7 +564,12 @@ export class VoxelWorld {
       maxZ: wz + half
     };
 
+    chunkList.push(voxel);
     this.voxels.set(k, voxel);
+    if (!this._buildingWorld) {
+      this._voxelMutationEpoch = (this._voxelMutationEpoch || 1) + 1;
+      this._markVoxelChunkDirty(gx, gz, true);
+    }
     return voxel;
   }
 
@@ -382,13 +603,9 @@ export class VoxelWorld {
       }
       return true;
     } else {
-      const batch = this.instancedBatches[voxel.type];
-      if (batch) {
-        const ratio = Math.max(0.25, voxel.hp / voxel.maxHp);
-        _tempColor.copy(voxel.baseColor).multiplyScalar(0.38 + 0.62 * ratio);
-        batch.mesh.setColorAt(voxel.instanceId, _tempColor);
-        this._markColorDirty(batch, voxel.instanceId);
-      }
+      const ratio = Math.max(0.25, voxel.hp / voxel.maxHp);
+      voxel._dmgBrightness = 0.38 + 0.62 * ratio;
+      this._markVoxelChunkDirty(gx, gz, false);
       return false;
     }
   }
@@ -398,18 +615,27 @@ export class VoxelWorld {
     if (!voxel) return false;
 
     const batch = this.instancedBatches[voxel.type];
-    if (batch) {
-      this.dummy.position.set(0, -999, 0);
-      this.dummy.scale.set(0, 0, 0);
-      this.dummy.updateMatrix();
-      batch.mesh.setMatrixAt(voxel.instanceId, this.dummy.matrix);
-      this._markMatrixDirty(batch, voxel.instanceId);
-      batch.freeIds.push(voxel.instanceId);
+    if (batch && batch.count > 0) {
+      batch.count--;
+    }
+
+    const list = voxel._chunkList;
+    if (Array.isArray(list) && voxel._chunkIdx >= 0 && voxel._chunkIdx < list.length) {
+      const last = list.pop();
+      if (last && last !== voxel) {
+        list[voxel._chunkIdx] = last;
+        last._chunkIdx = voxel._chunkIdx;
+      }
+      voxel._chunkIdx = -1;
     }
 
     const pos = voxel.pos;
     const color = voxel.baseColor;
     this.voxels.delete(voxel.key);
+    if (!this._buildingWorld) {
+      this._voxelMutationEpoch = (this._voxelMutationEpoch || 1) + 1;
+      this._markVoxelChunkDirty(gx, gz, true);
+    }
 
     if (asCollapseBlock) {
       this.spawnFallingBlock(pos, color);
@@ -425,17 +651,17 @@ export class VoxelWorld {
    * and optional ray thickness (`rayRadius`).
    */
   raycastVoxel(origin, dir, maxDist = DISTANCES.RAYCAST_MAX, rayRadius = 0, ignoreVoxelKey = null) {
-    // Fast O(1) sky-ceiling skip: highest voxel in the world is below y = 54m.
-    // When airborne above y = 54m, either exit immediately if aiming level/up, or jump straight down to y = 54m!
+    // Fast O(1) sky-ceiling skip: highest skyscraper/tower in the world is below y = 125m.
+    // When airborne above y = 125m, either exit immediately if aiming level/up, or jump straight down to y = 125m!
     const stepSize = VOXEL_SIZE * 0.36;
     const invVoxelSize = 1 / VOXEL_SIZE;
     const steps = Math.ceil(maxDist / stepSize);
     let startStep = 1;
-    if (origin.y > 54.0) {
+    if (origin.y > 125.0) {
       if (dir.y >= -0.0005) {
         return null;
       }
-      const distToVoxelCeiling = (origin.y - 54.0) / -dir.y;
+      const distToVoxelCeiling = (origin.y - 125.0) / -dir.y;
       if (distToVoxelCeiling >= maxDist) {
         return null;
       }
@@ -444,6 +670,8 @@ export class VoxelWorld {
 
     const groundBias = rayRadius > 0 ? 0.08 : 0;
     const radSq = rayRadius * rayRadius;
+    const platforms = this.elevatedPlatforms;
+    const hasPlatforms = Array.isArray(platforms) && platforms.length > 0;
 
     let prevGx = null;
     let prevGy = null;
@@ -455,8 +683,30 @@ export class VoxelWorld {
       const py = origin.y + dir.y * dist;
       const pz = origin.z + dir.z * dist;
 
-      if (py > 52.0 && dir.y >= 0 && Math.abs(px) < 2000 && Math.abs(pz) < 1300) {
+      if (py > 122.0 && dir.y >= 0 && Math.abs(px) < 2000 && Math.abs(pz) < 1300) {
         return null;
+      }
+
+      if (hasPlatforms && py > 8.0 && py < 85.0) {
+        for (let pIdx = 0; pIdx < platforms.length; pIdx++) {
+          const plat = platforms[pIdx];
+          if (
+            px >= plat.minX &&
+            px <= plat.maxX &&
+            pz >= plat.minZ &&
+            pz <= plat.maxZ &&
+            py <= plat.topY &&
+            py >= plat.topY - (plat.thickness || 0.32)
+          ) {
+            return {
+              voxel: null,
+              isGround: false,
+              distance: dist,
+              point: new THREE.Vector3(px, py, pz),
+              normal: new THREE.Vector3(0, dir.y < 0 ? 1 : -1, 0)
+            };
+          }
+        }
       }
 
       if (py < 18.0) {
@@ -567,12 +817,31 @@ export class VoxelWorld {
     }
     this.sharedBoxGeo = null;
 
+    if (this._voxelChunks) {
+      for (const chunk of this._voxelChunks.values()) {
+        for (const m of Object.values(chunk.meshesByType)) {
+          if (m) {
+            if (this.scene) this.scene.remove(m);
+            m.geometry?.dispose();
+          }
+        }
+      }
+      this._voxelChunks.clear();
+    }
+    if (this._dirtyVoxelChunkKeys) {
+      this._dirtyVoxelChunkKeys.clear();
+    }
+
     if (this.instancedBatches) {
       for (const batch of Object.values(this.instancedBatches)) {
-        if (batch && batch.mesh) {
-          if (this.scene) this.scene.remove(batch.mesh);
-          disposeMaterialSafe(batch.mesh.material);
-          batch.mesh.dispose?.();
+        if (batch) {
+          if (batch.mesh) {
+            if (this.scene) this.scene.remove(batch.mesh);
+            disposeMaterialSafe(batch.mesh.material);
+            batch.mesh.dispose?.();
+          } else if (batch.material) {
+            disposeMaterialSafe(batch.material);
+          }
         }
       }
       this.instancedBatches = {};
@@ -664,9 +933,13 @@ export class VoxelWorld {
     this.updateFlags(dt, units, onFlagCaptured);
     this.updateWeather(dt);
     this.updateAmmoCrates(dt, units);
+    if (typeof this.updateBuildingKeys === 'function') {
+      this.updateBuildingKeys(dt);
+    }
     if (typeof this.updateLootPacks === 'function') {
       this.updateLootPacks(dt);
     }
+    this.flushDirtyVoxelChunks();
   }
 }
 

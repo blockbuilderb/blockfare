@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=127';
+import { sound } from '../audio.js?v=132';
 import {
   PLAYER,
   COMBAT,
@@ -8,10 +8,10 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=127';
-import { events } from '../events.js?v=127';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=127';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=127';
+} from '../config.js?v=132';
+import { events } from '../events.js?v=132';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=132';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=132';
 
 function markShared(asset) {
   if (asset) {
@@ -1326,6 +1326,18 @@ export const CombatMethods = {
 
     if (def.type === 'melee_sword') {
       this.useMeleeSword(def);
+      return;
+    }
+
+    if (this.inDeepWater && (def.type === 'rpg' || def.type === 'stinger' || def.type === 'c4')) {
+      this.fireTimer = 0.35;
+      sound.playEmptyClick?.();
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          '🌊 CANNOT FIRE HEAVY LAUNCHERS OR EXPLOSIVES WHILE SWIMMING IN DEEP WATER!'
+        );
+      }
       return;
     }
 

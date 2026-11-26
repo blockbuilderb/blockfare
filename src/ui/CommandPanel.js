@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SQUAD_DEFS } from '../bots.js?v=127';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=127';
+import { SQUAD_DEFS } from '../bots.js?v=132';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=132';
 
 export const CommandPanel = {
   setCommandScope(scope, opts = {}) {
@@ -447,6 +447,9 @@ export const CommandPanel = {
 
   issueHudStrategicOrder(opts = {}) {
     if (!this.botManager || typeof this.botManager.issueStrategicOrder !== 'function') return null;
+    if (this.player && this.player.commandRank === 'MEMBER' && !opts.forceAllowMember) {
+      return null;
+    }
     const scope = opts.scope || this.player.commandScope || 'ALL';
     const targetSquad = opts.targetSquad || this.player.squad || 'ALPHA';
     const team = this.player.team || 'US';
@@ -568,6 +571,9 @@ export const CommandPanel = {
 
   issueHudFormationSpacing(spacingMode = 'FAN_OUT', opts = {}) {
     if (!this.botManager || typeof this.botManager.issueFormationSpacing !== 'function') return null;
+    if (this.player && this.player.commandRank === 'MEMBER' && !opts.forceAllowMember) {
+      return null;
+    }
     const scope = opts.scope || this.player.commandScope || 'ALL';
     const targetSquad = opts.targetSquad || this.player.squad || 'ALPHA';
     const mode =

@@ -1,5 +1,10 @@
 import * as THREE from '../../vendor/three.module.js';
-import { createRadarTowerMesh } from '../models/prop-models.js?v=127';
+import {
+  createRadarTowerMesh,
+  createPowerTowerMesh,
+  RADAR_TOWER_SPEC,
+  POWER_TOWER_SPEC
+} from '../models/prop-models.js?v=132';
 
 const VOXEL_SIZE = 1.25;
 const SPATIAL_MIN_X = -2048;
@@ -39,6 +44,41 @@ const _keyBowRingGeo = markShared(new THREE.TorusGeometry(0.11, 0.028, 8, 16));
 const _keyShaftGeo = markShared(new THREE.CylinderGeometry(0.022, 0.022, 0.32, 8));
 const _keyTooth1Geo = markShared(new THREE.BoxGeometry(0.036, 0.075, 0.024));
 const _keyTooth2Geo = markShared(new THREE.BoxGeometry(0.036, 0.055, 0.024));
+
+// Pre-merge the 4 golden Armory Key geometries into 1 shared BufferGeometry (cuts 150 draw calls across 50 buildings!)
+const _mergedKeyGoldGeo = (() => {
+  const parts = [
+    { geo: _keyBowRingGeo.clone(), mat4: new THREE.Matrix4().makeTranslation(-0.14, 0, 0) },
+    {
+      geo: _keyShaftGeo.clone(),
+      mat4: new THREE.Matrix4().makeRotationZ(Math.PI / 2).setPosition(0.06, 0, 0)
+    },
+    { geo: _keyTooth1Geo.clone(), mat4: new THREE.Matrix4().makeTranslation(0.14, -0.045, 0) },
+    { geo: _keyTooth2Geo.clone(), mat4: new THREE.Matrix4().makeTranslation(0.19, -0.035, 0) }
+  ];
+  let totalVerts = 0;
+  const nonIdxGeos = parts.map(({ geo, mat4 }) => {
+    geo.applyMatrix4(mat4);
+    const g = geo.index ? geo.toNonIndexed() : geo;
+    if (g !== geo) geo.dispose();
+    totalVerts += g.attributes.position.count;
+    return g;
+  });
+  const pos = new Float32Array(totalVerts * 3);
+  const norm = new Float32Array(totalVerts * 3);
+  let vOff = 0;
+  for (const g of nonIdxGeos) {
+    pos.set(g.attributes.position.array, vOff * 3);
+    norm.set(g.attributes.normal.array, vOff * 3);
+    vOff += g.attributes.position.count;
+    g.dispose();
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
+  merged.computeBoundingSphere();
+  return markShared(merged);
+})();
 
 const _repairFxColor = new THREE.Color(0x2ecc71);
 const _buildHouseFxColor = new THREE.Color(0xf1c40f);
@@ -319,6 +359,39 @@ export const BuildingFactory = {
     });
   },
 
+  registerClimbableLadder(spec) {
+    if (!this.climbableLadders) this.climbableLadders = [];
+    this.climbableLadders.push({
+      x: spec.x,
+      z: spec.z,
+      radius: spec.radius ?? 0.98,
+      minY: spec.minY ?? 0,
+      maxY: spec.maxY ?? 20,
+      topExitY: spec.topExitY ?? spec.maxY ?? 20,
+      exitDirX: spec.exitDirX ?? 0,
+      exitDirZ: spec.exitDirZ ?? -1,
+      buildingId: spec.buildingId ?? null,
+      label: spec.label || 'ladder'
+    });
+  },
+
+  registerElevatedPlatform(spec) {
+    if (!this.elevatedPlatforms) this.elevatedPlatforms = [];
+    this.elevatedPlatforms.push({
+      minX: Math.min(spec.minX, spec.maxX),
+      maxX: Math.max(spec.minX, spec.maxX),
+      minZ: Math.min(spec.minZ, spec.maxZ),
+      maxZ: Math.max(spec.minZ, spec.maxZ),
+      topY: spec.topY,
+      thickness: spec.thickness ?? 0.32,
+      holeMinX: spec.holeMinX,
+      holeMaxX: spec.holeMaxX,
+      holeMinZ: spec.holeMinZ,
+      holeMaxZ: spec.holeMaxZ,
+      label: spec.label || 'platform'
+    });
+  },
+
   isInsideStaticStructure(wx, wz, pad = 1.0) {
     const list = this.staticStructureBoxes;
     if (!Array.isArray(list) || list.length === 0) return false;
@@ -486,25 +559,17 @@ export const BuildingFactory = {
     // Velvet-lined tactical key display pad on top of room table
     const pad = new THREE.Mesh(_keyPadGeo, _keyCasePadMat);
     pad.position.set(0, 0.04, 0);
+    pad.matrixAutoUpdate = false;
+    pad.updateMatrix();
     group.add(pad);
 
-    // Floating, angled 3D Golden CS2 Armory Key above the pad
-    const keyPivot = new THREE.Group();
-    keyPivot.position.set(0, 0.34, 0);
-    keyPivot.rotation.set(0.35, 0.4, 0.25);
-
-    const bowRing = new THREE.Mesh(_keyBowRingGeo, _keyGoldMat);
-    bowRing.position.set(-0.14, 0, 0);
-    const shaft = new THREE.Mesh(_keyShaftGeo, _keyGoldMat);
-    shaft.rotation.z = Math.PI / 2;
-    shaft.position.set(0.06, 0, 0);
-    const tooth1 = new THREE.Mesh(_keyTooth1Geo, _keyGoldMat);
-    tooth1.position.set(0.14, -0.045, 0);
-    const tooth2 = new THREE.Mesh(_keyTooth2Geo, _keyGoldMat);
-    tooth2.position.set(0.19, -0.035, 0);
-
-    keyPivot.add(bowRing, shaft, tooth1, tooth2);
-    group.add(keyPivot);
+    // Floating, angled 3D Golden CS2 Armory Key above the pad (1 merged draw call instead of 4!)
+    const keyGold = new THREE.Mesh(_mergedKeyGoldGeo, _keyGoldMat);
+    keyGold.position.set(0, 0.34, 0);
+    keyGold.rotation.set(0.35, 0.4, 0.25);
+    keyGold.matrixAutoUpdate = false;
+    keyGold.updateMatrix();
+    group.add(keyGold);
     return group;
   },
 
@@ -538,7 +603,7 @@ export const BuildingFactory = {
         const gz = startGz + z;
         const localGy = this.getBaseGy(gx, gz);
         const isPerimeter = x === 0 || x === width - 1 || z === 0 || z === depth - 1;
-        const startFillGy = isPerimeter ? Math.min(localGy - 3, groundGy - 2) : groundGy - 1;
+        const startFillGy = isPerimeter ? Math.min(localGy - 1, groundGy - 2) : groundGy - 1;
         for (let fy = startFillGy; fy < groundGy; fy++) {
           addBuildingVoxel(gx, fy, gz, 'darkConcrete');
         }
@@ -552,9 +617,11 @@ export const BuildingFactory = {
     }
 
     const stairEndZ = Math.min(depth - 2, 5);
-    const hasEastWing = width >= 8;
+    const isModernSkyscraper = floors >= 8 && width >= 14 && depth >= 12;
+    const hasExpressLadder = floors >= 4 && width >= 7 && depth >= 6;
+    const hasEastWing = !isModernSkyscraper && width >= 8;
     const partX = hasEastWing ? Math.max(4, Math.floor(width * 0.52)) : -1;
-    const hasSuiteSplit = depth >= 9 && width >= 8;
+    const hasSuiteSplit = !isModernSkyscraper && depth >= 9 && width >= 8;
     const partZ = hasSuiteSplit ? Math.floor(depth * 0.5) : -1;
     const midX = Math.floor(width / 2);
     const midZ = Math.floor(depth / 2);
@@ -605,9 +672,10 @@ export const BuildingFactory = {
           const isEdgeZ = z === 0 || z === depth - 1;
           const isExteriorWall = isEdgeX || isEdgeZ;
 
-          // Wide 2x5 stairwell shaft cutout above the double-wide staircase so heads NEVER bump ceilings!
+          // Wide 2x5 stairwell shaft cutout + Express Service-Ladder shaft (x=3, z=1..2 on tall buildings)
           const isStairCutout = x >= 1 && x <= 2 && z >= 1 && z <= stairEndZ;
-          if (!isStairCutout) {
+          const isExpressShaftCutout = hasExpressLadder && x === 3 && z >= 1 && z <= 2;
+          if (!isStairCutout && !isExpressShaftCutout) {
             addBuildingVoxel(gx, baseGy + floorHeight - 1, gz, 'concrete');
           }
 
@@ -618,23 +686,30 @@ export const BuildingFactory = {
               const isGroundDoor =
                 f === 0 &&
                 y < 3 &&
-                (((z === 0 || z === depth - 1) && Math.abs(x - midX) <= 1 && x !== partX) ||
-                  ((x === 0 || x === width - 1) && Math.abs(z - midZ) <= 1 && z !== partZ));
+                (((z === 0 || z === depth - 1) && Math.abs(x - midX) <= (isModernSkyscraper ? 2 : 1) && x !== partX) ||
+                  ((x === 0 || x === width - 1) && Math.abs(z - midZ) <= (isModernSkyscraper ? 2 : 1) && z !== partZ));
 
               const isBalconyDoor =
                 f > 0 &&
+                (!isModernSkyscraper || f <= 2) &&
                 width >= 7 &&
                 z === 0 &&
                 y < 2 &&
                 Math.abs(x - midX) <= 1 &&
                 x !== partX;
 
-              const isWindow =
-                (y === 1 || (y === 2 && (x + z) % 4 === 0)) &&
-                !isGroundDoor &&
-                !isBalconyDoor &&
-                ((isEdgeZ && x > 1 && x < width - 2 && x !== partX && x % 2 === 0) ||
-                  (isEdgeX && z > 1 && z < depth - 2 && z !== partZ && z % 2 === 0));
+              // Modern high-rise curtain-wall panoramic windows vs standard town apartment windows
+              const isWindow = isModernSkyscraper
+                ? (y === 1 || y === 2) &&
+                  !isGroundDoor &&
+                  !isBalconyDoor &&
+                  ((isEdgeZ && x > 1 && x < width - 2 && x % 3 !== 0) ||
+                    (isEdgeX && z > 1 && z < depth - 2 && z % 3 !== 0))
+                : (y === 1 || (y === 2 && (x + z) % 4 === 0)) &&
+                  !isGroundDoor &&
+                  !isBalconyDoor &&
+                  ((isEdgeZ && x > 1 && x < width - 2 && x !== partX && x % 2 === 0) ||
+                    (isEdgeX && z > 1 && z < depth - 2 && z !== partZ && z % 2 === 0));
 
               if (!isGroundDoor && !isBalconyDoor && !isWindow) {
                 const mat =
@@ -649,8 +724,20 @@ export const BuildingFactory = {
             continue;
           }
 
-          if (f > 0 && x === 3 && z >= 1 && z <= 2 && partX !== 3) {
+          if (f > 0 && !hasExpressLadder && x === 3 && z >= 1 && z <= 2 && partX !== 3) {
             addBuildingVoxel(gx, baseGy, gz, 'wood');
+          }
+
+          // Skyscraper interior structural columns (4 central pillars framing open sniper overwatch floorplates)
+          if (
+            isModernSkyscraper &&
+            (x === Math.floor(width * 0.35) || x === Math.ceil(width * 0.65)) &&
+            (z === Math.floor(depth * 0.35) || z === Math.ceil(depth * 0.65))
+          ) {
+            for (let y = 0; y < floorHeight - 1; y++) {
+              addBuildingVoxel(gx, baseGy + y, gz, 'darkConcrete');
+            }
+            continue;
           }
 
           const isVerticalPartition = hasEastWing && x === partX && z > 0 && z < depth - 1;
@@ -688,7 +775,7 @@ export const BuildingFactory = {
         addBuildingVoxel(deskX, baseGy, deskZ, 'wood', true);
       }
 
-      if (f > 0 && width >= 7) {
+      if (f > 0 && (!isModernSkyscraper || f <= 2) && width >= 7) {
         for (let bx = 2; bx < width - 2; bx++) {
           addBuildingVoxel(startGx + bx, baseGy - 1, startGz - 1, 'concrete');
           if (bx === 2 || bx === width - 3 || bx % 2 === 0) {
@@ -706,45 +793,110 @@ export const BuildingFactory = {
 
     const topGy = groundGy + floors * floorHeight;
     const isDowntownHighRise = floors >= 5 && width >= 9 && depth >= 8;
+    const cornerBastionSpan = width >= 16 && depth >= 14 ? 4 : 2;
     for (let x = 0; x < width; x++) {
       for (let z = 0; z < depth; z++) {
         if (x === 0 || x === width - 1 || z === 0 || z === depth - 1) {
-          // Downtown High-Rise Sniper Overwatch Parapet: solid corner merlons + low firing embrasures!
-          const isCorner = (x <= 1 || x >= width - 2) && (z <= 1 || z >= depth - 2);
-          if (isCorner || (x + z) % 2 === 0) {
-            addBuildingVoxel(startGx + x, topGy, startGz + z, 'darkConcrete');
+          // 4-Corner Sniper Bastions: 5m × 5m (4×4 voxel) fortified corner nests on wide skyscrapers!
+          // Extreme corner piers rise 2 voxels high (`topGy + 1`) for anti-sniper cover, flanked by 1-voxel rifle rests!
+          const inCornerBastion =
+            (x < cornerBastionSpan || x >= width - cornerBastionSpan) &&
+            (z < cornerBastionSpan || z >= depth - cornerBastionSpan);
+          const isExtremeCorner =
+            (x === 0 || x === width - 1) && (z === 0 || z === depth - 1);
+          if (inCornerBastion || (x + z) % 2 === 0) {
+            addBuildingVoxel(
+              startGx + x,
+              topGy,
+              startGz + z,
+              inCornerBastion && !isExtremeCorner ? 'sandbag' : 'darkConcrete'
+            );
+            if (isExtremeCorner && isModernSkyscraper) {
+              addBuildingVoxel(startGx + x, topGy + 1, startGz + z, 'darkConcrete');
+            }
           }
         }
       }
     }
-    if (isDowntownHighRise && this.scene) {
-      // Flat Unobstructed Rooftop Helipad ("H" Pad) for Helicopter Landings & Sniper Insertions!
-      const padGroup = new THREE.Group();
-      const padCenterWx = (startGx + (width - 1) * 0.5) * VOXEL_SIZE;
-      const padCenterWz = (startGz + (depth - 1) * 0.5) * VOXEL_SIZE;
-      const roofTopWy = (topGy - 0.5) * VOXEL_SIZE + 0.03;
-      const ringMat = new THREE.MeshBasicMaterial({ color: 0xf1c40f, side: THREE.DoubleSide });
-      const hMat = new THREE.MeshBasicMaterial({ color: 0xecf0f1 });
-      const padRadius = Math.min(width, depth) * VOXEL_SIZE * 0.32;
-      const padRing = new THREE.Mesh(new THREE.RingGeometry(padRadius * 0.84, padRadius, 24), ringMat);
-      padRing.rotation.x = -Math.PI / 2;
-      padGroup.add(padRing);
-      const barLen = padRadius * 1.05;
-      const barThick = 0.36;
-      for (const sx of [-1, 1]) {
-        const leg = new THREE.Mesh(new THREE.BoxGeometry(barThick, 0.04, barLen), hMat);
-        leg.position.set(sx * (barLen * 0.36), 0.01, 0);
-        padGroup.add(leg);
+    if (isDowntownHighRise) {
+      // Spacious Inlaid Physical Voxel Helipad ("H" Pad) centered on the skyscraper roof (`topGy - 1`):
+      // Scales up to a bold 9×9 voxel (11.25m × 11.25m) "H" on wide skyscrapers, leaving all 4 corners (5m × 5m each) free for 4 snipers!
+      const hRadius = width >= 18 && depth >= 16 ? 4 : 2;
+      const hMinX = Math.max(4, midX - hRadius);
+      const hMaxX = Math.min(width - 4, midX + hRadius);
+      const hMinZ = Math.max(3, midZ - hRadius);
+      const hMaxZ = Math.min(depth - 4, midZ + hRadius);
+      const inlayRoofVoxel = (rx, rz, mat) => {
+        const gx = startGx + rx;
+        const gz = startGz + rz;
+        const gy = topGy - 1;
+        if (this.hasVoxel(gx, gy, gz)) {
+          this.destroyVoxel(gx, gy, gz, false, false);
+        }
+        const added = this.addVoxel(gx, gy, gz, mat, false, true);
+        for (let bi = blueprintBlocks.length - 1; bi >= 0; bi--) {
+          const bp = blueprintBlocks[bi];
+          if (bp.gx === gx && bp.gy === gy && bp.gz === gz) {
+            bp.mat = mat;
+            return added;
+          }
+        }
+        if (added) {
+          blueprintBlocks.push({ gx, gy, gz, mat, isProp: false });
+        }
+        return added;
+      };
+      for (let z = hMinZ; z <= hMaxZ; z++) {
+        inlayRoofVoxel(hMinX, z, 'concrete');
+        inlayRoofVoxel(hMaxX, z, 'concrete');
+        if (hRadius >= 4) {
+          inlayRoofVoxel(hMinX + 1, z, 'concrete');
+          inlayRoofVoxel(hMaxX - 1, z, 'concrete');
+        }
       }
-      const cross = new THREE.Mesh(new THREE.BoxGeometry(barLen * 0.75, 0.04, barThick), hMat);
-      cross.position.set(0, 0.01, 0);
-      padGroup.add(cross);
-      padGroup.position.set(padCenterWx, roofTopWy, padCenterWz);
-      this.scene.add(padGroup);
-      if (this._ownedWorldObjects) this._ownedWorldObjects.push(padGroup);
+      for (let x = hMinX + 1; x < hMaxX; x++) {
+        inlayRoofVoxel(x, midZ, 'concrete');
+        if (hRadius >= 4) {
+          inlayRoofVoxel(x, midZ - 1, 'concrete');
+        }
+      }
+      // 4 Corner Sniper Nest Tactical Flooring & Helipad Perimeter Markers
+      for (const [cx, cz] of [
+        [2, width >= 16 ? 4 : 1],
+        [width - 2, 1],
+        [1, depth - 2],
+        [width - 2, depth - 2]
+      ]) {
+        inlayRoofVoxel(cx, cz, 'sandbag');
+      }
     } else if (width >= 7 && depth >= 6) {
       addBuildingVoxel(startGx + midX, topGy, startGz + midZ, 'darkConcrete');
       addBuildingVoxel(startGx + midX + 1, topGy, startGz + midZ, 'wood', true);
+    }
+
+    // Express Interior Service Ladder Shaft (`x = 3, z = 1..2`) on all 4+ story buildings:
+    // Allows snipers & assault squads to climb rapidly from 1F Lobby straight onto 50m–80m Skyscraper Rooftops!
+    if (hasExpressLadder) {
+      const ladWx = (startGx + 3) * VOXEL_SIZE;
+      const ladWz = (startGz + 1.35) * VOXEL_SIZE;
+      const lobbyFloorY = (groundGy - 0.5) * VOXEL_SIZE + VOXEL_SIZE * 0.5;
+      const roofSurfaceY = topGy * VOXEL_SIZE;
+      // Visual steel ladder backing column along `x = 4, z = 1`
+      for (let gy = groundGy; gy < topGy; gy += 2) {
+        addBuildingVoxel(startGx + 4, gy, startGz + 1, 'darkConcrete', true);
+      }
+      this.registerClimbableLadder({
+        x: ladWx,
+        z: ladWz,
+        radius: 1.05,
+        minY: lobbyFloorY,
+        maxY: roofSurfaceY,
+        topExitY: roofSurfaceY,
+        exitDirX: 0,
+        exitDirZ: 1,
+        buildingId: this.buildings.length,
+        label: 'skyscraper_express_ladder'
+      });
     }
 
     // Pre-sort blueprintBlocks bottom-up once at creation so repairBuilding never clones/sorts at runtime
@@ -793,7 +945,12 @@ export const BuildingFactory = {
       this.buildingKeys = [];
     }
     if (width >= 6 && depth >= 6 && bldId % 2 === 0) {
-      const keyFloor = bldId % 4 === 0 && floors >= 2 ? 1 : 0;
+      const keyFloor =
+        floors >= 5
+          ? Math.min(floors - 1, 2 + (bldId % 3))
+          : bldId % 4 === 0 && floors >= 2
+          ? 1
+          : 0;
       const keyGx = startGx + Math.max(3, width - 3);
       const keyGz = startGz + Math.max(2, depth - 3);
       const keyFloorGy = groundGy + keyFloor * floorHeight;
@@ -810,11 +967,93 @@ export const BuildingFactory = {
         id: `bkey_${bldId}_f${keyFloor}`,
         buildingId: bldId,
         floor: keyFloor + 1,
-        roomLabel: `BLDG #${bldId + 1} (${keyFloor === 0 ? '1F FOYER ROOM' : '2F OVERWATCH SUITE'})`,
+        roomLabel: `BLDG #${bldId + 1} (${keyFloor === 0 ? '1F FOYER ROOM' : `${keyFloor + 1}F OVERWATCH SUITE`})`,
+        gx: keyGx,
+        gz: keyGz,
+        velY: 0,
         pos: new THREE.Vector3(keyWx, keyWy + 0.35, keyWz),
         mesh: keyMesh,
         collected: false
       });
+    }
+  },
+
+  /**
+   * Applies vertical gravity to uncollected Armory Case Keys (`this.buildingKeys`) whenever
+   * the floor slab beneath them is bombed or their building collapses, dropping them smoothly
+   * onto the next intact lower floor slab or ground terrain level — NEVER floating in empty air!
+   */
+  updateBuildingKeys(dt = 0.016) {
+    if (!Array.isArray(this.buildingKeys) || this.buildingKeys.length === 0) return;
+    const clampedDt = Math.min(0.1, Math.max(0.001, dt));
+    const curEpoch = this._voxelMutationEpoch || 1;
+    const viewerPos =
+      typeof window !== 'undefined'
+        ? window.game?.camera?.position || window.game?.player?.pos || null
+        : null;
+    const maxKeyVisDistSq = 95 * 95;
+
+    for (let i = 0; i < this.buildingKeys.length; i++) {
+      const keyObj = this.buildingKeys[i];
+      if (!keyObj || keyObj.collected || !keyObj.pos) continue;
+      const wx = keyObj.pos.x;
+      const wz = keyObj.pos.z;
+
+      if (viewerPos && keyObj.mesh) {
+        const dxV = wx - viewerPos.x;
+        const dyV = keyObj.pos.y - viewerPos.y;
+        const dzV = wz - viewerPos.z;
+        const shouldShow = dxV * dxV + dyV * dyV + dzV * dzV <= maxKeyVisDistSq;
+        if (keyObj.mesh.visible !== shouldShow) {
+          keyObj.mesh.visible = shouldShow;
+        }
+      }
+
+      // Fast O(1) skip: if this key is already resting on an intact slab and ZERO voxels have changed anywhere, skip column scan!
+      if (!keyObj._falling && keyObj._checkedEpoch === curEpoch) {
+        continue;
+      }
+
+      const gx = typeof keyObj.gx === 'number' ? keyObj.gx : Math.round(wx / VOXEL_SIZE);
+      const gz = typeof keyObj.gz === 'number' ? keyObj.gz : Math.round(wz / VOXEL_SIZE);
+      const terrainY = typeof this.getGroundHeightAt === 'function' ? this.getGroundHeightAt(wx, wz) : 0;
+
+      // Find the highest intact non-prop voxel surface at `(gx, gz)` at or below the key's current height
+      let supportSurfaceY = terrainY;
+      const maxCheckGy = Math.floor((keyObj.pos.y + 0.35) / VOXEL_SIZE);
+      const minCheckGy = Math.floor(terrainY / VOXEL_SIZE) - 1;
+      for (let gy = maxCheckGy; gy >= minCheckGy; gy--) {
+        const vox = this.getVoxel ? this.getVoxel(gx, gy, gz) : null;
+        if (vox && !vox.isProp) {
+          const topY = typeof vox.maxY === 'number' ? vox.maxY : (gy + 0.5) * VOXEL_SIZE;
+          if (topY <= keyObj.pos.y + 0.55) {
+            supportSurfaceY = Math.max(supportSurfaceY, topY);
+            break;
+          }
+        }
+      }
+
+      const restPosY = supportSurfaceY + 0.37;
+      if (keyObj.pos.y > restPosY + 0.04) {
+        keyObj._falling = true;
+        keyObj.velY = Math.max(-32.0, (keyObj.velY || 0) - 20.0 * clampedDt);
+        keyObj.pos.y = Math.max(restPosY, keyObj.pos.y + keyObj.velY * clampedDt);
+        if (keyObj.pos.y <= restPosY + 0.01) {
+          keyObj.pos.y = restPosY;
+          keyObj.velY = 0;
+          keyObj._falling = false;
+          keyObj._checkedEpoch = curEpoch;
+          keyObj.floor = Math.max(1, Math.round((supportSurfaceY - terrainY) / (4 * VOXEL_SIZE)) + 1);
+        }
+      } else {
+        keyObj.pos.y = restPosY;
+        keyObj.velY = 0;
+        keyObj._falling = false;
+        keyObj._checkedEpoch = curEpoch;
+      }
+      if (keyObj.mesh) {
+        keyObj.mesh.position.set(wx, keyObj.pos.y - 0.35, wz);
+      }
     }
   },
 
@@ -948,10 +1187,9 @@ export const BuildingFactory = {
       if (existing) {
         if (existing.hp < existing.maxHp) {
           existing.hp = existing.maxHp;
-          const batch = this.instancedBatches[existing.type];
-          if (batch) {
-            batch.mesh.setColorAt(existing.instanceId, existing.baseColor);
-            this._markColorDirty(batch, existing.instanceId);
+          existing._dmgBrightness = 1.0;
+          if (typeof this._markVoxelChunkDirty === 'function') {
+            this._markVoxelChunkDirty(existing.gx, existing.gz, false);
           }
           restoredCount++;
         }
@@ -989,6 +1227,9 @@ export const BuildingFactory = {
 
     const afterInfo = this.getBuildingHealthInfo(bld);
     if (restoredCount > 0) {
+      if (typeof this.flushDirtyVoxelChunks === 'function') {
+        this.flushDirtyVoxelChunks();
+      }
       _fxOrigin.set(bld.centerWx, ((bld.groundGy ?? 0) + 1.5) * VOXEL_SIZE, bld.centerWz);
       this.spawnDebris(_fxOrigin, _repairFxColor, 6);
     }
@@ -1051,21 +1292,58 @@ export const BuildingFactory = {
   },
 
   buildWatchtower(startGx, startGz) {
-    const baseGy = this.getBaseGy(startGx + 1, startGz + 1);
-    for (let y = -3; y < 5; y++) {
+    // Combined-Arms Scale Guard Watchtower: 6×6 voxels (7.5m × 7.5m outer, 5.0m × 5.0m sniper deck)
+    // rising 9 voxels (11.25m) above ground with an open climb-through hatch & 100% climbable ladder!
+    const baseGy = this.getBaseGy(startGx + 2, startGz + 2);
+    const span = 5; // indices 0..5 = 6 voxels (7.5m)
+    const deckGy = baseGy + 8;
+    for (let y = -3; y < 8; y++) {
       this.addVoxel(startGx, baseGy + y, startGz, 'wood');
-      this.addVoxel(startGx + 3, baseGy + y, startGz, 'wood');
-      this.addVoxel(startGx, baseGy + y, startGz + 3, 'wood');
-      this.addVoxel(startGx + 3, baseGy + y, startGz + 3, 'wood');
+      this.addVoxel(startGx + span, baseGy + y, startGz, 'wood');
+      this.addVoxel(startGx, baseGy + y, startGz + span, 'wood');
+      this.addVoxel(startGx + span, baseGy + y, startGz + span, 'wood');
+      // Horizontal cross-ties halfway up for visual structural scale (still leaves 5.0m clear ground passage!)
+      if (y === 4) {
+        for (let i = 1; i < span; i++) {
+          this.addVoxel(startGx + i, baseGy + y, startGz, 'wood');
+          this.addVoxel(startGx + i, baseGy + y, startGz + span, 'wood');
+          this.addVoxel(startGx, baseGy + y, startGz + i, 'wood');
+          this.addVoxel(startGx + span, baseGy + y, startGz + i, 'wood');
+        }
+      }
+      // Visible vertical climb ladder column at (x = 2, z = 1)
+      if (y >= 0) {
+        this.addVoxel(startGx + 2, baseGy + y, startGz, 'darkConcrete', true);
+      }
     }
-    for (let x = 0; x <= 3; x++) {
-      for (let z = 0; z <= 3; z++) {
-        this.addVoxel(startGx + x, baseGy + 4, startGz + z, 'wood');
-        if (x === 0 || x === 3 || z === 0 || z === 3) {
-          this.addVoxel(startGx + x, baseGy + 5, startGz + z, 'sandbag');
+    for (let x = 0; x <= span; x++) {
+      for (let z = 0; z <= span; z++) {
+        const isLadderHatch = x === 2 && z === 1;
+        if (!isLadderHatch) {
+          this.addVoxel(startGx + x, deckGy, startGz + z, 'wood');
+        }
+        if (x === 0 || x === span || z === 0 || z === span) {
+          const isCorner = (x === 0 || x === span) && (z === 0 || z === span);
+          this.addVoxel(startGx + x, deckGy + 1, startGz + z, isCorner ? 'darkConcrete' : 'sandbag');
+          if (isCorner) {
+            this.addVoxel(startGx + x, deckGy + 2, startGz + z, 'wood');
+          }
         }
       }
     }
+    const groundY = this.getGroundHeightAt((startGx + 2) * VOXEL_SIZE, (startGz + 1) * VOXEL_SIZE);
+    const deckTopY = (deckGy + 1) * VOXEL_SIZE;
+    this.registerClimbableLadder({
+      x: (startGx + 2) * VOXEL_SIZE,
+      z: (startGz + 1) * VOXEL_SIZE,
+      radius: 0.98,
+      minY: groundY,
+      maxY: deckTopY,
+      topExitY: deckTopY,
+      exitDirX: 0,
+      exitDirZ: 1,
+      label: 'watchtower_ladder'
+    });
   },
 
   buildHescoBastion(startGx, startGz, length, alongX = true) {
@@ -1100,6 +1378,169 @@ export const BuildingFactory = {
     group.position.set(wx, wy, wz);
     this.scene.add(group);
     if (this._ownedWorldObjects) this._ownedWorldObjects.push(group);
+
+    // Register 4 corner concrete pier footings (leaving a clear 7.5m drive-through/walk-under center!)
+    const bSpan = RADAR_TOWER_SPEC.baseHalfSpan;
+    const pHalf = RADAR_TOWER_SPEC.pierSize * 0.5;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const px = wx + sx * bSpan;
+        const pz = wz + sz * bSpan;
+        this.registerStaticStructureBox(px - pHalf, px + pHalf, pz - pHalf, pz + pHalf, 'radar_tower_pier');
+      }
+    }
+
+    // Register 6.8m × 6.8m Walkable Sniper Catwalk Deck at wy + 28.0m + Climbable Caged Steel Ladder!
+    const deckHalf = RADAR_TOWER_SPEC.deckWidth * 0.5;
+    const ladX = wx + RADAR_TOWER_SPEC.ladderLocalX;
+    const ladZ = wz + RADAR_TOWER_SPEC.ladderLocalZ;
+    const hHalf = RADAR_TOWER_SPEC.hatchHalfW;
+    const deckWorldY = wy + RADAR_TOWER_SPEC.deckY;
+    this.registerElevatedPlatform({
+      minX: wx - deckHalf,
+      maxX: wx + deckHalf,
+      minZ: wz - deckHalf,
+      maxZ: wz + deckHalf,
+      topY: deckWorldY,
+      thickness: 0.34,
+      holeMinX: ladX - hHalf,
+      holeMaxX: ladX + hHalf,
+      holeMinZ: ladZ - hHalf,
+      holeMaxZ: ladZ + hHalf,
+      label: 'radar_tower_catwalk'
+    });
+    this.registerClimbableLadder({
+      x: ladX,
+      z: ladZ,
+      radius: 1.05,
+      minY: wy,
+      maxY: deckWorldY,
+      topExitY: deckWorldY,
+      exitDirX: 0,
+      exitDirZ: -1,
+      label: 'radar_tower_ladder'
+    });
+  },
+
+  buildPowerTower(wx, wz) {
+    const wy = this.getTerrainHeight(wx, wz);
+    const group = createPowerTowerMesh();
+    group.position.set(wx, wy, wz);
+    this.scene.add(group);
+    if (this._ownedWorldObjects) this._ownedWorldObjects.push(group);
+
+    // Register ONLY the 4 outer concrete corner piers (±6.2m) so Tanks, Trucks & Cars can drive right underneath!
+    const bSpan = POWER_TOWER_SPEC.baseHalfSpan;
+    const pHalf = POWER_TOWER_SPEC.pierSize * 0.5;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const px = wx + sx * bSpan;
+        const pz = wz + sz * bSpan;
+        this.registerStaticStructureBox(px - pHalf, px + pHalf, pz - pHalf, pz + pHalf, 'power_tower_pier');
+      }
+    }
+
+    const ladX = wx + POWER_TOWER_SPEC.ladderLocalX;
+    const ladZ = wz + POWER_TOWER_SPEC.ladderLocalZ;
+    const hHalf = POWER_TOWER_SPEC.hatchHalfW;
+
+    // Lower 7.6m × 7.6m Walkable Sniper Overwatch Deck (wy + 20.0m) + Upper 6.8m × 6.8m Crown Sniper Deck (wy + 32.5m)
+    const lowHalf = POWER_TOWER_SPEC.lowerDeckWidth * 0.5;
+    const upHalf = POWER_TOWER_SPEC.upperDeckWidth * 0.5;
+    const lowerWorldY = wy + POWER_TOWER_SPEC.lowerDeckY;
+    const upperWorldY = wy + POWER_TOWER_SPEC.upperDeckY;
+
+    this.registerElevatedPlatform({
+      minX: wx - lowHalf,
+      maxX: wx + lowHalf,
+      minZ: wz - lowHalf,
+      maxZ: wz + lowHalf,
+      topY: lowerWorldY,
+      thickness: 0.34,
+      holeMinX: ladX - hHalf,
+      holeMaxX: ladX + hHalf,
+      holeMinZ: ladZ - hHalf,
+      holeMaxZ: ladZ + hHalf,
+      label: 'power_tower_lower_deck'
+    });
+    this.registerElevatedPlatform({
+      minX: wx - upHalf,
+      maxX: wx + upHalf,
+      minZ: wz - upHalf,
+      maxZ: wz + upHalf,
+      topY: upperWorldY,
+      thickness: 0.34,
+      holeMinX: ladX - hHalf,
+      holeMaxX: ladX + hHalf,
+      holeMinZ: ladZ - hHalf,
+      holeMaxZ: ladZ + hHalf,
+      label: 'power_tower_upper_deck'
+    });
+    this.registerClimbableLadder({
+      x: ladX,
+      z: ladZ,
+      radius: 1.08,
+      minY: wy,
+      maxY: upperWorldY,
+      topExitY: upperWorldY,
+      exitDirX: 0,
+      exitDirZ: -1,
+      label: 'power_tower_ladder'
+    });
+  },
+
+  buildPowerTransmissionLines(towerCoords) {
+    if (!Array.isArray(towerCoords) || towerCoords.length < 2 || !this.scene) return;
+    // Connect sequential northern corridor pylons (and any pair within 420m) with catenary-sagged 400kV cables!
+    const cableVerts = [];
+    const attachments = [
+      { dy: POWER_TOWER_SPEC.lowerArmY - 2.8, dz: -POWER_TOWER_SPEC.lowerArmHalfSpan },
+      { dy: POWER_TOWER_SPEC.lowerArmY - 2.8, dz: POWER_TOWER_SPEC.lowerArmHalfSpan },
+      { dy: POWER_TOWER_SPEC.upperArmY - 2.8, dz: -POWER_TOWER_SPEC.upperArmHalfSpan },
+      { dy: POWER_TOWER_SPEC.upperArmY - 2.8, dz: POWER_TOWER_SPEC.upperArmHalfSpan },
+      { dy: POWER_TOWER_SPEC.totalHeight - 0.55, dz: 0 } // Top lightning shield wire
+    ];
+
+    for (let i = 0; i < towerCoords.length - 1; i++) {
+      const [x1, z1] = towerCoords[i];
+      const [x2, z2] = towerCoords[i + 1];
+      const spanDist = Math.hypot(x2 - x1, z2 - z1);
+      if (spanDist > 420 || spanDist < 20) continue;
+      const y1 = this.getTerrainHeight(x1, z1);
+      const y2 = this.getTerrainHeight(x2, z2);
+      const sagM = Math.min(7.5, spanDist * 0.022);
+      const segs = 12;
+
+      for (let a = 0; a < attachments.length; a++) {
+        const att = attachments[a];
+        for (let s = 0; s < segs; s++) {
+          const t0 = s / segs;
+          const t1 = (s + 1) / segs;
+          const sag0 = 4 * t0 * (1 - t0) * sagM;
+          const sag1 = 4 * t1 * (1 - t1) * sagM;
+          cableVerts.push(
+            x1 + (x2 - x1) * t0,
+            y1 + att.dy + (y2 - y1) * t0 - sag0,
+            z1 + att.dz + (z2 - z1) * t0,
+            x1 + (x2 - x1) * t1,
+            y1 + att.dy + (y2 - y1) * t1 - sag1,
+            z1 + att.dz + (z2 - z1) * t1
+          );
+        }
+      }
+    }
+
+    if (cableVerts.length > 0) {
+      const cableGeo = new THREE.BufferGeometry();
+      cableGeo.setAttribute('position', new THREE.Float32BufferAttribute(cableVerts, 3));
+      cableGeo.computeBoundingSphere();
+      const cableMat = new THREE.LineBasicMaterial({ color: 0x2f3640, transparent: true, opacity: 0.78 });
+      const lines = new THREE.LineSegments(cableGeo, cableMat);
+      lines.matrixAutoUpdate = false;
+      lines.updateMatrix();
+      this.scene.add(lines);
+      if (this._ownedWorldObjects) this._ownedWorldObjects.push(lines);
+    }
   },
 
   /**

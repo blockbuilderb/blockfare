@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=127';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=127';
+import { UI, getEraRoles } from '../config.js?v=132';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=132';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -1254,12 +1254,14 @@ export const HudRenderer = {
         this.vehicleOverlayEl.className = vehTheme;
       }
 
+      // Ground Turreted Vehicles ONLY: 2D Rotating Hull vs. Turret Compass Ring (`#reticle-hull-ring`).
+      // Aircraft NEVER show this 2D dotted tank ring (planes use 3D projected `⊹ NOSE` boresight & `#air-bvv-svg` dial instead)!
       const showHullRing =
-        activeVeh.isAircraft ||
-        activeVeh.type === 'tank' ||
-        activeVeh.type === 'apc' ||
-        activeVeh.type === 'aa' ||
-        activeVeh.type === 'humvee';
+        !activeVeh.isAircraft &&
+        (activeVeh.type === 'tank' ||
+          activeVeh.type === 'apc' ||
+          activeVeh.type === 'aa' ||
+          activeVeh.type === 'humvee');
       if (reticleHullRingEl) {
         let hideRing = !showHullRing;
         if (showHullRing) {
@@ -1268,14 +1270,10 @@ export const HudRenderer = {
           let viewDegR = Math.round(((-(this.player.yaw || 0) * 180) / Math.PI) % 360);
           if (viewDegR < 0) viewDegR += 360;
           const relHullDeg = ((hullDegR - viewDegR + 540) % 360) - 180;
-          if (activeVeh.isAircraft && Math.abs(relHullDeg) < 4) {
-            hideRing = true;
-          } else {
-            reticleHullRingEl.style.transform = `translate(-50%, -50%) rotate(${relHullDeg.toFixed(1)}deg)`;
-            const chevEl = this.el('reticle-hull-chevron');
-            if (chevEl) {
-              this._setText(chevEl, activeVeh.isAircraft ? '▲ NOSE' : '▲ HULL');
-            }
+          reticleHullRingEl.style.transform = `translate(-50%, -50%) rotate(${relHullDeg.toFixed(1)}deg)`;
+          const chevEl = this.el('reticle-hull-chevron');
+          if (chevEl) {
+            this._setText(chevEl, '▲ HULL');
           }
         }
         reticleHullRingEl.classList.toggle('hidden', hideRing);
@@ -1631,11 +1629,11 @@ export const HudRenderer = {
             : '';
       }
 
-      // Rotate nearby building keys smoothly at 60Hz while throttling proximity scans to 10Hz
+      // Rotate ONLY nearby visible building keys smoothly at 60Hz
       if (this.world && Array.isArray(this.world.buildingKeys)) {
         for (let i = 0; i < this.world.buildingKeys.length; i++) {
           const kObj = this.world.buildingKeys[i];
-          if (!kObj.collected && kObj.mesh) {
+          if (!kObj.collected && kObj.mesh && kObj.mesh.visible) {
             kObj.mesh.rotation.y += dt * 1.8;
           }
         }
@@ -2778,6 +2776,22 @@ export const HudRenderer = {
 
     const wHeld = Boolean(this.player?.keys?.['KeyW']);
     const sHeld = Boolean(this.player?.keys?.['KeyS']);
+    const heliEasyMode = Boolean(isHeli && this.player?.aircraftCollisionAvoidance !== false);
+    const heliClimbHeld = Boolean(
+      isHeli &&
+        (this.player?.keys?.['Space'] ||
+          this.player?.keys?.['KeyQ'] ||
+          this.player?.keys?.['ArrowUp'] ||
+          (!heliEasyMode && wHeld))
+    );
+    const heliDescHeld = Boolean(
+      isHeli &&
+        (this.player?.keys?.['ControlLeft'] ||
+          this.player?.keys?.['ControlRight'] ||
+          this.player?.keys?.['KeyZ'] ||
+          this.player?.keys?.['ArrowDown'] ||
+          (!heliEasyMode && sHeld))
+    );
 
     const asiKmhEl = this.el('air-asi-kmh');
     const asiKtsEl = this.el('air-asi-kts');
@@ -2801,14 +2815,14 @@ export const HudRenderer = {
         ? '🚨 EJECT [E]'
         : isHeli
         ? v.heliHoverHold
-          ? '🚁 HOVER [R]'
+          ? '🚁 HOVER LOCK [R]'
+          : heliClimbHeld
+          ? `▲ CLIMB (${heliEasyMode ? 'EASY' : 'SIM'})`
+          : heliDescHeld
+          ? `▼ LAND (${heliEasyMode ? 'EASY' : 'SIM'})`
           : kmh < 18
-          ? '🚁 HOVER'
-          : wHeld
-          ? '▲ CLIMB'
-          : sHeld
-          ? '▼ DESCEND'
-          : 'CRUISE'
+          ? `🚁 HOVER (${heliEasyMode ? 'EASY [G]' : 'SIM [G]'})`
+          : `CRUISE (${heliEasyMode ? 'EASY [G]' : 'SIM [G]'})`
         : v.isStalling || kmh <= minKmh * 1.06
         ? '⚠️ STALL'
         : wHeld || kmh >= maxKmh * 0.92
@@ -3152,7 +3166,7 @@ export const HudRenderer = {
       ? [
           { icon: '💣', lbl: '80× MK82' },
           { icon: '☢️', lbl: 'GBU-57 MOP' },
-          { icon: '🎯', lbl: '20MM+AIM9' }
+          { icon: '🎯', lbl: '4× GBU-31' }
         ]
       : isCas
       ? [

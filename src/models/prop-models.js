@@ -75,6 +75,34 @@ function beamBetween(p1, p2, w, d) {
   };
 }
 
+export const RADAR_TOWER_SPEC = {
+  baseHalfSpan: 5.2,
+  pierSize: 1.5,
+  deckY: 28.0,
+  deckWidth: 6.8,
+  totalHeight: 38.5,
+  ladderLocalX: 0,
+  ladderLocalZ: 2.35,
+  hatchHalfW: 0.68
+};
+
+export const POWER_TOWER_SPEC = {
+  baseHalfSpan: 6.2,
+  pierSize: 1.7,
+  lowerDeckY: 20.0,
+  lowerDeckWidth: 7.6,
+  upperDeckY: 32.5,
+  upperDeckWidth: 6.8,
+  lowerArmY: 24.5,
+  lowerArmHalfSpan: 11.0,
+  upperArmY: 35.5,
+  upperArmHalfSpan: 9.2,
+  totalHeight: 44.5,
+  ladderLocalX: 0,
+  ladderLocalZ: 2.55,
+  hatchHalfW: 0.72
+};
+
 function buildRadarTowerGeometries() {
   const steelParts = [];
   const darkEquipParts = [];
@@ -82,32 +110,29 @@ function buildRadarTowerGeometries() {
   const whiteWarnParts = [];
   const beaconGlowParts = [];
 
-  // 1. Concrete foundation pads + 4-legged tapered steel lattice tower (y = 0..21m)
-  //    with 5 horizontal tiers & diagonal X-cross-bracing across all 4 faces
-  const tierYs = [0.4, 4.52, 8.64, 12.76, 16.88, 21.0];
-  const halfSpanAt = (y) => 2.65 - (y / 21.0) * 1.72; // tapers from ±2.65m at base to ±0.93m at y=21m
+  // 1. Combined-Arms Scale 4-Legged Tapered Steel Lattice Air-Defense Radar Tower (10.4m x 10.4m base, 38.5m pinnacle)
+  const tierYs = [0.5, 6.2, 11.9, 17.6, 23.3, 29.2];
+  const halfSpanAt = (y) => 5.2 - (y / 29.2) * 3.1; // tapers from ±5.20m (10.4m base) to ±2.10m at y=29.2m
 
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
-      const baseH = halfSpanAt(0.4);
-      // Concrete pier foundation pad + steel baseplate flange
+      const baseH = halfSpanAt(0.5);
       steelParts.push({
-        geo: new THREE.BoxGeometry(1.05, 0.65, 1.05),
-        pos: [sx * baseH, 0.325, sz * baseH],
+        geo: new THREE.BoxGeometry(1.55, 0.9, 1.55),
+        pos: [sx * baseH, 0.45, sz * baseH],
         rot: [0, 0, 0]
       });
       steelParts.push({
-        geo: new THREE.BoxGeometry(0.68, 0.14, 0.68),
-        pos: [sx * baseH, 0.68, sz * baseH],
+        geo: new THREE.BoxGeometry(1.02, 0.18, 1.02),
+        pos: [sx * baseH, 0.95, sz * baseH],
         rot: [0, 0, 0]
       });
-      // Main tapered corner angle-iron column leg (y = 0.4 -> 21.0m)
-      const topH = halfSpanAt(21.0);
-      steelParts.push(beamBetween([sx * baseH, 0.4, sz * baseH], [sx * topH, 21.0, sz * topH], 0.22, 0.22));
+      const topH = halfSpanAt(29.2);
+      steelParts.push(beamBetween([sx * baseH, 0.5, sz * baseH], [sx * topH, 29.2, sz * topH], 0.32, 0.32));
     }
   }
 
-  // 5 bays of horizontal perimeter girts + diagonal X-cross-bracing across all 4 faces
+  // 5 bays of horizontal perimeter girts + diagonal X-cross-bracing (open drive-under lower bay up to y=6.2m!)
   for (let b = 0; b < tierYs.length - 1; b++) {
     const y0 = tierYs[b];
     const y1 = tierYs[b + 1];
@@ -129,167 +154,186 @@ function buildRadarTowerGeometries() {
 
     for (let f = 0; f < 4; f++) {
       const nf = (f + 1) % 4;
-      // Upper horizontal tier girt on each face
-      steelParts.push(beamBetween(corners1[f], corners1[nf], 0.14, 0.14));
-      // Diagonal X-cross-bracing across face
-      steelParts.push(beamBetween(corners0[f], corners1[nf], 0.095, 0.095));
-      steelParts.push(beamBetween(corners0[nf], corners1[f], 0.095, 0.095));
+      steelParts.push(beamBetween(corners1[f], corners1[nf], 0.2, 0.2));
+      if (b > 0) {
+        steelParts.push(beamBetween(corners0[f], corners1[nf], 0.14, 0.14));
+        steelParts.push(beamBetween(corners0[nf], corners1[f], 0.14, 0.14));
+      } else {
+        // Knee-braces in lower bay leave a tall 5.2m clear ground arch underneath!
+        const midTop = [(corners1[f][0] + corners1[nf][0]) * 0.5, y1, (corners1[f][2] + corners1[nf][2]) * 0.5];
+        steelParts.push(beamBetween(corners0[f], midTop, 0.15, 0.15));
+        steelParts.push(beamBetween(corners0[nf], midTop, 0.15, 0.15));
+      }
     }
-    // Internal horizontal plan-view K/X-diagonals at each tier
-    steelParts.push(beamBetween(corners1[0], corners1[2], 0.085, 0.085));
-    steelParts.push(beamBetween(corners1[1], corners1[3], 0.085, 0.085));
+    if (b >= 1) {
+      steelParts.push(beamBetween(corners1[0], corners1[2], 0.12, 0.12));
+      steelParts.push(beamBetween(corners1[1], corners1[3], 0.12, 0.12));
+    }
   }
 
-  // 2. Upper observation catwalk deck (y = 19.8m), safety guardrails, equipment shelter & caged ladder
-  const deckW = 3.15;
-  const deckHalf = deckW * 0.5;
+  // 2. Spacious 6.8m × 6.8m Walkable Sniper & Spotter Catwalk Deck at y = 28.0m (with open ladder hatch at z = +2.35m)
+  const deckW = RADAR_TOWER_SPEC.deckWidth; // 6.8m
+  const deckHalf = deckW * 0.5; // 3.4m
+  const ladZ = RADAR_TOWER_SPEC.ladderLocalZ; // +2.35m
+  // Build deck around the (x in [-0.68..+0.68], z in [1.67..3.03]) ladder hatch opening!
   darkEquipParts.push({
-    geo: new THREE.BoxGeometry(deckW, 0.16, deckW),
-    pos: [0, 19.8, 0],
+    geo: new THREE.BoxGeometry(deckW, 0.24, 5.05),
+    pos: [0, 27.88, -0.875],
     rot: [0, 0, 0]
   });
-  // Guardrail corner & mid posts + waist/knee safety rails around y = 19.8..20.95m
+  darkEquipParts.push({
+    geo: new THREE.BoxGeometry(2.72, 0.24, 1.75),
+    pos: [-2.04, 27.88, 2.525],
+    rot: [0, 0, 0]
+  });
+  darkEquipParts.push({
+    geo: new THREE.BoxGeometry(2.72, 0.24, 1.75),
+    pos: [2.04, 27.88, 2.525],
+    rot: [0, 0, 0]
+  });
+
+  // 4-Corner Sniper Ballistic Waist Shields & Full Perimeter Safety Guardrails (y = 28.0..29.18m)
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       darkEquipParts.push({
-        geo: new THREE.BoxGeometry(0.08, 1.15, 0.08),
-        pos: [sx * (deckHalf - 0.06), 20.38, sz * (deckHalf - 0.06)],
+        geo: new THREE.BoxGeometry(0.12, 1.22, 0.12),
+        pos: [sx * (deckHalf - 0.08), 28.6, sz * (deckHalf - 0.08)],
+        rot: [0, 0, 0]
+      });
+      // Corner sniper cover plates (waist-high steel ballistic apron at all 4 corners!)
+      steelParts.push({
+        geo: new THREE.BoxGeometry(1.45, 0.92, 0.08),
+        pos: [sx * (deckHalf - 0.78), 28.46, sz * (deckHalf - 0.08)],
+        rot: [0, 0, 0]
+      });
+      steelParts.push({
+        geo: new THREE.BoxGeometry(0.08, 0.92, 1.45),
+        pos: [sx * (deckHalf - 0.08), 28.46, sz * (deckHalf - 0.78)],
         rot: [0, 0, 0]
       });
     }
-    // X-parallel rails & Z-parallel rails (waist & mid-height)
-    for (const ry of [20.36, 20.92]) {
+    for (const ry of [28.58, 29.15]) {
       darkEquipParts.push({
-        geo: new THREE.BoxGeometry(deckW, 0.06, 0.06),
-        pos: [0, ry, sx * (deckHalf - 0.06)],
+        geo: new THREE.BoxGeometry(deckW, 0.08, 0.08),
+        pos: [0, ry, sx * (deckHalf - 0.08)],
         rot: [0, 0, 0]
       });
       darkEquipParts.push({
-        geo: new THREE.BoxGeometry(0.06, 0.06, deckW),
-        pos: [sx * (deckHalf - 0.06), ry, 0],
+        geo: new THREE.BoxGeometry(0.08, 0.08, deckW),
+        pos: [sx * (deckHalf - 0.08), ry, 0],
         rot: [0, 0, 0]
       });
     }
   }
 
-  // Upper radar electronics cabinet on catwalk + Ground base transmitter shelter cabinet
+  // Electronics cabinets tucked near center pedestal so all 4 corners stay 100% open for snipers!
   darkEquipParts.push({
-    geo: new THREE.BoxGeometry(0.95, 1.42, 0.82),
-    pos: [-0.68, 20.58, -0.58],
+    geo: new THREE.BoxGeometry(1.15, 1.5, 0.95),
+    pos: [-0.95, 28.75, -0.75],
     rot: [0, 0, 0]
   });
   darkEquipParts.push({
-    geo: new THREE.BoxGeometry(1.48, 1.85, 1.18),
-    pos: [-0.65, 0.95, -0.55],
+    geo: new THREE.BoxGeometry(1.85, 2.2, 1.45),
+    pos: [-1.85, 1.1, -1.85],
     rot: [0, 0, 0]
   });
 
-  // Vertical access ladder run (y = 0.4..19.8m) + waveguide cable conduit
-  darkEquipParts.push({ geo: new THREE.BoxGeometry(0.06, 19.4, 0.06), pos: [-0.24, 10.1, 0.72], rot: [0, 0, 0] });
-  darkEquipParts.push({ geo: new THREE.BoxGeometry(0.06, 19.4, 0.06), pos: [0.24, 10.1, 0.72], rot: [0, 0, 0] });
-  darkEquipParts.push({
-    geo: new THREE.CylinderGeometry(0.075, 0.075, 20.5, 6),
-    pos: [0.42, 10.6, -0.35],
-    rot: [0, 0, 0]
-  });
-  for (let ly = 1.0; ly <= 19.4; ly += 0.85) {
+  // Full-Height Climbable Caged Steel Ladder (y = 0.2..28.6m at x = 0, z = +2.35m) + High-Vis Entry Stile!
+  darkEquipParts.push({ geo: new THREE.BoxGeometry(0.08, 28.5, 0.08), pos: [-0.34, 14.35, ladZ], rot: [0, 0, 0] });
+  darkEquipParts.push({ geo: new THREE.BoxGeometry(0.08, 28.5, 0.08), pos: [0.34, 14.35, ladZ], rot: [0, 0, 0] });
+  redWarnParts.push({ geo: new THREE.BoxGeometry(0.12, 2.6, 0.12), pos: [-0.34, 1.35, ladZ], rot: [0, 0, 0] });
+  redWarnParts.push({ geo: new THREE.BoxGeometry(0.12, 2.6, 0.12), pos: [0.34, 1.35, ladZ], rot: [0, 0, 0] });
+  for (let ly = 0.5; ly <= 28.2; ly += 0.55) {
     darkEquipParts.push({
-      geo: new THREE.BoxGeometry(0.48, 0.04, 0.04),
-      pos: [0, ly, 0.72],
+      geo: new THREE.BoxGeometry(0.68, 0.05, 0.05),
+      pos: [0, ly, ladZ],
       rot: [0, 0, 0]
     });
   }
+  // Safety cage hoops along climbable shaft (z = ladZ + 0.42m)
+  for (let cy = 3.2; cy <= 26.8; cy += 2.6) {
+    steelParts.push({ geo: new THREE.BoxGeometry(0.92, 0.06, 0.06), pos: [0, cy, ladZ + 0.68], rot: [0, 0, 0] });
+    steelParts.push({ geo: new THREE.BoxGeometry(0.06, 0.06, 0.68), pos: [-0.44, cy, ladZ + 0.34], rot: [0, 0, 0] });
+    steelParts.push({ geo: new THREE.BoxGeometry(0.06, 0.06, 0.68), pos: [0.44, cy, ladZ + 0.34], rot: [0, 0, 0] });
+  }
 
-  // 3. Rotary Azimuth Pedestal + Open-Ribbed Parabolic Air-Search Radar Dish + 3-Strut Feed-Horn Tripod
+  // 3. Elevated Rotary Azimuth Pedestal (clear above head height at y = 31.2..34.5m!) + Large Air-Search Radar Dish
   steelParts.push({
-    geo: new THREE.CylinderGeometry(0.58, 0.72, 1.35, 10),
-    pos: [0, 21.65, 0],
+    geo: new THREE.CylinderGeometry(0.75, 0.95, 3.8, 10),
+    pos: [0, 30.1, 0],
     rot: [0, 0, 0]
   });
   darkEquipParts.push({
-    geo: new THREE.BoxGeometry(1.15, 0.78, 1.35),
-    pos: [-0.15, 22.38, 0],
+    geo: new THREE.BoxGeometry(1.65, 1.15, 1.85),
+    pos: [-0.2, 32.5, 0],
     rot: [0, 0, 0]
   });
 
-  // Tilted open-ribbed parabolic Air-Search Radar Dish centered at (0.85, 22.65, 0) facing +X and tilted ~18 deg skyward
-  const dishCenter = new THREE.Vector3(0.95, 22.65, 0);
-  const dishTilt = new THREE.Euler(0, 0, 0.32); // normal (+X) tilted skyward (+Y)
+  const dishCenter = new THREE.Vector3(1.35, 33.2, 0);
+  const dishTilt = new THREE.Euler(0, 0, 0.3);
   const dishQuat = new THREE.Quaternion().setFromEuler(dishTilt);
   const toWorldDish = (lx, ly, lz) => {
     const v = new THREE.Vector3(lx, ly, lz).applyQuaternion(dishQuat).add(dishCenter);
     return [v.x, v.y, v.z];
   };
 
-  // Parabolic hub + 12 radial curved truss ribs + outer polygonal rim + 3-strut focal feed-horn tripod
   const hubPt = toWorldDish(0, 0, 0);
-  const focalPt = toWorldDish(1.95, 0, 0);
-  const dishRadY = 2.15;
-  const dishRadZ = 3.15; // Wide elliptical S-band / L-band air-search radar aperture!
+  const focalPt = toWorldDish(2.75, 0, 0);
+  const dishRadY = 3.1;
+  const dishRadZ = 4.6;
   const rimPts = [];
   const ribCount = 12;
   for (let r = 0; r < ribCount; r++) {
     const ang = (r / ribCount) * Math.PI * 2;
-    const midPt = toWorldDish(0.28, Math.sin(ang) * dishRadY * 0.55, Math.cos(ang) * dishRadZ * 0.55);
-    const rimPt = toWorldDish(0.78, Math.sin(ang) * dishRadY, Math.cos(ang) * dishRadZ);
+    const midPt = toWorldDish(0.38, Math.sin(ang) * dishRadY * 0.55, Math.cos(ang) * dishRadZ * 0.55);
+    const rimPt = toWorldDish(1.05, Math.sin(ang) * dishRadY, Math.cos(ang) * dishRadZ);
     rimPts.push(rimPt);
-    steelParts.push(beamBetween(hubPt, midPt, 0.075, 0.075));
-    steelParts.push(beamBetween(midPt, rimPt, 0.065, 0.065));
+    steelParts.push(beamBetween(hubPt, midPt, 0.1, 0.1));
+    steelParts.push(beamBetween(midPt, rimPt, 0.085, 0.085));
   }
   for (let r = 0; r < ribCount; r++) {
-    steelParts.push(beamBetween(rimPts[r], rimPts[(r + 1) % ribCount], 0.085, 0.085));
+    steelParts.push(beamBetween(rimPts[r], rimPts[(r + 1) % ribCount], 0.11, 0.11));
   }
-  // 3-strut feed-horn tripod converging from dish rim to focal L-band horn receiver
   for (const idx of [1, 5, 9]) {
-    steelParts.push(beamBetween(rimPts[idx], focalPt, 0.065, 0.065));
+    steelParts.push(beamBetween(rimPts[idx], focalPt, 0.085, 0.085));
   }
-  // Focal feed-horn assembly + rear counterweight boom
-  darkEquipParts.push(beamBetween(toWorldDish(1.7, 0, 0), toWorldDish(2.15, 0, 0), 0.32, 0.32));
-  steelParts.push(beamBetween(toWorldDish(-1.35, 0, 0), hubPt, 0.16, 0.16));
+  darkEquipParts.push(beamBetween(toWorldDish(2.4, 0, 0), toWorldDish(3.0, 0, 0), 0.42, 0.42));
+  steelParts.push(beamBetween(toWorldDish(-1.85, 0, 0), hubPt, 0.22, 0.22));
 
-  // Central lightning & aviation obstruction mast rising to y = 25.2m
+  // Lightning & FAA Obstruction Mast rising to y = 38.5m
   steelParts.push({
-    geo: new THREE.CylinderGeometry(0.065, 0.11, 2.85, 8),
-    pos: [-0.35, 23.75, 0],
+    geo: new THREE.CylinderGeometry(0.08, 0.15, 5.2, 8),
+    pos: [-0.45, 35.6, 0],
     rot: [0, 0, 0]
   });
 
-  // 4. Red & White Aviation Warning Bands (y = 21.8..24.8m) + Dish Tip Warning Trim
-  for (let band = 0; band < 5; band++) {
-    const by = 22.55 + band * 0.48;
+  for (let band = 0; band < 6; band++) {
+    const by = 33.4 + band * 0.78;
     const targetArr = band % 2 === 0 ? redWarnParts : whiteWarnParts;
     targetArr.push({
-      geo: new THREE.CylinderGeometry(0.115, 0.125, 0.44, 8),
-      pos: [-0.35, by, 0],
+      geo: new THREE.CylinderGeometry(0.16, 0.17, 0.72, 8),
+      pos: [-0.45, by, 0],
       rot: [0, 0, 0]
     });
   }
-  // Red warning caps on horizontal dish wingtips & counterweight
-  redWarnParts.push({ geo: new THREE.BoxGeometry(0.22, 0.38, 0.32), pos: rimPts[0], rot: [0, 0, 0.32] });
-  redWarnParts.push({ geo: new THREE.BoxGeometry(0.22, 0.38, 0.32), pos: rimPts[6], rot: [0, 0, 0.32] });
-  redWarnParts.push({
-    geo: new THREE.BoxGeometry(0.36, 0.36, 0.36),
-    pos: toWorldDish(-1.42, 0, 0),
-    rot: [0, 0, 0.32]
-  });
-  // Secondary white microwave drum relay dish on mid-tower (y = 14.8m)
+  redWarnParts.push({ geo: new THREE.BoxGeometry(0.28, 0.48, 0.42), pos: rimPts[0], rot: [0, 0, 0.3] });
+  redWarnParts.push({ geo: new THREE.BoxGeometry(0.28, 0.48, 0.42), pos: rimPts[6], rot: [0, 0, 0.3] });
   whiteWarnParts.push({
-    geo: new THREE.CylinderGeometry(0.68, 0.68, 0.32, 12),
-    pos: [0, 14.8, 1.52],
+    geo: new THREE.CylinderGeometry(0.95, 0.95, 0.42, 12),
+    pos: [0, 20.5, 3.15],
     rot: [Math.PI / 2, 0, 0]
   });
 
-  // 5. Glowing Red FAA Obstruction Beacon at y = 25.2m + 4 Catwalk Corner Marker Lights
   beaconGlowParts.push({
-    geo: new THREE.CylinderGeometry(0.18, 0.2, 0.36, 10),
-    pos: [-0.35, 25.2, 0],
+    geo: new THREE.CylinderGeometry(0.24, 0.26, 0.48, 10),
+    pos: [-0.45, 38.45, 0],
     rot: [0, 0, 0]
   });
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       beaconGlowParts.push({
-        geo: new THREE.BoxGeometry(0.12, 0.12, 0.12),
-        pos: [sx * (deckHalf - 0.06), 21.02, sz * (deckHalf - 0.06)],
+        geo: new THREE.BoxGeometry(0.16, 0.16, 0.16),
+        pos: [sx * (deckHalf - 0.08), 29.28, sz * (deckHalf - 0.08)],
         rot: [0, 0, 0]
       });
     }
@@ -301,6 +345,221 @@ function buildRadarTowerGeometries() {
     towerRedGeo: mergeStaticParts(redWarnParts),
     towerWhiteGeo: mergeStaticParts(whiteWarnParts),
     towerBeaconGeo: mergeStaticParts(beaconGlowParts)
+  };
+}
+
+function buildPowerTowerGeometries() {
+  const steelParts = [];
+  const darkEquipParts = [];
+  const redWarnParts = [];
+  const whiteWarnParts = [];
+  const beaconGlowParts = [];
+
+  // 1. Monumental 44.5m High-Voltage 400kV Steel Lattice Power Transmission Tower (12.4m × 12.4m straddle base!)
+  //    Open 7.8m lower portal allows Tanks, Trucks & Humvees to drive cleanly underneath!
+  const tierYs = [0.5, 7.8, 14.2, 20.0, 26.2, 32.5, 38.8, 44.0];
+  const halfSpanAt = (y) => {
+    if (y <= 20.0) return 6.2 - (y / 20.0) * 2.55; // 6.20m base -> 3.65m waist at y=20m
+    if (y <= 32.5) return 3.65 - ((y - 20.0) / 12.5) * 0.55; // 3.65m -> 3.10m crown at y=32.5m
+    return Math.max(0.32, 3.1 - ((y - 32.5) / 11.5) * 2.78); // pyramidal earth-wire spire to y=44.0m
+  };
+
+  // 4 Massive Concrete Corner Footings + Tapered Main Lattice Legs
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const baseH = halfSpanAt(0.5);
+      steelParts.push({
+        geo: new THREE.BoxGeometry(1.75, 1.1, 1.75),
+        pos: [sx * baseH, 0.55, sz * baseH],
+        rot: [0, 0, 0]
+      });
+      for (let b = 0; b < tierYs.length - 1; b++) {
+        const y0 = tierYs[b];
+        const y1 = tierYs[b + 1];
+        const h0 = halfSpanAt(y0);
+        const h1 = halfSpanAt(y1);
+        const legW = b < 5 ? 0.34 : 0.24;
+        steelParts.push(beamBetween([sx * h0, y0, sz * h0], [sx * h1, y1, sz * h1], legW, legW));
+      }
+    }
+  }
+
+  // Horizontal Truss Girts & Diagonal X-Cross-Bracing across all bays (open drive-under portal in Bay 0!)
+  for (let b = 0; b < tierYs.length - 1; b++) {
+    const y0 = tierYs[b];
+    const y1 = tierYs[b + 1];
+    const h0 = halfSpanAt(y0);
+    const h1 = halfSpanAt(y1);
+    const c0 = [
+      [-h0, y0, -h0],
+      [h0, y0, -h0],
+      [h0, y0, h0],
+      [-h0, y0, h0]
+    ];
+    const c1 = [
+      [-h1, y1, -h1],
+      [h1, y1, -h1],
+      [h1, y1, h1],
+      [-h1, y1, h1]
+    ];
+    for (let f = 0; f < 4; f++) {
+      const nf = (f + 1) % 4;
+      steelParts.push(beamBetween(c1[f], c1[nf], 0.2, 0.2));
+      if (b === 0) {
+        const archMid = [(c1[f][0] + c1[nf][0]) * 0.5, y1, (c1[f][2] + c1[nf][2]) * 0.5];
+        steelParts.push(beamBetween(c0[f], archMid, 0.18, 0.18));
+        steelParts.push(beamBetween(c0[nf], archMid, 0.18, 0.18));
+      } else {
+        const targetArr = b >= 5 ? (b % 2 === 1 ? redWarnParts : whiteWarnParts) : steelParts;
+        targetArr.push(beamBetween(c0[f], c1[nf], 0.14, 0.14));
+        targetArr.push(beamBetween(c0[nf], c1[f], 0.14, 0.14));
+      }
+    }
+  }
+
+  // 2. Twin Wide High-Voltage Steel Cross-Arms (spanning along Z so West-East cables attach at ±Z tips!)
+  //    Lower Cross-Arm: 22.0m total span (±11.0m) at y = 24.5m; Upper Cross-Arm: 18.4m span (±9.2m) at y = 35.5m
+  for (const arm of [
+    { y: POWER_TOWER_SPEC.lowerArmY, halfSpan: POWER_TOWER_SPEC.lowerArmHalfSpan, bodyH: halfSpanAt(24.5) },
+    { y: POWER_TOWER_SPEC.upperArmY, halfSpan: POWER_TOWER_SPEC.upperArmHalfSpan, bodyH: halfSpanAt(35.5) }
+  ]) {
+    for (const sz of [-1, 1]) {
+      const tipZ = sz * arm.halfSpan;
+      const rootZ = sz * arm.bodyH;
+      for (const sx of [-1, 1]) {
+        const rootX = sx * arm.bodyH * 0.75;
+        steelParts.push(beamBetween([rootX, arm.y - 0.5, rootZ], [0, arm.y - 0.35, tipZ], 0.2, 0.2));
+        steelParts.push(beamBetween([rootX, arm.y + 1.55, rootZ], [0, arm.y - 0.25, tipZ], 0.16, 0.16));
+      }
+      // Hanging Ceramic High-Voltage Suspension Insulator String (2.6m long) + Conductor Clamp Yoke
+      whiteWarnParts.push({
+        geo: new THREE.CylinderGeometry(0.24, 0.24, 2.4, 8),
+        pos: [0, arm.y - 1.55, tipZ],
+        rot: [0, 0, 0]
+      });
+      darkEquipParts.push({
+        geo: new THREE.BoxGeometry(0.95, 0.22, 0.32),
+        pos: [0, arm.y - 2.8, tipZ],
+        rot: [0, 0, 0]
+      });
+      redWarnParts.push({
+        geo: new THREE.BoxGeometry(0.32, 0.42, 0.32),
+        pos: [0, arm.y - 0.15, tipZ],
+        rot: [0, 0, 0]
+      });
+    }
+  }
+
+  // 3. TWO Spacious Walkable Sniper Overwatch Decks (Lower 7.6m × 7.6m @ y=20.0m, Upper 6.8m × 6.8m @ y=32.5m)
+  const ladZ = POWER_TOWER_SPEC.ladderLocalZ; // +2.55m
+  for (const deck of [
+    { y: POWER_TOWER_SPEC.lowerDeckY, w: POWER_TOWER_SPEC.lowerDeckWidth },
+    { y: POWER_TOWER_SPEC.upperDeckY, w: POWER_TOWER_SPEC.upperDeckWidth }
+  ]) {
+    const half = deck.w * 0.5;
+    const backSpan = ladZ - 0.72 - -half;
+    const frontSpan = half - (ladZ + 0.72);
+    // Solid steel grating platform surrounding the climb-through ladder hatch at (x in [-0.72..+0.72], z in [ladZ-0.72..ladZ+0.72])
+    darkEquipParts.push({
+      geo: new THREE.BoxGeometry(deck.w, 0.24, backSpan),
+      pos: [0, deck.y - 0.12, -half + backSpan * 0.5],
+      rot: [0, 0, 0]
+    });
+    if (frontSpan > 0.12) {
+      darkEquipParts.push({
+        geo: new THREE.BoxGeometry(deck.w, 0.24, frontSpan),
+        pos: [0, deck.y - 0.12, half - frontSpan * 0.5],
+        rot: [0, 0, 0]
+      });
+    }
+    const sideW = half - 0.72;
+    darkEquipParts.push({
+      geo: new THREE.BoxGeometry(sideW, 0.24, 1.44),
+      pos: [-half + sideW * 0.5, deck.y - 0.12, ladZ],
+      rot: [0, 0, 0]
+    });
+    darkEquipParts.push({
+      geo: new THREE.BoxGeometry(sideW, 0.24, 1.44),
+      pos: [half - sideW * 0.5, deck.y - 0.12, ladZ],
+      rot: [0, 0, 0]
+    });
+
+    // 4-Corner Sniper Ballistic Shields & Waist/Knee Safety Guardrails
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        darkEquipParts.push({
+          geo: new THREE.BoxGeometry(0.12, 1.2, 0.12),
+          pos: [sx * (half - 0.08), deck.y + 0.6, sz * (half - 0.08)],
+          rot: [0, 0, 0]
+        });
+        steelParts.push({
+          geo: new THREE.BoxGeometry(1.55, 0.92, 0.08),
+          pos: [sx * (half - 0.82), deck.y + 0.46, sz * (half - 0.08)],
+          rot: [0, 0, 0]
+        });
+        steelParts.push({
+          geo: new THREE.BoxGeometry(0.08, 0.92, 1.55),
+          pos: [sx * (half - 0.08), deck.y + 0.46, sz * (half - 0.82)],
+          rot: [0, 0, 0]
+        });
+      }
+      for (const ry of [deck.y + 0.58, deck.y + 1.15]) {
+        darkEquipParts.push({
+          geo: new THREE.BoxGeometry(deck.w, 0.08, 0.08),
+          pos: [0, ry, sx * (half - 0.08)],
+          rot: [0, 0, 0]
+        });
+        darkEquipParts.push({
+          geo: new THREE.BoxGeometry(0.08, 0.08, deck.w),
+          pos: [sx * (half - 0.08), ry, 0],
+          rot: [0, 0, 0]
+        });
+      }
+    }
+  }
+
+  // 4. Full-Height Climbable Caged Steel Ladder (y = 0.2..33.2m at x = 0, z = +2.55m) + High-Vis Base Entry Frame!
+  darkEquipParts.push({ geo: new THREE.BoxGeometry(0.09, 33.1, 0.09), pos: [-0.36, 16.65, ladZ], rot: [0, 0, 0] });
+  darkEquipParts.push({ geo: new THREE.BoxGeometry(0.09, 33.1, 0.09), pos: [0.36, 16.65, ladZ], rot: [0, 0, 0] });
+  redWarnParts.push({ geo: new THREE.BoxGeometry(0.14, 3.0, 0.14), pos: [-0.36, 1.5, ladZ], rot: [0, 0, 0] });
+  redWarnParts.push({ geo: new THREE.BoxGeometry(0.14, 3.0, 0.14), pos: [0.36, 1.5, ladZ], rot: [0, 0, 0] });
+  whiteWarnParts.push({ geo: new THREE.BoxGeometry(0.95, 0.28, 0.1), pos: [0, 2.85, ladZ - 0.05], rot: [0, 0, 0] });
+  for (let ly = 0.45; ly <= 32.9; ly += 0.55) {
+    darkEquipParts.push({
+      geo: new THREE.BoxGeometry(0.72, 0.05, 0.05),
+      pos: [0, ly, ladZ],
+      rot: [0, 0, 0]
+    });
+  }
+  for (let cy = 3.2; cy <= 31.6; cy += 2.6) {
+    if (Math.abs(cy - 20.5) < 1.1) continue;
+    steelParts.push({ geo: new THREE.BoxGeometry(0.96, 0.06, 0.06), pos: [0, cy, ladZ + 0.7], rot: [0, 0, 0] });
+    steelParts.push({ geo: new THREE.BoxGeometry(0.06, 0.06, 0.7), pos: [-0.46, cy, ladZ + 0.35], rot: [0, 0, 0] });
+    steelParts.push({ geo: new THREE.BoxGeometry(0.06, 0.06, 0.7), pos: [0.46, cy, ladZ + 0.35], rot: [0, 0, 0] });
+  }
+
+  // 5. Pinnacle FAA Red Obstruction Beacon at y = 44.5m + Upper Deck Corner Lights
+  beaconGlowParts.push({
+    geo: new THREE.CylinderGeometry(0.28, 0.3, 0.56, 10),
+    pos: [0, 44.45, 0],
+    rot: [0, 0, 0]
+  });
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      beaconGlowParts.push({
+        geo: new THREE.BoxGeometry(0.16, 0.16, 0.16),
+        pos: [sx * 3.32, 33.75, sz * 3.32],
+        rot: [0, 0, 0]
+      });
+    }
+  }
+
+  return {
+    pylonSteelGeo: mergeStaticParts(steelParts),
+    pylonEquipGeo: mergeStaticParts(darkEquipParts),
+    pylonRedGeo: mergeStaticParts(redWarnParts),
+    pylonWhiteGeo: mergeStaticParts(whiteWarnParts),
+    pylonBeaconGeo: mergeStaticParts(beaconGlowParts)
   };
 }
 
@@ -409,10 +668,12 @@ function buildAmmoStashGeometries() {
 function getPropShared() {
   if (!propShared) {
     const towerGeos = buildRadarTowerGeometries();
+    const pylonGeos = buildPowerTowerGeometries();
     const stashGeos = buildAmmoStashGeometries();
 
     propShared = {
       ...towerGeos,
+      ...pylonGeos,
       ...stashGeos,
       ringGeo: markShared(new THREE.RingGeometry(1.15, 1.48, 24)),
 
@@ -508,6 +769,32 @@ export function createRadarTowerMesh() {
   const beacon = new THREE.Mesh(s.towerBeaconGeo, s.beaconGlowMat);
 
   group.add(latticeStructure, catwalkAndShelter, redBands, whiteBands, beacon);
+  freezeStaticMeshes(group);
+  return group;
+}
+
+export function createPowerTowerMesh() {
+  const s = getPropShared();
+  const group = new THREE.Group();
+
+  // 1. 12.4m × 12.4m Straddle Lattice Legs + Twin 22m High-Voltage Cross-Arms
+  const lattice = new THREE.Mesh(s.pylonSteelGeo, s.steelMat);
+  lattice.castShadow = true;
+  lattice.receiveShadow = true;
+
+  // 2. Dual Sniper Overwatch Catwalk Decks (20.0m & 32.5m), Guardrails & Full-Height Climbable Ladder
+  const decksAndLadder = new THREE.Mesh(s.pylonEquipGeo, s.rackFrameMat);
+  decksAndLadder.castShadow = true;
+  decksAndLadder.receiveShadow = true;
+
+  // 3 & 4. Red/White Aviation Warning Upper Bracing & Ceramic Suspension Insulator Strings
+  const redTrim = new THREE.Mesh(s.pylonRedGeo, s.redMat);
+  const insulators = new THREE.Mesh(s.pylonWhiteGeo, s.whiteWarnMat);
+
+  // 5. Pinnacle 44.5m FAA Red Obstruction Beacon & Deck Lights
+  const beacon = new THREE.Mesh(s.pylonBeaconGeo, s.beaconGlowMat);
+
+  group.add(lattice, decksAndLadder, redTrim, insulators, beacon);
   freezeStaticMeshes(group);
   return group;
 }

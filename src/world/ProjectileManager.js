@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=127';
-import { TERRAIN } from '../config.js?v=127';
-import { events } from '../events.js?v=127';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=127';
+import { sound } from '../audio.js?v=132';
+import { TERRAIN } from '../config.js?v=132';
+import { events } from '../events.js?v=132';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=132';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;
@@ -591,7 +591,29 @@ export const ProjectileManager = {
 
     for (let gx = bld.startGx - 1; gx <= bld.startGx + bld.width; gx++) {
       for (let gz = bld.startGz - 1; gz <= bld.startGz + bld.depth; gz++) {
-        for (let gy = baseGy + 1; gy <= topGy; gy++) {
+        const inFootprint =
+          gx >= bld.startGx &&
+          gx < bld.startGx + bld.width &&
+          gz >= bld.startGz &&
+          gz < bld.startGz + bld.depth;
+        const relX = gx - bld.startGx;
+        const relZ = gz - bld.startGz;
+        const isCornerPillar =
+          inFootprint &&
+          (relX <= 1 || relX >= bld.width - 2) &&
+          (relZ <= 1 || relZ >= bld.depth - 2);
+        const isPerimeterWall =
+          inFootprint &&
+          (relX === 0 || relX === bld.width - 1 || relZ === 0 || relZ === bld.depth - 1);
+        // Leave realistic jagged ground-floor ruins (2-voxel corner pillars & broken 1–2 voxel perimeter wall stubs)
+        // instead of wiping collapsed buildings completely flat!
+        const ruinKeepMaxGy = isCornerPillar
+          ? baseGy + 2
+          : isPerimeterWall && (gx * 5 + gz * 11) % 3 !== 0
+          ? baseGy + ((gx + gz) % 2 === 0 ? 1 : 2)
+          : baseGy;
+
+        for (let gy = ruinKeepMaxGy + 1; gy <= topGy + 1; gy++) {
           if (this.hasVoxel(gx, gy, gz)) {
             const spawnFall = (gx + gy + gz) % 3 === 0;
             this.destroyVoxel(gx, gy, gz, false, spawnFall);
@@ -601,16 +623,12 @@ export const ProjectileManager = {
             collapsedCount++;
           }
         }
-        // Leave intermittent low rubble piles on ground floor
-        if (
-          gx >= bld.startGx &&
-          gx < bld.startGx + bld.width &&
-          gz >= bld.startGz &&
-          gz < bld.startGz + bld.depth &&
-          (gx * 7 + gz * 13) % 5 === 0 &&
-          !this.hasVoxel(gx, baseGy, gz)
-        ) {
+        // Leave broken concrete & rubble mounds across the collapsed ground floor for infantry cover
+        if (inFootprint && (gx * 7 + gz * 13) % 4 === 0 && !this.hasVoxel(gx, baseGy, gz)) {
           this.addVoxel(gx, baseGy, gz, 'darkConcrete');
+          if ((gx + gz) % 5 === 0 && !this.hasVoxel(gx, baseGy + 1, gz)) {
+            this.addVoxel(gx, baseGy + 1, gz, 'concrete');
+          }
         }
       }
     }
@@ -1736,7 +1754,10 @@ export const ProjectileManager = {
               : pType === 'mortar_shell' || pType === 'tank_shell' || pType === 'a2a_missile'
               ? 1.15
               : 0.95;
-          const wepLabel = proj.weaponName || proj.weaponLabel || null;
+          const wepLabel =
+            proj.weaponName ||
+            proj.weaponLabel ||
+            (pType === 'autocannon' ? '30MM AUTOCANNON' : null);
           sound.playExplosion(aud.dist, aud.pan, soundScale);
           this.explodeAt(
             hitPos,

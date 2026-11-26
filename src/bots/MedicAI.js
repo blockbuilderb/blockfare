@@ -1,11 +1,11 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT } from '../config.js?v=127';
-import { tmpVec3 } from '../utils/VectorPool.js?v=127';
-import { events } from '../events.js?v=127';
+import { BOT } from '../config.js?v=132';
+import { tmpVec3 } from '../utils/VectorPool.js?v=132';
+import { events } from '../events.js?v=132';
 import {
   MEDIC_RESCUE_EVENTS,
   createMedicRescueFSM
-} from '../core/StateMachines.js?v=127';
+} from '../core/StateMachines.js?v=132';
 
 const REVIVE_PARTICLE_COLOR = new THREE.Color(0x2ecc71);
 const SHARED_SMOKE_PUFF_GEO = new THREE.BoxGeometry(1.5, 1.3, 1.5);
@@ -560,7 +560,15 @@ export function findNearestDownedFriendly(pos, team, maxDist = 3.8) {
  * (`APPROACH`, `DRAG`, or `REVIVE`), or `false` if the bot should proceed to combat/movement AI.
  */
 export function updateMedicRescue(bot, dt, player, onKillFn) {
-  if (bot.isDinosaur) return false;
+  if (bot.isDinosaur || bot.isSwimming) {
+    if (bot.isSwimming && bot.rescueTarget) {
+      this.clearBotRescueLinks(bot);
+    }
+    return false;
+  }
+  const riverWaterY = this.world?.mapDef?.dimensions?.riverWaterY ?? -0.85;
+  const isDeepWaterPos = (p) =>
+    Boolean(p && this.world?.era !== 'jurassic' && p.y < riverWaterY - 0.9);
   const parts = bot.mesh.userData.parts;
   bot.assessThreatEnemy = null;
 
@@ -568,18 +576,20 @@ export function updateMedicRescue(bot, dt, player, onKillFn) {
     createMedicRescueFSM(bot);
   }
 
-  // Validate existing rescue target (Squad rule: reviving requires at least 1 Field Dressing!)
+  // Validate existing rescue target (Squad rule: reviving requires >= 1 Field Dressing & cannot revive underwater!)
   if (bot.rescueTarget) {
     if ((bot.fieldDressings ?? 1) <= 0) {
       this.clearBotRescueLinks(bot);
     } else if (bot.rescueTarget === 'PLAYER') {
-      if (!player.downed || player.dead || player.role === 'dino_raptor') {
+      if (!player.downed || player.dead || player.role === 'dino_raptor' || player.inDeepWater || isDeepWaterPos(player.pos)) {
         this.clearBotRescueLinks(bot);
       }
     } else if (
       bot.rescueTarget.dead ||
       bot.rescueTarget.isDinosaur ||
       !bot.rescueTarget.downed ||
+      bot.rescueTarget.isSwimming ||
+      isDeepWaterPos(bot.rescueTarget.pos) ||
       (bot.rescueTarget.rescuer && bot.rescueTarget.rescuer !== bot) ||
       player.reviveTargetBot === bot.rescueTarget
     ) {
@@ -605,6 +615,8 @@ export function updateMedicRescue(bot, dt, player, onKillFn) {
     if (
       player.downed &&
       !player.dead &&
+      !player.inDeepWater &&
+      !isDeepWaterPos(player.pos) &&
       player.role !== 'dino_raptor' &&
       bot.team === player.team &&
       (isMedic || bot.inPlayerSquad)
@@ -623,6 +635,7 @@ export function updateMedicRescue(bot, dt, player, onKillFn) {
     for (let i = 0; i < downedList.length; i++) {
       const ally = downedList[i];
       if (ally === bot || ally.isDinosaur || ally.team !== bot.team || !ally.downed || ally.dead) continue;
+      if (ally.isSwimming || isDeepWaterPos(ally.pos)) continue;
       // Dedicated Medics can take over a casualty claim from a non-medic who hasn't started dragging/reviving yet
       if (
         ally.rescuer &&

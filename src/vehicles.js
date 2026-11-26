@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=127';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=127';
+import { sound } from './audio.js?v=132';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=132';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=127';
-import { createVehicleMesh } from './models/vehicle-model.js?v=127';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=127';
-import { events, makeEventBridge } from './events.js?v=127';
+} from './assets/vehicle-defs.js?v=132';
+import { createVehicleMesh } from './models/vehicle-model.js?v=132';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=132';
+import { events, makeEventBridge } from './events.js?v=132';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=127';
+} from './core/StateMachines.js?v=132';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -144,7 +144,7 @@ export function initVehicleOrdnance(v) {
     } else if (role === 'cas') {
       maxPools = { slot0: 1150, slot1: 14, slot2: 4 }; // 1150× 30mm GAU-8 drum, 14× Hydra-70, 4× AGM-65 Maverick
     } else if (role === 'b2_spirit') {
-      maxPools = { slot0: 8, slot1: 1, slot2: 4 }; // Stock CSRL: 8 Carpet Waves (40× 500lb Mk-82), 1× Twin GBU-57 MOP drop (2 MOPs), 4× AIM-9X
+      maxPools = { slot0: 8, slot1: 1, slot2: 4 }; // Stock CSRL: 8 Carpet Waves (40× 500lb Mk-82), 1× Twin GBU-57 MOP drop (2 MOPs), 4× GBU-31 2,000lb Precision JDAMs (ZERO guns/A2A!)
     } else if (role === 'wright_flyer') {
       maxPools = { slot0: 600, slot1: 8, slot2: 4 };
     } else {
@@ -161,7 +161,11 @@ export function initVehicleOrdnance(v) {
   } else if (v.type === 'truck_transport') {
     maxPools = { slot0: 600, slot1: 600 }; // 600× 7.62mm M240B / PKP Roof Ring Defense MG
   } else if (v.type === 'humvee' || v.type === 'emplace_hmg') {
-    maxPools = { slot0: 500, slot1: 500 }; // 500× .50 BMG M2HB / Kord Heavy Ammo Cans
+    maxPools = { slot0: 1200, slot1: 1200 }; // 1,200× .50 BMG (12.7×99mm M2HB / Kord — 6×200-rd heavy ammo cans)
+  } else if (v.type === 'bike') {
+    maxPools = { slot0: 240 }; // 240× 9×19mm Rider PDW (8×30-rd magazines — finite ammo, resupply at HQ/FOB/Stash)
+  } else if (v.type === 'atv') {
+    maxPools = { slot0: 360 }; // 360× 9×19mm Rider PDW (12×30-rd magazines — finite ammo, resupply at HQ/FOB/Stash)
   }
 
   v._baseOrdnancePools = maxPools ? { ...maxPools } : null;
@@ -271,10 +275,14 @@ export function classifyWeaponBallistics(weaponName = '') {
     w.includes('TALON');
 
   const isSmallArms = !isHeavyAntiArmor && !isAutocannon && !isHeavyMg50 && !isMeleeOrPrimitive;
+  const isRotaryMinigun =
+    isSmallArms &&
+    (w.includes('M134') || w.includes('MINIGUN') || w.includes('PKT DOOR'));
   const isLmgOrSniper =
     isSmallArms &&
     !isFragGrenade &&
-    (w.includes('M249') ||
+    (isRotaryMinigun ||
+      w.includes('M249') ||
       w.includes('SAW') ||
       w.includes('PKP') ||
       w.includes('PECHENEG') ||
@@ -293,6 +301,7 @@ export function classifyWeaponBallistics(weaponName = '') {
     isAutocannon,
     isHeavyMg50,
     isSmallArms,
+    isRotaryMinigun,
     isLmgOrSniper,
     isFragGrenade,
     isMeleeOrPrimitive
@@ -567,6 +576,10 @@ export class VehicleManager {
         v.turretYaw = targetYaw;
         v.throttle = 0;
         v.forwardSpeed = 0;
+        v._heliVelX = 0;
+        v._heliVelY = 0;
+        v._heliVelZ = 0;
+        v.heliHoverHold = false;
         v.flightFSM?.send(AIRCRAFT_FLIGHT_EVENTS.RESPAWN_RUNWAY);
       } else {
         const safePt = this.world?.findSafeVehicleSpawnPoint
@@ -810,9 +823,13 @@ export class VehicleManager {
     const ticketCategory = isPlane ? 'PLANE' : isHeavyArmorType ? 'TANK' : 'CAR';
     const statBlock = isPlane
       ? cfg.aircraftRole === 'heli_transport'
-        ? VEHICLE_STATS.HELI_TRANSPORT
+        ? cfg.team === 'RU' && VEHICLE_STATS.HELI_MI8
+          ? VEHICLE_STATS.HELI_MI8
+          : VEHICLE_STATS.HELI_TRANSPORT
         : cfg.aircraftRole === 'heli_attack'
-        ? VEHICLE_STATS.HELI_ATTACK
+        ? cfg.team === 'RU' && VEHICLE_STATS.HELI_KA52
+          ? VEHICLE_STATS.HELI_KA52
+          : VEHICLE_STATS.HELI_ATTACK
         : cfg.aircraftRole === 'wright_flyer'
         ? VEHICLE_STATS.PLANE_WRIGHT_FLYER
         : cfg.aircraftRole === 'b2_spirit'
@@ -891,23 +908,26 @@ export class VehicleManager {
       : cfg.type === 'apc' || cfg.type === 'aa'
       ? 3.35
       : 2.65;
-    const massTonnes = isPlane
-      ? isHeli
-        ? 10.2
-        : 18
-      : cfg.type === 'bike'
-      ? 0.18
-      : cfg.type === 'atv'
-      ? 0.42
-      : cfg.isEmplacement
-      ? 2.5
-      : cfg.type === 'tank'
-      ? 65
-      : cfg.type === 'truck_transport'
-      ? 12.5
-      : cfg.type === 'apc' || cfg.type === 'aa'
-      ? 16
-      : 5.5;
+    const massTonnes =
+      cfg.massTonnes ??
+      statBlock.massTonnes ??
+      (isPlane
+        ? isHeli
+          ? 10.2
+          : 18
+        : cfg.type === 'bike'
+        ? 0.18
+        : cfg.type === 'atv'
+        ? 0.42
+        : cfg.isEmplacement
+        ? 2.5
+        : cfg.type === 'tank'
+        ? 65
+        : cfg.type === 'truck_transport'
+        ? 12.5
+        : cfg.type === 'apc' || cfg.type === 'aa'
+        ? 16
+        : 5.5);
 
     const vehicle = {
       ...cfg,
@@ -1814,8 +1834,14 @@ export class VehicleManager {
     plane.fireCooldown = 0;
     plane.coaxCooldown = 0;
 
-    // Position the aircraft airborne at 135m altitude entering over the player's sector heading toward enemy lines
-    const entryBackDist = 140;
+    // Position the aircraft airborne entering over the player's sector heading toward enemy lines
+    const isHeliLaunch = Boolean(
+      plane.isHelicopter ||
+        plane.aircraftRole === 'heli_transport' ||
+        plane.aircraftRole === 'heli_attack'
+    );
+    if (isHeliLaunch) plane.isHelicopter = true;
+    const entryBackDist = isHeliLaunch ? 24 : 140;
     const headingYaw = team === 'US' ? -Math.PI / 2 : Math.PI / 2;
     const startX = THREE.MathUtils.clamp(
       player.pos.x + (team === 'US' ? -entryBackDist : entryBackDist),
@@ -1823,41 +1849,51 @@ export class VehicleManager {
       2450
     );
     const startZ = THREE.MathUtils.clamp(player.pos.z, -1650, 1650);
-    const alt =
-      plane.aircraftRole === 'wright_flyer'
-        ? 62
-        : plane.aircraftRole === 'b2_spirit'
-        ? 185
-        : plane.aircraftRole === 'gunship'
-        ? 165
-        : plane.aircraftRole === 'fighter'
-        ? 155
-        : plane.aircraftRole === 'bomber'
-        ? 145
-        : 120;
+    const gStart = this.world ? this.world.getGroundHeightAt(startX, startZ) : 0;
+    const alt = isHeliLaunch
+      ? Math.max(gStart + 38, 44)
+      : plane.aircraftRole === 'wright_flyer'
+      ? 62
+      : plane.aircraftRole === 'b2_spirit'
+      ? 185
+      : plane.aircraftRole === 'gunship'
+      ? 165
+      : plane.aircraftRole === 'fighter'
+      ? 155
+      : plane.aircraftRole === 'bomber'
+      ? 145
+      : 120;
 
     plane.pos.set(startX, alt, startZ);
     plane.yaw = headingYaw;
-    plane.pitch =
-      plane.aircraftRole === 'wright_flyer'
-        ? 0.0
-        : plane.aircraftRole === 'gunship'
-        ? -0.02
-        : -0.04;
+    plane.pitch = isHeliLaunch
+      ? 0.0
+      : plane.aircraftRole === 'wright_flyer'
+      ? 0.0
+      : plane.aircraftRole === 'gunship'
+      ? -0.02
+      : -0.04;
     plane.roll = plane.aircraftRole === 'gunship' ? 0.34 : 0;
     plane.orbitAssist = plane.aircraftRole === 'gunship';
     plane.turretYaw = headingYaw;
     plane.isShotDown = false;
     plane.isStalling = false;
     plane.stallSinkVel = 0;
-    plane.throttle = plane.aircraftRole === 'wright_flyer' ? 0.14 : 0.58;
-    plane.forwardSpeed =
-      plane.aircraftRole === 'wright_flyer'
-        ? 13.5
-        : plane.speed ||
-          (plane.aircraftRole === 'b2_spirit'
-            ? 125
-            : 62);
+    plane.heliHoverHold = false;
+    plane.throttle = isHeliLaunch ? 0.48 : plane.aircraftRole === 'wright_flyer' ? 0.14 : 0.58;
+    plane.forwardSpeed = isHeliLaunch
+      ? 8.0
+      : plane.aircraftRole === 'wright_flyer'
+      ? 13.5
+      : plane.speed ||
+        (plane.aircraftRole === 'b2_spirit'
+          ? 125
+          : 62);
+    if (isHeliLaunch) {
+      plane._heliVelX = -Math.sin(headingYaw) * 8.0;
+      plane._heliVelY = 0;
+      plane._heliVelZ = -Math.cos(headingYaw) * 8.0;
+    }
     plane.mesh.position.copy(plane.pos);
     plane.mesh.rotation.set(plane.pitch, plane.yaw, plane.roll, 'YXZ');
 
@@ -2098,31 +2134,53 @@ export class VehicleManager {
       plane.pos.set(startX, alt, startZ);
       plane.yaw = headingYaw;
       plane.pitch = isHeliRole
-        ? -0.08
+        ? 0.0
         : normRole === 'wright_flyer'
         ? 0.0
         : normRole === 'gunship'
         ? -0.02
         : -0.04;
       plane.roll = 0;
+      plane.isHelicopter = isHeliRole;
       plane.heliHoverHold = false;
       plane.gunshipManualFlight = normRole === 'gunship';
       plane.orbitAssist = false;
       plane.turretYaw = headingYaw;
-      plane.throttle = isHeliRole ? 0.55 : normRole === 'wright_flyer' ? 0.14 : 0.58;
+      plane.throttle = isHeliRole ? 0.48 : normRole === 'wright_flyer' ? 0.14 : 0.58;
       plane.forwardSpeed = isHeliRole
-        ? 26
+        ? 8.0
         : normRole === 'wright_flyer'
         ? 13.5
         : plane.speed || (normRole === 'b2_spirit' ? 125 : 62);
+      if (isHeliRole) {
+        plane._heliVelX = -Math.sin(headingYaw) * 8.0;
+        plane._heliVelY = 0;
+        plane._heliVelZ = -Math.cos(headingYaw) * 8.0;
+      }
       plane.mesh.position.copy(plane.pos);
       plane.mesh.rotation.set(plane.pitch, plane.yaw, plane.roll, 'YXZ');
       syncAircraftFlightFSM(plane, { onRunway: false });
     } else {
       const isRU = team === 'RU';
-      const apronZ = isRU ? 138 : -138;
+      const apronZ = isHeliRole
+        ? plane.spawnPos
+          ? plane.spawnPos.z
+          : normRole === 'heli_transport'
+          ? isRU
+            ? 44
+            : -44
+          : isRU
+          ? -44
+          : 44
+        : isRU
+        ? 138
+        : -138;
       const apronX = plane.spawnPos
         ? plane.spawnPos.x
+        : isHeliRole
+        ? isRU
+          ? 1504
+          : -1504
         : normRole === 'gunship'
         ? isRU
           ? 2876
@@ -2140,12 +2198,16 @@ export class VehicleManager {
         : -2736;
       const groundY = this.world ? this.world.getGroundHeightAt(apronX, apronZ) : 0;
       plane.pos.set(apronX, groundY, apronZ);
-      plane.yaw = plane.spawnYaw ?? (isRU ? Math.PI / 2 - 0.32 : -Math.PI / 2 - 0.32);
+      plane.yaw = plane.spawnYaw ?? (isHeliRole ? (isRU ? Math.PI / 2 : -Math.PI / 2) : isRU ? Math.PI / 2 - 0.32 : -Math.PI / 2 - 0.32);
       plane.pitch = 0;
       plane.roll = 0;
       plane.turretYaw = plane.yaw;
       plane.throttle = 0;
       plane.forwardSpeed = 0;
+      plane._heliVelX = 0;
+      plane._heliVelY = 0;
+      plane._heliVelZ = 0;
+      plane.heliHoverHold = false;
       plane.claimedByPlayer = true;
       plane.claimedByPlayerTimer = 45.0;
       plane.mesh.position.copy(plane.pos);
@@ -2234,8 +2296,8 @@ export class VehicleManager {
       accelRate: stats.accelRate,
       brakeRate: stats.brakeRate,
       turnRate: stats.turnRate,
-      weaponType: 'hmg',
-      rpm: 850,
+      weaponType: 'moto_pdw',
+      rpm: 750,
       patrolPoints: [dropPos.clone()]
     });
     veh.claimedByBot = null;
@@ -2709,6 +2771,9 @@ export class VehicleManager {
 
       if (aRole !== 'wright_flyer') {
         if (ballistics.isSmallArms) {
+          const isTargetHeli = Boolean(
+            vehicle.isHelicopter || aRole === 'heli_transport' || aRole === 'heli_attack'
+          );
           if (aRole === 'cas') {
             // Titanium armored bathtub: 0 hull damage from small arms, rare 1.5% external targeting-pod/HUD glitch
             if (ballistics.isLmgOrSniper && distToAttacker <= 260 && critRng < 0.015) {
@@ -2725,31 +2790,54 @@ export class VehicleManager {
             return false;
           }
 
-          // Fighters, B-2 Stealth Bombers & AC-130 Gunships vs. Infantry Small Arms:
-          if (!ballistics.isLmgOrSniper || distToAttacker > 220) {
-            if (distToAttacker <= 180 && critRng < 0.01) {
-              vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 3.5);
-              vehicle.lastSubsystemCrit = 'SENSORS';
-              vehicle.lastHitDesc = '📡 AVIONICS RADOME SCRATCHED BY SMALL ARMS (0 HULL DMG)';
-            } else {
-              vehicle.lastHitDesc = '🛡️ AIRFRAME SKIN DEFLECTED SMALL ARMS (0 DMG)';
+          if (isTargetHeli && ballistics.isRotaryMinigun) {
+            // Helicopter-vs-Helicopter 7.62×51mm M134 / PKT Rotary Minigun Dogfight:
+            // High-volume 1,500 RPM API stream penetrates aluminum tailbooms, turboshaft intakes, hydraulic lines & rotor links!
+            if (distToAttacker > 620) {
+              vehicle.lastArmorRicochet = true;
+              vehicle.lastHitDesc = '🛡️ OUT OF 7.62MM MINIGUN EFFECTIVE RANGE (>620M)';
+              return false;
             }
-            vehicle.lastArmorRicochet = true;
-            return false;
-          }
+            const rangeFalloff = distToAttacker <= 280 ? 1.0 : Math.max(0.45, 1 - (distToAttacker - 280) / 420);
+            const armorMultHeli = aRole === 'heli_attack' ? 0.78 : 1.0; // Attack helis have heavier cockpit/engine armor than utility transports
+            amount = Math.max(6, Math.round(amount * 0.72 * rangeFalloff * armorMultHeli));
+            if (critRng < 0.04) {
+              vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 3.2);
+              vehicle.lastSubsystemCrit = 'SENSORS';
+            }
+          } else {
+            // Fast Fighter Jets, B-2 Stealth Bombers, AC-130 Gunships & Ground Infantry Rifles vs. Aircraft:
+            if (!ballistics.isLmgOrSniper || distToAttacker > (isTargetHeli ? 260 : 220)) {
+              if (distToAttacker <= 180 && critRng < 0.01) {
+                vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 3.5);
+                vehicle.lastSubsystemCrit = 'SENSORS';
+                vehicle.lastHitDesc = '📡 AVIONICS RADOME SCRATCHED BY SMALL ARMS (0 HULL DMG)';
+              } else {
+                vehicle.lastHitDesc = '🛡️ AIRFRAME SKIN DEFLECTED SMALL ARMS (0 DMG)';
+              }
+              vehicle.lastArmorRicochet = true;
+              return false;
+            }
 
-          // Close-range (<220m) 7.62mm LMG / Sniper harassment: tiny 1-2 HP scratch, NEVER reduces jet below 25% HP!
-          if (critRng < 0.025) {
-            vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 4.5);
-            vehicle.lastSubsystemCrit = 'SENSORS';
+            // Close-range (<220–260m) Infantry 7.62mm LMG / Sniper harassment:
+            // Helicopters can be chipped down slowly by heavy squad LMG/Sniper focus fire (3–5 DMG),
+            // whereas fast fixed-wing jets cannot be reduced below 25% HP by infantry rifles!
+            if (critRng < 0.025) {
+              vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 4.5);
+              vehicle.lastSubsystemCrit = 'SENSORS';
+            }
+            if (isTargetHeli) {
+              amount = Math.min(4, Math.max(2, Math.round(amount * 0.14)));
+            } else {
+              const minHpFloor = Math.ceil((vehicle.maxHp || 600) * 0.25);
+              if (vehicle.hp <= minHpFloor) {
+                vehicle.lastArmorRicochet = true;
+                vehicle.lastHitDesc = '🛡️ SMALL ARMS CANNOT DOWN JET AIRFRAME — USE .50 HMG / AA / STINGER!';
+                return false;
+              }
+              amount = Math.min(2, Math.max(1, vehicle.hp - minHpFloor));
+            }
           }
-          const minHpFloor = Math.ceil((vehicle.maxHp || 600) * 0.25);
-          if (vehicle.hp <= minHpFloor) {
-            vehicle.lastArmorRicochet = true;
-            vehicle.lastHitDesc = '🛡️ SMALL ARMS CANNOT DOWN JET AIRFRAME — USE .50 HMG / AA / STINGER!';
-            return false;
-          }
-          amount = Math.min(2, Math.max(1, vehicle.hp - minHpFloor));
         } else if (ballistics.isHeavyMg50) {
           if (distToAttacker > 680) {
             vehicle.lastArmorRicochet = true;
@@ -3063,6 +3151,47 @@ export class VehicleManager {
           armorNote = '30MM GAU-8 SIDE SKIRT PENETRATION (TRACKS SHREDDED)';
         }
         vehicle.lastHitDesc = armorNote;
+      } else if (/M242|BUSHMASTER|2A72|30MM AUTOCANNON/i.test(String(weaponName || ''))) {
+        // Real-World LAV-25 (25mm M242 M791/M919 APDS-T) & BTR-82A (30mm 2A72 3UBR8 APDS-T) vs 65-ton MBT:
+        // - Front Glacis (~650–800mm RHAe Chobham/Relikt): 0 hull HP pen (ricochet + 22% chance to shatter Tank Optics!).
+        // - Side Skirts (~75mm): Light flanking chip damage + shreds Tank Tracks (Mobility Kill!).
+        // - Rear Engine Louver Deck (~30–40mm): True armor-piercing penetration + Engine Smoking/Critical!
+        if (hitZone === 'FRONT') {
+          vehicle.lastArmorRicochet = true;
+          if (critRng < 0.22 && vehicle.subsystems) {
+            vehicle.subsystems.optics = 'DAMAGED';
+            vehicle.opticsGlitchTimer = 10.0;
+            vehicle.lastSubsystemCrit = 'OPTICS';
+            armorNote =
+              '🔭 25MM/30MM SHATTERED MBT FRONT OPTICS (0 HULL DMG — FLANK REAR ENGINE DECK OR FIRE [3] TOW ATGM!)';
+          } else {
+            armorNote =
+              '🛡️ RICOCHET: 25MM/30MM CANNOT PENETRATE MBT FRONT GLACIS — FLANK REAR OR FIRE [3] TOW-2B / KORNET ATGM!';
+          }
+          vehicle.lastHitDesc = armorNote;
+          vehicle.lastBdaHitmarker = armorNote;
+          if (vehicle.driver && typeof vehicle.driver.recordIncomingFire === 'function') {
+            vehicle.driver.recordIncomingFire(attackerName, armorNote, attackerPos);
+          }
+          return false;
+        } else if (hitZone === 'REAR' || hitZone === 'TOP ROOF') {
+          amount = Math.max(24, Math.round(amount * 0.88));
+          if (vehicle.subsystems) {
+            vehicle.subsystems.engine =
+              vehicle.hp - amount < vehicle.maxHp * 0.45 ? 'CRITICAL' : 'SMOKING';
+          }
+          armorNote = '🔥 25MM/30MM APDS-T PENETRATED MBT REAR ENGINE LOUVERS (ENGINE HIT!)';
+          vehicle.lastHitDesc = armorNote;
+          vehicle.lastBdaHitmarker = armorNote;
+        } else {
+          amount = Math.max(10, Math.round(amount * 0.34));
+          if (vehicle.subsystems) {
+            vehicle.subsystems.tracks = 'DAMAGED';
+          }
+          armorNote = '⚙️ 25MM/30MM APDS-T FLANKED MBT SIDE SKIRT (TRACKS DAMAGED!)';
+          vehicle.lastHitDesc = armorNote;
+          vehicle.lastBdaHitmarker = armorNote;
+        }
       }
     }
 
@@ -3410,7 +3539,7 @@ export class VehicleManager {
               '🚨 MAYDAY! AIRFRAME SHOT DOWN — PRESS [E] TO EJECT SEAT BEFORE GROUND CRASH!'
             );
           }
-        } else if (window.game?.botManager?.bots && vehicle.pos.y > groundH + 16) {
+        } else if (typeof window !== 'undefined' && window.game?.botManager?.bots && vehicle.pos.y > groundH + 16) {
           // Eject an AI pilot with parachute while the burning plane spirals down!
           const pilotBot = window.game.botManager.bots.find(
             (b) => b.team === vehicle.team && !b.drivingVehicle && (b.dead || !b.downed)
@@ -3621,7 +3750,12 @@ export class VehicleManager {
           npc.respawnTimer = 6.5;
           npc.mesh.visible = false;
         }
-      } else if (vehicle.isAircraft && !vehicle.driver && window.game?.botManager?.bots) {
+      } else if (
+        vehicle.isAircraft &&
+        !vehicle.driver &&
+        typeof window !== 'undefined' &&
+        window.game?.botManager?.bots
+      ) {
         // If an autonomous AI aircraft was shot down in mid-air, eject a surviving AI Pilot with Parachute!
         const gY = this.world.getGroundHeightAt(vehicle.pos.x, vehicle.pos.z);
         if (vehicle.pos.y > gY + 12) {
@@ -3686,10 +3820,48 @@ export class VehicleManager {
     return false;
   }
 
-  update(dt, player = null, botManager = null, onDeployMenu = false) {
+  update(dt, player = null, botManager = null, onDeployMenu = false, cameraArg = null) {
     if (player) this.lastPlayer = player;
-    this._suppressPreDeployKills = Boolean(onDeployMenu && (!player || (player.dead && (player.deaths || 0) === 0)));
+    const isDeployFlag = Boolean(onDeployMenu && !onDeployMenu.isCamera);
+    const activeCam =
+      (cameraArg && cameraArg.isCamera ? cameraArg : null) ||
+      (onDeployMenu && onDeployMenu.isCamera ? onDeployMenu : null) ||
+      player?.camera ||
+      null;
+    this._suppressPreDeployKills = Boolean(
+      isDeployFlag && (!player || (player.dead && (player.deaths || 0) === 0))
+    );
     this.refreshTeamVehicleLists();
+
+    // Precompute 3D Camera Frustum & Fog-Safe Distance LOD once per frame to cull 600+ off-screen / 2.8km HQ apron draw calls!
+    let hasVehFrustum = false;
+    let camPosX = player ? player.pos.x : 0;
+    let camPosY = player ? player.pos.y + 1.6 : 0;
+    let camPosZ = player ? player.pos.z : 0;
+    let opticZoomScale = 1.0;
+    if (activeCam?.projectionMatrix && activeCam?.matrixWorld) {
+      if (!this._vehProjScreenMat) this._vehProjScreenMat = new THREE.Matrix4();
+      if (!this._vehFrustum) this._vehFrustum = new THREE.Frustum();
+      if (!this._vehCullSphere) this._vehCullSphere = new THREE.Sphere(new THREE.Vector3(), 22);
+      if (activeCam.matrixWorldInverse) {
+        activeCam.matrixWorldInverse.copy(activeCam.matrixWorld).invert();
+        this._vehProjScreenMat.multiplyMatrices(
+          activeCam.projectionMatrix,
+          activeCam.matrixWorldInverse
+        );
+        this._vehFrustum.setFromProjectionMatrix(this._vehProjScreenMat);
+        hasVehFrustum = true;
+      }
+      const ce = activeCam.matrixWorld.elements;
+      camPosX = ce[12];
+      camPosY = ce[13];
+      camPosZ = ce[14];
+      opticZoomScale = THREE.MathUtils.clamp(75 / Math.max(10, activeCam.fov || 75), 1.0, 6.5);
+    }
+    const playerInAir = Boolean(player?.activeVehicle && player.activeVehicle.isAircraft);
+    const maxGroundVehVisDist = Math.min(2600, (playerInAir ? 1350 : 720) * opticZoomScale);
+    const maxGroundVehVisDistSq = maxGroundVehVisDist * maxGroundVehVisDist;
+    const maxAirborneVisDistSq = 3200 * 3200;
 
     // Update persistent 20s Burning 3D Vehicle Wrecks (fire flicker + smoke column + clean expiry)
     if (Array.isArray(this.activeWrecks) && this.activeWrecks.length > 0) {
@@ -3721,7 +3893,7 @@ export class VehicleManager {
 
     for (const v of this.vehicles) {
       if (v.dead) {
-        if (onDeployMenu) continue;
+        if (isDeployFlag) continue;
         // B-2 Spirit Stealth Bomber stays locked in hangar until its faction reaches 25 kills!
         if (v.b2LockedUntilKills) {
           if (this.isB2UnlockedForTeam(v.team)) {
@@ -4963,7 +5135,7 @@ export class VehicleManager {
         }
 
         // Autonomous Siege Crew Target Acquisition & Boulder Launching towards the Enemy!
-        if (!v.driver && v.setupState === 'READY_FIRING' && !onDeployMenu) {
+        if (!v.driver && v.setupState === 'READY_FIRING' && !isDeployFlag) {
           v.aiFireTimer = (v.aiFireTimer || 0) - dt;
           v._trebScanCooldown = Math.max(0, (v._trebScanCooldown || 0) - dt);
 
@@ -5329,6 +5501,45 @@ export class VehicleManager {
       }
     }
 
+    // Fast O(36) 3D Frustum & Fog-Horizon Visibility Culling across all multi-part vehicles & parked HQ aircraft!
+    if (hasVehFrustum || player) {
+      for (let vi = 0; vi < this.vehicles.length; vi++) {
+        const v = this.vehicles[vi];
+        if (!v || !v.mesh || v.dead || v.b2LockedUntilKills) continue;
+        if (v === player?.activeVehicle || v.driver === player) {
+          if (!v.mesh.visible) v.mesh.visible = true;
+          continue;
+        }
+        const dxC = v.pos.x - camPosX;
+        const dyC = v.pos.y - camPosY;
+        const dzC = v.pos.z - camPosZ;
+        const dSq = dxC * dxC + dyC * dyC + dzC * dzC;
+        const isAirborneActive = Boolean(
+          v.isAircraft && (v.driver || v.aiPilotActive || v.pos.y > 14.0)
+        );
+        const isParkedSmallMoto = Boolean(
+          !v.driver &&
+            !v.npcDriver &&
+            (v.isWarehouseBike || v.type === 'bike' || v.type === 'atv')
+        );
+        const parkMotoDist = Math.min(1200, (playerInAir ? 360 : 165) * opticZoomScale);
+        const maxSq = isAirborneActive
+          ? maxAirborneVisDistSq
+          : isParkedSmallMoto
+          ? parkMotoDist * parkMotoDist
+          : maxGroundVehVisDistSq;
+        let showVeh = dSq <= maxSq;
+        if (showVeh && hasVehFrustum && dSq > 52 * 52) {
+          this._vehCullSphere.center.set(v.pos.x, v.pos.y + 2.2, v.pos.z);
+          this._vehCullSphere.radius = v.isAircraft ? 24.0 : 12.5;
+          showVeh = this._vehFrustum.intersectsSphere(this._vehCullSphere);
+        }
+        if (v.mesh.visible !== showVeh) {
+          v.mesh.visible = showVeh;
+        }
+      }
+    }
+
     // Update 3D spatial aircraft flyby engine audio & continuous ground/motorcycle engine audio
     if (player && (!player.activeVehicle || !player.activeVehicle.isAircraft)) {
       sound.updateAircraftEngineAudio?.(
@@ -5339,7 +5550,7 @@ export class VehicleManager {
         false
       );
     }
-    if (onDeployMenu || !player || player.dead) {
+    if (isDeployFlag || !player || player.dead) {
       sound.updateGroundVehicleEngineAudio?.(null, null, null, 0);
     } else {
       sound.updateGroundVehicleEngineAudio?.(
@@ -5820,11 +6031,17 @@ export class VehicleManager {
       const nextWp = v.patrolPoints[(v.patrolIndex + 1) % wpCount];
 
       // Air-to-Air Dogfight Priority: Fighter / CAS AI tracks nearby enemy aircraft in the sky
-      // (Northrop B-2A Spirit has 88% radar/IR stealth reduction, and planes < 28m AGL or < 4.0s post-takeoff are masked by radar ground clutter!)
+      // (Pure bombers/gunships like Northrop B-2A Spirit & AC-130 have ZERO forward guns/A2A missiles and NEVER dogfight!)
       let dogfightTarget = null;
       let bestAirDist = 680;
+      const canAiDogfight =
+        v.aircraftRole !== 'b2_spirit' &&
+        v.aircraftRole !== 'gunship' &&
+        v.aircraftRole !== 'heli_transport';
       const enemyAirTeam = v.team === 'US' ? 'RU' : 'US';
-      const enemyPlanes = this.activeAircraftByTeam?.[enemyAirTeam] || this.vehicles;
+      const enemyPlanes = canAiDogfight
+        ? this.activeAircraftByTeam?.[enemyAirTeam] || this.vehicles
+        : [];
       for (let ai = 0; ai < enemyPlanes.length; ai++) {
         const other = enemyPlanes[ai];
         if (!other.isAircraft || other.dead || other.team === v.team) continue;
@@ -6194,18 +6411,38 @@ export class VehicleManager {
         life: 3.5,
         owner: ownerObj
       });
-    } else if (v.weaponType === 'autocannon' || v.weaponType === 'hmg') {
-      if (distToPlayer < 170) sound.playGunshot(v.weaponType, distToPlayer, pan);
+    } else if (v.weaponType === 'autocannon') {
+      if (distToPlayer < 170) sound.playGunshot('autocannon', distToPlayer, pan);
       const shellMesh = new THREE.Mesh(SHARED_AI_AUTO_SHELL_GEO, SHARED_AI_AUTO_SHELL_MAT);
       shellMesh.position.copy(muzzleOrigin).addScaledVector(dir, 2.4);
       this.scene.add(shellMesh);
-
+      const aiAcName =
+        v.team === 'RU' ? '30MM 2A72 APDS-T AUTOCANNON' : '25MM M242 BUSHMASTER APDS-T';
       this.world.projectiles.push({
         type: 'autocannon',
+        weaponName: aiAcName,
+        weaponLabel: aiAcName,
         mesh: shellMesh,
         vel: dir.clone().multiplyScalar(340),
         gravity: 2.1,
         life: 3.0,
+        owner: ownerObj
+      });
+    } else if (v.weaponType === 'hmg') {
+      if (distToPlayer < 170) sound.playGunshot('hmg', distToPlayer, pan);
+      const shellMesh = new THREE.Mesh(SHARED_AI_AUTO_SHELL_GEO, SHARED_AI_AUTO_SHELL_MAT);
+      shellMesh.position.copy(muzzleOrigin).addScaledVector(dir, 2.2);
+      this.scene.add(shellMesh);
+      this.world.projectiles.push({
+        type: 'autocannon',
+        weaponName: '.50 CAL HMG',
+        weaponLabel: '.50 CAL HMG',
+        blastRadius: 1.8,
+        blastDamage: 68,
+        mesh: shellMesh,
+        vel: dir.clone().multiplyScalar(420),
+        gravity: 1.8,
+        life: 2.4,
         owner: ownerObj
       });
     }

@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=127';
-import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=127';
-import { events } from '../events.js?v=127';
+import { SQUAD_DEFS } from '../bots.js?v=132';
+import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=132';
+import { events } from '../events.js?v=132';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=127';
+} from '../core/StateMachines.js?v=132';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=127';
+} from '../utils/KeyboardShortcuts.js?v=132';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -782,7 +782,9 @@ export const DeployScreen = {
         const globalShortcut = resolveGlobalCommandShortcut(e, {
           isPointerLocked: Boolean(document.pointerLockElement),
           inGunship: Boolean(this.player?.activeVehicle?.aircraftRole === 'gunship'),
-          inVehicle: Boolean(this.player?.activeVehicle && !this.player.dead)
+          inAircraft: Boolean(this.player?.activeVehicle?.isAircraft && !this.player.dead),
+          inVehicle: Boolean(this.player?.activeVehicle && !this.player.dead),
+          commandRank: this.player?.commandRank
         });
         if (globalShortcut) {
           e.preventDefault();

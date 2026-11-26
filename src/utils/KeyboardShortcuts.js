@@ -136,9 +136,19 @@ export function resolveGlobalCommandShortcut(e, ctx = {}) {
   const isMac = typeof ctx.isMac === 'boolean' ? ctx.isMac : isMacPlatform();
   const isPointerLocked = Boolean(ctx.isPointerLocked);
   const inGunship = Boolean(ctx.inGunship);
-  const inVehicle = Boolean(ctx.inVehicle);
+  const inAircraft = Boolean(ctx.inAircraft);
+  const inVehicle = Boolean(ctx.inVehicle || inAircraft || inGunship);
+  const isSquadMember = ctx.commandRank === 'MEMBER';
   const cmdMod = isCommandOrderModifier(e, isMac, isPointerLocked);
   const anyMod = hasAnyModifier(e);
+  // De-conflict Pilot `Alt` Free-Look + WASD/F/R/G/C Flight Controls:
+  // While piloting any aircraft/helicopter (`inAircraft: true`), holding `Alt` is dedicated to 360° Pilot Free-Look —
+  // `Alt + letter/digit` NEVER accidentally triggers `Alt+A` (AI Off) or `Alt+D` (Hold) mid-dogfight!
+  // (Pilots who are Commander/SL can still issue orders via Numpad 0–8, `[K]` Tactical Map, or Mac `⌃`.)
+  const isAltFreeLookConflict = Boolean(inAircraft && e.altKey && !e.ctrlKey && !e.metaKey);
+  const allowCmdModOrder = Boolean(cmdMod && !isSquadMember && !isAltFreeLookConflict);
+  const allowSpacingMod = Boolean(cmdMod && !isSquadMember);
+  const allowNumpadOrder = !isSquadMember;
 
   // Never hijack browser/OS Command (`⌘`) or Windows/Linux `Ctrl+R/W/T/L` shortcuts
   if (e.metaKey && !cmdMod) return null;
@@ -174,50 +184,52 @@ export function resolveGlobalCommandShortcut(e, ctx = {}) {
     return { type: 'CYCLE_ATMOS' };
   }
 
-  // 2. Commander & Squad Strategic Orders (`Alt+...` on PC, `⌥+...` or `⌃+...` on Mac, or Numpad)
-  if (cmdMod && e.code === 'KeyG') {
+  // 2. Commander & Squad Strategic Orders (`Alt+...` on PC, `⌥+...` or `⌃+...` on Mac, or Numpad — Commander/SL only, disabled on `Alt` while flying!)
+  if (allowCmdModOrder && e.code === 'KeyG') {
     return { type: 'STRATEGIC_ORDER', action: 'GARRISON' };
   }
-  if (cmdMod && e.code === 'KeyC') {
+  if (allowCmdModOrder && e.code === 'KeyC') {
     return { type: 'STRATEGIC_ORDER', action: 'CHARGE' };
   }
-  if (cmdMod && e.code === 'KeyR') {
+  if (allowCmdModOrder && e.code === 'KeyR') {
     return { type: 'STRATEGIC_ORDER', action: 'RETREAT' };
   }
-  if ((cmdMod && e.code === 'KeyF') || (!anyMod && !e.shiftKey && e.code === 'Numpad6')) {
+  if ((allowCmdModOrder && e.code === 'KeyF') || (allowNumpadOrder && !anyMod && !e.shiftKey && e.code === 'Numpad6')) {
     return { type: 'STRATEGIC_ORDER', action: 'FOLLOW' };
   }
   if (
-    (cmdMod && (e.code === 'KeyH' || e.code === 'KeyD')) ||
-    (!anyMod && !e.shiftKey && e.code === 'Numpad7')
+    (allowCmdModOrder && (e.code === 'KeyH' || e.code === 'KeyD')) ||
+    (allowNumpadOrder && !anyMod && !e.shiftKey && e.code === 'Numpad7')
   ) {
     return { type: 'STRATEGIC_ORDER', action: 'HOLD' };
   }
-  if ((cmdMod && e.code === 'KeyA') || (!anyMod && !e.shiftKey && e.code === 'Numpad8')) {
+  if ((allowCmdModOrder && e.code === 'KeyA') || (allowNumpadOrder && !anyMod && !e.shiftKey && e.code === 'Numpad8')) {
     return { type: 'STRATEGIC_ORDER', action: 'AUTO' };
   }
   if (
-    (cmdMod && ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].includes(e.code)) ||
-    (!anyMod && !e.shiftKey && ['Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Numpad5'].includes(e.code))
+    (allowCmdModOrder && ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].includes(e.code)) ||
+    (allowNumpadOrder && !anyMod && !e.shiftKey && ['Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Numpad5'].includes(e.code))
   ) {
     return { type: 'STRATEGIC_ORDER', action: 'OBJECTIVE', flagId: FLAG_BY_DIGIT[e.code] };
   }
-  if ((cmdMod && e.code === 'Digit0') || (!anyMod && !e.shiftKey && e.code === 'Numpad0')) {
+  if ((allowCmdModOrder && e.code === 'Digit0') || (allowNumpadOrder && !anyMod && !e.shiftKey && e.code === 'Numpad0')) {
     return { type: 'TOGGLE_SCOPE' };
   }
 
-  // 3. Formation Spacing (`Num -` / `Num +`, `Alt/⌥ + -/=`, or bare `-/=` when NOT flying AC-130)
+  // 3. Formation Spacing (`Num -` / `Num +`, `Alt/⌥ + -/=`, or bare `-/=` when NOT flying Aircraft/Helicopter/Gunship)
   if (
-    (!anyMod && e.code === 'NumpadSubtract') ||
-    (cmdMod && e.code === 'Minus') ||
-    (!anyMod && !e.shiftKey && !inGunship && e.code === 'Minus')
+    !isSquadMember &&
+    ((!anyMod && e.code === 'NumpadSubtract') ||
+      (allowSpacingMod && e.code === 'Minus') ||
+      (!anyMod && !e.shiftKey && !inGunship && !inAircraft && e.code === 'Minus'))
   ) {
     return { type: 'SPACING', spacingMode: 'STAY_CLOSE' };
   }
   if (
-    (!anyMod && e.code === 'NumpadAdd') ||
-    (cmdMod && e.code === 'Equal') ||
-    (!anyMod && !e.shiftKey && !inGunship && e.code === 'Equal')
+    !isSquadMember &&
+    ((!anyMod && e.code === 'NumpadAdd') ||
+      (allowSpacingMod && e.code === 'Equal') ||
+      (!anyMod && !e.shiftKey && !inGunship && !inAircraft && e.code === 'Equal'))
   ) {
     return { type: 'SPACING', spacingMode: 'FAN_OUT' };
   }

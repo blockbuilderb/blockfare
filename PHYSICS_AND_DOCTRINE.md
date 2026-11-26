@@ -149,3 +149,99 @@ For `250 vs 250` (`500` total soldiers), each faction fields **12 default specia
 | **Recon / Sniper (`RECON`)** | `6` | `ECHO, KILO` | `Recon/Sniper(3), Medic(1), Engineer(1), Assault(2)` — ideal for Helicopter rooftop overwatch! |
 | **Heavy Armor (`ARMOR`)** | `4` | `BRAVO, IRON` | `Armor Crewman(4), Engineer(2)` |
 | **Combat Air Wing (`AIR`)** | `4` | `FALCON, VIPER` | `Combat Pilot(4), Engineer(1)` — Jets, Gunships & Helicopters |
+
+
+---
+
+## 10. Radar Gimbal Cones, Strategic Stealth Bombers & Heavy MG / IFV Caliber Ballistics (`v128`)
+
+### 10.1 Air-to-Air Radar Gimbal Limits (`AN/APG-63/82` vs. Off-Boresight `JHMCS + AIM-9X`)
+- **Physical Nose Radar Cone (`AIM-120D AMRAAM` / `R-77M`)**: Active-radar BVR/WVR missiles require initial target illumination/datalink from the fighter's nose-mounted fire-control radar (`AN/APG-63(V)3` / `AN/APG-82(V)1` AESA on F-15C/E/EX, `AN/APG-68/83` on F-16C/V). Fixed AESA arrays and mechanical gimbals are physically bounded to **$\pm 60^\circ$ off the aircraft nose** ($\cos 58^\circ \approx 0.53$). Looking $90^\circ$ sideways off the wing via Free-Look (`Alt`) **cannot** radar-lock an `AIM-120D`.
+- **High Off-Boresight (`HOBS`) IR Seekers (`JHMCS + AIM-9X Block II` / `R-73`)**: Only short-range imaging-infrared missiles slaved to a Joint Helmet-Mounted Cueing System (`JHMCS`) can lock up to $\pm 80^\circ\text{–}90^\circ$ off-boresight (modeled in *DCS World* and *War Thunder* top-tier; *Ace Combat* and *Battlefield* restrict standard locks to the forward HUD cone).
+- **In-Game Implementation**: Fighter radar lock requires **both** target inside pilot sight cone ($\hat{d}_{\text{cam}} \cdot \hat{u}_{\text{tgt}} > 0.78$) **and** inside the aircraft's physical nose radar gimbal ($\hat{d}_{\text{nose}} \cdot \hat{u}_{\text{tgt}} \ge 0.53$, $\pm 58^\circ$). Looking at a bandit outside $\pm 58^\circ$ triggers `RADAR GIMBAL LIMIT (±60° NOSE)`.
+
+### 10.2 Northrop `B-2A Spirit` Pure Strategic Stealth Penetration
+- **Real-World Airframe**: Zero internal/external guns, zero air-to-air missiles, fly-by-wire structural load limit **$+2.0\,G$** (`19.5 m/s²`), subsonic high-altitude stealth (`RCS` $\approx 0.0001\text{ m}^2$).
+- **Ordnance Bays**: Two internal Common Strategic Rotary Launchers (`CSRL`) carrying `80× 500 lb Mk-82 / GBU-38`, `2× 30,000 lb GBU-57A/B MOP`, or `16× 2,000 lb GBU-31(V)3 JDAM` (`4×` per tactical game sortie in Slot `[3]`). Never engages in air-to-air dogfighting.
+
+### 10.3 Machine-Gun Muzzle Energy & Sustainment (`.50 BMG` vs. `9×19mm` Rider PDW)
+$$E_k = \frac{1}{2} m v_0^2$$
+
+| Platform & Caliber | Projectile Mass $m$ | Muzzle Velocity $v_0$ | Muzzle Energy $E_k$ | Cyclic Rate | Stowed Ready Ammo | Armor Penetration |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **M1151 Humvee — `12.7×99mm (.50 BMG)` M2HB** | `42.0–45.0 g` | `890 m/s` | **~17,800 J** | `550 RPM` | `1,200 rds` (`6×200` cans, `131s` fire) | Shreds trucks/cars/helis & flanking APCs (`26–28 mm` RHA) |
+| **Support Infantry — `5.56×45mm` M249 / `7.62×54mmR` PKP** | `4.0 / 9.6 g` | `915 / 825 m/s` | **~1,675 / 3,265 J** | `700–800 RPM` | `100–200 rd` belt boxes | Infantry body armor & soft cover; `0` vs armored hulls |
+| **Recon Motorcycle / ATV — `9×19mm` Rider PDW** | `7.45–8.0 g` | `390 m/s` | **~570–610 J** | `750 RPM` | `240 / 360 rds` (`8–12×30` mags) | Close-range unarmored infantry (`<= 115m`); **`0` vs all armor** |
+
+### 10.4 `LAV-25` (`25mm M242 Bushmaster`) & `BTR-82A` (`30mm 2A72`) vs. Main Battle Tanks
+- **Role**: `LAV-25` is an 8×8 Light Armored Reconnaissance / Infantry Carrier (`3` crew + `6` scouts, `13.2 t`, light `7.62mm–14.5mm` rated hull).
+- **Autocannon Penetration (`M791 APDS-T` Tungsten / `M919 APFSDS-T` DU)**: Penetrates **`65–85 mm` RHAe** at combat range.
+  - **MBT Front Composite Glacis (`650–800 mm` RHAe)**: **`0` hull HP penetration** (ricochets off Chobham/Relikt, with a `22%` chance per burst impact to shatter external **Tank Optics / CITV**, matching USMC/Army Desert Storm doctrine — use Slot `[3]` `BGM-71 TOW-2B` / `9M133 Kornet` ATGM frontally!).
+  - **MBT Side Skirts (`~75 mm`)**: Light flanking chip damage + **Track Mobility Kill**.
+  - **MBT Rear Engine Louvers (`30–40 mm` grilles)**: Full armor-piercing engine-deck penetration (`24+ DMG/hit` + **Engine Smoking/Critical**).
+
+
+---
+
+## 11. Dual-Mode Helicopter Controls, Newtonian AFCS Rotor Inertia & `7.62×51mm M134` Doctrine (`v130`)
+
+### 11.1 Unified Newtonian Rotorcraft Physics & Dual-Mode Control (`[G]` Toggle)
+Both helicopter modes run on the **exact same `9-ton` Newtonian 3D rotorcraft physics model** — helicopters have **zero mid-air car brakes or velocity `lerp` shortcuts**. Horizontal acceleration and braking arise strictly from tilting the main-rotor thrust vector $\vec{T}$ against airframe inertia plus quadratic aerodynamic drag:
+
+$$a_{\text{fwd}} = -\frac{T}{m}\sin\theta\cos\phi - \left(c_{\text{lin}} + c_{\text{quad}}\|\vec{v}_{xz}\|\right)v_{\text{fwd}}, \qquad a_{\text{right}} = -\frac{T}{m}\sin\phi - \left(c_{\text{lin}} + c_{\text{quad}}\|\vec{v}_{xz}\|\right)v_{\text{right}}$$
+
+$$a_y = \frac{T}{m}\cos\theta\cos\phi - g + a_{y,\text{flare}} - c_{y}v_y, \qquad \left(\frac{T}{m}\right)_{\max} \approx 16.4\text{ m/s}^2$$
+
+1. **Easy / Sikorsky DAFCS Fly-By-Wire Mode (`[G]` ON — Default)**:
+   - **Separated Lift & Translation Inputs + 100% Decoupled Gun Aiming**:
+     - **Vertical Collective**: `[Space]` / `[Q]` / `[↑]` = **Climb UP**; `[Left Ctrl]` / `[Z]` / `[↓]` = **Cushioned Descent / Land**; releasing holds barometric altitude.
+     - **Horizontal AFCS Velocity Command (`[W / S / A / D]`)**: Translates pilot desires into **physically bounded cyclic angles** (`cmdPitch`, `cmdRoll`), slewed through rotational hub inertia ($\dot{\theta}_{\max} = 1.05\text{ rad/s}$, $\ddot{\theta}_{\max} = 3.3\text{ rad/s}^2$). Moving the mouse aims weapons freely without tilting cyclic.
+   - **Real Momentum, Coasting & Nose-Up Flare Braking**:
+     - **Gradual Acceleration**: Pressing `[W]` pitches the nose down (`-21°` cruise / `-26°` `[Shift]` military power), accelerating at `~3.8–5.4 m/s²` (`0–100 km/h` in `~5.5–6.5 s`).
+     - **Hands-Off Aerodynamic Glide**: Releasing `WASD` at cruise speed commands a gentle passenger-safe `~9°` soft flare (`~1.5 m/s²` + air drag), gliding **`~250 m` over `~11 s`** from `160 km/h` instead of stopping like a car.
+     - **Active Combat Flare (`[S]` or `[R]`)**: Pulling `[S]` (or toggling `[R]` Hover-Hold) rears the nose up to **`+24°`**, generating `~5–8 m/s²` peak rotor + drag deceleration with realistic translational flare lift ballooning (`+0.5–1.5 m`) — still requiring `~6–7 s` and `~145 m` to bleed `160 km/h` to a hover before rooftop touchdown.
+2. **Hard / Manual Cyclic Simulator Mode (`[G]` OFF)**:
+   - Disables the AFCS flight computer while keeping the identical `9-ton` Newtonian rotor equations: `[W / S]` drives raw main-rotor collective thrust, Mouse Pitch & Roll directly tilt the cyclic swashplate up to `±32°–37°` (trading vertical lift $\cos\theta\cos\phi$ for speed), and `[A / D]` operates anti-torque tail-rotor pedals with hard-landing (`< -14.5 m/s`) and high-rise impact crash physics active.
+
+### 11.2 `UH-60M` `7.62×51mm NATO M134 Minigun` vs. Tanks & Helicopters
+- **vs. Main Battle Tanks (`M1A2` / `T-90M`) & IFVs (`LAV-25` / `BTR-82A`)**: **`0` hull penetration**. `7.62×51mm NATO` (`~3,300 J` solid/API ball, zero explosive filler) bounces harmlessly off `600–800 mm` composite/RHA armor (`Space` is also decoupled from unguided rocket pods in helicopters so climbing never launches `Hydra-70` rockets!).
+- **vs. Enemy Helicopters (`UH-60M`, `Mi-8`, `AH-64E`, `Ka-52`)**: High-volume `1,500 RPM` `7.62mm` API bursts penetrate unarmored aluminum tailbooms, turboshaft intakes, hydraulic lines, and rotor pitch links up to `620 m` (with `22%` heavier armor resistance on `AH-64E` / `Ka-52` attack helicopters), enabling authentic helicopter-vs-helicopter gun duels while keeping `AH-64E`'s `30mm M230 HEDP` dominant in head-on gunship fights.
+
+---
+
+## 12. Combined-Arms Architectural & World Scale Standard (`v131`)
+
+All world geometry uses exact metric proportions (`1.0 unit = 1.0 m`, `VOXEL_SIZE = 1.25 m`) calibrated simultaneously against infantry, armored vehicles, helicopters, and fixed-wing aircraft:
+
+| World Entity / Structure | Footprint (`W × L`) | Height | Tactical & Scale Calibration |
+| :--- | :---: | :---: | :--- |
+| **Infantry Soldier** | `0.8 m × 0.8 m` (`1.85 m` prone) | **`1.80 m`** (`1.65 m` eye) | Base human scale (`1.44` voxels tall). |
+| **Ground Vehicles (`Humvee` / `FMTV` / `MBT`)** | `2.2–3.7 m × 5.3–9.8 m` | **`2.4 – 3.2 m`** | Downtown avenues maintained at **`17.5 – 41.25 m` wide** for multi-lane armor maneuver. |
+| **Helicopters (`UH-60M` / `AH-64E`)** | **`16.4 m` rotor × `19.7 m` long** | **`5.1 m`** | Requires **`>= 22.5 m × 20.0 m`** rooftops to land cleanly without rotor overhang clipping. |
+| **Fixed-Wing Aircraft (`F-15EX` / `B-2A`)** | `13.0–52.4 m × 19.4–21.0 m` | **`5.2 – 5.6 m`** | Raycast & obstacle ceilings extended to **`125 – 130 m`** above valley floor. |
+| **Town & Outpost Buildings (`Obj A, B, D, E`)** | `10.0–13.75 m × 8.75 m` (`8–11 × 7` vox) | **`10 – 20 m`** (`2–4` floors) | Low/mid-rise apartments and industrial warehouses. |
+| **Downtown FOB C High-Rise Skyscrapers (`12×`)** | **`22.5–27.5 m × 20.0–25.0 m`** (`18–22 × 16–20` vox) | **`50 – 80 m`** (`10 – 16` floors) | **`450 – 687.5 m²` rooftops**: fits `4` independent `5 m × 5 m` fortified corner sniper bastions (`20–24 m` apart) **plus** a central `11.25 m × 11.25 m` inlaid `"H"` helipad and an interior Express Service Ladder (`1F` -> Roof). |
+| **400 kV Steel Lattice Power Towers (`10×`)** | **`12.4 m × 12.4 m` straddle base** (`22 m` cross-arms) | **`44.5 m`** (`20 m` & `32.5 m` decks) | Open `7.8 m` drive-under portal for tanks/cars, catenary transmission cables, caged climbable steel ladder, and dual `7.6×7.6 m` / `6.8×6.8 m` sniper overwatch decks. |
+| **Air-Defense Lattice Radar Towers (`2×`)** | **`10.4 m × 10.4 m` base** | **`38.5 m`** (`28.0 m` deck) | Climbable caged steel ladder up to a `6.8 m × 6.8 m` (`46 m²`) 4-corner sniper/spotter catwalk. |
+| **Tactical Base Watchtowers (`11×`)** | **`7.5 m × 7.5 m`** (`6 × 6` vox) | **`11.25 – 13.75 m`** | Climbable exterior ladder ascending through an open hatch onto a `5.0 m × 5.0 m` sandbagged overwatch deck. |
+
+
+---
+
+## 13. Authentic Rotorcraft Aerospace Envelopes & Drag-Thrust Equilibrium (`v132`)
+
+### 13.1 Analytic Parasitic Drag Calibration
+To guarantee that every rotorcraft obeys pure Newtonian tilted-disk dynamics ($a_{\text{prop}} = -\frac{T}{m}\sin\theta\cos\phi$) while converging **analytically** onto its real-world tactical cruise speed (`[W]`) and maximum level speed $V_H$ (`[Shift+W]` or full cyclic forward tilt $\theta_{\text{dash}}$), fuselage parasitic drag per unit mass is calibrated from steady level equilibrium ($T/m = g / \cos\theta_{\text{dash}} \implies a_{\text{peak}} = g\tan|\theta_{\text{dash}}|$):
+
+$$a_{\text{drag}}(V) = c_{\text{lin}} V + c_{\text{quad}} V^2, \quad c_{\text{lin}} = 0.12\,\frac{a_{\text{peak}}}{V_{\max}}, \quad c_{\text{quad}} = 0.88\,\frac{a_{\text{peak}}}{V_{\max}^2}$$
+
+At $V = V_{\max}$, $a_{\text{drag}}(V_{\max}) = a_{\text{peak}} = g\tan|\theta_{\text{dash}}|$, eliminating premature drag walls while preserving quadratic high-speed resistance and `4.8–6.9 s` `0–100 km/h` rotor spool/tilt acceleration.
+
+### 13.2 Per-Airframe Flight Manual Performance Table
+
+| Rotorcraft | Powerplant & Combat Mass | Tactical Cruise (`[W]`) | Max Level Speed $V_H$ (`[Shift+W]`) | Peak Horiz Accel (`0–100 km/h`) | Sea-Level Climb Rate | Distinct Handling Trait |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`UH-60M Black Hawk`** (`US`) | `2× T700-GE-701D` (`9.1 t`) | **`245 km/h`** (`68.0 m/s`) | **`295 km/h`** (`82.0 m/s`, `159 kt`) | **`~4.9 m/s²`** (`~5.7 s`) | **`11.2 m/s`** (`2,205 ft/min`) | Balanced Sikorsky DAFCS agility, `1,750 HP` utility airframe. |
+| **`Mi-8AMTSh Terminator`** (`RU`) | `2× Klimov VK-2500` (`11.8 t`) | **`225 km/h`** (`62.5 m/s`) | **`254 km/h`** (`70.5 m/s`, `137 kt`) | **`~4.15 m/s²`** (`~6.8 s`) | **`9.4 m/s`** (`1,850 ft/min`) | Heavier armored assault transport (`1,920 HP`, `0.88×` roll/yaw inertia). |
+| **`AH-64E Apache Guardian`** (`US`) | `2× T700-GE-701D` (`8.0 t`) | **`266 km/h`** (`74.0 m/s`) | **`304 km/h`** (`84.5 m/s`, `164 kt`) | **`~5.5 m/s²`** (`~5.0 s`) | **`12.7 m/s`** (`2,500 ft/min`) | High-agility composite-blade gunship (`1.15×` roll slew). |
+| **`Ka-52 Alligator`** (`RU`) | `2× VK-2500 Coaxial` (`10.4 t`) | **`272 km/h`** (`75.5 m/s`) | **`311 km/h`** (`86.5 m/s`, `168 kt`) | **`~5.75 m/s²`** (`~4.8 s`) | **`14.2 m/s`** (`2,795 ft/min`) | Contra-rotating coaxial rotors (`0` tail-rotor power loss, `1.24×` flat-pedal yaw authority at all speeds). |

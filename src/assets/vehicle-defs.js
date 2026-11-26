@@ -4,7 +4,7 @@
 // Positions stored as arrays [x, y, z] — y is computed at runtime via getGroundHeightAt.
 // =========================================================================
 
-import { VEHICLE_STATS } from '../config.js?v=127';
+import { VEHICLE_STATS } from '../config.js?v=132';
 
 export const VEHICLE_DEFS = [
   // ===================== US FLEET (Open Motor Pool Apron aligned with 28m Main Gate at x = -904..-884, z = -10..+10) =====================
@@ -68,7 +68,7 @@ export const VEHICLE_DEFS = [
   },
   {
     id: 'us_lav25_hq',
-    name: 'LAV-25 IFV (30MM HE)',
+    name: 'LAV-25 IFV (25MM M242 APDS-T + TOW-2B)',
     type: 'apc',
     team: 'US',
     spawnPos: [-1456, 0, 11],
@@ -202,7 +202,7 @@ export const VEHICLE_DEFS = [
   },
   {
     id: 'ru_btr82_hq',
-    name: 'BTR-82A APC (30MM HE)',
+    name: 'BTR-82A APC (30MM 2A72 APDS-T + KORNET)',
     type: 'apc',
     team: 'RU',
     spawnPos: [1456, 0, -11],
@@ -288,8 +288,8 @@ export const VEHICLE_DEFS = [
     spawnYaw: -Math.PI / 2,
     maxHp: VEHICLE_STATS.BIKE_250CC_2T.maxHp,
     speed: VEHICLE_STATS.BIKE_250CC_2T.speed,
-    weaponType: 'hmg',
-    rpm: 850,
+    weaponType: 'moto_pdw',
+    rpm: 750,
     patrolPoints: [[-620, 0, -18]]
   },
   {
@@ -305,8 +305,8 @@ export const VEHICLE_DEFS = [
     spawnYaw: -Math.PI / 2,
     maxHp: VEHICLE_STATS.ATV_QUAD.maxHp,
     speed: VEHICLE_STATS.ATV_QUAD.speed,
-    weaponType: 'hmg',
-    rpm: 850,
+    weaponType: 'moto_pdw',
+    rpm: 750,
     patrolPoints: [[-620, 0, 18]]
   },
   {
@@ -322,8 +322,8 @@ export const VEHICLE_DEFS = [
     spawnYaw: Math.PI / 2,
     maxHp: VEHICLE_STATS.BIKE_250CC_2T.maxHp,
     speed: VEHICLE_STATS.BIKE_250CC_2T.speed,
-    weaponType: 'hmg',
-    rpm: 850,
+    weaponType: 'moto_pdw',
+    rpm: 750,
     patrolPoints: [[620, 0, 18]]
   },
   {
@@ -339,8 +339,8 @@ export const VEHICLE_DEFS = [
     spawnYaw: Math.PI / 2,
     maxHp: VEHICLE_STATS.ATV_QUAD.maxHp,
     speed: VEHICLE_STATS.ATV_QUAD.speed,
-    weaponType: 'hmg',
-    rpm: 850,
+    weaponType: 'moto_pdw',
+    rpm: 750,
     patrolPoints: [[620, 0, -18]]
   },
 
@@ -433,6 +433,11 @@ export const VEHICLE_DEFS = [
     speed: VEHICLE_STATS.HELI_TRANSPORT.speed,
     minSpeed: 0,
     maxSpeed: VEHICLE_STATS.HELI_TRANSPORT.maxSpeed,
+    climbRateMs: VEHICLE_STATS.HELI_TRANSPORT.climbRateMs,
+    maxFwdTiltRad: VEHICLE_STATS.HELI_TRANSPORT.maxFwdTiltRad,
+    yawAuthorityMult: VEHICLE_STATS.HELI_TRANSPORT.yawAuthorityMult,
+    rollAgilityMult: VEHICLE_STATS.HELI_TRANSPORT.rollAgilityMult,
+    massTonnes: VEHICLE_STATS.HELI_TRANSPORT.massTonnes,
     weaponType: 'heli_minigun',
     rpm: VEHICLE_STATS.RPM_HELI_MINIGUN,
     coaxRpm: 180,
@@ -456,6 +461,11 @@ export const VEHICLE_DEFS = [
     speed: VEHICLE_STATS.HELI_ATTACK.speed,
     minSpeed: 0,
     maxSpeed: VEHICLE_STATS.HELI_ATTACK.maxSpeed,
+    climbRateMs: VEHICLE_STATS.HELI_ATTACK.climbRateMs,
+    maxFwdTiltRad: VEHICLE_STATS.HELI_ATTACK.maxFwdTiltRad,
+    yawAuthorityMult: VEHICLE_STATS.HELI_ATTACK.yawAuthorityMult,
+    rollAgilityMult: VEHICLE_STATS.HELI_ATTACK.rollAgilityMult,
+    massTonnes: VEHICLE_STATS.HELI_ATTACK.massTonnes,
     weaponType: 'heli_attack',
     rpm: VEHICLE_STATS.RPM_HELI_30MM,
     coaxRpm: 210,
@@ -476,10 +486,15 @@ export const VEHICLE_DEFS = [
     team: 'RU',
     spawnPos: [1504, 0, 44],
     spawnYaw: Math.PI / 2,
-    maxHp: VEHICLE_STATS.HELI_TRANSPORT.maxHp,
-    speed: VEHICLE_STATS.HELI_TRANSPORT.speed,
+    maxHp: VEHICLE_STATS.HELI_MI8.maxHp,
+    speed: VEHICLE_STATS.HELI_MI8.speed,
     minSpeed: 0,
-    maxSpeed: VEHICLE_STATS.HELI_TRANSPORT.maxSpeed,
+    maxSpeed: VEHICLE_STATS.HELI_MI8.maxSpeed,
+    climbRateMs: VEHICLE_STATS.HELI_MI8.climbRateMs,
+    maxFwdTiltRad: VEHICLE_STATS.HELI_MI8.maxFwdTiltRad,
+    yawAuthorityMult: VEHICLE_STATS.HELI_MI8.yawAuthorityMult,
+    rollAgilityMult: VEHICLE_STATS.HELI_MI8.rollAgilityMult,
+    massTonnes: VEHICLE_STATS.HELI_MI8.massTonnes,
     weaponType: 'heli_minigun',
     rpm: VEHICLE_STATS.RPM_HELI_MINIGUN,
     coaxRpm: 180,
@@ -496,13 +511,19 @@ export const VEHICLE_DEFS = [
     isAircraft: true,
     isHelicopter: true,
     aircraftRole: 'heli_attack',
+    isCoaxialHeli: true,
     team: 'RU',
     spawnPos: [1504, 0, -44],
     spawnYaw: Math.PI / 2,
-    maxHp: VEHICLE_STATS.HELI_ATTACK.maxHp,
-    speed: VEHICLE_STATS.HELI_ATTACK.speed,
+    maxHp: VEHICLE_STATS.HELI_KA52.maxHp,
+    speed: VEHICLE_STATS.HELI_KA52.speed,
     minSpeed: 0,
-    maxSpeed: VEHICLE_STATS.HELI_ATTACK.maxSpeed,
+    maxSpeed: VEHICLE_STATS.HELI_KA52.maxSpeed,
+    climbRateMs: VEHICLE_STATS.HELI_KA52.climbRateMs,
+    maxFwdTiltRad: VEHICLE_STATS.HELI_KA52.maxFwdTiltRad,
+    yawAuthorityMult: VEHICLE_STATS.HELI_KA52.yawAuthorityMult,
+    rollAgilityMult: VEHICLE_STATS.HELI_KA52.rollAgilityMult,
+    massTonnes: VEHICLE_STATS.HELI_KA52.massTonnes,
     weaponType: 'heli_attack',
     rpm: VEHICLE_STATS.RPM_HELI_30MM,
     coaxRpm: 210,

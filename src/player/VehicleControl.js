@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=127';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=127';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=127';
-import { events } from '../events.js?v=127';
+import { sound } from '../audio.js?v=132';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=132';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=132';
+import { events } from '../events.js?v=132';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -11,7 +11,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=127';
+} from '../core/StateMachines.js?v=132';
 
 function markShared(asset) {
   if (asset) {
@@ -670,9 +670,9 @@ export const VehicleControlMethods = {
             ? `🛸 ${nearVehicle.ac130EraLabel || 'AC-130'} COUPLED PYLON AUTOPILOT (${nearVehicle.orbitAnchorLabel || 'FOB'}) — [R] TRANSIT/ORBIT • [F] LOCK ORBIT • [C] LEFT-WINDOW/BELLY CAM • [F1] MANUAL`
             : `🛸 ${nearVehicle.ac130EraLabel || '1968 AC-130A'} ORBIT MODE — [A/D] BANK LEFT PYLON • [R] TRANSIT ⇄ ORBIT • [L] UNLOCK EOTECH & COUPLED AUTOPILOT • [F1] MANUAL`
           : nearVehicle.isAircraft && nearVehicle.isHelicopter
-          ? nearVehicle.aircraftRole === 'heli_attack'
-            ? `🚁 ${nearVehicle.name}${customBadge} — [W/S] COLLECTIVE LIFT/LAND • MOUSE CYCLIC • [A/D] PEDAL YAW • [1] 30MM • [2] ROCKETS • [3] HELLFIRE ATGM • [R] HOVER HOLD`
-            : `🚁 ${nearVehicle.name}${customBadge} — [W/S] COLLECTIVE LIFT/LAND • MOUSE CYCLIC • [A/D] PEDAL YAW • [R] HOVER HOLD • [E] ROOFTOP / FAST-ROPE EXIT • [F1–F8] SEATS`
+          ? this.aircraftCollisionAvoidance !== false
+            ? `🚁 ${nearVehicle.name}${customBadge} — EASY MODE [G]: [SPACE/Q] CLIMB • [CTRL/Z] LAND • [WASD] HORIZONTAL FLY • MOUSE FREE-AIMS GUN • [R] HOVER LOCK`
+            : `🚁 ${nearVehicle.name}${customBadge} — HARD CYCLIC SIM [G]: [W/S] COLLECTIVE • MOUSE CYCLIC TILT • [A/D] PEDALS • [R] HOVER LOCK`
           : nearVehicle.isAircraft
           ? `✈️ COCKPIT READY: ${nearVehicle.name}${customBadge} ([W/S] THROTTLE • MOUSE/ARROWS LOOP • [C] COCKPIT/3P/NOSE CAM • [X] FLARES • [E] EJECT)`
           : nearVehicle.type === 'truck_transport'
@@ -1710,8 +1710,8 @@ export const VehicleControlMethods = {
       this.preferredAircraftRole = normForce;
     } else if (launchAirborne && this.activeVehicle && this.activeVehicle.isAircraft) {
       const roles = b2Unlocked
-        ? ['b2_spirit', 'wright_flyer', 'cas', 'fighter', 'gunship']
-        : ['cas', 'fighter', 'gunship', 'wright_flyer'];
+        ? ['heli_transport', 'heli_attack', 'cas', 'fighter', 'gunship', 'b2_spirit', 'wright_flyer']
+        : ['heli_transport', 'heli_attack', 'cas', 'fighter', 'gunship', 'wright_flyer'];
       const curRole =
         this.activeVehicle.aircraftRole === 'bomber'
           ? 'b2_spirit'
@@ -1772,7 +1772,7 @@ export const VehicleControlMethods = {
         role === 'wright_flyer'
           ? '1903 WRIGHT FLYER I SECRET PIONEER SORTIE'
           : role === 'b2_spirit'
-          ? 'NORTHROP B-2A SPIRIT STEALTH CARPET BOMBER ([1/LMB] 80× MK-82 • [2/SPACE] GBU-57 MOP)'
+          ? 'NORTHROP B-2A SPIRIT STEALTH BOMBER ([1] 80× MK-82 CARPET • [2] GBU-57 MOP • [3] 4× GBU-31 JDAM)'
           : role === 'cas'
           ? 'A-10 CAS STRAFING MISSION (30MM GAU-8 [LMB] + ROCKETS [SPACE])'
           : role === 'gunship'
@@ -1918,7 +1918,7 @@ export const VehicleControlMethods = {
             ? '💣 [1] 80× MK-82 ROTARY CARPET BOMB BAY (5-BOMB ROLLING WAVE • HOLD LMB / SPACE)'
             : clamped === 1
             ? '💥 [2] 2× GBU-57A/B MOP 30,000LB MASSIVE BUNKER-BUSTER (LMB / SPACE)'
-            : '🎯 [3] B-2 RECESSED 20MM DEFENSE CANNON [LMB] + AIM-9X SELF-DEFENSE [SPACE]';
+            : '🎯 [3] 4× GBU-31(V)3 2,000LB PRECISION JDAM PENETRATOR (LMB / SPACE)';
       } else if (v.aircraftRole === 'cas') {
         label =
           clamped === 0
@@ -2683,8 +2683,10 @@ export const VehicleControlMethods = {
       const effectiveRpm =
         v.weaponType === 'aa_autocannon'
           ? Math.max(v.rpm || 1050, 1050)
+          : v.weaponType === 'moto_pdw' || v.type === 'bike' || v.type === 'atv'
+          ? v.rpm || 750
           : v.weaponType === 'hmg'
-          ? Math.max(v.rpm || 720, 720)
+          ? v.rpm || 550
           : v.weaponType === 'autocannon'
           ? Math.max(v.rpm || 330, 330)
           : v.weaponType === 'mounted_warbow'
@@ -2942,18 +2944,20 @@ export const VehicleControlMethods = {
           owner: this
         });
       } else if (v.weaponType === 'autocannon') {
-        if (!this.consumeVehicleOrdnance(v, 'slot0', 1, '30MM AUTOCANNON')) {
+        const acLabel =
+          v.team === 'RU' ? '30MM 2A72 APDS-T AUTOCANNON' : '25MM M242 BUSHMASTER APDS-T';
+        if (!this.consumeVehicleOrdnance(v, 'slot0', 1, acLabel)) {
           return;
         }
         this.recoilOffsetPitch += 0.0035;
         this.addShake(0.12);
         sound.playGunshot('autocannon', 0);
 
-        const aimTarget = this.computeVehicleAimTarget(camOrigin, camDir, v, 150);
+        const aimTarget = this.computeVehicleAimTarget(camOrigin, camDir, v, 185);
         const targetDist = muzzleOrigin.distanceTo(aimTarget.point);
         const acSpeed = PROJECTILES.AUTOCANNON.speed;
         const acGrav = PROJECTILES.AUTOCANNON.gravity;
-        const compDist = Math.min(targetDist, 145);
+        const compDist = Math.min(targetDist, 180);
         const flightTime = compDist / acSpeed;
         const gravDropComp = 0.5 * acGrav * flightTime * flightTime;
         const compensatedAimPoint = aimTarget.point
@@ -2969,21 +2973,62 @@ export const VehicleControlMethods = {
 
         this.world.projectiles.push({
           type: 'autocannon',
+          weaponName: acLabel,
+          weaponLabel: acLabel,
           mesh: shellMesh,
           vel: launchDir.multiplyScalar(acSpeed),
           gravity: acGrav,
           life: PROJECTILES.AUTOCANNON.life,
           owner: this
         });
+      } else if (v.weaponType === 'moto_pdw' || v.type === 'bike' || v.type === 'atv') {
+        // Motorcycle / 4×4 Quad ATV Rider One-Handed 9×19mm Personal Defense SMG (Finite Mag Pouch • Small-Arms Ballistics):
+        // ~520 J pistol-caliber submachine gun (`26` DMG, `390 m/s`, `115m` range, ZERO damage to armored Humvees/APCs/Tanks!)
+        if (!this.consumeVehicleOrdnance(v, 'slot0', 1, '9MM RIDER PDW')) {
+          return;
+        }
+        this.recoilOffsetPitch += 0.0024;
+        this.addShake(0.018);
+        sound.playGunshot('smg', 0);
+        const pdwSpread = 0.014; // One-handed handlebar firing dispersion (~0.8°)
+        const pdwDir = camDir
+          .clone()
+          .add(
+            new THREE.Vector3(
+              (Math.random() - 0.5) * pdwSpread,
+              (Math.random() - 0.5) * pdwSpread,
+              (Math.random() - 0.5) * pdwSpread
+            )
+          )
+          .normalize();
+        this.fireBallisticRay(
+          camOrigin,
+          pdwDir,
+          26,
+          1.65,
+          10,
+          '9MM RIDER PDW',
+          0.75,
+          {
+            isMountedMg: false,
+            soundType: 'smg',
+            muzzleVelocity: 390,
+            maxEffectiveRange: 115,
+            tracerEveryShots: 3
+          },
+          1,
+          muzzleOrigin
+        );
       } else {
-        // Car-Mounted .50 Cal M2HB Heavy Machine Gun (720 RPM • High-Velocity AP-I • +60° Elevation)
+        // Humvee / GAZ Tigr / Emplacement .50 Cal M2HB / Kord Heavy Machine Gun (12.7×99mm NATO • ~18,000 J Anti-Materiel):
+        // Controlled 550 RPM heavy cyclic cadence, 1,200-round ammo chest (131s sustained fire!), 86 DMG & anti-light-armor punch!
         if (!this.consumeVehicleOrdnance(v, 'slot0', 1, '.50 CAL HMG')) {
           return;
         }
-        this.recoilOffsetPitch += 0.0018;
-        this.addShake(0.035);
+        this.recoilOffsetPitch += 0.002;
+        this.addShake(0.04);
         sound.playGunshot('hmg', 0);
-        const hmgSpread = 0.0016; // Stabilized pintle mount (~0.09° dispersion)
+        const hmgSpread = 0.0015; // Heavy pintle / CROWS mount (~0.085° dispersion)
         const hmgDir = camDir
           .clone()
           .add(
@@ -2997,12 +3042,12 @@ export const VehicleControlMethods = {
         this.fireBallisticRay(
           camOrigin,
           hmgDir,
-          68,
+          86,
           2.0,
-          110,
+          135,
           '.50 CAL HMG',
-          1.85,
-          { isMountedMg: true, muzzleVelocity: 890, maxEffectiveRange: 650, tracerEveryShots: 2 },
+          2.15,
+          { isMountedMg: true, muzzleVelocity: 890, maxEffectiveRange: 800, tracerEveryShots: 2 },
           1,
           muzzleOrigin
         );
@@ -3934,15 +3979,24 @@ export const VehicleControlMethods = {
   getAircraftObstacleHeightAt(wx, wz, aircraftY = 0) {
     const terrY = this.world ? this.world.getGroundHeightAt(wx, wz) : 0;
     if (!this.world || !this.world.voxels) return terrY;
-    if (aircraftY > 75.0 && Math.abs(wx) < 2000 && Math.abs(wz) < 1300) {
+    if (aircraftY > 130.0 && Math.abs(wx) < 2000 && Math.abs(wz) < 1300) {
       return terrY;
     }
     let maxY = terrY;
+    const platforms = this.world.elevatedPlatforms;
+    if (Array.isArray(platforms) && platforms.length > 0) {
+      for (let i = 0; i < platforms.length; i++) {
+        const p = platforms[i];
+        if (wx >= p.minX && wx <= p.maxX && wz >= p.minZ && wz <= p.maxZ && p.topY > maxY) {
+          maxY = p.topY;
+        }
+      }
+    }
     const g = this.world.worldToGrid(wx, terrY + 0.5, wz, _tmpGrid);
     const gx = g.gx;
     const baseGy = g.gy;
     const gz = g.gz;
-    for (let dy = 0; dy <= 36; dy++) {
+    for (let dy = 0; dy <= 84; dy++) {
       const vox = this.world.getVoxel(gx, baseGy + dy, gz);
       if (vox && !vox.isProp) {
         const top = vox.maxY ?? terrY + (dy + 1) * 1.25;
@@ -3958,7 +4012,7 @@ export const VehicleControlMethods = {
    */
   checkAircraftStructureCollision(v, pos, flightDir) {
     if (!this.world || !this.world.voxels) return null;
-    if (pos.y > 75.0 && Math.abs(pos.x) < 2000 && Math.abs(pos.z) < 1300) {
+    if (pos.y > 130.0 && Math.abs(pos.x) < 2000 && Math.abs(pos.z) < 1300) {
       return null;
     }
     const rightX = Math.cos(v.yaw || 0);
@@ -4067,6 +4121,9 @@ export const VehicleControlMethods = {
 
     const isWright = v.aircraftRole === 'wright_flyer';
     const roleKey = v.aircraftRole || 'fighter';
+    if (roleKey === 'heli_transport' || roleKey === 'heli_attack') {
+      v.isHelicopter = true;
+    }
     const cruiseSpd = v.speed || 62;
     const minSpd = v.minSpeed || 32;
     const maxSpd = v.maxSpeed || 96;
@@ -4144,16 +4201,22 @@ export const VehicleControlMethods = {
       this.pos.copy(v.pos);
     } else if (v.isHelicopter) {
       // =========================================================================
-      // DEDICATED 3D ROTORCRAFT FLIGHT DYNAMICS (UH-60M / MI-8 TRANSPORT & AH-64E / KA-52 ATTACK)
-      // - Zero stall speed (hovers effortlessly at 0 km/h!).
-      // - [W / S] Collective Lift: vertical climb (+16.5 m/s) & precision vertical descent (-13.5 m/s).
-      // - [A / D] Tail-Rotor / Coaxial Pedal Yaw (89 deg/s on-the-spot pirouette) + lateral roll strafe.
-      // - Mouse Cyclic Pitch & Heading: nose-down tilt accelerates up to 260–281 km/h; nose-up flares to hover.
-      // - [R] Auto-Hover Hold: locks 3D hover position & altitude for solo Door Minigun / Apache FLIR / Rooftop Insert!
-      // - Solid Building & Skyscraper Rooftop Touchdown: lands cleanly on any flat roof or Downtown "H" helipad!
+      // DUAL-MODE 3D ROTORCRAFT FLIGHT ARCHITECTURE (TOGGLED LIVE VIA [G]):
+      // 1. EASY / TACTICAL STABILIZED MODE (`[G]` ON — Default, Warzone / War Thunder Pointer-Aim style):
+      //    - Separate Engine Lift vs. Horizontal Direction:
+      //        * `[Space / Q / ↑ / PgUp]` = Collective Lift UP (Takeoff & Climb)
+      //        * `[Left Ctrl / Z / ↓ / PgDn]` = Collective Lift DOWN (Cushioned Descent & Land)
+      //        * `[W / S / A / D]` = Horizontal Forward / Backward / Strafe Left / Strafe Right (`[Shift]` Speed Boost)
+      //    - 100% Decoupled Gun Aiming: Moving the mouse (`this.yaw`, `this.pitch`) aims the M134 / 30mm / Rockets
+      //      freely up or down WITHOUT tilting the helicopter or altering flight speed/altitude!
+      // 2. HARD / REALISTIC CYCLIC SIMULATOR MODE (`[G]` OFF — Arma 3 / Squad / BF4 style):
+      //    - `[W / S]` (or `[Space / Ctrl]`) = Main-Rotor Collective Pitch & Power
+      //    - Mouse Pitch & Roll = Direct Cyclic Rotor-Disk Tilt (tilting nose down trades vertical lift for speed!)
+      //    - `[A / D]` = Anti-Torque Tail-Rotor Pedals + realistic hard-impact & wall crash physics!
       // =========================================================================
       v.isStalling = false;
       v.stallSinkVel = 0;
+      const isHeliEasyMode = this.aircraftCollisionAvoidance !== false;
       const apH = v.airframeParts || null;
       const engFracH = apH ? THREE.MathUtils.clamp((apH.engines ?? 100) / 100, 0.25, 1) : 1.0;
       const tailFracH = apH ? THREE.MathUtils.clamp((apH.tail ?? 100) / 100, 0.35, 1) : 1.0;
@@ -4185,96 +4248,366 @@ export const VehicleControlMethods = {
         if (typeof v.heliHoverAlt !== 'number') v.heliHoverAlt = v.pos.y;
       }
 
-      const auxClimbInput =
-        (this.keys['KeyQ'] || this.keys['ArrowUp'] || this.keys['Equal'] || this.keys['PageUp'] ? 1 : 0) -
-        (this.keys['KeyZ'] || this.keys['ArrowDown'] || this.keys['Minus'] || this.keys['PageDown'] ? 1 : 0);
-      const collectiveInput = isHeliPilot
-        ? throttleInput !== 0
-          ? throttleInput
-          : auxClimbInput
-        : 0;
-
-      v.throttle = THREE.MathUtils.lerp(
-        v.throttle ?? 0.5,
-        collectiveInput > 0 ? 0.92 : collectiveInput < 0 ? 0.18 : onPadOrRoof ? 0.08 : 0.54,
-        Math.min(1, dt * 5.5)
-      );
+      const dedicatedClimbInput =
+        (this.keys['Space'] || this.keys['KeyQ'] || this.keys['ArrowUp'] || this.keys['Equal'] || this.keys['PageUp'] ? 1 : 0) -
+        (this.keys['ControlLeft'] || this.keys['ControlRight'] || this.keys['KeyZ'] || this.keys['ArrowDown'] || this.keys['Minus'] || this.keys['PageDown'] ? 1 : 0);
+      const forwardCruiseBoost = Boolean(isHeliPilot && (this.keys['ShiftLeft'] || this.keys['ShiftRight']));
 
       if (typeof v._heliVelX !== 'number') v._heliVelX = 0;
       if (typeof v._heliVelY !== 'number') v._heliVelY = 0;
       if (typeof v._heliVelZ !== 'number') v._heliVelZ = 0;
+      if (typeof v._heliPitchRate !== 'number') v._heliPitchRate = 0;
+      if (typeof v._heliRollRate !== 'number') v._heliRollRate = 0;
+      if (typeof v._heliYawRate !== 'number') v._heliYawRate = 0;
+      if (typeof v._heliRotorThrust !== 'number') v._heliRotorThrust = onPadOrRoof ? 8.2 : 9.81;
+      if (typeof v.heliHoverAlt !== 'number') v.heliHoverAlt = v.pos.y;
 
-      // Vertical Collective Velocity
-      const maxClimbMs = 16.5 * engFracH * thinAirCeilFactor;
-      const maxSinkMs = -13.5;
-      let targetVelY = 0;
-      if (collectiveInput > 0) {
-        targetVelY = maxClimbMs;
-        v.heliHoverAlt = v.pos.y + 0.4;
-      } else if (collectiveInput < 0) {
-        targetVelY = onPadOrRoof ? 0 : maxSinkMs;
-        v.heliHoverAlt = Math.max(heliSupportY, v.pos.y - 0.4);
-      } else if (v.heliHoverHold && typeof v.heliHoverAlt === 'number') {
-        targetVelY = THREE.MathUtils.clamp((v.heliHoverAlt - v.pos.y) * 2.8, -8.0, 10.0);
-      } else {
-        targetVelY = onPadOrRoof ? 0 : 0;
-      }
-      v._heliVelY = THREE.MathUtils.lerp(v._heliVelY, targetVelY, Math.min(1, dt * 5.2));
+      const GRAVITY_G = 9.81;
+      const isRuHeli = v.team === 'RU';
+      const isAttackHeli = v.aircraftRole === 'heli_attack';
+      const airframeClimbSpec =
+        v.climbRateMs ||
+        (isAttackHeli ? (isRuHeli ? 14.2 : 12.7) : isRuHeli ? 9.4 : 11.2);
+      const dashFwdTiltMag =
+        v.maxFwdTiltRad ||
+        (isAttackHeli ? (isRuHeli ? 0.53 : 0.51) : isRuHeli ? 0.40 : 0.46);
+      const yawAuthMult =
+        v.yawAuthorityMult ||
+        (isAttackHeli ? (isRuHeli ? 1.24 : 1.08) : isRuHeli ? 0.88 : 1.0);
+      const rollAgilityMult =
+        v.rollAgilityMult ||
+        (isAttackHeli ? (isRuHeli ? 1.18 : 1.15) : isRuHeli ? 0.88 : 1.0);
+      const engPowerScale = 0.55 + 0.45 * engFracH;
+      const ratedCruiseSpd = (v.speed || (isAttackHeli ? 74.0 : 68.0)) * engPowerScale;
+      const ratedMaxLevelSpd =
+        (v.maxSpeed || (v.speed || 68.0) * 1.2) * engPowerScale;
+      const effHeliTargetSpd = forwardCruiseBoost ? ratedMaxLevelSpd : ratedCruiseSpd;
 
-      // Cyclic Pitch, Roll, Pedal Yaw & Horizontal Velocity
-      const effHeliMaxSpd = (v.maxSpeed || 74) * (0.55 + 0.45 * engFracH);
-      if (v.heliHoverHold || !isHeliPilot || (onPadOrRoof && collectiveInput <= 0)) {
-        if (isHeliPilot && bankInput !== 0 && !onPadOrRoof) {
-          v.yaw = (v.yaw || 0) + bankInput * 0.95 * tailFracH * dt;
+      // Exact Analytic Parasitic Drag Equilibrium with 12% Turbine Power Margin at V_max:
+      // Guarantees every helicopter reaches its real-world cruise speed (`[W]`) AND rated max level speed (`[Shift+W]`)!
+      const peakDashPropAccel = GRAVITY_G * Math.tan(dashFwdTiltMag);
+      const vMaxSafe = Math.max(35.0, ratedMaxLevelSpd);
+      const heliLinDragCoeff = (0.09 * peakDashPropAccel) / vMaxSafe;
+      const heliQuadDragCoeff = (0.69 * peakDashPropAccel) / (vMaxSafe * vMaxSafe);
+
+      const maxClimbMs = airframeClimbSpec * engFracH * thinAirCeilFactor;
+      const maxRotorThrust =
+        GRAVITY_G + (4.8 + airframeClimbSpec * 0.22) * engFracH * thinAirCeilFactor;
+      const heightAbovePad = Math.max(0, v.pos.y - heliSupportY);
+      const effHeliMaxSpd = effHeliTargetSpd;
+      let collectiveInput = 0;
+      let cmdPitch = 0;
+      let cmdRoll = 0;
+      let reqRotorThrust = GRAVITY_G;
+      let hasHorizInput = false;
+
+      // Current body-frame horizontal velocity components (momentum in world airmass)
+      const preFwdX = -Math.sin(v.yaw || 0);
+      const preFwdZ = -Math.cos(v.yaw || 0);
+      const preRightX = Math.cos(v.yaw || 0);
+      const preRightZ = -Math.sin(v.yaw || 0);
+      const preFwdSpd = v._heliVelX * preFwdX + v._heliVelZ * preFwdZ;
+      const preRightSpd = v._heliVelX * preRightX + v._heliVelZ * preRightZ;
+      const preHorizSpd = Math.hypot(v._heliVelX, v._heliVelZ);
+
+      // Aerodynamic translational flare inflow: pitching nose-up at forward speed temporarily balloons rotor lift
+      const flareLiftAccel =
+        preFwdSpd > 9.0 && (v.pitch || 0) > 0.05
+          ? Math.min(2.2, (preFwdSpd - 9.0) * Math.sin(Math.max(0, v.pitch || 0)) * 0.16)
+          : 0;
+
+      if (isHeliEasyMode) {
+        // ─── MODE 1: EASY / AFCS FLY-BY-WIRE MODE ([G] ON) ────────────────────
+        // True Sikorsky DAFCS-style Fly-By-Wire:
+        // - Separate Collective (`[Space/Q]` Climb, `[Ctrl/Z]` Land) & Horizontal (`WASD`),
+        //   with 100% decoupled Mouse Gun Aiming (`this.yaw`, `this.pitch` NEVER tilt cyclic!).
+        // - OBEYS 100% REAL NEWTONIAN ROTOR PHYSICS: `WASD` commands bounded AFCS cyclic tilt
+        //   (`cmdPitch`, `cmdRoll`), NOT direct velocity! Acceleration, turns, coasting, and
+        //   nose-up flare braking are strictly limited by 9-ton mass, rotational hub inertia,
+        //   tilted rotor thrust `-T/m * sin(tilt)`, and quadratic air drag!
+        collectiveInput = isHeliPilot ? dedicatedClimbInput : 0;
+        const moveFwd = isHeliPilot && !v.heliHoverHold ? throttleInput : 0; // KeyW (+1) / KeyS (-1)
+        const moveRight = isHeliPilot && !v.heliHoverHold ? -bankInput : 0;  // KeyD (+1) / KeyA (-1)
+        hasHorizInput = moveFwd !== 0 || moveRight !== 0;
+
+        // Convenience liftoff clearance: pressing [W] while parked gently lifts skids ~4m clear of ground clutter
+        if (onPadOrRoof && moveFwd > 0 && collectiveInput === 0) {
+          v.heliHoverAlt = Math.max(v.heliHoverAlt, heliSupportY + 4.0);
         }
-        v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, Math.min(1, dt * 5.8));
-        v.roll = THREE.MathUtils.lerp(v.roll || 0, 0, Math.min(1, dt * 5.8));
-        const dampRate = onPadOrRoof ? 8.5 : 3.8;
-        v._heliVelX = THREE.MathUtils.lerp(v._heliVelX, 0, Math.min(1, dt * dampRate));
-        v._heliVelZ = THREE.MathUtils.lerp(v._heliVelZ, 0, Math.min(1, dt * dampRate));
+
+        // 1. Tail-Rotor Yaw with Rotational Inertia & High-Speed Weathercock Stability
+        const freeLookHeld = Boolean(this.keys['AltLeft'] || this.keys['AltRight']);
+        let desYawRate = 0;
+        if (isHeliPilot && !v.heliHoverHold && !freeLookHeld && !(onPadOrRoof && !hasHorizInput && collectiveInput <= 0)) {
+          let yawErr = (this.yaw || 0) - (v.yaw || 0);
+          while (yawErr > Math.PI) yawErr -= Math.PI * 2;
+          while (yawErr < -Math.PI) yawErr += Math.PI * 2;
+          const weathercockScale = v.isCoaxialHeli ? 0.88 : 1.0 / (1.0 + preHorizSpd / 62.0);
+          desYawRate =
+            THREE.MathUtils.clamp(yawErr * 1.85, -1.32, 1.32) *
+            yawAuthMult *
+            tailFracH *
+            (0.46 + 0.54 * weathercockScale);
+        }
+        const maxYawAccel = (onPadOrRoof && collectiveInput <= 0 ? 4.8 : 2.55) * yawAuthMult * tailFracH;
+        v._heliYawRate += THREE.MathUtils.clamp(
+          desYawRate - v._heliYawRate,
+          -maxYawAccel * dt,
+          maxYawAccel * dt
+        );
+        v.yaw = (v.yaw || 0) + v._heliYawRate * dt;
+
+        // 2. AFCS Cyclic Pitch & Roll Command (Bounded Envelope Protection + Nose-Up Flare Braking)
+        if (moveFwd >= 0) {
+          v._heliFlareBraking = false;
+          v._heliRevPause = 0;
+        } else if (preFwdSpd > 2.4) {
+          // Pulling [S] while moving forward engages Nose-Up Quick-Stop Flare first rather than instant reverse
+          v._heliFlareBraking = true;
+          v._heliRevPause = 0.32;
+        } else if (v._heliFlareBraking) {
+          v._heliRevPause = Math.max(0, (v._heliRevPause || 0) - dt);
+          if (v._heliRevPause <= 0) v._heliFlareBraking = false;
+        }
+
+        const isLandingFlare = collectiveInput < 0 && heightAbovePad < 14.0 && preHorizSpd > 1.8;
+        if (onPadOrRoof && !hasHorizInput && collectiveInput <= 0) {
+          cmdPitch = 0;
+          cmdRoll = 0;
+        } else if (!isHeliPilot || v.heliHoverHold || isLandingFlare) {
+          // Active Auto-Hover [R] or Landing Auto-Flare: pitch nose UP (`+24°` max) against momentum vector
+          cmdPitch = THREE.MathUtils.clamp(preFwdSpd * 0.046, -0.34, 0.42);
+          cmdRoll = THREE.MathUtils.clamp(preRightSpd * 0.048, -0.42, 0.42);
+        } else {
+          // Longitudinal AFCS Cyclic (`cmdPitch`)
+          if (moveFwd > 0) {
+            const reqEqDrag =
+              heliLinDragCoeff * effHeliTargetSpd +
+              heliQuadDragCoeff * effHeliTargetSpd * effHeliTargetSpd;
+            const eqCruisePitch = -Math.atan(reqEqDrag / GRAVITY_G);
+            const maxFwdTilt = forwardCruiseBoost
+              ? -dashFwdTiltMag
+              : -Math.min(dashFwdTiltMag, Math.abs(eqCruisePitch) + 0.1);
+            cmdPitch = THREE.MathUtils.clamp(
+              eqCruisePitch - (effHeliTargetSpd - preFwdSpd) * 0.085,
+              maxFwdTilt,
+              0.38
+            );
+          } else if (moveFwd < 0) {
+            if (v._heliFlareBraking || preFwdSpd > 1.2) {
+              // Active pilot [S] Combat Flare: nose rears up to +26° (+0.46 rad) to bleed forward momentum!
+              cmdPitch = THREE.MathUtils.clamp(0.18 + preFwdSpd * 0.048, 0.14, 0.46);
+            } else {
+              // Smooth reverse flight once forward speed has bled off (max ~58 km/h tail-down)
+              const revCap = effHeliMaxSpd * 0.28;
+              cmdPitch = THREE.MathUtils.clamp((revCap + preFwdSpd) * 0.028 + 0.07, -0.18, 0.22);
+            }
+          } else {
+            // Hands-off coasting: gentle passenger-safe attitude stabilization (max ~9° soft flare — glides smoothly!)
+            cmdPitch = THREE.MathUtils.clamp(preFwdSpd * 0.015, -0.15, 0.16);
+          }
+
+          // Lateral AFCS Cyclic (`cmdRoll`) + Coordinated Banking in Forward Turns
+          const coordTurnBank =
+            v._heliYawRate * THREE.MathUtils.clamp(preFwdSpd / 28.0, 0.12, 1.15) * 0.34;
+          if (moveRight !== 0) {
+            const targetRight = moveRight * effHeliMaxSpd * 0.62;
+            cmdRoll = THREE.MathUtils.clamp(
+              -(targetRight - preRightSpd) * 0.034 + coordTurnBank,
+              -0.46,
+              0.46
+            );
+          } else {
+            const softLatFlare = THREE.MathUtils.clamp(preRightSpd * 0.02, -0.22, 0.22);
+            cmdRoll = THREE.MathUtils.clamp(softLatFlare + coordTurnBank, -0.44, 0.44);
+          }
+        }
+
+        // 3. AFCS Collective Governor (Computes Required Specific Rotor Thrust `T/m` Bounded by Engine Power)
+        const softLandSinkCap = heightAbovePad < 6.0 ? -Math.max(1.4, heightAbovePad * 1.45) : -9.8;
+        let desVelY = 0;
+        if (collectiveInput > 0) {
+          desVelY = maxClimbMs;
+          v._heliClimbSettling = true;
+          v.heliHoverAlt = v.pos.y;
+        } else if (collectiveInput < 0) {
+          desVelY = v.pos.y <= heliSupportY + 0.01 ? 0 : softLandSinkCap;
+          v._heliClimbSettling = true;
+          v.heliHoverAlt = Math.max(heliSupportY, v.pos.y);
+        } else if (onPadOrRoof && !hasHorizInput) {
+          desVelY = 0;
+          v._heliClimbSettling = false;
+          v.heliHoverAlt = heliSupportY;
+        } else if (v._heliClimbSettling) {
+          desVelY = 0;
+          v.heliHoverAlt = Math.max(heliSupportY, v.pos.y);
+          if (Math.abs(v._heliVelY) < 0.35) {
+            v._heliClimbSettling = false;
+          }
+        } else {
+          if (hasHorizInput && v.heliHoverAlt < heliSupportY + 3.2) {
+            v.heliHoverAlt = heliSupportY + 3.5;
+          }
+          desVelY = THREE.MathUtils.clamp((v.heliHoverAlt - v.pos.y) * 2.1, -6.5, 7.2);
+        }
+
+        const desVertAccel = THREE.MathUtils.clamp((desVelY - v._heliVelY) * 2.5, -5.6, 6.4);
+        const curVertCos = Math.max(0.42, Math.cos(v.pitch || 0) * Math.cos(v.roll || 0));
+        const minRotorThrust = onPadOrRoof && collectiveInput <= 0 && !hasHorizInput ? 0 : 3.8;
+        reqRotorThrust = THREE.MathUtils.clamp(
+          (GRAVITY_G + desVertAccel - flareLiftAccel * 0.55) / curVertCos,
+          minRotorThrust,
+          maxRotorThrust
+        );
+
+        const isFlaringHard = (v.pitch || 0) > 0.2 && preFwdSpd > 8.0;
+        v.throttle = THREE.MathUtils.lerp(
+          v.throttle ?? 0.48,
+          collectiveInput > 0
+            ? 0.92
+            : collectiveInput < 0 && !isFlaringHard
+            ? 0.18
+            : onPadOrRoof && !hasHorizInput
+            ? 0.08
+            : isFlaringHard
+            ? 0.78
+            : hasHorizInput
+            ? 0.68
+            : 0.48,
+          Math.min(1, dt * 4.2)
+        );
       } else {
+        // ─── MODE 2: HARD / REALISTIC CYCLIC SIMULATOR MODE ([G] OFF) ────────
+        // Unassisted Manual Collective (`[W/S]` or `[Space/Ctrl]`) + Direct Mouse Cyclic Swashplate
+        // + `[A/D]` Anti-Torque Tail-Rotor Pedals running on the EXACT SAME Newtonian physics!
+        collectiveInput = isHeliPilot
+          ? throttleInput !== 0
+            ? throttleInput
+            : dedicatedClimbInput
+          : 0;
+        hasHorizInput = isHeliPilot && !v.heliHoverHold && !onPadOrRoof;
+
         let yawErr = (this.yaw || 0) - (v.yaw || 0);
         while (yawErr > Math.PI) yawErr -= Math.PI * 2;
         while (yawErr < -Math.PI) yawErr += Math.PI * 2;
+        yawErr = THREE.MathUtils.clamp(yawErr, -1.35, 1.35);
 
-        const horizSpdNow = Math.hypot(v._heliVelX, v._heliVelZ);
-        const hoverBlend = THREE.MathUtils.clamp(1.0 - horizSpdNow / 24.0, 0, 1);
-        const pedalYawRate = bankInput * (1.55 * hoverBlend + 0.65 * (1 - hoverBlend)) * tailFracH;
-        const mouseYawRate = THREE.MathUtils.clamp(yawErr * 2.1, -1.55, 1.55) * tailFracH;
-        const totalYawStep = (pedalYawRate + mouseYawRate * 0.85) * dt;
-        v.yaw = (v.yaw || 0) + totalYawStep;
-        if (bankInput !== 0) {
-          this.yaw = (this.yaw || 0) + pedalYawRate * dt * 0.75;
+        let desSimYawRate = 0;
+        if (isHeliPilot && !(onPadOrRoof && collectiveInput <= 0)) {
+          this.yaw = (v.yaw || 0) + yawErr;
+          const pedalYawRate = bankInput * 1.55 * yawAuthMult * tailFracH;
+          const coordTurnYaw = v.heliHoverHold
+            ? 0
+            : THREE.MathUtils.clamp(yawErr * 1.1, -1.12, 1.12) * yawAuthMult * tailFracH;
+          desSimYawRate = pedalYawRate + coordTurnYaw;
+        }
+        const maxSimYawAccel = (onPadOrRoof && collectiveInput <= 0 ? 5.0 : 2.95) * yawAuthMult * tailFracH;
+        v._heliYawRate += THREE.MathUtils.clamp(
+          desSimYawRate - v._heliYawRate,
+          -maxSimYawAccel * dt,
+          maxSimYawAccel * dt
+        );
+        v.yaw = (v.yaw || 0) + v._heliYawRate * dt;
+        if (isHeliPilot && bankInput !== 0 && !(onPadOrRoof && collectiveInput <= 0)) {
+          this.yaw = (this.yaw || 0) + bankInput * 1.3 * yawAuthMult * tailFracH * dt;
         }
 
-        // Cyclic Pitch: tilting mouse nose-down (`this.pitch < 0`) drives forward rotor thrust; nose-up flares & reverses!
-        const cmdPitch = THREE.MathUtils.clamp(this.pitch || 0, -0.45, 0.38);
-        const targetHeliPitch = THREE.MathUtils.clamp(cmdPitch * 0.92, -0.42, 0.35);
-        const targetHeliRoll = THREE.MathUtils.clamp(
-          bankInput * 0.38 + yawErr * (0.25 + 0.45 * (1 - hoverBlend)),
-          -0.56,
-          0.56
+        if (onPadOrRoof && collectiveInput <= 0) {
+          cmdPitch = 0;
+          cmdRoll = 0;
+          reqRotorThrust = 0;
+        } else if (v.heliHoverHold || !isHeliPilot) {
+          cmdPitch = THREE.MathUtils.clamp(preFwdSpd * 0.046, -0.34, 0.42);
+          cmdRoll = THREE.MathUtils.clamp(preRightSpd * 0.048, -0.42, 0.42);
+          const holdVelY = THREE.MathUtils.clamp((v.heliHoverAlt - v.pos.y) * 2.1, -6.5, 7.2);
+          const holdAccY = THREE.MathUtils.clamp((holdVelY - v._heliVelY) * 2.5, -5.6, 6.4);
+          const holdCos = Math.max(0.42, Math.cos(v.pitch || 0) * Math.cos(v.roll || 0));
+          reqRotorThrust = THREE.MathUtils.clamp((GRAVITY_G + holdAccY) / holdCos, 3.8, maxRotorThrust);
+        } else {
+          cmdPitch = THREE.MathUtils.clamp(this.pitch || 0, -0.56, 0.48);
+          cmdRoll = THREE.MathUtils.clamp(yawErr * 0.85 + bankInput * 0.18, -0.64, 0.64);
+          if (collectiveInput > 0) {
+            reqRotorThrust = maxRotorThrust;
+            v.heliHoverAlt = v.pos.y;
+          } else if (collectiveInput < 0) {
+            reqRotorThrust = 3.6;
+            v.heliHoverAlt = Math.max(heliSupportY, v.pos.y);
+          } else {
+            reqRotorThrust = GRAVITY_G * 1.01;
+          }
+        }
+
+        v.throttle = THREE.MathUtils.lerp(
+          v.throttle ?? 0.48,
+          collectiveInput > 0 ? 0.94 : collectiveInput < 0 ? 0.15 : onPadOrRoof ? 0.06 : 0.54,
+          Math.min(1, dt * 4.5)
         );
-        v.pitch = THREE.MathUtils.lerp(v.pitch || 0, targetHeliPitch, Math.min(1, dt * 4.8));
-        v.roll = THREE.MathUtils.lerp(v.roll || 0, targetHeliRoll, Math.min(1, dt * 5.2));
+      }
 
-        const noseFwdX = -Math.sin(v.yaw || 0);
-        const noseFwdZ = -Math.cos(v.yaw || 0);
-        const rightLatX = Math.cos(v.yaw || 0);
-        const rightLatZ = -Math.sin(v.yaw || 0);
+      // ─── SHARED NEWTONIAN ROTORCRAFT DYNAMICS (BOTH EASY & HARD MODES) ──────
+      // 1. Airframe Rotational Inertia (`I_xx`, `I_zz` hub torque slew — cannot snap pitch/roll in 1 frame!)
+      const maxPitchRate = (isHeliEasyMode ? 1.08 : 1.48) * rollAgilityMult;
+      const maxRollRate = (isHeliEasyMode ? 1.42 : 1.92) * rollAgilityMult;
+      const maxPitchAccel = (onPadOrRoof && collectiveInput <= 0 ? 6.5 : 3.45) * rollAgilityMult;
+      const maxRollAccel = (onPadOrRoof && collectiveInput <= 0 ? 7.0 : 4.5) * rollAgilityMult;
 
-        const fwdCyclicFrac =
-          v.pitch < -0.02
-            ? THREE.MathUtils.clamp(-v.pitch / 0.38, 0, 1)
-            : v.pitch > 0.04
-            ? -THREE.MathUtils.clamp((v.pitch - 0.04) / 0.32, 0, 0.24)
-            : 0;
-        const latStrafeSpd = -bankInput * hoverBlend * 14.0;
-        const desiredVx = noseFwdX * (fwdCyclicFrac * effHeliMaxSpd) + rightLatX * latStrafeSpd;
-        const desiredVz = noseFwdZ * (fwdCyclicFrac * effHeliMaxSpd) + rightLatZ * latStrafeSpd;
-        const horizAccelGain = fwdCyclicFrac < 0 || Math.abs(fwdCyclicFrac) < 0.05 ? 2.6 : 1.95;
-        v._heliVelX = THREE.MathUtils.lerp(v._heliVelX, desiredVx, Math.min(1, dt * horizAccelGain));
-        v._heliVelZ = THREE.MathUtils.lerp(v._heliVelZ, desiredVz, Math.min(1, dt * horizAccelGain));
+      const desPitchRate = THREE.MathUtils.clamp((cmdPitch - (v.pitch || 0)) * 3.6, -maxPitchRate, maxPitchRate);
+      v._heliPitchRate += THREE.MathUtils.clamp(
+        desPitchRate - v._heliPitchRate,
+        -maxPitchAccel * dt,
+        maxPitchAccel * dt
+      );
+      v.pitch = THREE.MathUtils.clamp((v.pitch || 0) + v._heliPitchRate * dt, -0.62, 0.52);
+
+      const desRollRate = THREE.MathUtils.clamp((cmdRoll - (v.roll || 0)) * 4.0, -maxRollRate, maxRollRate);
+      v._heliRollRate += THREE.MathUtils.clamp(
+        desRollRate - v._heliRollRate,
+        -maxRollAccel * dt,
+        maxRollAccel * dt
+      );
+      v.roll = THREE.MathUtils.clamp((v.roll || 0) + v._heliRollRate * dt, -0.68, 0.68);
+
+      // 2. Main-Rotor Collective Spool & 3D Thrust Vector Integration (`F = m*a`)
+      v._heliRotorThrust = THREE.MathUtils.lerp(
+        v._heliRotorThrust,
+        reqRotorThrust,
+        Math.min(1, dt * 4.4)
+      );
+
+      const noseFwdX = -Math.sin(v.yaw || 0);
+      const noseFwdZ = -Math.cos(v.yaw || 0);
+      const rightLatX = Math.cos(v.yaw || 0);
+      const rightLatZ = -Math.sin(v.yaw || 0);
+
+      const vertLiftCos = Math.max(0.35, Math.cos(v.pitch) * Math.cos(v.roll));
+      const vertInflowDrag = -0.13 * v._heliVelY - 0.012 * v._heliVelY * Math.abs(v._heliVelY);
+      if (v.pos.y <= heliSupportY + 0.005 && v._heliRotorThrust <= GRAVITY_G && collectiveInput <= 0) {
+        v._heliVelY = 0;
+      } else {
+        const accelY = v._heliRotorThrust * vertLiftCos - GRAVITY_G + flareLiftAccel + vertInflowDrag;
+        v._heliVelY += accelY * dt;
+      }
+
+      // Horizontal acceleration comes STRICTLY from tilted rotor disk thrust + aft-flare rotor H-force drag + calibrated parasitic air drag!
+      const flareRotorHForceDrag =
+        (v.pitch || 0) > 0.14 && preFwdSpd > 3.0
+          ? Math.sin(v.pitch) * preFwdSpd * 0.135
+          : 0;
+      const rotorFwdAccel =
+        -v._heliRotorThrust * Math.sin(v.pitch) * Math.cos(v.roll) - flareRotorHForceDrag;
+      const rotorRightAccel = -v._heliRotorThrust * Math.sin(v.roll);
+      const horizSpdNow = Math.hypot(v._heliVelX, v._heliVelZ);
+      const airDragRate = heliLinDragCoeff + heliQuadDragCoeff * horizSpdNow;
+
+      const accelX = noseFwdX * rotorFwdAccel + rightLatX * rotorRightAccel - airDragRate * v._heliVelX;
+      const accelZ = noseFwdZ * rotorFwdAccel + rightLatZ * rotorRightAccel - airDragRate * v._heliVelZ;
+      v._heliVelX += accelX * dt;
+      v._heliVelZ += accelZ * dt;
+
+      // Sub-walking micro-drift settle ONLY when already < 0.45 m/s (< 1.6 km/h) with zero pilot translation input
+      if (!hasHorizInput && horizSpdNow < 0.45) {
+        v._heliVelX = THREE.MathUtils.lerp(v._heliVelX, 0, Math.min(1, dt * 1.8));
+        v._heliVelZ = THREE.MathUtils.lerp(v._heliVelZ, 0, Math.min(1, dt * 1.8));
       }
 
       const maxAirX = VEHICLE_STATS.AIRSPACE_MAX_X || 2400;
@@ -4283,8 +4616,8 @@ export const VehicleControlMethods = {
       let candZ = THREE.MathUtils.clamp(v.pos.z + v._heliVelZ * dt, -maxAirZ, maxAirZ);
       let candY = v.pos.y + v._heliVelY * dt;
 
-      // Side-wall building check when flying low between Downtown FOB C skyscrapers
-      if (this.world?.voxels && candY < 45.0) {
+      // Side-wall building check when flying between Downtown FOB C skyscrapers (up to 105m tall!)
+      if (this.world?.voxels && candY < 105.0) {
         const gSide = this.world.worldToGrid(candX, candY + 1.1, candZ, _tmpGrid);
         const sideVox = this.world.getVoxel(gSide.gx, gSide.gy, gSide.gz);
         if (sideVox && !sideVox.isProp && candY + 0.6 < (sideVox.maxY ?? candY + 2.0)) {
@@ -4315,7 +4648,7 @@ export const VehicleControlMethods = {
         nextSupportY = newGndH;
       }
 
-      if (candY <= nextSupportY) {
+      if (candY <= nextSupportY + (collectiveInput <= 0 ? 0.02 : 0)) {
         if (
           this.aircraftCollisionAvoidance === false &&
           v.hasLeftRunwayOnce &&
@@ -4333,10 +4666,18 @@ export const VehicleControlMethods = {
         v.pos.y = nextSupportY;
         v._heliVelY = 0;
         if (collectiveInput <= 0) {
-          v._heliVelX *= Math.pow(0.02, dt);
-          v._heliVelZ *= Math.pow(0.02, dt);
-          v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, Math.min(1, dt * 8.0));
-          v.roll = THREE.MathUtils.lerp(v.roll || 0, 0, Math.min(1, dt * 8.0));
+          // Physical oleo-wheel / landing-skid braking friction (~9.5 m/s²) on solid ground/rooftop
+          const gndSpd = Math.hypot(v._heliVelX, v._heliVelZ);
+          if (gndSpd > 0.001) {
+            const brakedSpd = Math.max(0, gndSpd - 9.5 * dt);
+            const gndScale = brakedSpd / gndSpd;
+            v._heliVelX *= gndScale;
+            v._heliVelZ *= gndScale;
+          }
+          v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, Math.min(1, dt * 6.5));
+          v.roll = THREE.MathUtils.lerp(v.roll || 0, 0, Math.min(1, dt * 6.5));
+          v._heliPitchRate *= 0.85;
+          v._heliRollRate *= 0.85;
           v.hasLeftRunwayOnce = false;
         }
       } else {
@@ -4494,7 +4835,7 @@ export const VehicleControlMethods = {
         if (onRunway && curSpd < 0 && throttleInput >= 0) {
           const tugStopStep = 9.5 * dt;
           v.forwardSpeed = Math.min(0, curSpd + tugStopStep);
-        } else {
+        } else if (!v.autoFlightMode) {
           const spdDiff = desiredThrottleSpd - curSpd;
           let engineAccelRate;
           if (spdDiff >= 0) {
@@ -4634,9 +4975,17 @@ export const VehicleControlMethods = {
           const rotX = rwyCx + outDirX * 165;
           const targetClimbAlt = isGunship ? 210 : isWright ? 65 : 155;
           const liftoffSpd = isWright ? 8.2 : Math.max(minSpd * 0.98, 30);
-          v.throttle = Math.min(maxThrottleCap, (v.throttle || 0.5) + dt * 0.65);
+          v._takeoffSpool = Math.min(1.0, (v._takeoffSpool || 0.22) + dt * 0.85);
+          v.throttle = Math.min(maxThrottleCap, (v.throttle || 0.25) + dt * 0.55);
           const targetSpd = THREE.MathUtils.lerp(liftoffSpd * 1.15, effMaxSpd * 0.88, 0.72);
-          v.forwardSpeed = THREE.MathUtils.lerp(v.forwardSpeed || 0, targetSpd, Math.min(1, dt * 2.2));
+          // Physics-bounded jet/prop thrust acceleration (`<= 11.8 m/s^2`, ~1.2G max) — zero sudden lerp velocity jolts!
+          const maxTakeoffAccel =
+            (isWright ? 4.5 : isGunship ? 7.8 : v.aircraftRole === 'b2_spirit' ? 9.4 : 11.8) *
+            (0.35 + 0.65 * v._takeoffSpool);
+          const curTakeoffSpd = v.forwardSpeed || 0;
+          const spdDelta = targetSpd - curTakeoffSpd;
+          v.forwardSpeed =
+            curTakeoffSpd + THREE.MathUtils.clamp(spdDelta, -6.5 * dt, maxTakeoffAccel * dt);
 
           // Lookahead point along paved `z = rwyCz` (`-68` US / `+68` RU) runway centerline toward battlefield!
           const lookAheadX = v.pos.x + outDirX * (onRunway ? 135 : 240);
@@ -4646,9 +4995,9 @@ export const VehicleControlMethods = {
           while (yErr > Math.PI) yErr -= Math.PI * 2;
           while (yErr < -Math.PI) yErr += Math.PI * 2;
 
-          v.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(yErr * 2.2, -1.35, 1.35) * dt;
-          const targetApRoll = onRunway ? 0 : THREE.MathUtils.clamp(yErr * 1.1, -0.42, 0.42);
-          v.roll = THREE.MathUtils.lerp(v.roll || 0, targetApRoll, Math.min(1, dt * 5.2));
+          v.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(yErr * 2.0, -1.15, 1.15) * dt;
+          const targetApRoll = onRunway ? 0 : THREE.MathUtils.clamp(yErr * 1.05, -0.4, 0.4);
+          v.roll = THREE.MathUtils.lerp(v.roll || 0, targetApRoll, Math.min(1, dt * 4.2));
 
           const pastVr = (v.forwardSpeed || 0) >= liftoffSpd || (v.pos.x - rotX) * outDirX > -25;
           const altRem = runwayY + targetClimbAlt - v.pos.y;
@@ -4657,15 +5006,19 @@ export const VehicleControlMethods = {
             : altRem > 22
             ? isWright
               ? 0.18
-              : 0.25
+              : 0.24
             : THREE.MathUtils.clamp(altRem * 0.012, 0, 0.22);
-          v.pitch = THREE.MathUtils.lerp(v.pitch || 0, targetApPitch, Math.min(1, dt * 3.8));
-          this.yaw = THREE.MathUtils.lerp(this.yaw, v.yaw, Math.min(1, dt * 4.5));
-          this.pitch = THREE.MathUtils.lerp(this.pitch, v.pitch, Math.min(1, dt * 4.5));
+          const maxPitchStep = 0.52 * dt;
+          v.pitch =
+            (v.pitch || 0) +
+            THREE.MathUtils.clamp(targetApPitch - (v.pitch || 0), -maxPitchStep, maxPitchStep);
+          this.yaw = THREE.MathUtils.lerp(this.yaw, v.yaw, Math.min(1, dt * 4.2));
+          this.pitch = THREE.MathUtils.lerp(this.pitch, v.pitch, Math.min(1, dt * 4.2));
 
           // Complete Auto-Takeoff & immediately remove BOTH green and orange guide lines upon lifting off (`altAgl >= 11.5m`)!
           if (altAgl >= 11.5 && pastVr) {
             v.autoFlightMode = null;
+            v._takeoffSpool = 0;
             v._suppressLandingGuideUntilClear = true;
             if (this._runwayAssistVisGroup) {
               this._runwayAssistVisGroup.visible = false;
@@ -4688,6 +5041,7 @@ export const VehicleControlMethods = {
         } else if (v.autoFlightMode === 'LANDING') {
           if (typeof v._lockedLandDirX !== 'number') {
             v._lockedLandDirX = v.pos.x < rwyCx ? 1 : -1;
+            v._landBrakeRamp = 0.18;
           }
           const landDirX = v._lockedLandDirX;
           const threshX = rwyCx - landDirX * 156;
@@ -4704,25 +5058,30 @@ export const VehicleControlMethods = {
           while (yErr > Math.PI) yErr -= Math.PI * 2;
           while (yErr < -Math.PI) yErr += Math.PI * 2;
 
-          const turnLimit = onRunway ? 1.5 : 1.25;
-          v.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(yErr * 2.2, -turnLimit, turnLimit) * dt;
+          const turnLimit = onRunway ? 1.15 : 1.05;
+          v.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(yErr * 1.95, -turnLimit, turnLimit) * dt;
           const targetApRoll =
-            onRunway || altAgl < 9.0 ? 0 : THREE.MathUtils.clamp(yErr * 1.25, -0.52, 0.52);
-          v.roll = THREE.MathUtils.lerp(v.roll || 0, targetApRoll, Math.min(1, dt * 4.8));
+            onRunway || altAgl < 9.0 ? 0 : THREE.MathUtils.clamp(yErr * 1.15, -0.48, 0.48);
+          v.roll = THREE.MathUtils.lerp(v.roll || 0, targetApRoll, Math.min(1, dt * 4.2));
 
           if (onRunway || (altAgl < 3.2 && Math.abs(v.pos.z - rwyCz) < 22 && distBeforeThresh < 85)) {
-            // Touchdown & Anti-Skid Runway Rollout along `z = rwyCz` to Full Stop in Ground Crew Pit-Stop Zone!
-            v.throttle = 0;
+            // Progressive Anti-Skid Wheel Braking & Drag Chute Rollout (`<= 9.6 m/s^2`, < 1.0G) — zero sudden stops!
+            v.throttle = THREE.MathUtils.lerp(v.throttle ?? 0.25, 0, Math.min(1, dt * 4.5));
             v.isStalling = false;
             v.stallSinkVel = 0;
-            v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, Math.min(1, dt * 6.0));
-            v.forwardSpeed = Math.max(0, (v.forwardSpeed || 0) - 19.5 * dt);
-            this.yaw = THREE.MathUtils.lerp(this.yaw, v.yaw, Math.min(1, dt * 5.0));
-            this.pitch = THREE.MathUtils.lerp(this.pitch, 0, Math.min(1, dt * 5.0));
-            if ((v.forwardSpeed || 0) <= 0.6) {
+            v._landBrakeRamp = Math.min(1.0, (v._landBrakeRamp || 0.2) + dt * 1.25);
+            const curRollSpd = v.forwardSpeed || 0;
+            const smoothWheelDecel =
+              Math.min(9.6, 2.4 + curRollSpd * 0.38) * v._landBrakeRamp;
+            v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, Math.min(1, dt * 4.5));
+            v.forwardSpeed = Math.max(0, curRollSpd - smoothWheelDecel * dt);
+            this.yaw = THREE.MathUtils.lerp(this.yaw, v.yaw, Math.min(1, dt * 4.5));
+            this.pitch = THREE.MathUtils.lerp(this.pitch, 0, Math.min(1, dt * 4.5));
+            if ((v.forwardSpeed || 0) <= 0.4) {
               v.forwardSpeed = 0;
               v.autoFlightMode = null;
               v._lockedLandDirX = undefined;
+              v._landBrakeRamp = 0;
               v.pitch = 0;
               v.roll = 0;
               sound.playRadioBeep?.(true);
@@ -4734,22 +5093,25 @@ export const VehicleControlMethods = {
               }
             }
           } else {
-            // Airborne ILS Glideslope Descent & Flare onto `z = rwyCz`
+            // Airborne ILS Glideslope Descent & Flare with physics-bounded airbrake drag (`<= 8.2 m/s^2`, ~0.84G)
             v.isStalling = false;
             v.stallSinkVel = 0;
-            v.throttle = 0.34;
-            v.forwardSpeed = THREE.MathUtils.lerp(
-              v.forwardSpeed || approachSpd,
-              approachSpd,
-              Math.min(1, dt * 2.4)
-            );
+            v._landBrakeRamp = 0.2;
+            v.throttle = THREE.MathUtils.lerp(v.throttle ?? 0.5, 0.34, Math.min(1, dt * 2.8));
+            const curAirSpd = v.forwardSpeed || approachSpd;
+            const airSpdErr = approachSpd - curAirSpd;
+            v.forwardSpeed =
+              curAirSpd + THREE.MathUtils.clamp(airSpdErr, -8.2 * dt, 6.8 * dt);
             const horizToTouchdown = Math.max(25, Math.hypot(v.pos.x - (threshX + landDirX * 30), v.pos.z - rwyCz));
             const glideAngle = -Math.atan2(Math.max(0, v.pos.y - (runwayY + 1.1)), horizToTouchdown);
             const flarePitch =
               altAgl < 9.5
                 ? THREE.MathUtils.lerp(0.03, glideAngle, altAgl / 9.5)
-                : THREE.MathUtils.clamp(glideAngle, -0.24, 0.08);
-            v.pitch = THREE.MathUtils.lerp(v.pitch || 0, flarePitch, Math.min(1, dt * 3.8));
+                : THREE.MathUtils.clamp(glideAngle, -0.22, 0.08);
+            const maxFlareStep = 0.55 * dt;
+            v.pitch =
+              (v.pitch || 0) +
+              THREE.MathUtils.clamp(flarePitch - (v.pitch || 0), -maxFlareStep, maxFlareStep);
             this.yaw = THREE.MathUtils.lerp(this.yaw, v.yaw, Math.min(1, dt * 3.8));
             this.pitch = THREE.MathUtils.lerp(this.pitch, v.pitch, Math.min(1, dt * 3.8));
           }
@@ -5001,6 +5363,12 @@ export const VehicleControlMethods = {
           let yawDiff = this.yaw - v.yaw;
           while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
           while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+          // Prevent continuous mouse-turn wrap-around (`> ±180°` suddenly flipping bank to the opposite direction!):
+          // Clamp coupled flight-director yaw lead to ±1.42 rad (±81.4°) so sweeping the mouse continuously holds max bank!
+          if (!decoupledFlightActive && !v.spiTargetPos) {
+            yawDiff = THREE.MathUtils.clamp(yawDiff, -1.42, 1.42);
+            this.yaw = v.yaw + yawDiff;
+          }
 
           // Role-specific coordinated bank limit:
           // - In `[G]` ON (Easy Flight), `canAerobaticLoop` is false so bank never exceeds a natural 53°–60° turn!
@@ -5507,8 +5875,14 @@ export const VehicleControlMethods = {
 
     let chaseYaw = this.yaw;
     let chasePitch = this.pitch;
+    // In Easy Stabilized Helicopter Mode (`[G]` ON), Hover-Hold `[R]`, or Crew Seats (`F2+`),
+    // camera & weapon crosshair track 1:1 with mouse (`this.yaw`, `this.pitch`) with level horizon (`camRoll = 0`)
+    // so aiming the gun NEVER lags behind or fights helicopter movement!
     const isHeliFreeAim = Boolean(
-      v.isHelicopter && (v.heliHoverHold || (this.vehicleSeatIndex || 0) >= 1)
+      v.isHelicopter &&
+        (this.aircraftCollisionAvoidance !== false ||
+          v.heliHoverHold ||
+          (this.vehicleSeatIndex || 0) >= 1)
     );
     const hasFreeLookOffset =
       !isGunship &&
@@ -5542,6 +5916,9 @@ export const VehicleControlMethods = {
     } else if (hasFreeLookOffset) {
       chaseYaw = (v.yaw || 0) + (v.freeLookYaw || 0);
       chasePitch = THREE.MathUtils.clamp((v.pitch || 0) + (v.freeLookPitch || 0), -1.48, 1.35);
+    } else if (isHeliFreeAim) {
+      chaseYaw = this.yaw || 0;
+      chasePitch = THREE.MathUtils.clamp(this.pitch || 0, -1.42, 1.25);
     } else if (isForwardBubbleCockpit) {
       // 1P Cockpit Camera MUST stay bolted 1:1 to the physical airframe (`v.yaw`, `v.pitch`, `v.roll`) —
       // NEVER turning ahead of the lagging airplane body! Mouse input steers the Flight-Director Ring (`this.yaw`, `this.pitch`).
@@ -5563,7 +5940,7 @@ export const VehicleControlMethods = {
         ? THREE.MathUtils.smoothstep(Math.abs(v.roll || 0), 1.18, 2.15)
         : 0;
     const camRoll =
-      hasSpiLock || hasFreeLookOffset
+      hasSpiLock || hasFreeLookOffset || isHeliFreeAim
         ? 0
         : isForwardBubbleCockpit
         ? v.roll || 0
@@ -5599,9 +5976,9 @@ export const VehicleControlMethods = {
           this.camera.position.copy(camPos);
         }
       } else {
-        // Keep 3P Chase centered directly behind & above the jet in camera space (`chaseUpVec`) so banking turns never swing the plane off-center!
-        const upDist = isGunship ? 6.2 : isB2Spirit ? 5.0 : isWrightFlyer ? 3.9 : 4.35;
-        const backDist = isGunship ? -21.0 : isB2Spirit ? -19.5 : isWrightFlyer ? -14.2 : -16.8;
+        // Keep 3P Chase centered directly behind & above the jet/helicopter in camera space (`chaseUpVec`)
+        const upDist = v.isHelicopter ? 5.4 : isGunship ? 6.2 : isB2Spirit ? 5.0 : isWrightFlyer ? 3.9 : 4.35;
+        const backDist = v.isHelicopter ? -18.5 : isGunship ? -21.0 : isB2Spirit ? -19.5 : isWrightFlyer ? -14.2 : -16.8;
         const camPos = v.pos
           .clone()
           .addScaledVector(chaseUpVec, upDist)
@@ -5709,7 +6086,7 @@ export const VehicleControlMethods = {
     const activeWpnSlot = v.activeWeaponSlot || 0;
     const isA2aMissileSelected = Boolean(v.aircraftRole === 'fighter' && activeWpnSlot === 1);
     const isBombOrdnanceSelected = Boolean(
-      (isB2Spirit && activeWpnSlot <= 1) ||
+      isB2Spirit ||
         (v.aircraftRole === 'wright_flyer' && activeWpnSlot === 1) ||
         (v.aircraftRole === 'fighter' && activeWpnSlot === 2) ||
         (v.aircraftRole === 'cas' && activeWpnSlot === 2) ||
@@ -5877,14 +6254,19 @@ export const VehicleControlMethods = {
     this.updateGunshipOrbitVisualizer(v);
     this.updateRunwayFlightDirector(v);
 
-    // 6. Air-to-Air Active Radar Lock-On Scanner (AIM-120D AMRAAM / AIM-9X HMD Cone up to 2,100m!)
+    // 6. Air-to-Air Active Radar Lock-On Scanner (AN/APG-82 ±58° Physical Nose Gimbal Cone + HUD Seeker Cone up to 2,100m!)
+    // Real F-15C/E/EX AN/APG-63/82 AESA radar is mounted in the aircraft nose (`±60°` azimuth/elevation mechanical/electronic gimbal limit):
+    // Turning the pilot viewport sideways (`Alt` Free-Look or 3P camera > 58° off the nose) CANNOT lock AIM-120D AMRAAM off the wing!
     const myGroundHForRadar = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
     const myAltAglForRadar = Math.max(0, v.pos.y - myGroundHForRadar);
     const maxRadarRange = 2100 * (v.lockRangeMult || 1.0);
+    const canUseA2aRadar = !isB2Spirit && !isGunship && v.aircraftRole !== 'cas';
+    const minNoseGimbalDot = v.isHelicopter ? -0.15 : 0.53; // ±58° physical nose radar gimbal cone (`cos(58°) ≈ 0.53`)
     let bestAirTarget = null;
-    let bestAirDot = 0.7; // ~45 deg HMD off-boresight cone
+    let bestAirDot = 0.78; // ~38° pilot sight / HUD acquisition cone within radar gimbal
+    let gimbalBlockedBandit = false;
     // Cannot lock onto distant targets while our own plane is still parked on the runway (< 10m AGL)
-    if (myAltAglForRadar >= 10.0 && this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+    if (canUseA2aRadar && myAltAglForRadar >= 10.0 && this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
       for (const other of this.vehicleManager.vehicles) {
         if (!other.isAircraft || other === v || other.dead || other.isShotDown || other.team === this.team) continue;
         // Enemy aircraft flying below 24m AGL (ground-effect radar clutter masking) or within 3.5s of takeoff evade radar lock!
@@ -5895,13 +6277,19 @@ export const VehicleControlMethods = {
         const dist = toOther.length();
         if (dist < 12 || dist > maxRadarRange) continue;
         toOther.divideScalar(dist);
-        const dot = toOther.dot(camDir);
-        if (dot > bestAirDot) {
-          bestAirDot = dot;
+        const camDot = toOther.dot(camDir);
+        const noseDot = toOther.dot(flightDir);
+        if (camDot > 0.78 && noseDot < minNoseGimbalDot) {
+          gimbalBlockedBandit = true;
+          continue;
+        }
+        if (noseDot >= minNoseGimbalDot && camDot > bestAirDot) {
+          bestAirDot = camDot;
           bestAirTarget = other;
         }
       }
     }
+    this.aircraftRadarGimbalExceeded = Boolean(gimbalBlockedBandit && !bestAirTarget);
 
     // ~1.15s Radar/IR Seeker Lock-On required before launching Shoot-and-Forget A2A Missiles (slower when Avionics < 40%)!
     const avionicsLockMult =
@@ -5968,7 +6356,8 @@ export const VehicleControlMethods = {
     const fireSuppressed = performance.now() < (this._suppressFireUntil || 0) || this.isModalOpen(true);
     const activeSlot = v.activeWeaponSlot || 0;
     const wantPrimary = !fireSuppressed && Boolean(this.isFiring);
-    const wantSpaceOrdnance = !fireSuppressed && Boolean(this.keys['Space']);
+    // In Helicopters, `[Space]` is dedicated to Collective Climb UP — weapons fire cleanly via `[LMB]` across Slots [1]/[2]/[3]!
+    const wantSpaceOrdnance = !fireSuppressed && !v.isHelicopter && Boolean(this.keys['Space']);
 
     // Compute true 3D world-space muzzle tip:
     // - On AC-130 Gunship: exact Port-Side (-X) Embrasure Barrel Outer Tip matching `vehicle-model.js`:
@@ -6007,19 +6396,21 @@ export const VehicleControlMethods = {
           v.fireCooldown = 0.22;
           v.coaxCooldown = 0;
         } else {
-          // UH-60M Black Hawk / Mi-8AMTSh [1]: Twin 7.62mm M134 Door Miniguns (1,500 RPM Tracer Stream!)
+          // UH-60M Black Hawk / Mi-8AMTSh [1]: Twin 7.62×51mm NATO M134 Door Miniguns (1,500 RPM Solid/API Tracer Stream!)
+          // Real 7.62mm NATO fires high-velocity solid/API bullets (ZERO explosive splash, 0 hull pen vs Tanks/APCs,
+          // while tearing up soft trucks, infantry, and enemy helicopter tailbooms/turboshafts/rotors!).
           if (!this.consumeVehicleOrdnance(v, 'slot0', 1, 'TWIN M134 MINIGUN')) {
             return;
           }
           v.maxFireCooldown = 60 / 1500;
           v.fireCooldown = v.maxFireCooldown;
-          v.coaxHeat = Math.min(1.0, (v.coaxHeat || 0) + 0.009);
-          this.recoilOffsetPitch += 0.0005;
-          this.addShake(0.02);
+          v.coaxHeat = Math.min(1.0, (v.coaxHeat || 0) + 0.008);
+          this.recoilOffsetPitch += 0.0004;
+          this.addShake(0.018);
           sound.playGunshot('lmg', 0);
 
-          const spread = 0.0034;
-          const shotDir = camDir
+          const spread = 0.0028;
+          const rawMiniDir = camDir
             .clone()
             .add(
               new THREE.Vector3(
@@ -6029,26 +6420,23 @@ export const VehicleControlMethods = {
               )
             )
             .normalize();
-          this._heliMiniCount = ((this._heliMiniCount || 0) + 1) % 4;
-          const miniSplash =
-            this._heliMiniCount === 0
-              ? { radius: 2.2, damage: 45, weaponName: '7.62MM M134 MINIGUN' }
-              : null;
+          const shotDir = this.applyDogfightLeadConvergence
+            ? this.applyDogfightLeadConvergence(camOrigin, rawMiniDir, 680, 2.2)
+            : rawMiniDir;
           this.fireBallisticRay(
             camOrigin,
             shotDir,
-            56,
+            46,
             2.0,
-            65,
+            48,
             v.team === 'RU' ? '7.62MM PKT DOOR MG' : '7.62MM M134 MINIGUN',
-            1.6,
+            1.45,
             {
               isMountedMg: true,
-              muzzleVelocity: 420,
-              bulletGravity: 3.8,
-              maxEffectiveRange: 950,
-              tracerEveryShots: 1,
-              explosiveSplash: miniSplash
+              muzzleVelocity: 680,
+              bulletGravity: 2.2,
+              maxEffectiveRange: 650,
+              tracerEveryShots: 1
             },
             1,
             noseMuzzle
@@ -6284,9 +6672,9 @@ export const VehicleControlMethods = {
             `💣 B-2 SPIRIT CARPET BOMBING BARRAGE — ${v.carpetSalvoCount * 5}× 500LB MK-82 BOMBS RELEASED ON TARGET CORRIDOR!`
           );
         }
-      } else if (isB2Spirit && activeSlot === 1) {
-        // Northrop B-2A Spirit [2] LMB: Trigger Twin GBU-57A/B MOP 30,000lb Massive Ordnance Penetrator via secondary block
-        v.maxFireCooldown = 2.4;
+      } else if (isB2Spirit && (activeSlot === 1 || activeSlot === 2)) {
+        // Northrop B-2A Spirit [2] GBU-57 MOP & [3] GBU-31 2,000lb JDAM: Pure Stealth Bomber (ZERO forward guns — route LMB to bomb bay!)
+        v.maxFireCooldown = activeSlot === 2 ? 1.15 : 2.4;
         v.fireCooldown = v.maxFireCooldown;
         v.coaxCooldown = 0;
       } else if (v.aircraftRole === 'cas' && activeSlot === 0) {
@@ -6724,7 +7112,7 @@ export const VehicleControlMethods = {
       (this.isFiring && v.aircraftRole === 'heli_transport' && activeSlot === 2) ||
       (this.isFiring && v.aircraftRole === 'cas' && activeSlot === 1) ||
       (this.isFiring && v.aircraftRole === 'fighter' && activeSlot === 1) ||
-      (this.isFiring && isB2Spirit && activeSlot === 1) ||
+      (this.isFiring && isB2Spirit && (activeSlot === 1 || activeSlot === 2)) ||
       (this.isFiring && isWrightFlyer && activeSlot === 1);
     if (triggerSecondary && v.coaxCooldown <= 0) {
       if (v.isHelicopter && activeSlot <= 1) {
@@ -6891,6 +7279,35 @@ export const VehicleControlMethods = {
         }
         if (this.onAwardXp) {
           this.onAwardXp(0, '💥 TWIN 30,000LB GBU-57A/B MOP BUNKER-BUSTERS RELEASED ON CCIP TARGET!');
+        }
+      } else if (isB2Spirit && activeSlot === 2) {
+        // B-2 Spirit [3]: 2,000lb GBU-31(V)3 JDAM Precision Penetrator Bomb (4× rotary bay — real B-2 carries ZERO guns or A2A missiles!)
+        if (!this.consumeVehicleOrdnance(v, 'slot2', 1, 'B-2 GBU-31 2,000LB JDAM')) {
+          return;
+        }
+        v.coaxCooldown = 1.15;
+        this.addShake(0.28);
+        sound.playRocketLaunch?.(0);
+
+        const gbu31Mesh = new THREE.Mesh(_gbu28Geo, _gbu28Mat);
+        gbu31Mesh.position.set(v.pos.x, v.pos.y - 1.35, v.pos.z);
+        gbu31Mesh.lookAt(ccipPos);
+        this.scene.add(gbu31Mesh);
+
+        this.world.projectiles.push({
+          type: 'gbu28_bomb',
+          weaponName: 'B-2 GBU-31 2,000LB JDAM',
+          weaponLabel: 'B-2 GBU-31(V)3 2,000LB JDAM',
+          mesh: gbu31Mesh,
+          vel: bombInitVel.clone(),
+          gravity: bombGrav,
+          life: PROJECTILES.GBU28_BOMB?.life || 26.0,
+          blastRadius: 17.5,
+          blastDamage: 650,
+          owner: this
+        });
+        if (this.onAwardXp) {
+          this.onAwardXp(0, '🎯 B-2 SPIRIT 2,000LB GBU-31(V)3 PRECISION JDAM RELEASED ON CCIP TARGET!');
         }
       } else if (v.aircraftRole === 'cas' && activeSlot === 2 && wantSpaceOrdnance) {
         // A-10C / Su-25 [3] + [SPACE]: 500lb Mk-82 / FAB-250 CCIP Precision Bomb Drop!
@@ -7072,8 +7489,16 @@ export const VehicleControlMethods = {
       } else {
         // AIM-120D AMRAAM / AIM-9X (RU: R-77M / R-73) Active-Radar "FOX-3" Shoot-and-Forget Air-to-Air Missile!
         // Supports full 45° HMD Cone Lock (~1.15s) OR instant Pitbull Boresight Lock when Slot [2] is aimed directly on an enemy plane!
+        // AIM-120D AMRAAM / R-77M Active-Radar "FOX-3" Shoot-and-Forget Air-to-Air Missile!
+        // Enforces real AN/APG-82 ±58° nose radar gimbal limit (`toCandNose.dot(flightDir) >= 0.53`) — no sideways viewport locks!
         let boresightAirTarget = null;
-        if (activeSlot === 1 && this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+        const isHeliStingerSlot = v.aircraftRole === 'heli_transport' && activeSlot === 2;
+        if (
+          canUseA2aRadar &&
+          (activeSlot === 1 || isHeliStingerSlot) &&
+          this.vehicleManager &&
+          Array.isArray(this.vehicleManager.vehicles)
+        ) {
           let bestBsDot = 0.984; // ~10° tight Pitbull radar boresight cone
           for (const cand of this.vehicleManager.vehicles) {
             if (!cand || !cand.isAircraft || cand.dead || cand.isShotDown || cand.team === this.team || cand === v) {
@@ -7083,6 +7508,8 @@ export const VehicleControlMethods = {
             if (cand.pos.y - candGnd < 18 && !cand.driver && !cand.aiPilotActive) continue;
             const dCand = cand.pos.distanceTo(camOrigin);
             if (dCand > 1650 || dCand < 15) continue;
+            const toCandNose = _vehScratchB.copy(cand.pos).sub(v.pos).normalize();
+            if (toCandNose.dot(flightDir) < minNoseGimbalDot) continue;
             const toCand = _vehScratchA.copy(cand.pos).sub(camOrigin).normalize();
             const dot = toCand.dot(camDir);
             if (dot > bestBsDot) {
@@ -7103,13 +7530,17 @@ export const VehicleControlMethods = {
             const lockPct = Math.round((this.aircraftLockProgress || 0) * 100);
             this.onAwardXp(
               0,
-              this.aircraftLockTarget && lockPct > 0
-                ? `📡 ACQUIRING RADAR LOCK (${lockPct}%) — HOLD BANDIT IN HUD CONE (~1.1S) TO FIRE!`
-                : '📡 NO AIRCRAFT LOCKED — KEEP ENEMY PLANE IN HUD CONE (~1.1S) FOR SHOOT-AND-FORGET LOCK!'
+              this.aircraftRadarGimbalExceeded
+                ? '📡 RADAR GIMBAL LIMIT (±60° NOSE) — TURN AIRCRAFT NOSE TOWARD BANDIT TO LOCK AIM-120!'
+                : this.aircraftLockTarget && lockPct > 0
+                ? `📡 ACQUIRING RADAR LOCK (${lockPct}%) — HOLD BANDIT IN NOSE RADAR CONE (~1.1S) TO FIRE!`
+                : '📡 NO AIRCRAFT LOCKED — POINT NOSE WITHIN ±60° RADAR CONE (~1.1S) FOR FOX-3 LOCK!'
             );
           }
         } else {
-          if (!this.consumeVehicleOrdnance(v, 'slot1', 1, 'AIM-120D AMRAAM')) {
+          const mslPoolKey = isHeliStingerSlot ? 'slot2' : 'slot1';
+          const mslConsumeLbl = isHeliStingerSlot ? 'FIM-92 STINGER A2A' : 'AIM-120D AMRAAM';
+          if (!this.consumeVehicleOrdnance(v, mslPoolKey, 1, mslConsumeLbl)) {
             return;
           }
           const missileTarget = resolvedMslTarget;

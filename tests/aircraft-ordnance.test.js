@@ -1,14 +1,14 @@
 import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { sound } from '../src/audio.js?v=127';
-import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=127';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=127';
-import { VehicleManager } from '../src/vehicles.js?v=127';
-import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=127';
-import { createVehicleMesh } from '../src/models/vehicle-model.js?v=127';
-import { BotManager, SQUAD_DEFS } from '../src/bots/BotManager.js?v=127';
-import { SQUAD_KIT_CAPS } from '../src/config.js?v=127';
+import { sound } from '../src/audio.js?v=132';
+import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=132';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=132';
+import { VehicleManager } from '../src/vehicles.js?v=132';
+import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=132';
+import { createVehicleMesh } from '../src/models/vehicle-model.js?v=132';
+import { BotManager, SQUAD_DEFS } from '../src/bots/BotManager.js?v=132';
+import { SQUAD_KIT_CAPS } from '../src/config.js?v=132';
 
 let createdWindowShim = false;
 let prevMuted = false;
@@ -1540,7 +1540,7 @@ test('v125.1 Real-World Doctrine: AC-130 105mm HE immobilizes MBT (~4-5 hits) & 
 //       Fast-Rope Insertions & Downtown FOB C High-Rise Skyline
 // ============================================================================
 test('v127.1 Helicopters (UH-60M/Mi-8 Transport & AH-64E/Ka-52 Attack) + 6x6 Troop Trucks: models, seats, Recon access, AI convoys & 2-hit Hellfire/Vikhr ATGM', async () => {
-  const { FRUGIS_RIVER_MAP } = await import('../src/maps/frugis-river.js?v=127');
+  const { FRUGIS_RIVER_MAP } = await import('../src/maps/frugis-river.js?v=132');
   const scene = new THREE.Scene();
   const contestedFlagC = {
     id: 'C',
@@ -1671,13 +1671,13 @@ test('v127.1 Helicopters (UH-60M/Mi-8 Transport & AH-64E/Ka-52 Attack) + 6x6 Tro
   assert.equal(squadRiders[0].ridingVehicle, null);
   assert.equal(squadRiders[0].mesh.visible, true);
 
-  // Downtown FOB C Skyline check: >= 10 high-rise towers (floors >= 4, including 7-story pinnacle towers) & clear (0,0) bridge boulevard
+  // Downtown FOB C Skyline check: >= 12 monumental high-rise skyscrapers (10–16 stories = 50m–80m tall, 18×16 to 22×20 voxels = 22.5m–27.5m wide!)
   const downtownHighRises = FRUGIS_RIVER_MAP.buildings.filter(
-    (b) => Math.abs(b[0]) <= 70 && Math.abs(b[1]) <= 55 && b[4] >= 4
+    (b) => Math.abs(b[0]) <= 100 && Math.abs(b[1]) <= 75 && b[4] >= 10
   );
-  const sevenStoryTowers = downtownHighRises.filter((b) => b[4] >= 7);
-  assert.ok(downtownHighRises.length >= 10, `Expected >=10 Downtown FOB C high-rises, got ${downtownHighRises.length}`);
-  assert.ok(sevenStoryTowers.length >= 2, 'Downtown FOB C must include 7-story (~35m) sniper & helipad pinnacle towers');
+  const pinnacleTowers = downtownHighRises.filter((b) => b[4] >= 16 && b[2] >= 22 && b[3] >= 20);
+  assert.ok(downtownHighRises.length >= 12, `Expected >=12 Downtown FOB C skyscrapers, got ${downtownHighRises.length}`);
+  assert.ok(pinnacleTowers.length >= 2, 'Downtown FOB C must include twin 16-story (80m, 27.5m × 25m) sniper & helipad pinnacle towers');
 });
 
 test('v127.2 Helicopter 3D Collective/Hover Physics, Zero Stall & Safe Rooftop Sniper Insertion on 35m Skyscraper', () => {
@@ -1700,33 +1700,35 @@ test('v127.2 Helicopter 3D Collective/Hover Physics, Zero Stall & Safe Rooftop S
   // 1.Helicopter never triggers fixed-wing runway takeoff/landing guide ribbons
   assert.equal(pilot.getRunwayAssistEligibility(vehicle), null, 'Helicopters must never show fixed-wing runway ILS trails');
 
-  // 2. Collective climb [W] straight up from 0 km/h stationary hover with ZERO aerodynamic stall!
+  // 2. Easy Mode ([G] ON default): Collective climb [Space] from 0 km/h hover with real 9-ton rotor inertia, ZERO stall & ZERO rocket launches!
   vehicle.pos.set(0, 0, 0);
   pilot.getAircraftObstacleHeightAt = (wx, wz) =>
     Math.abs(wx - -52) <= 7 && Math.abs(wz - -28) <= 6 ? roofHeightM : 0;
-  pilot.keys.KeyW = true;
-  for (let i = 0; i < 60; i++) {
+  pilot.keys.Space = true;
+  for (let i = 0; i < 120; i++) {
     pilot.updateAircraftControl(1 / 60, vehicle);
   }
-  pilot.keys.KeyW = false;
-  assert.ok(vehicle.pos.y > 7.5, `Helicopter [W] collective must climb vertically from 0 km/h (got y=${vehicle.pos.y.toFixed(2)}m)`);
+  pilot.keys.Space = false;
+  assert.ok(vehicle.pos.y > 7.5, `Helicopter [Space] collective must climb vertically from 0 km/h over 2.0s (got y=${vehicle.pos.y.toFixed(2)}m)`);
   assert.equal(vehicle.isStalling, false, 'Helicopter must never enter fixed-wing aerodynamic stall at 0 km/h');
+  assert.equal(pilot.world.projectiles.length, 0, '[Space] collective climb in helicopter must NEVER fire Hydra-70 rockets');
 
   // 3. [R] engages Auto-Hover Hold (`HOVER_HOLD`) in mid-air
   const rMode = pilot.handleAircraftRKey();
   assert.equal(rMode, 'HOVER_HOLD');
   assert.equal(vehicle.heliHoverHold, true);
 
-  // 4. Position above the 35m Downtown Skyscraper Rooftop Helipad (-52, 38.5, -28), release Hover Hold & descend [S] onto solid roof!
+  // 4. Position above the 35m Downtown Skyscraper Rooftop Helipad (-52, 38.2, -28), release Hover Hold & descend [Ctrl] onto solid roof!
   pilot.handleAircraftRKey(); // Toggle Hover Hold OFF
   assert.equal(vehicle.heliHoverHold, false);
   vehicle.pos.set(-52, roofHeightM + 3.2, -28);
-  vehicle.heliVertVel = -2.0;
-  pilot.keys.KeyS = true;
-  for (let i = 0; i < 90; i++) {
+  vehicle.heliHoverAlt = roofHeightM + 3.2;
+  vehicle._heliVelY = -1.5;
+  pilot.keys.ControlLeft = true;
+  for (let i = 0; i < 130; i++) {
     pilot.updateAircraftControl(1 / 60, vehicle);
   }
-  pilot.keys.KeyS = false;
+  pilot.keys.ControlLeft = false;
   assert.equal(vehicle.dead, false, 'Helicopter must touch down gently on 35m skyscraper helipad without crashing');
   assert.ok(
     Math.abs(vehicle.pos.y - roofHeightM) < 0.25,

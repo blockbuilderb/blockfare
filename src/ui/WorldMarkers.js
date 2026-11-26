@@ -298,14 +298,28 @@ export const WorldMarkers = {
     // 2. Friendly Chevrons, Clustered Downed '+' Micro-Dots, and Spotted Enemy Diamonds
     //    (Zero bulky text banners on the horizon — clusters of downed allies merge into a single tiny '+N' dot!)
     const maxDownedIconDist = isPlayerMedic ? 42 : 28;
+    const maxDownedDistSq = maxDownedIconDist * maxDownedIconDist;
+    const maxAllyDistSq = 55 * 55;
+    const maxSpotDistSq = 160 * 160;
+    const maxUavDistSq = 380 * 380;
+    const plrX = this.player.pos.x;
+    const plrY = this.player.pos.y;
+    const plrZ = this.player.pos.z;
+    const plrTeam = this.player.team;
     const downedClusters = [];
 
     for (const bot of this.botManager.bots) {
       if (bot.dead) continue;
-      const dist = this.player.pos.distanceTo(bot.pos);
 
-      if (bot.team === this.player.team) {
-        if (bot.downed && dist < maxDownedIconDist) {
+      if (bot.team === plrTeam) {
+        if (!bot.downed && bot.drivingVehicle) continue;
+        const dx = bot.pos.x - plrX;
+        const dz = bot.pos.z - plrZ;
+        const dy = bot.pos.y - plrY;
+        const distSq = dx * dx + dy * dy + dz * dz;
+        if (bot.downed) {
+          if (distSq >= maxDownedDistSq) continue;
+          const dist = Math.sqrt(distSq);
           const scr = projectToScreen(bot.pos, 1.05);
           if (scr) {
             // Merge nearby downed markers within 52px on screen so clusters of casualties never stack!
@@ -343,7 +357,7 @@ export const WorldMarkers = {
               });
             }
           }
-        } else if (!bot.downed && !bot.drivingVehicle && dist < 55) {
+        } else if (distSq < maxAllyDistSq) {
           const scr = projectToScreen(bot.pos, 2.2);
           if (scr) {
             const color = bot.inPlayerSquad
@@ -353,7 +367,7 @@ export const WorldMarkers = {
               : '#48dbfb';
             const op = getSightlineOpacity(scr.centerDist, 0.68, 0.14);
             // Only show a short name when very close (< 8m) and outside the central aiming reticle
-            const showShortName = dist < 8 && scr.centerDist > 85 && !inAds;
+            const showShortName = distSq < 64 && scr.centerDist > 85 && !inAds;
             const slot = this._acquireWorldMarkerSlot('ally');
             this._configureMarkerSlot(slot, {
               x: scr.x,
@@ -367,14 +381,17 @@ export const WorldMarkers = {
             });
           }
         }
-      } else if (
-        !bot.downed &&
-        ((bot.spottedTimer > 0 && dist < 160) || (bot.uavRevealed && dist < 380))
-      ) {
+      } else if (!bot.downed && (bot.spottedTimer > 0 || bot.uavRevealed)) {
+        const dx = bot.pos.x - plrX;
+        const dz = bot.pos.z - plrZ;
+        const dy = bot.pos.y - plrY;
+        const distSq = dx * dx + dy * dy + dz * dz;
+        const allowedSq = bot.uavRevealed ? maxUavDistSq : maxSpotDistSq;
+        if (distSq >= allowedSq) continue;
         const scr = projectToScreen(bot.pos, 2.25);
         if (scr) {
           const op = getSightlineOpacity(scr.centerDist, bot.uavRevealed ? 0.88 : 0.85, 0.25);
-          const showDist = bot.uavRevealed && scr.centerDist > 95 && !inAds && dist < 180;
+          const showDist = bot.uavRevealed && scr.centerDist > 95 && !inAds && distSq < 180 * 180;
           const slot = this._acquireWorldMarkerSlot('spot');
           this._configureMarkerSlot(slot, {
             x: scr.x,
@@ -383,7 +400,7 @@ export const WorldMarkers = {
             iconClass: 'world-spot-diamond',
             iconStyle: '',
             iconText: '',
-            distText: showDist ? `${Math.round(dist)}m` : '',
+            distText: showDist ? `${Math.round(Math.sqrt(distSq))}m` : '',
             distColor: showDist ? '#ff5252' : ''
           });
         }
@@ -596,6 +613,50 @@ export const WorldMarkers = {
 
       // 2) Hollow Target Designator (TD) Boxes for Enemy/Friendly Aircraft & Hollow Diamonds for Ground Vehicles
       if (this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+        // 2a) Aircraft 3D-Projected Nose Boresight Cross (`⊹ NOSE`) when Free-Looking / Off-Boresight (> 5°):
+        // Replaces the confusing 2D yellow dotted tank-hull compass ring on planes and clearly shows where
+        // the jet's physical nose & ±60° AN/APG-82 radar gimbal cone are pointing!
+        if (
+          activeAircraft &&
+          !activeAircraft.isHelicopter &&
+          activeAircraft.aircraftRole !== 'gunship' &&
+          this.camera
+        ) {
+          const pYaw = activeAircraft.yaw || 0;
+          const pPitch = activeAircraft.pitch || 0;
+          const cosP = Math.cos(pPitch);
+          const noseDirX = -Math.sin(pYaw) * cosP;
+          const noseDirY = Math.sin(pPitch);
+          const noseDirZ = -Math.cos(pYaw) * cosP;
+          const camFwd = this._wmScratchCamFwd || (this._wmScratchCamFwd = refPos.clone());
+          camFwd.set(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+          const alignDot = camFwd.x * noseDirX + camFwd.y * noseDirY + camFwd.z * noseDirZ;
+          if (alignDot < 0.996) {
+            const nosePt = this._wmScratchNosePt || (this._wmScratchNosePt = refPos.clone());
+            nosePt.set(
+              activeAircraft.pos.x + noseDirX * 650,
+              activeAircraft.pos.y + noseDirY * 650,
+              activeAircraft.pos.z + noseDirZ * 650
+            );
+            const noseScr = projectToScreen(nosePt, 0);
+            if (noseScr) {
+              const gimbalWarn = Boolean(this.player.aircraftRadarGimbalExceeded);
+              const noseCol = gimbalWarn ? '#ff9f43' : '#00d2d3';
+              const noseSlot = this._acquireWorldMarkerSlot('airBox');
+              this._configureMarkerSlot(noseSlot, {
+                x: noseScr.x,
+                y: noseScr.y,
+                opacity: 0.88,
+                iconClass: '',
+                iconStyle: `width:18px;height:18px;display:flex;align-items:center;justify-content:center;color:${noseCol};font-size:13px;font-weight:900;text-shadow:0 0 6px rgba(0,0,0,0.9);`,
+                iconText: '⊹',
+                distText: gimbalWarn ? '📡 NOSE (±60° RADAR LIMIT)' : 'NOSE',
+                distColor: noseCol,
+                distWeight: '800'
+              });
+            }
+          }
+        }
         const refPos = activeVeh ? activeVeh.pos : this.player.pos;
         const lockTgt = holdingStinger
           ? this.player.stingerLockTarget
@@ -765,11 +826,13 @@ export const WorldMarkers = {
             // - AC-130 (`gunship`): ZERO air-to-air lead indicator (downward ground-attack sensor suite only)!
             const myAirRole = activeAircraft ? activeAircraft.aircraftRole || activeAircraft.type : null;
             const isGunshipObserver = myAirRole === 'gunship';
+            const isB2Observer = myAirRole === 'b2_spirit';
             const isCasPassiveFunnel = myAirRole === 'cas';
             const showRadarEeegsLead =
               isEnemy &&
               !v.isShotDown &&
               !isGunshipObserver &&
+              !isB2Observer &&
               !isCasPassiveFunnel &&
               !holdingStinger &&
               !isMortarEmplace &&

@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=127';
-import { sound } from '../audio.js?v=127';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=127';
+import { VOXEL_SIZE } from '../world.js?v=132';
+import { sound } from '../audio.js?v=132';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=132';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=127';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=127';
-import { events, makeEventBridge } from '../events.js?v=127';
-import { GunsmithMethods } from './GunsmithState.js?v=127';
-import { FortificationMethods } from './FortificationBuilder.js?v=127';
-import { CommanderMethods } from './CommanderAbilities.js?v=127';
-import { VehicleControlMethods } from './VehicleControl.js?v=127';
-import { CombatMethods } from './PlayerCombat.js?v=127';
+} from '../utils/KeyboardShortcuts.js?v=132';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=132';
+import { events, makeEventBridge } from '../events.js?v=132';
+import { GunsmithMethods } from './GunsmithState.js?v=132';
+import { FortificationMethods } from './FortificationBuilder.js?v=132';
+import { CommanderMethods } from './CommanderAbilities.js?v=132';
+import { VehicleControlMethods } from './VehicleControl.js?v=132';
+import { CombatMethods } from './PlayerCombat.js?v=132';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=127';
+} from '../core/StateMachines.js?v=132';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -799,11 +799,23 @@ export class PlayerController {
       if (!hasAnyModifier(e) && e.code === 'KeyG' && !e.repeat) {
         if (this.activeVehicle && this.activeVehicle.isAircraft) {
           const avoidOn = this.toggleAircraftCollisionAvoidance();
+          const isHeliNow = Boolean(
+            this.activeVehicle.isHelicopter ||
+              this.activeVehicle.aircraftRole === 'heli_transport' ||
+              this.activeVehicle.aircraftRole === 'heli_attack'
+          );
+          if (isHeliNow && avoidOn) {
+            this.activeVehicle.heliHoverAlt = this.activeVehicle.pos.y;
+          }
           sound.playRadioBeep?.(true);
           if (this.onAwardXp) {
             this.onAwardXp(
               0,
-              avoidOn
+              isHeliNow
+                ? avoidOn
+                  ? '🚁 HELI ASSIST [G]: EASY MODE ON ([WASD] HORIZONTAL FLY • [SPACE/Q] CLIMB • [CTRL/Z] LAND • DECOUPLED MOUSE GUN AIM!)'
+                  : '🔥 HELI SIM [G]: HARD CYCLIC MODE ([W/S] ROTOR COLLECTIVE • MOUSE CYCLIC TILT • [A/D] TAIL PEDALS • REAL CRASH!)'
+                : avoidOn
                 ? '🛡️ FLIGHT ASSIST [G]: AUTO ON (UPRIGHT BANK LIMITER + TERRAIN PULL-UP — EASY FLIGHT)'
                 : '🔥 FLIGHT ASSIST [G]: OFF (ADVANCED AEROBATICS — 360° BARREL ROLLS, LOOPS, UPSIDE-DOWN FLIGHT & REALISTIC CRASH!)'
             );
@@ -831,8 +843,15 @@ export class PlayerController {
         }
       }
       if (!hasAnyModifier(e) && e.code === 'KeyQ' && !e.repeat) {
-        if (this.activeVehicle && this.activeVehicle.isAircraft && this.activeVehicle.aircraftRole === 'gunship') {
-          // In AC-130 Gunship, [Q] = Climb UP & [Z] = Descend DOWN (Weapons use [1], [2], [3])!
+        if (
+          this.activeVehicle &&
+          this.activeVehicle.isAircraft &&
+          (this.activeVehicle.aircraftRole === 'gunship' ||
+            this.activeVehicle.isHelicopter ||
+            this.activeVehicle.aircraftRole === 'heli_transport' ||
+            this.activeVehicle.aircraftRole === 'heli_attack')
+        ) {
+          // In AC-130 Gunship & Helicopters, [Q] = Collective Climb UP & [Z] = Descend DOWN (Weapons use [1], [2], [3])!
         } else if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
           const maxSlots =
             this.activeVehicle.isAircraft ||
@@ -1828,7 +1847,20 @@ export class PlayerController {
     }
 
     const activeReviveUnit = nearDownedRemoteAlly || nearDownedBot;
-    if (activeReviveUnit && this.keys['KeyF'] && (this.bandages || 0) > 0) {
+    const riverSurfForRev = this.world?.mapDef?.dimensions?.riverWaterY ?? -0.85;
+    const targetSubmerged = Boolean(
+      activeReviveUnit &&
+        this.world?.era !== 'jurassic' &&
+        (this.inDeepWater || activeReviveUnit.isSwimming || (activeReviveUnit.pos?.y ?? 0) < riverSurfForRev - 0.9)
+    );
+    if (activeReviveUnit && this.keys['KeyF'] && targetSubmerged) {
+      this.reviveProgress = 0;
+      const nowRevWarn = performance.now();
+      if (nowRevWarn - (this._lastWaterReviveWarnMs || 0) > 1800 && this.onAwardXp) {
+        this._lastWaterReviveWarnMs = nowRevWarn;
+        this.onAwardXp(0, '🌊 CANNOT REVIVE SUBMERGED CASUALTIES IN DEEP WATER — DRAG [E] TO DRY BANK FIRST!');
+      }
+    } else if (activeReviveUnit && this.keys['KeyF'] && (this.bandages || 0) > 0) {
       this._fUsedForFriendlyAction = true;
       this._pendingEnemyLootPack = null;
       this.keyFHoldTime = 0;
@@ -2340,30 +2372,114 @@ export class PlayerController {
     }
     this.horizSpeed = Math.hypot(this.vel.x, this.vel.z);
 
-    if (this.parachuting) {
-      // Parachute canopy drag caps descent speed to a smooth 5.5 m/s glide
-      this.vel.y = Math.max(this.vel.y - 8.5 * dt, -5.5);
-    } else {
-      // High-speed freefall when parachute is cut or not yet deployed
-      const freefallAccel = this.parachuteCut ? 32.0 : 24.0;
-      const maxTerminalVel = this.parachuteCut ? -58.0 : -46.0;
-      this.vel.y = Math.max(maxTerminalVel, this.vel.y - freefallAccel * dt);
-      // Manual [SPACE] parachute deploy when falling > 6.5m AGL (never auto-deploys so cutting your
-      // parachute or failing to deploy causes high-speed freefall and lethal fall damage!)
-      const gHCheck = this.world ? this.world.getGroundHeightAt(this.pos.x, this.pos.z) : 0;
-      const agl = this.pos.y - gHCheck;
-      if (
-        !this.isGrounded &&
-        this.keys['Space'] &&
-        agl > 6.5 &&
-        this.vel.y < -5.5 &&
-        typeof this.activateParachuteEject === 'function'
-      ) {
-        this.parachuteCut = false;
-        this.activateParachuteEject(this.pos, true);
-      }
+    // Climbable Steel Tower / Watchtower / Skyscraper Express-Shaft Ladder Physics (`world.climbableLadders`)
+    if ((this._ladderDetachTimer || 0) > 0) {
+      this._ladderDetachTimer = Math.max(0, this._ladderDetachTimer - dt);
     }
-    this.moveWithVoxelCollision(dt);
+    const activeLadder =
+      !modalOpenNow && !this.activeVehicle && !this.dead && !this.downed && !(this._ladderDetachTimer > 0)
+        ? this.findActiveClimbableLadder()
+        : null;
+
+    if (activeLadder) {
+      const toLadX = activeLadder.x - this.pos.x;
+      const toLadZ = activeLadder.z - this.pos.z;
+      const lookAwayJump =
+        Boolean(this.keys['Space']) &&
+        this.pos.y > activeLadder.minY + 1.5 &&
+        forward.x * toLadX + forward.z * toLadZ < -0.18;
+
+      if (lookAwayJump) {
+        this.onLadder = false;
+        this._ladderDetachTimer = 0.35;
+        this.vel.set(forward.x * 5.2, 6.2, forward.z * 5.2);
+        this.isGrounded = false;
+      } else {
+        this.onLadder = true;
+        this.parachuting = false;
+        this.parachuteCut = false;
+        this.prone = false;
+        const wantUp =
+          (Boolean(this.keys['KeyW']) && (this.pitch || 0) >= -0.55) ||
+          Boolean(this.keys['Space']);
+        const wantDown =
+          Boolean(this.keys['KeyS']) ||
+          Boolean(this.keys['ControlLeft']) ||
+          Boolean(this.keys['ControlRight']) ||
+          (Boolean(this.keys['KeyW']) && (this.pitch || 0) < -0.55);
+        const climbVelY = wantUp ? 6.8 : wantDown ? -7.2 : 0;
+
+        this.pos.x = THREE.MathUtils.lerp(this.pos.x, activeLadder.x, Math.min(1, dt * 10.0));
+        this.pos.z = THREE.MathUtils.lerp(this.pos.z, activeLadder.z, Math.min(1, dt * 10.0));
+        this.pos.y = THREE.MathUtils.clamp(
+          this.pos.y + climbVelY * dt,
+          activeLadder.minY,
+          activeLadder.maxY + 0.12
+        );
+        this.vel.set(0, 0, 0);
+        this.isGrounded = true;
+
+        if (wantUp && this.pos.y >= activeLadder.topExitY - 0.06) {
+          this.pos.y = activeLadder.topExitY + 0.04;
+          this.pos.x = activeLadder.x + (activeLadder.exitDirX || 0) * 1.15;
+          this.pos.z = activeLadder.z + (activeLadder.exitDirZ || -1) * 1.15;
+          this.onLadder = false;
+          this._ladderDetachTimer = 0.22;
+        } else if (wantDown && this.pos.y <= activeLadder.minY + 0.04) {
+          this.pos.y = activeLadder.minY;
+          this.onLadder = false;
+        }
+      }
+    } else {
+      this.onLadder = false;
+    }
+
+    if (!this.onLadder) {
+      if (this.parachuting) {
+        // Parachute canopy drag caps descent speed to a smooth 5.5 m/s glide
+        this.vel.y = Math.max(this.vel.y - 8.5 * dt, -5.5);
+      } else {
+        // High-speed freefall when parachute is cut or not yet deployed
+        const freefallAccel = this.parachuteCut ? 32.0 : 24.0;
+        const maxTerminalVel = this.parachuteCut ? -58.0 : -46.0;
+        this.vel.y = Math.max(maxTerminalVel, this.vel.y - freefallAccel * dt);
+        // Manual [SPACE] parachute deploy when falling > 6.5m AGL (never auto-deploys so cutting your
+        // parachute or failing to deploy causes high-speed freefall and lethal fall damage!)
+        const gHCheck = this.world ? this.world.getGroundHeightAt(this.pos.x, this.pos.z) : 0;
+        const agl = this.pos.y - gHCheck;
+        if (
+          !this.isGrounded &&
+          this.keys['Space'] &&
+          agl > 6.5 &&
+          this.vel.y < -5.5 &&
+          typeof this.activateParachuteEject === 'function'
+        ) {
+          this.parachuteCut = false;
+          this.activateParachuteEject(this.pos, true);
+        }
+      }
+      this.moveWithVoxelCollision(dt);
+    }
+
+    // Buoyant River Surface Swimming (`riverWaterY = -0.85m`):
+    // Prevents infantry from walking along the `-3.75m` riverbed underwater (`eyeHeight +1.65m` stays `+0.47m` above water!).
+    const riverWaterY = this.world?.mapDef?.dimensions?.riverWaterY ?? -0.85;
+    if (!this.activeVehicle && !this.parachuting && this.world?.era !== 'jurassic' && this.pos.y < riverWaterY - 0.95) {
+      this.inDeepWater = true;
+      const swimFloorY = riverWaterY - 1.18;
+      if (this.pos.y < swimFloorY) {
+        this.pos.y = THREE.MathUtils.lerp(this.pos.y, swimFloorY, Math.min(1, dt * 14.0));
+        if (swimFloorY - this.pos.y < 0.08) this.pos.y = swimFloorY;
+      }
+      if (this.vel.y < 0) this.vel.y = 0;
+      this.isGrounded = true;
+      this.prone = false;
+      this.crouching = false;
+      this.vel.x *= Math.pow(0.45, dt);
+      this.vel.z *= Math.pow(0.45, dt);
+    } else {
+      this.inDeepWater = false;
+    }
 
     if (typeof this.updateStingerLockOn === 'function') {
       this.updateStingerLockOn(dt);
@@ -2552,6 +2668,8 @@ export class PlayerController {
       const isPistol =
         cur.def.slot === 'secondary' ||
         cur.def.id === 'mp443' ||
+        cur.def.id === 'm9_beretta' ||
+        cur.def.id === 'five_seven' ||
         cur.def.id === 'usp45' ||
         cur.def.id === 'g18' ||
         cur.def.id === 'deagle';
@@ -2576,31 +2694,23 @@ export class PlayerController {
           activeOptic === 'elcan4x' ||
           activeOptic === 'prism2x' ||
           activeOptic === 'holo3x');
-      const isHolo = !isCantedActive && (activeOptic === 'holo' || activeOptic === 'uh1');
-      const isKobra =
-        !isCantedActive &&
-        (activeOptic === 'kobra' || activeOptic === 'okp7' || activeOptic === 'rmr');
+      // Exact mathematical bore-sight alignment with `weapon-model.js`:
+      // - Iron sights (`!activeOptic`): `frontSightPin` & `rearDot` sit at `y = +0.058` (`isPistol: +0.050`).
+      // - All 3D Reflex / Holo / Prism / ACOG optics (`opticSightGroup`): reticle sits at `y = +0.082` (`isPistol: +0.064`).
+      // - Full-screen 2D Scopes (`isSniper8x`): lower receiver (`-0.118`) clears the 2D scope reticle.
       const sightCenterY = isLauncher && (isBareIronSights || activeOptic === 'rpgSight')
         ? -0.108
         : isBareIronSights
         ? isPistol
-          ? -0.052
-          : -0.060
+          ? -0.050
+          : -0.058
         : isCantedActive
         ? -0.068
         : isSniper8x
         ? -0.118
-        : isAcog
-        ? isPistol
-          ? -0.072
-          : -0.076
-        : isHolo || isKobra
-        ? isPistol
-          ? -0.073
-          : -0.082
         : isPistol
-        ? -0.076
-        : -0.085;
+        ? -0.064
+        : -0.082;
       const baseAdsZ = isLauncher
         ? -0.22
         : isBareIronSights
@@ -3012,9 +3122,8 @@ export class PlayerController {
           if (biteH) biteH.rotation.x = 0;
         }
         if (packBulletMesh) packBulletMesh.visible = false;
-        const adsPitchTilt = isBareIronSights
-          ? 0
-          : (isPistol ? -0.012 : -0.008) * this.adsAmount;
+        // Zero pitch tilt in ADS so front sight post, rail & optic reticle stay 100% collinear with camera bore (0, 0)!
+        const adsPitchTilt = 0;
         const sprRotX = sprBlend * (-0.22 + Math.sin(this.walkBobPhase) * 0.045);
         const sprRotY = sprBlend * (0.48 + Math.cos(this.walkBobPhase * 0.5) * 0.045);
         const sprRotZ = sprBlend * (0.18 + Math.sin(this.walkBobPhase * 0.5) * 0.035);
@@ -3651,10 +3760,73 @@ export class PlayerController {
       : this.world.voxels.has(this.world.key(gx, gy, gz));
   }
 
+  findActiveClimbableLadder() {
+    const ladders = this.world?.climbableLadders;
+    if (!Array.isArray(ladders) || ladders.length === 0) return null;
+    const px = this.pos.x;
+    const py = this.pos.y;
+    const pz = this.pos.z;
+    const wantDescendFromTop = Boolean(
+      this.keys['KeyS'] || this.keys['ControlLeft'] || this.keys['ControlRight']
+    );
+    const wantClimb =
+      Boolean(this.keys['KeyW']) ||
+      Boolean(this.keys['Space']) ||
+      wantDescendFromTop ||
+      Boolean(this.onLadder);
+
+    if (!wantClimb) return null;
+
+    for (let i = 0; i < ladders.length; i++) {
+      const lad = ladders[i];
+      if (lad.buildingId !== null && lad.buildingId !== undefined) {
+        const bld = this.world.buildings?.[lad.buildingId];
+        if (bld?.collapsed) continue;
+      }
+      const dx = px - lad.x;
+      const dz = pz - lad.z;
+      const dist = Math.hypot(dx, dz);
+      const rad = this.onLadder ? (lad.radius || 1.0) + 0.35 : lad.radius || 1.0;
+      if (dist <= rad && py >= lad.minY - 0.5 && py <= lad.maxY - 0.02) {
+        return lad;
+      }
+      if (wantDescendFromTop && dist <= rad + 0.4 && Math.abs(py - lad.topExitY) <= 0.45) {
+        return lad;
+      }
+    }
+    return null;
+  }
+
   getSupportSurfaceY(x, y, z, r) {
     const world = this.world;
     const hasGetVoxel = typeof world.getVoxel === 'function';
     let bestY = world.getGroundHeightAt(x, z);
+
+    const platforms = world.elevatedPlatforms;
+    if (Array.isArray(platforms) && platforms.length > 0) {
+      const climbingDown = Boolean(
+        this.onLadder && (this.keys['KeyS'] || this.keys['ControlLeft'] || this.keys['ControlRight'])
+      );
+      for (let i = 0; i < platforms.length; i++) {
+        const p = platforms[i];
+        if (x + r > p.minX && x - r < p.maxX && z + r > p.minZ && z - r < p.maxZ) {
+          if (
+            climbingDown &&
+            typeof p.holeMinX === 'number' &&
+            x >= p.holeMinX - 0.3 &&
+            x <= p.holeMaxX + 0.3 &&
+            z >= p.holeMinZ - 0.3 &&
+            z <= p.holeMaxZ + 0.3
+          ) {
+            continue;
+          }
+          if (p.topY <= y + 0.42 && p.topY > bestY) {
+            bestY = p.topY;
+          }
+        }
+      }
+    }
+
     const minCoord = world.worldToGrid(x - r, bestY - 0.5, z - r);
     const maxCoord = world.worldToGrid(x + r, y + 0.35, z + r);
     for (let gx = minCoord.gx; gx <= maxCoord.gx; gx++) {

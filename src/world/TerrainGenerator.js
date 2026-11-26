@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../textures.js?v=127';
-import { TERRAIN } from '../config.js?v=127';
-import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=127';
+import { TEXTURES } from '../textures.js?v=132';
+import { TERRAIN } from '../config.js?v=132';
+import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=132';
 
 const VOXEL_SIZE = 1.25;
 
@@ -454,6 +454,8 @@ export const TerrainGenerator = {
 
   buildEnvironment() {
     this.staticStructureBoxes = [];
+    this.climbableLadders = [];
+    this.elevatedPlatforms = [];
     const era = this.era || (this.mapDef && this.mapDef.era) || 'modern';
     const isModern = era === 'modern';
     const isMedieval = era === 'medieval';
@@ -1418,6 +1420,14 @@ export const TerrainGenerator = {
       if (mapDef.radarTowers) {
         for (const [wx, wz] of mapDef.radarTowers) {
           this.buildRadarTower(wx, wz);
+        }
+      }
+      if (mapDef.powerTowers && typeof this.buildPowerTower === 'function') {
+        for (const [wx, wz] of mapDef.powerTowers) {
+          this.buildPowerTower(wx, wz);
+        }
+        if (typeof this.buildPowerTransmissionLines === 'function') {
+          this.buildPowerTransmissionLines(mapDef.powerTowers);
         }
       }
       if (mapDef.ammoCrates) {

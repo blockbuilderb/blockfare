@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=127';
-import { BOT } from '../config.js?v=127';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=127';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=127';
-import { events } from '../events.js?v=127';
+import { sound } from '../audio.js?v=132';
+import { BOT } from '../config.js?v=132';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=132';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=132';
+import { events } from '../events.js?v=132';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -351,6 +351,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
   let camFwdY = 0;
   let camFwdZ = player ? -Math.cos(player.yaw || 0) : -1;
   let hasCam3D = Boolean(player);
+  let hasCamFrustum = false;
   if (player?.camera?.matrixWorld?.elements) {
     const me = player.camera.matrixWorld.elements;
     camX = me[12];
@@ -367,6 +368,18 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     } else {
       hasCam3D = false;
     }
+    if (player.camera.projectionMatrix && player.camera.matrixWorldInverse) {
+      if (!this._botProjScreenMat) this._botProjScreenMat = new THREE.Matrix4();
+      if (!this._botFrustum) this._botFrustum = new THREE.Frustum();
+      if (!this._botCullSphere) this._botCullSphere = new THREE.Sphere(new THREE.Vector3(), 3.4);
+      player.camera.matrixWorldInverse.copy(player.camera.matrixWorld).invert();
+      this._botProjScreenMat.multiplyMatrices(
+        player.camera.projectionMatrix,
+        player.camera.matrixWorldInverse
+      );
+      this._botFrustum.setFromProjectionMatrix(this._botProjScreenMat);
+      hasCamFrustum = true;
+    }
   }
   const activeCamFov = player?.camera?.fov || 75;
   const opticZoomMag = THREE.MathUtils.clamp(75 / Math.max(8, activeCamFov), 1.0, 9.5);
@@ -382,8 +395,8 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
   );
   const fullGaitDistSq = fullGaitDist * fullGaitDist;
   const halfRateGaitDistSq = Math.min(900, (ultraScale ? 38 : 48) * opticZoomMag) ** 2;
-  // Sub-pixel 3D weapon assembly LOD (~26 child meshes per gun) & micro-gear LOD: hide beyond ~75m * zoomMag!
-  const gunLodDistSq = Math.min(1800, (playerInAircraft ? 180 : 85) * opticZoomMag) ** 2;
+  // Sub-pixel 3D weapon assembly LOD (~26 child meshes per gun) & micro-gear LOD: hide beyond ~52m * zoomMag on foot (scales up automatically in ADS/scopes!)
+  const gunLodDistSq = Math.min(1800, (playerInAircraft ? 165 : 52) * opticZoomMag) ** 2;
   // Far limb/boot LOD: keep full 3D limbs visible up to 1,850m+ from aircraft optics so ground squads NEVER turn into tiny vanishing specks!
   const farLimbLodDistSq = Math.min(
     2600,
@@ -603,13 +616,18 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     const dzCam = bot.pos.z - camZ;
     const distSqCam = dxCam * dxCam + dyCam * dyCam + dzCam * dzCam;
     const dot3DUnnorm = dxCam * camFwdX + dyCam * camFwdY + dzCam * camFwdZ;
-    // True 3D behind-camera check — extra wide tolerance in banked aircraft/AC-130 views so ground infantry never flicker at screen edges!
+    // True 3D camera frustum sphere check (with generous pad for banked aircraft/sniper views)
     const behindCosSq = playerInAircraft ? 0.52 : 0.16;
-    const offFrustum =
+    let offFrustum =
       hasCam3D &&
       distSqCam > (playerInAircraft ? 45 * 45 : 22 * 22) &&
       dot3DUnnorm < 0 &&
       dot3DUnnorm * dot3DUnnorm > behindCosSq * distSqCam;
+    if (!offFrustum && hasCamFrustum && !playerInAircraft && opticZoomMag <= 1.5 && distSqCam > 26 * 26) {
+      this._botCullSphere.center.set(bot.pos.x, bot.pos.y + 1.0, bot.pos.z);
+      this._botCullSphere.radius = 3.8;
+      offFrustum = !this._botFrustum.intersectsSphere(this._botCullSphere);
+    }
     const within3DRender = distSqCam <= maxRenderDistSq;
 
     // Apply 3D visibility & frustum matrix flag BEFORE early-return states (`downed`, `updateMedicRescue`, `trebuchet`)
@@ -910,10 +928,15 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.targetFlagIndex = garrisonFlagIdx;
         const gFlag = this.world.flags[garrisonFlagIdx];
         if (gFlag) {
-          // Garrison Defenders form a disciplined Battle Line / Perimeter Array outside internal keeps!
-          const rawX = gFlag.pos.x + sp.clusterOffX;
-          const rawZ = gFlag.pos.z + sp.clusterOffZ;
-          const safeGoal = this.world.pushOutOfBuildingFootprint(rawX, rawZ, 2.4);
+          // Garrison Defenders walk active security patrol circuits around the base perimeter instead of standing frozen!
+          const seedNum = typeof bot.patrolSeed === 'number' ? bot.patrolSeed : ((bot.name || 'B').charCodeAt(0) % 8) * 0.78;
+          bot._garrisonPatrolClock = (bot._garrisonPatrolClock || seedNum) + 0.16;
+          const legIdx = Math.floor(bot._garrisonPatrolClock) % 4;
+          const patrolAng = seedNum + legIdx * (Math.PI * 0.5);
+          const patrolRad = 11.5 + (seedNum % 2) * 5.5;
+          const rawX = gFlag.pos.x + sp.clusterOffX * 0.45 + Math.cos(patrolAng) * patrolRad;
+          const rawZ = gFlag.pos.z + sp.clusterOffZ * 0.45 + Math.sin(patrolAng) * patrolRad;
+          const safeGoal = this.world.pushOutOfBuildingFootprint(rawX, rawZ, 2.6);
           bot.waypointOffset.set(safeGoal.x - gFlag.pos.x, 0, safeGoal.z - gFlag.pos.z);
         }
       } else if (
@@ -1212,6 +1235,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     }
     const shouldUseRpg = Boolean(
       nearestArmor &&
+        !bot.isSwimming &&
         (nearestArmor.isAircraft ||
           (hasGroundRpgAmmo &&
             nearestArmorDistSq < BOT.ENGAGE_RANGE_RPG_TOGGLE * BOT.ENGAGE_RANGE_RPG_TOGGLE))
@@ -1494,11 +1518,30 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       }
     }
 
-    // Route across the nearest of the 3 grand 92m-wide river bridges (-400, 0, +400) when crossing the river
-    if (!seekingVehicle && Math.sign(bot.pos.x) !== Math.sign(goal.x) && Math.abs(bot.pos.x) < 34) {
-      const nearestBridgeZ = Math.abs(bot.pos.z) < 200 ? 0 : bot.pos.z > 0 ? 400 : -400;
-      goal.x = Math.sign(goal.x) * 4;
-      goal.z = nearestBridgeZ;
+    // Route across the nearest of the 3 grand river bridges (z = -400, 0, +400) whenever crossing the meandering river!
+    // Uses true `getRiverCenterX(z)` (`±43m` meander) so soldiers walk over bridge decks instead of wading underwater!
+    if (!seekingVehicle && this.world.era !== 'jurassic' && typeof this.world.getRiverCenterX === 'function') {
+      const botRiverCx = this.world.getRiverCenterX(bot.pos.z);
+      const goalRiverCx = this.world.getRiverCenterX(goal.z);
+      const botRelX = bot.pos.x - botRiverCx;
+      const goalRelX = goal.x - goalRiverCx;
+      const crossingRiver = botRelX * goalRelX < 0 || Math.abs(botRelX) < 26;
+      if (crossingRiver && Math.abs(botRelX - goalRelX) > 12) {
+        const nearestBridgeZ = Math.abs(bot.pos.z) < 210 ? 0 : bot.pos.z > 0 ? 400 : -400;
+        const bridgeHalfW = nearestBridgeZ === 0 ? 14.5 : 6.2;
+        const bridgeRiverCx = this.world.getRiverCenterX(nearestBridgeZ);
+        if (Math.abs(bot.pos.z - nearestBridgeZ) > bridgeHalfW) {
+          // Step 1: Move along the dry riverbank to the bridge entrance ramp first
+          const dryBankSide = botRelX >= 0 ? 1 : -1;
+          goal.x = bridgeRiverCx + dryBankSide * 34;
+          goal.z = nearestBridgeZ;
+        } else if (botRelX * goalRelX < 0 || Math.abs(botRelX) < 30) {
+          // Step 2: March straight across the bridge deck onto the far bank
+          const farBankSide = goalRelX >= 0 ? 1 : -1;
+          goal.x = bridgeRiverCx + farBankSide * 36;
+          goal.z = THREE.MathUtils.clamp(bot.pos.z, nearestBridgeZ - bridgeHalfW * 0.7, nearestBridgeZ + bridgeHalfW * 0.7);
+        }
+      }
     }
 
     // ─── MEDIEVAL CASTLE GATEHOUSE ARCHWAY PATHFINDING ────────────────────────────
@@ -1818,9 +1861,37 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         desiredDir.copy(toGoal);
         // Double-time march sprint when >135m out of combat from objective across the 7,600m valley!
         desiredSpeed = distToGoal > 135 ? BOT.SPEED_SPRINT * 1.18 : BOT.SPEED_PATROL;
+      } else if ((bot.isGarrisonDefender || bot.inFriendlyForwardBase) && !isFollowOrHold && targetFlag) {
+        // Active Base Perimeter Sentry Patrol: soldiers stationed in a friendly base walk perimeter beats
+        // between watchpoints (`5.2s` walk <-> `2.2s` overwatch scan) instead of standing like statues!
+        bot._baseSentryCycle = ((bot._baseSentryCycle ?? ((bot.name || 'A').charCodeAt(0) % 7)) + dt) % 7.4;
+        if (bot._baseSentryCycle < 5.2) {
+          if (!bot._sentryGoal || bot.pos.distanceToSquared(bot._sentryGoal) < 5.5) {
+            const nextAng = ((bot._sentryLeg || 0) * 1.95 + ((bot.name || 'A').charCodeAt(0) * 0.47)) % (Math.PI * 2);
+            bot._sentryLeg = (bot._sentryLeg || 0) + 1;
+            const rad = 9.5 + (bot._sentryLeg % 3) * 4.8;
+            const candPt = this.world.pushOutOfBuildingFootprint(
+              targetFlag.pos.x + Math.cos(nextAng) * rad,
+              targetFlag.pos.z + Math.sin(nextAng) * rad,
+              2.6
+            );
+            if (!bot._sentryGoal) bot._sentryGoal = new THREE.Vector3();
+            bot._sentryGoal.set(candPt.x, bot.pos.y, candPt.z);
+          }
+          const sdx = bot._sentryGoal.x - bot.pos.x;
+          const sdz = bot._sentryGoal.z - bot.pos.z;
+          const sLen = Math.hypot(sdx, sdz) || 1;
+          bot.isCrouching = false;
+          bot.leanDir = 0;
+          desiredDir.set(sdx / sLen, 0, sdz / sLen);
+          desiredSpeed = BOT.SPEED_PATROL * 0.72;
+        } else {
+          bot.isCrouching = bot.role !== 'MEDIC';
+          bot.leanDir = 0;
+          desiredSpeed = 0;
+        }
       } else {
         // Hold cohesive Squad overwatch formation using active spacing mode (STAY_CLOSE vs FAN_OUT)!
-        // Garrison defenders crouch behind prepared forward-base cover while scanning the enemy approach!
         bot.isCrouching =
           (isFollowOrHold || bot.isGarrisonDefender || bot.inFriendlyForwardBase) &&
           bot.role !== 'MEDIC';
@@ -1912,34 +1983,79 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
           );
 
         if (centerBlockedNear || centerBlockedFar) {
-          const sign = bot.avoidanceSign || 1;
-          const fanOffsets = [
-            0.52 * sign,
-            -0.52 * sign,
-            1.05 * sign,
-            -1.05 * sign,
-            1.58 * sign,
-            -1.58 * sign
-          ];
-          let chosenAngle = baseAngle + 1.55 * sign;
-          for (let fIdx = 0; fIdx < fanOffsets.length; fIdx++) {
-            const testAngle = baseAngle + fanOffsets[fIdx];
-            const nearClear = !this.isPointBlocked(
-              bot.pos.x + Math.sin(testAngle) * 1.85,
-              bot.pos.y,
-              bot.pos.z + Math.cos(testAngle) * 1.85,
-              0.15
-            );
-            if (nearClear) {
-              chosenAngle = testAngle;
-              if (bot.avoidanceTimer <= 0) {
-                bot.avoidanceSign = Math.sign(fanOffsets[fIdx]) || 1;
-                bot.avoidanceTimer = 1.4;
+          // 1) Smart Building AABB Exterior Corner Detour: when a wide building blocks the path toward `goal`,
+          //    route directly toward the closest clear exterior corner (+2.8m margin) so bots never oscillate behind walls!
+          let cornerAngle = null;
+          if (Array.isArray(this.world.buildings)) {
+            const probeX = bot.pos.x + Math.sin(baseAngle) * 2.6;
+            const probeZ = bot.pos.z + Math.cos(baseAngle) * 2.6;
+            for (let bi = 0; bi < this.world.buildings.length; bi++) {
+              const bld = this.world.buildings[bi];
+              if (
+                probeX >= bld.minWx - 1.4 &&
+                probeX <= bld.maxWx + 1.4 &&
+                probeZ >= bld.minWz - 1.4 &&
+                probeZ <= bld.maxWz + 1.4
+              ) {
+                const pad = 2.85;
+                const corners = [
+                  [bld.minWx - pad, bld.minWz - pad],
+                  [bld.maxWx + pad, bld.minWz - pad],
+                  [bld.minWx - pad, bld.maxWz + pad],
+                  [bld.maxWx + pad, bld.maxWz + pad]
+                ];
+                let bestCornerCost = Infinity;
+                for (let ci = 0; ci < 4; ci++) {
+                  const [cx, cz] = corners[ci];
+                  const dBot = Math.hypot(cx - bot.pos.x, cz - bot.pos.z);
+                  if (dBot < 1.2) continue;
+                  const dGoal = Math.hypot(goal.x - cx, goal.z - cz);
+                  const cost = dBot + dGoal * 0.92;
+                  if (cost < bestCornerCost && !this.isPointBlocked(cx, bot.pos.y, cz, 0.15)) {
+                    bestCornerCost = cost;
+                    cornerAngle = Math.atan2(cx - bot.pos.x, cz - bot.pos.z);
+                  }
+                }
+                break;
               }
-              break;
             }
           }
-          bot._cachedSteerAngle = chosenAngle;
+
+          if (typeof cornerAngle === 'number') {
+            bot._cachedSteerAngle = cornerAngle;
+            bot.avoidanceTimer = Math.max(bot.avoidanceTimer || 0, 1.1);
+          } else {
+            const sign = bot.avoidanceSign || 1;
+            const fanOffsets = [
+              0.52 * sign,
+              -0.52 * sign,
+              1.05 * sign,
+              -1.05 * sign,
+              1.58 * sign,
+              -1.58 * sign,
+              2.15 * sign,
+              -2.15 * sign
+            ];
+            let chosenAngle = baseAngle + 1.58 * sign;
+            for (let fIdx = 0; fIdx < fanOffsets.length; fIdx++) {
+              const testAngle = baseAngle + fanOffsets[fIdx];
+              const nearClear = !this.isPointBlocked(
+                bot.pos.x + Math.sin(testAngle) * 2.1,
+                bot.pos.y,
+                bot.pos.z + Math.cos(testAngle) * 2.1,
+                0.15
+              );
+              if (nearClear) {
+                chosenAngle = testAngle;
+                if (bot.avoidanceTimer <= 0) {
+                  bot.avoidanceSign = Math.sign(fanOffsets[fIdx]) || 1;
+                  bot.avoidanceTimer = 1.5;
+                }
+                break;
+              }
+            }
+            bot._cachedSteerAngle = chosenAngle;
+          }
         } else {
           bot._cachedSteerAngle = null;
         }
@@ -2113,13 +2229,13 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       }
     }
 
-    // Anti-Stuck Progress Watchdog: ensures ZERO bots remain trapped behind walls or inside geometry
+    // Anti-Stuck Progress Watchdog: ensures ZERO bots ever remain trapped behind buildings or walls
     if (!bot.lastProgressPos) {
       bot.lastProgressPos = bot.pos.clone();
     }
-    if (desiredSpeed > 1.8 && !bot.rescueTarget && (bot.postReviveTimer || 0) <= 0) {
+    if (desiredSpeed > 0.85 && !bot.rescueTarget && (bot.postReviveTimer || 0) <= 0) {
       bot.stuckTimer = (bot.stuckTimer || 0) + dt;
-      if (bot.stuckTimer >= 0.7) {
+      if (bot.stuckTimer >= 0.55) {
         const movedDist = Math.hypot(
           bot.pos.x - bot.lastProgressPos.x,
           bot.pos.z - bot.lastProgressPos.z
@@ -2127,31 +2243,34 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.lastProgressPos.copy(bot.pos);
         bot.stuckTimer = 0;
 
-        if (movedDist < 0.85) {
+        if (movedDist < 0.7) {
           bot.stuckCount = (bot.stuckCount || 0) + 1;
           bot.avoidanceSign = -(bot.avoidanceSign || 1);
           bot.avoidanceTimer = 1.6;
-          if (bot.stuckCount >= 3) {
-            // Smoothly sidestep 2.2m around wall/corner without long-distance teleporting!
+          if (bot.stuckCount >= 2) {
+            const pushedOut = this.world.pushOutOfBuildingFootprint
+              ? this.world.pushOutOfBuildingFootprint(bot.pos.x, bot.pos.z, 2.8)
+              : { x: bot.pos.x, z: bot.pos.z };
             const perpSideX = -desiredDir.z * (bot.avoidanceSign || 1);
             const perpSideZ = desiredDir.x * (bot.avoidanceSign || 1);
-            const candX = bot.pos.x + desiredDir.x * 1.6 + perpSideX * 2.2;
-            const candZ = bot.pos.z + desiredDir.z * 1.6 + perpSideZ * 2.2;
+            const candX = pushedOut.x + perpSideX * 2.6 + desiredDir.x * 1.2;
+            const candZ = pushedOut.z + perpSideZ * 2.6 + desiredDir.z * 1.2;
             if (!this.isPointBlocked(candX, bot.pos.y, candZ)) {
               bot.pos.x = candX;
               bot.pos.z = candZ;
-            } else if (bot.stuckCount >= 6) {
+              bot.stuckCount = 0;
+            } else if (bot.stuckCount >= 4) {
               const safePos = this.world.findSafeSpawnPoint(
-                bot.pos.x + desiredDir.x * 3.2,
-                bot.pos.z + desiredDir.z * 3.2
+                pushedOut.x + perpSideX * 3.8,
+                pushedOut.z + perpSideZ * 3.8
               );
-              if (Math.hypot(safePos.x - bot.pos.x, safePos.z - bot.pos.z) <= 12.0) {
+              if (Math.hypot(safePos.x - bot.pos.x, safePos.z - bot.pos.z) <= 22.0) {
                 bot.pos.copy(safePos);
               }
+              bot.stuckCount = 0;
             }
             bot.velX = 0;
             bot.velZ = 0;
-            bot.stuckCount = 0;
           }
         } else {
           bot.stuckCount = 0;
@@ -2163,14 +2282,41 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       bot.lastProgressPos.copy(bot.pos);
     }
 
-    // Vertical Gravity & 3D Terrain Following
+    // Vertical Gravity, Bridge Voxel Deck Support & River Surface Buoyancy (no walking underwater!)
     bot.velY -= BOT.GRAVITY * dt;
     bot.pos.y += bot.velY * dt;
-    const groundY = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
+    let groundY = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
+    const riverWaterY = this.world.mapDef?.dimensions?.riverWaterY ?? -0.85;
+    if (this.world.era !== 'jurassic' && groundY < riverWaterY - 0.3 && this.world.voxels) {
+      // Check if soldier is crossing on top of a solid voxel bridge deck above the river
+      const gBridge = this.world.worldToGrid(bot.pos.x, Math.max(0.2, bot.pos.y - 0.3), bot.pos.z);
+      for (let bGy = gBridge.gy + 1; bGy >= -1; bGy--) {
+        const bVox = this.world.getVoxel ? this.world.getVoxel(gBridge.gx, bGy, gBridge.gz) : null;
+        if (bVox && !bVox.isProp) {
+          const deckTop = typeof bVox.maxY === 'number' ? bVox.maxY : (bGy + 0.5) * 1.25;
+          if (deckTop > riverWaterY + 0.2 && deckTop <= bot.pos.y + 1.6) {
+            groundY = Math.max(groundY, deckTop);
+            break;
+          }
+        }
+      }
+    }
     if (bot.pos.y <= groundY) {
       bot.pos.y = groundY;
       bot.velY = 0;
       bot.isGrounded = true;
+    }
+    // Buoyant River Surface Swimming: keep soldier head & chest ABOVE `riverWaterY` (`-0.85m`) instead of walking on the `-3.75m` riverbed!
+    if (this.world.era !== 'jurassic' && bot.pos.y < riverWaterY - 0.95) {
+      bot.isSwimming = true;
+      bot.pos.y = riverWaterY - 1.08;
+      bot.velY = 0;
+      bot.isGrounded = true;
+      bot.isCrouching = false;
+      bot.velX *= Math.pow(0.55, dt);
+      bot.velZ *= Math.pow(0.55, dt);
+    } else {
+      bot.isSwimming = false;
     }
 
     // =======================================================================
