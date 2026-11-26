@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=132';
-import { COMBAT, DEPLOYABLES } from '../config.js?v=132';
-import { events } from '../events.js?v=132';
+import { sound } from '../audio.js?v=133';
+import { COMBAT, DEPLOYABLES } from '../config.js?v=133';
+import { events } from '../events.js?v=133';
 import {
   COMMANDER_UAV_EVENTS,
   COMMANDER_AIRSTRIKE_EVENTS,
   COMMANDER_AIRSTRIKE_STATES,
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM
-} from '../core/StateMachines.js?v=132';
+} from '../core/StateMachines.js?v=133';
 
 function markShared(asset) {
   if (asset) {

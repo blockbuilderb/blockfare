@@ -4,7 +4,7 @@ import {
   createPowerTowerMesh,
   RADAR_TOWER_SPEC,
   POWER_TOWER_SPEC
-} from '../models/prop-models.js?v=132';
+} from '../models/prop-models.js?v=133';
 
 const VOXEL_SIZE = 1.25;
 const SPATIAL_MIN_X = -2048;

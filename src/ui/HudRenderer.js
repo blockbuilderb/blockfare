@@ -1,5 +1,5 @@
-import { UI, getEraRoles } from '../config.js?v=132';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=132';
+import { UI, getEraRoles } from '../config.js?v=133';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=133';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -184,6 +184,7 @@ export const HudRenderer = {
               ['Tap Q / RMB + E', '3D Tactical Ping (Tap Q) • Lean Left (Hold Q) / Lean Right (RMB + E)'],
               ['LMB / RMB / Shift', 'Fire Weapon / ADS Scope / Hold Breath (steadies sniper sway)'],
               ['[V] Key', 'Toggle Variable Scope Zoom (1x ⇄ 4x/6x/12x), Canted Red-Dot, or Weapon Inspect'],
+              ['[V] (When Downed)', 'Toggle Optional Forensic Death Cam, 3D Shot Trace & Killer Replay (OFF by default)'],
               ['[X] / [N] Keys', 'Cycle Scope Zeroing (100m–400m) / Toggle NVG or Thermal Scope Polarity (WHOT/BHOT)'],
               ['[R] / 2× [R] / [P]', 'Tactical Mag Swap / Emergency Speed-Drop Reload / Tarkov Bullet-by-Bullet Mag Pack']
             ]
@@ -771,6 +772,17 @@ export const HudRenderer = {
     }
 
     if (this.player.dead) {
+      this.updateDeathCamHud?.(dt);
+      // During Post-Death Over-The-Shoulder Killer Replay (`deathCamPostTimer > 0`),
+      // hide live infantry panels while keeping `#hud` open for `#death-cam-hud`!
+      const inPostDeathReplay = Boolean(
+        this.player.deathCamEnabled &&
+          this.player.deathCamPostTimer > 0 &&
+          this.player.lastDeathReport?.hasKillerOrigin
+      );
+      if (inPostDeathReplay && this.downedOverlayEl && !this.downedOverlayEl.classList.contains('hidden')) {
+        this.downedOverlayEl.classList.add('hidden');
+      }
       // Respawn timer countdown
       if (this.player.respawnTimer > 0) {
         this.player.respawnTimer -= dt;
@@ -858,10 +870,33 @@ export const HudRenderer = {
       }
     }
 
-    // Downed State Overlay
+    // Downed State Overlay & Optional Forensic Death Cam HUD
+    this.updateDeathCamHud?.(dt);
     if (this.player.downed) {
+      const dcActive = Boolean(
+        this.player.deathCamEnabled && this.player.lastDeathReport?.hasKillerOrigin
+      );
       if (this.downedOverlayEl.classList.contains('hidden')) {
         this.downedOverlayEl.classList.remove('hidden');
+      }
+      this.downedOverlayEl.classList.toggle('deathcam-active', dcActive);
+      const downedDcBtn = this.el('downed-deathcam-toggle-btn');
+      if (downedDcBtn) {
+        if (!downedDcBtn._deathCamBound) {
+          downedDcBtn._deathCamBound = true;
+          downedDcBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            this.player?.toggleDeathCamEnabled?.();
+            this.updateDeathCamHud?.(0);
+          });
+        }
+        downedDcBtn.classList.toggle('active', Boolean(this.player.deathCamEnabled));
+        this._setText(
+          downedDcBtn,
+          this.player.deathCamEnabled
+            ? '🎥 [V] OPTIONAL DEATH CAM: ON — SHOWING KILLER & 3D SHOT TRACE'
+            : '🎥 [V] OPTIONAL DEATH CAM: OFF (REALISTIC — PRESS [V] TO REVEAL HOW YOU DIED)'
+        );
       }
       if (!this.scopeOverlayEl.classList.contains('hidden')) {
         this.scopeOverlayEl.classList.add('hidden');
@@ -910,6 +945,7 @@ export const HudRenderer = {
       }
     } else if (this.downedOverlayEl && !this.downedOverlayEl.classList.contains('hidden')) {
       this.downedOverlayEl.classList.add('hidden');
+      this.downedOverlayEl.classList.remove('deathcam-active');
     }
 
     const tUS = Math.max(0, Math.floor(ticketsUS));
@@ -5520,6 +5556,111 @@ export const HudRenderer = {
         </div>`;
       })
       .join('');
+  },
+
+  updateDeathCamHud(dt = 0) {
+    const dcEl = this.el('death-cam-hud');
+    if (!dcEl || !this.player) return;
+
+    const report = this.player.lastDeathReport;
+    const isDownedDc = Boolean(this.player.downed && this.player.deathCamEnabled && report);
+    const isPostReplayDc = Boolean(
+      this.player.dead &&
+        this.player.deathCamEnabled &&
+        this.player.deathCamPostTimer > 0 &&
+        report?.hasKillerOrigin
+    );
+
+    if (!isDownedDc && !isPostReplayDc) {
+      if (!dcEl.classList.contains('hidden')) {
+        dcEl.classList.add('hidden');
+      }
+      this._lastDeathCamSig = '';
+      return;
+    }
+
+    if (dcEl.classList.contains('hidden')) {
+      dcEl.classList.remove('hidden');
+    }
+
+    const esc = (s) =>
+      String(s ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    const liveHp = Math.max(0, Math.round(report.killerLiveHp ?? report.killerHp ?? 0));
+    const liveMaxHp = Math.max(1, Math.round(report.killerLiveMaxHp ?? report.killerMaxHp ?? 100));
+    const hpPct = Math.min(100, Math.max(0, Math.round((liveHp / liveMaxHp) * 100)));
+    const postSec = isPostReplayDc ? Math.max(0, this.player.deathCamPostTimer).toFixed(1) : '';
+    const sig = `${isPostReplayDc ? 'POST' : 'DOWN'}|${report.timestamp}|${liveHp}|${postSec}`;
+    if (this._lastDeathCamSig === sig) return;
+    this._lastDeathCamSig = sig;
+
+    const phaseText = isPostReplayDc
+      ? `🎥 KILLER PERSPECTIVE REPLAY (${postSec}s)`
+      : '🎥 OPTIONAL FORENSIC DEATH CAM • 3D SHOT TRAJECTORY';
+    const hintText = isPostReplayDc
+      ? '[SPACE / ESC] SKIP TO DEPLOY • [V] TURN OFF'
+      : '[V] TURN OFF (REALISM)';
+
+    const teamCode = report.killerTeam === 'US' ? 'US' : report.killerTeam === 'RU' ? 'RU' : '';
+    const teamPillHtml = teamCode
+      ? `<span class="dc-team-pill ${teamCode === 'US' ? 'us' : 'ru'}">${teamCode}</span>`
+      : '';
+
+    const distText = report.hasKillerOrigin
+      ? `${Math.round(report.distanceM)}m • ${report.bearingDeg}° ${esc(report.bearingCompass)}`
+      : 'SELF / POINT-BLANK';
+    const elevVal = report.elevDeltaM || 0;
+    const elevText = !report.hasKillerOrigin
+      ? 'LOCAL IMPACT'
+      : elevVal >= 6
+      ? `▲ +${elevVal}m HIGH GROUND`
+      : elevVal <= -6
+      ? `▼ ${elevVal}m BELOW YOU`
+      : `● LEVEL (${elevVal >= 0 ? '+' : ''}${elevVal}m)`;
+
+    const hitBadge = `${report.isHeadshot ? '💀 ' : '🎯 '}${esc(report.hitZoneLabel)} (-${report.fatalDamage})`;
+
+    dcEl.innerHTML = `
+      <div class="dc-header-row">
+        <span class="dc-phase-badge">${phaseText}</span>
+        <span class="dc-controls-hint">${hintText}</span>
+      </div>
+      <div class="dc-killer-row">
+        <div class="dc-killer-id">
+          ${teamPillHtml}
+          <span>${esc(report.killerName)}</span>
+          <span class="dc-role-pill">${esc(report.killerRoleLabel)}</span>
+        </div>
+        <div class="dc-hp-box" title="Killer Remaining Health">
+          <div class="dc-hp-bar-bg">
+            <div class="dc-hp-bar-fill" style="width:${hpPct}%"></div>
+          </div>
+          <span class="dc-hp-txt">${liveHp}/${liveMaxHp} HP</span>
+        </div>
+      </div>
+      <div class="dc-grid">
+        <div class="dc-cell">
+          <div class="dc-cell-lbl">FATAL WEAPON</div>
+          <div class="dc-cell-val" title="${esc(report.weaponName)}">${esc(report.weaponName)}</div>
+        </div>
+        <div class="dc-cell">
+          <div class="dc-cell-lbl">HIT ANATOMY</div>
+          <div class="dc-cell-val ${report.isHeadshot ? 'hs' : ''}">${hitBadge}</div>
+        </div>
+        <div class="dc-cell">
+          <div class="dc-cell-lbl">RANGE &amp; BEARING</div>
+          <div class="dc-cell-val">${distText}</div>
+        </div>
+        <div class="dc-cell">
+          <div class="dc-cell-lbl">SHOOTER VANTAGE</div>
+          <div class="dc-cell-val ${elevVal >= 6 ? 'elev-high' : ''}">${elevText}</div>
+        </div>
+      </div>
+    `;
   }
 };
 

@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=132';
+import { sound } from '../audio.js?v=133';
 import {
   PLAYER,
   COMBAT,
@@ -8,10 +8,10 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=132';
-import { events } from '../events.js?v=132';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=132';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=132';
+} from '../config.js?v=133';
+import { events } from '../events.js?v=133';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=133';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=133';
 
 function markShared(asset) {
   if (asset) {
@@ -56,6 +56,62 @@ const _hitHeadColor = new THREE.Color(0xff2222);
 const _hitBodyColor = new THREE.Color(0xd63031);
 const _hitVehColor = new THREE.Color(0xf1c40f);
 const _hitGroundColor = new THREE.Color(0x6b7c59);
+
+// Shared Cached Optional Death Cam 3D Trajectory & Origin Beacon Assets
+const _deathTraceCoreGeo = markShared(new THREE.CylinderGeometry(0.045, 0.045, 1, 8, 1, true));
+const _deathTraceGlowGeo = markShared(new THREE.CylinderGeometry(0.16, 0.16, 1, 8, 1, true));
+const _deathOriginDiamondGeo = markShared(new THREE.OctahedronGeometry(0.55, 0));
+const _deathImpactRingGeo = markShared(new THREE.RingGeometry(0.22, 0.4, 16));
+const _deathTraceCoreMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xff3b30,
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false
+  })
+);
+const _deathTraceGlowMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xff7675,
+    transparent: true,
+    opacity: 0.28,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  })
+);
+const _deathOriginMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xff4757,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.95,
+    depthTest: false,
+    depthWrite: false
+  })
+);
+const _deathImpactMat = markShared(
+  new THREE.MeshBasicMaterial({
+    color: 0xf1c40f,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.9,
+    depthTest: false,
+    depthWrite: false
+  })
+);
+const _deathUpAxis = new THREE.Vector3(0, 1, 0);
+const _deathSegVec = new THREE.Vector3();
+const _deathMidPos = new THREE.Vector3();
+
+const _COMPASS_DIRS_8 = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+const _HIT_ZONE_LABELS = {
+  head: 'HEADSHOT (CRANIAL)',
+  thorax: 'THORAX (CHEST)',
+  leftArm: 'LEFT ARM',
+  rightArm: 'RIGHT ARM',
+  leftLeg: 'LEFT LEG',
+  rightLeg: 'RIGHT LEG'
+};
 
 const _fireCamQuat = new THREE.Quaternion();
 const _fireOrigin = new THREE.Vector3();
@@ -3448,6 +3504,17 @@ export const CombatMethods = {
         }
       }
 
+      // Build Forensic Death Report (used ONLY when Optional Death Cam is toggled ON)
+      this._buildDeathReport({
+        amount,
+        attackerName,
+        attackerTeam,
+        weaponName,
+        attackerPos: attackerPos || blastMeta?.origin || null,
+        isHeadshot: Boolean(isHeadshot || hitZone === 'head'),
+        hitZone
+      });
+
       // Enter Downed State (2.6s un-revivable blast aftermath if Beyond Rescue, else 120s Medic window)
       this.downed = true;
       this.downedTimer = this.beyondRescue ? 2.6 : PLAYER.DOWNED_TIMER;
@@ -3455,6 +3522,282 @@ export const CombatMethods = {
       this.downedKiller = attackerName;
       this.downedWeapon = weaponName;
       this.viewModelGroup.visible = false;
+      this._deathCamBlend = 0;
+      if (this.deathCamEnabled && this.lastDeathReport?.hasKillerOrigin) {
+        this.syncDeathCamVisuals(true);
+      } else {
+        this.clearDeathCamVisuals();
+      }
+    }
+  },
+
+  _resolveKillerEntity(attackerName, attackerTeam, attackerPos) {
+    const cleanName = String(attackerName || '').trim();
+    if (
+      !cleanName ||
+      cleanName === this.name ||
+      cleanName === 'ENVIRONMENT' ||
+      cleanName === 'OUT OF BOUNDS' ||
+      cleanName === 'DROWNED'
+    ) {
+      return {
+        unit: null,
+        vehicle: null,
+        kind: 'self',
+        roleLabel: 'SELF / ENVIRONMENT',
+        hp: 0,
+        maxHp: 100,
+        livePos: null
+      };
+    }
+
+    // 1. Check Vehicles first (direct vehicle attribution or bot/player driver matching attackerName)
+    let matchedVehicle = null;
+    if (this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+      for (const v of this.vehicleManager.vehicles) {
+        if (!v) continue;
+        if (v.name === cleanName || (v.driver && v.driver.name === cleanName)) {
+          matchedVehicle = v;
+          if (!v.dead) break;
+        }
+      }
+    }
+
+    // 2. Check AI Bots
+    let matchedBot = null;
+    if (this.botManager && Array.isArray(this.botManager.bots)) {
+      let bestDistSq = Infinity;
+      for (const b of this.botManager.bots) {
+        if (!b || b.name !== cleanName) continue;
+        if (attackerTeam && b.team && b.team !== attackerTeam) continue;
+        const dSq =
+          attackerPos && b.pos
+            ? (b.pos.x - attackerPos.x) * (b.pos.x - attackerPos.x) +
+              (b.pos.z - attackerPos.z) * (b.pos.z - attackerPos.z)
+            : 0;
+        if (!matchedBot || (!b.dead && matchedBot.dead) || dSq < bestDistSq) {
+          matchedBot = b;
+          bestDistSq = dSq;
+        }
+      }
+    }
+
+    if (matchedBot && matchedBot.activeVehicle && !matchedBot.activeVehicle.dead) {
+      matchedVehicle = matchedBot.activeVehicle;
+    }
+
+    if (matchedVehicle) {
+      const vehLabel = String(matchedVehicle.name || matchedVehicle.type || 'VEHICLE').toUpperCase();
+      return {
+        unit: matchedBot || matchedVehicle.driver || matchedVehicle,
+        vehicle: matchedVehicle,
+        kind: matchedVehicle.isAircraft ? 'aircraft' : 'vehicle',
+        roleLabel: vehLabel,
+        hp: Math.max(0, Math.round(matchedVehicle.hp ?? 0)),
+        maxHp: Math.max(1, Math.round(matchedVehicle.maxHp || 1000)),
+        livePos: matchedVehicle.pos ? matchedVehicle.pos.clone() : null
+      };
+    }
+
+    if (matchedBot) {
+      const roleStr = String(matchedBot.role || 'SOLDIER').toUpperCase();
+      return {
+        unit: matchedBot,
+        vehicle: null,
+        kind: 'bot',
+        roleLabel: roleStr,
+        hp: Math.max(0, Math.round(matchedBot.hp ?? 100)),
+        maxHp: Math.max(1, Math.round(matchedBot.maxHp || 100)),
+        livePos: matchedBot.pos ? matchedBot.pos.clone() : null
+      };
+    }
+
+    // 3. Check Remote Multiplayer Players if connected
+    const net = typeof window !== 'undefined' ? window.game?.network : null;
+    if (net && net.remotePlayers) {
+      const iter =
+        typeof net.remotePlayers.values === 'function'
+          ? net.remotePlayers.values()
+          : Object.values(net.remotePlayers);
+      for (const rp of iter) {
+        if (rp && rp.name === cleanName) {
+          return {
+            unit: rp,
+            vehicle: null,
+            kind: 'player',
+            roleLabel: String(rp.role || 'OPERATOR').toUpperCase(),
+            hp: Math.max(0, Math.round(rp.hp ?? 100)),
+            maxHp: Math.max(1, Math.round(rp.maxHp || 100)),
+            livePos: rp.pos ? rp.pos.clone() : null
+          };
+        }
+      }
+    }
+
+    return {
+      unit: null,
+      vehicle: null,
+      kind: 'external',
+      roleLabel: attackerTeam ? `${attackerTeam} COMBATANT` : 'HOSTILE FORCE',
+      hp: 100,
+      maxHp: 100,
+      livePos: null
+    };
+  },
+
+  _buildDeathReport({
+    amount,
+    attackerName,
+    attackerTeam,
+    weaponName,
+    attackerPos,
+    isHeadshot,
+    hitZone
+  }) {
+    const resolved = this._resolveKillerEntity(attackerName, attackerTeam, attackerPos);
+    const hitHeight =
+      hitZone === 'head'
+        ? this.prone
+          ? 0.36
+          : this.crouching
+          ? 0.98
+          : 1.56
+        : hitZone === 'leftLeg' || hitZone === 'rightLeg'
+        ? 0.52
+        : this.prone
+        ? 0.28
+        : this.crouching
+        ? 0.78
+        : 1.18;
+    const victimSnapshotPos = new THREE.Vector3(
+      this.pos.x,
+      this.pos.y + hitHeight,
+      this.pos.z
+    );
+
+    let killerOriginPos = null;
+    const rawOrigin = attackerPos || resolved.livePos;
+    if (rawOrigin && Number.isFinite(rawOrigin.x) && Number.isFinite(rawOrigin.z)) {
+      killerOriginPos = new THREE.Vector3(rawOrigin.x, rawOrigin.y || 0, rawOrigin.z);
+      // Elevate ground-level unit positions to rifle muzzle / turret height so 3D shot trace aligns cleanly
+      const refEntity = resolved.vehicle || resolved.unit;
+      if (refEntity && refEntity.pos && Math.abs(killerOriginPos.y - refEntity.pos.y) < 0.35) {
+        killerOriginPos.y += resolved.vehicle
+          ? resolved.vehicle.isAircraft
+            ? 0.0
+            : 2.15
+          : 1.46;
+      }
+    }
+
+    let distanceM = 0;
+    let elevDeltaM = 0;
+    let bearingDeg = 0;
+    let bearingCompass = 'N';
+    let hasKillerOrigin = false;
+
+    if (killerOriginPos && resolved.kind !== 'self') {
+      const dx = killerOriginPos.x - victimSnapshotPos.x;
+      const dy = killerOriginPos.y - victimSnapshotPos.y;
+      const dz = killerOriginPos.z - victimSnapshotPos.z;
+      distanceM = Math.hypot(dx, dy, dz);
+      elevDeltaM = Math.round(killerOriginPos.y - this.pos.y);
+      const rawDeg = (Math.atan2(dx, -dz) * 180) / Math.PI;
+      bearingDeg = ((Math.round(rawDeg) % 360) + 360) % 360;
+      bearingCompass = _COMPASS_DIRS_8[Math.round(bearingDeg / 45) % 8];
+      hasKillerOrigin = distanceM >= 0.75;
+    }
+
+    const cleanWeapon = String(weaponName || 'UNKNOWN WEAPON').trim();
+    const cleanKiller = String(attackerName || 'ENVIRONMENT').trim();
+    this.lastDeathReport = {
+      killerName: cleanKiller,
+      killerTeam: attackerTeam || null,
+      killerUnit: resolved.unit,
+      killerVehicle: resolved.vehicle,
+      killerKind: resolved.kind,
+      killerRoleLabel: resolved.roleLabel,
+      killerHp: resolved.hp,
+      killerMaxHp: resolved.maxHp,
+      killerLiveHp: resolved.hp,
+      killerLiveMaxHp: resolved.maxHp,
+      weaponName: cleanWeapon,
+      fatalDamage: Math.max(1, Math.round(amount || 0)),
+      isHeadshot: Boolean(isHeadshot || hitZone === 'head'),
+      hitZone: hitZone || 'thorax',
+      hitZoneLabel: _HIT_ZONE_LABELS[hitZone] || 'THORAX (CHEST)',
+      distanceM: Number(distanceM.toFixed(1)),
+      elevDeltaM,
+      bearingDeg,
+      bearingCompass,
+      killerOriginPos,
+      victimSnapshotPos,
+      hasKillerOrigin,
+      timestamp: typeof performance !== 'undefined' ? performance.now() : Date.now()
+    };
+    return this.lastDeathReport;
+  },
+
+  syncDeathCamVisuals(active = true) {
+    const report = this.lastDeathReport;
+    if (!active || !this.deathCamEnabled || !report || !report.hasKillerOrigin || !this.scene) {
+      this.clearDeathCamVisuals();
+      return false;
+    }
+
+    if (!this._deathCamTraceGroup) {
+      const grp = new THREE.Group();
+      grp.name = 'DeathCamShotTrace';
+      const coreBeam = new THREE.Mesh(_deathTraceCoreGeo, _deathTraceCoreMat);
+      const glowBeam = new THREE.Mesh(_deathTraceGlowGeo, _deathTraceGlowMat);
+      const originBeacon = new THREE.Mesh(_deathOriginDiamondGeo, _deathOriginMat);
+      originBeacon.renderOrder = 999;
+      const impactRing = new THREE.Mesh(_deathImpactRingGeo, _deathImpactMat);
+      impactRing.renderOrder = 998;
+      grp.add(coreBeam, glowBeam, originBeacon, impactRing);
+      grp.userData = { coreBeam, glowBeam, originBeacon, impactRing };
+      this._deathCamTraceGroup = grp;
+    }
+
+    const grp = this._deathCamTraceGroup;
+    const { coreBeam, glowBeam, originBeacon, impactRing } = grp.userData;
+    const orig = report.killerOriginPos;
+    const dest = report.victimSnapshotPos;
+
+    _deathSegVec.subVectors(dest, orig);
+    const segLen = Math.max(0.5, _deathSegVec.length());
+    _deathMidPos.addVectors(orig, dest).multiplyScalar(0.5);
+    _deathSegVec.divideScalar(segLen);
+
+    const beamThickness = Math.min(3.4, Math.max(0.85, segLen / 85));
+    coreBeam.position.copy(_deathMidPos);
+    coreBeam.scale.set(beamThickness, segLen, beamThickness);
+    coreBeam.quaternion.setFromUnitVectors(_deathUpAxis, _deathSegVec);
+
+    glowBeam.position.copy(_deathMidPos);
+    glowBeam.scale.set(beamThickness, segLen, beamThickness);
+    glowBeam.quaternion.copy(coreBeam.quaternion);
+
+    const beaconScale = Math.min(4.8, Math.max(0.95, segLen / 52));
+    originBeacon.position.copy(orig);
+    originBeacon.scale.setScalar(beaconScale);
+
+    impactRing.position.copy(dest);
+    impactRing.lookAt(orig);
+
+    grp.visible = true;
+    if (grp.parent !== this.scene) {
+      this.scene.add(grp);
+    }
+    return true;
+  },
+
+  clearDeathCamVisuals() {
+    if (this._deathCamTraceGroup) {
+      this._deathCamTraceGroup.visible = false;
+      if (this._deathCamTraceGroup.parent) {
+        this._deathCamTraceGroup.parent.remove(this._deathCamTraceGroup);
+      }
     }
   },
 
@@ -3469,6 +3812,11 @@ export const CombatMethods = {
     this.beyondRescue = false;
     this.downedTimer = 0;
     this.giveUpProgress = 0;
+    this._deathCamBlend = 0;
+    this.clearDeathCamVisuals();
+    if (typeof this.resetDeathCamFov === 'function') {
+      this.resetDeathCamFov();
+    }
     // Squad 2-Stage Medical Treatment:
     // Stage 1: Field Dressing stabilizes the downed soldier at 35 HP and stops bleeding (-1 Field Dressing).
     // Stage 2: If rescued by a Medic, they immediately follow up with their Medic Bag to heal injuries to 100/100 HP!
@@ -3517,8 +3865,19 @@ export const CombatMethods = {
     this.multiKillTimer = 0;
     this.suppressionLevel = 0;
     this.respawnTimer = this.respawnDelay; // Start respawn countdown
-    if (document.pointerLockElement === document.body) {
-      document.exitPointerLock();
+    if (this.deathCamEnabled && this.lastDeathReport?.hasKillerOrigin) {
+      this.deathCamPostMax = 3.8;
+      this.deathCamPostTimer = 3.8;
+      this.syncDeathCamVisuals(true);
+    } else {
+      this.deathCamPostTimer = 0;
+      this.clearDeathCamVisuals();
+      if (typeof this.resetDeathCamFov === 'function') {
+        this.resetDeathCamFov();
+      }
+    }
+    if (typeof document !== 'undefined' && document.pointerLockElement === document.body) {
+      document.exitPointerLock?.();
     }
     if (this.onPlayerDied) {
       this.onPlayerDied(this.downedKiller, this.downedWeapon);

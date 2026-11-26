@@ -848,6 +848,206 @@
   background: #e74c3c;
 }
 
+#downed-overlay.deathcam-active {
+  background: radial-gradient(circle at center, rgba(140, 15, 15, 0.04) 48%, rgba(8, 10, 14, 0.56) 96%);
+  align-items: flex-end;
+  padding-bottom: 26px;
+}
+
+#downed-overlay.deathcam-active .downed-card {
+  padding: 14px 24px;
+  background: rgba(10, 14, 20, 0.86);
+  border-color: rgba(231, 76, 60, 0.78);
+}
+
+.downed-deathcam-row {
+  margin-top: 11px;
+  display: flex;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.downed-deathcam-btn {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(189, 195, 199, 0.35);
+  color: #dfe6e9;
+  font-family: 'Rajdhani', 'Segoe UI', sans-serif;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.downed-deathcam-btn:hover {
+  background: rgba(231, 76, 60, 0.2);
+  border-color: #ff6b6b;
+  color: #ffffff;
+}
+
+.downed-deathcam-btn.active {
+  background: rgba(231, 76, 60, 0.26);
+  border-color: #ff4757;
+  color: #ff9f9f;
+  box-shadow: 0 0 14px rgba(231, 76, 60, 0.35);
+}
+
+/* Optional Forensic Death Cam Banner & Target Bracket */
+#death-cam-hud {
+  position: fixed;
+  top: 62px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 32;
+  width: min(590px, 94vw);
+  background: linear-gradient(180deg, rgba(11, 16, 23, 0.92), rgba(7, 10, 15, 0.95));
+  border: 1.5px solid rgba(255, 71, 87, 0.78);
+  border-top: 3px solid #ff4757;
+  border-radius: 7px;
+  padding: 10px 14px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.82), 0 0 22px rgba(255, 71, 87, 0.22);
+  pointer-events: auto;
+  color: #ecf0f1;
+}
+
+.dc-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.dc-phase-badge {
+  color: #ff6b81;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dc-controls-hint {
+  color: #95a5a6;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.dc-killer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 7px;
+  flex-wrap: wrap;
+}
+
+.dc-killer-id {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 15px;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.dc-team-pill {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 900;
+  background: rgba(231, 76, 60, 0.28);
+  border: 1px solid #ff6b6b;
+  color: #ff9f9f;
+}
+
+.dc-team-pill.us {
+  background: rgba(52, 152, 219, 0.28);
+  border-color: #54a0ff;
+  color: #82ccdd;
+}
+
+.dc-role-pill {
+  font-size: 10.5px;
+  color: #f1c40f;
+  background: rgba(241, 196, 15, 0.14);
+  border: 1px solid rgba(241, 196, 15, 0.42);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 800;
+}
+
+.dc-hp-box {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 145px;
+}
+
+.dc-hp-bar-bg {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.dc-hp-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #e74c3c, #ff6b6b);
+}
+
+.dc-hp-txt {
+  font-size: 11px;
+  font-weight: 900;
+  color: #ff9f9f;
+  white-space: nowrap;
+}
+
+.dc-grid {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.dc-cell {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 4px 7px;
+}
+
+.dc-cell-lbl {
+  font-size: 9px;
+  font-weight: 800;
+  color: #95a5a6;
+  letter-spacing: 0.5px;
+}
+
+.dc-cell-val {
+  font-size: 11.5px;
+  font-weight: 900;
+  color: #ecf0f1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dc-cell-val.hs {
+  color: #ff6b6b;
+}
+
+.dc-cell-val.elev-high {
+  color: #ffeaa7;
+}
+
 /* Squad Roster + Vitals Left Stack */
 .left-hud-stack {
   display: flex;

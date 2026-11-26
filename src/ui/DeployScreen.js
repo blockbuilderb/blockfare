@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=132';
-import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=132';
-import { events } from '../events.js?v=132';
+import { SQUAD_DEFS } from '../bots.js?v=133';
+import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=133';
+import { events } from '../events.js?v=133';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=132';
+} from '../core/StateMachines.js?v=133';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=132';
+} from '../utils/KeyboardShortcuts.js?v=133';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -448,6 +448,14 @@ export const DeployScreen = {
             ? '🎖️ SQUAD DOCTRINE: ON (PILOT/ARMOR LICENSES, ENGINEER WALLS & BASE/FOB GUNSMITH)'
             : '🔓 SQUAD DOCTRINE: OFF (ALL CLASSES CAN FLY PLANES, DRIVE TANKS, BUILD & USE GUNSMITH ANYWHERE)'
         );
+      });
+    }
+    const deathCamToggleBtn = this.el('deploy-deathcam-toggle-btn');
+    if (deathCamToggleBtn && this.player && typeof this.player.toggleDeathCamEnabled === 'function') {
+      this.updateDeathCamUI?.();
+      deathCamToggleBtn.addEventListener('click', () => {
+        this.player.toggleDeathCamEnabled();
+        this.updateDeathCamUI?.();
       });
     }
     if (destrToggleBtn && this.world) {
@@ -1961,7 +1969,18 @@ export const DeployScreen = {
     this.hudEl.classList.add('hidden');
     this.scopeOverlayEl.classList.add('hidden');
     this.vehicleOverlayEl.classList.add('hidden');
-    if (this.downedOverlayEl) this.downedOverlayEl.classList.add('hidden');
+    if (this.downedOverlayEl) {
+      this.downedOverlayEl.classList.add('hidden');
+      this.downedOverlayEl.classList.remove('deathcam-active');
+    }
+    const dcHudEl = this.el('death-cam-hud');
+    if (dcHudEl) dcHudEl.classList.add('hidden');
+    if (this.player) {
+      this.player.deathCamPostTimer = 0;
+      this.player.clearDeathCamVisuals?.();
+      this.player.resetDeathCamFov?.();
+    }
+    this.updateDeathCamUI?.();
     if (typeof document !== 'undefined' && document.body) {
       document.body.classList.remove(
         'nvg-green-mode',

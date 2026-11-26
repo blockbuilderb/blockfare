@@ -2,24 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
 
-import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=132';
-import { VEHICLE_STATS } from '../src/config.js?v=132';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=132';
-import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=132';
-import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=132';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=132';
-import { createWeaponViewModel } from '../src/models/weapon-model.js?v=132';
-import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=132';
-import { BotManager } from '../src/bots/BotManager.js?v=132';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=132';
-import { CombatMethods } from '../src/player/PlayerCombat.js?v=132';
-import { PlayerController } from '../src/player/PlayerController.js?v=132';
-import { SoundManager } from '../src/audio/SoundManager.js?v=132';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=132';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=132';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=132';
-import { BotAIMethods } from '../src/bots/BotAI.js?v=132';
-import { updateMedicRescue } from '../src/bots/MedicAI.js?v=132';
+import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=133';
+import { VEHICLE_STATS } from '../src/config.js?v=133';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=133';
+import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=133';
+import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=133';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=133';
+import { createWeaponViewModel } from '../src/models/weapon-model.js?v=133';
+import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=133';
+import { BotManager } from '../src/bots/BotManager.js?v=133';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=133';
+import { CombatMethods } from '../src/player/PlayerCombat.js?v=133';
+import { PlayerController } from '../src/player/PlayerController.js?v=133';
+import { SoundManager } from '../src/audio/SoundManager.js?v=133';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=133';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=133';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=133';
+import { BotAIMethods } from '../src/bots/BotAI.js?v=133';
+import { updateMedicRescue } from '../src/bots/MedicAI.js?v=133';
 
 function buildPilotHarness(role = 'fighter', team = 'US') {
   const scene = new THREE.Scene();
@@ -1073,4 +1073,167 @@ test('v132: Exposed-Face Voxel Sector Chunking, Frustum Draw-Call Culling & 500-
   );
 
   world.dispose();
+});
+
+test('v133: Optional Forensic Death Cam — Realism OFF Default, 3D Shot Trace, Killer Zoom & Post-Death Replay', () => {
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 3500);
+  const mockWorld = {
+    era: 'modern',
+    findSafeSpawnPoint: (x, z) => new THREE.Vector3(x, 4, z),
+    getGroundHeightAt: () => 4,
+    isSolidAt: () => false
+  };
+  const sniperMesh = new THREE.Group();
+  sniperMesh.visible = false; // Simulate distant frustum/distance-culled sniper
+  const sniperBot = {
+    name: 'V. ZAYTSEV [RU-4]',
+    team: 'RU',
+    role: 'RECON',
+    hp: 78,
+    maxHp: 100,
+    dead: false,
+    downed: false,
+    pos: new THREE.Vector3(120, 62, -90),
+    mesh: sniperMesh
+  };
+  const mockBm = { bots: [sniperBot] };
+  const mockVm = { vehicles: [] };
+
+  const prevStorage = globalThis.localStorage;
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const memStore = new Map();
+  const winListeners = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (memStore.has(k) ? memStore.get(k) : null),
+    setItem: (k, v) => memStore.set(k, String(v)),
+    removeItem: (k) => memStore.delete(k)
+  };
+  globalThis.document = {
+    pointerLockElement: null,
+    activeElement: null,
+    body: { requestPointerLock: () => Promise.resolve() },
+    addEventListener: () => {},
+    getElementById: () => null,
+    querySelectorAll: () => [],
+    exitPointerLock: () => {}
+  };
+  let deployOpenedCount = 0;
+  globalThis.window = {
+    addEventListener: (type, fn) => {
+      if (!winListeners.has(type)) winListeners.set(type, []);
+      winListeners.get(type).push(fn);
+    },
+    focus: () => {},
+    game: {
+      matchEnded: false,
+      ui: {
+        updateDeathCamUI: () => {},
+        showDeployScreen: () => {
+          deployOpenedCount++;
+        }
+      }
+    }
+  };
+
+  try {
+    const player = new PlayerController(cam, scene, mockWorld, mockBm, mockVm);
+    player.deploy('US', 'assault', new THREE.Vector3(0, 4, 0));
+
+    // 1. Default OFF to preserve mil-sim realism!
+    assert.equal(player.deathCamEnabled, false, 'Optional Death Cam must default to OFF (false) for realism');
+
+    // Downed by a distant rooftop sniper (+58m high ground, ~160m away)
+    player.takeDamage(
+      220,
+      sniperBot.name,
+      'RU',
+      'SV-98 7.62×54mmR',
+      null,
+      sniperBot.pos.clone(),
+      true
+    );
+    assert.equal(player.downed, true, 'Player enters downed state on lethal hit');
+    assert.ok(player.lastDeathReport, 'Forensic lastDeathReport is captured');
+    assert.equal(player.lastDeathReport.killerName, sniperBot.name);
+    assert.equal(player.lastDeathReport.killerRoleLabel, 'RECON');
+    assert.equal(player.lastDeathReport.killerHp, 78);
+    assert.equal(player.lastDeathReport.isHeadshot, true);
+    assert.equal(player.lastDeathReport.hitZone, 'head');
+    assert.ok(player.lastDeathReport.distanceM > 150 && player.lastDeathReport.distanceM < 175);
+    assert.ok(player.lastDeathReport.elevDeltaM >= 55, 'Detects +58m high-ground rooftop elevation delta');
+    assert.equal(player.lastDeathReport.hasKillerOrigin, true);
+
+    // Realism check when OFF: zero 3D trace in scene & normal 75 deg FOV
+    player.update(1 / 60);
+    assert.equal(
+      scene.getObjectByName('DeathCamShotTrace'),
+      undefined,
+      'No 3D trajectory line rendered when Death Cam is OFF'
+    );
+    assert.equal(cam.fov, 75, 'Camera FOV stays at 75 when Death Cam is OFF');
+
+    // 2. Toggle Death Cam ON while downed (simulating pressing [V] on the Downed screen!)
+    player.setDeathCamEnabled(true);
+    assert.equal(memStore.get('bb_death_cam_enabled'), 'true', 'Persists preference to localStorage');
+    const traceGrp = scene.getObjectByName('DeathCamShotTrace');
+    assert.ok(traceGrp && traceGrp.visible, '3D Shot Trajectory Group attaches to scene immediately when toggled ON');
+
+    for (let i = 0; i < 40; i++) {
+      player.update(1 / 60);
+    }
+    assert.equal(sniperBot.mesh.visible, true, 'Distant culled sniper mesh forced visible during Death Cam');
+    assert.ok(cam.fov < 35, `Camera dynamically zooms onto distant 160m sniper (expected FOV < 35, got ${cam.fov.toFixed(1)})`);
+
+    const camFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion).normalize();
+    const toKiller = new THREE.Vector3()
+      .subVectors(player.getLiveKillerFocusPos(new THREE.Vector3()), cam.position)
+      .normalize();
+    assert.ok(
+      camFwd.dot(toKiller) > 0.97,
+      `Downed Death Cam smoothly points directly at killer (dot=${camFwd.dot(toKiller).toFixed(4)})`
+    );
+
+    // 3. Revive cleans up 3D trajectory & restores FOV
+    player.beyondRescue = false;
+    player.reviveFromDowned('DOC', true, 7, 9);
+    assert.equal(scene.getObjectByName('DeathCamShotTrace'), undefined, 'Revive removes 3D trace from scene');
+    assert.equal(cam.fov, 75, 'Revive restores 75 deg FOV');
+
+    // 4. Finalizing death with Death Cam ON engages 3.8s Over-The-Shoulder Killer Replay
+    player.takeDamage(220, sniperBot.name, 'RU', 'SV-98 7.62×54mmR', null, sniperBot.pos.clone(), true);
+    player.finalizeDeath();
+    assert.equal(player.dead, true);
+    assert.ok(Math.abs(player.deathCamPostTimer - 3.8) < 0.01, 'Starts 3.8s post-death killer replay timer');
+    player.updateDeathCamCamera(1 / 60, true);
+    const replayDistToKiller = cam.position.distanceTo(sniperBot.pos);
+    assert.ok(
+      replayDistToKiller < 12,
+      `Post-death replay positions camera over killer's shoulder (dist=${replayDistToKiller.toFixed(2)}m)`
+    );
+    assert.equal(cam.fov, 56, 'Post-death killer perspective uses 56 deg tactical FOV');
+
+    // 5. Pressing [Space] during Post-Death Replay skips straight to Deploy Screen & cleans up everything
+    const keydownHandlers = winListeners.get('keydown') || [];
+    for (const fn of keydownHandlers) {
+      fn({
+        code: 'Space',
+        repeat: false,
+        altKey: false,
+        ctrlKey: false,
+        metaKey: false,
+        preventDefault: () => {},
+        stopImmediatePropagation: () => {}
+      });
+    }
+    assert.equal(player.deathCamPostTimer, 0, '[Space] skips post-death replay immediately');
+    assert.equal(deployOpenedCount, 1, 'Skipping post-death replay opens Deploy Screen cleanly once');
+    assert.equal(scene.getObjectByName('DeathCamShotTrace'), undefined, 'Finishing post-death cam removes 3D trace');
+    assert.equal(cam.fov, 75, 'Finishing post-death cam restores 75 deg FOV');
+  } finally {
+    globalThis.localStorage = prevStorage;
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
 });

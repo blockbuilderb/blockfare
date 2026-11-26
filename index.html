@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MODERN BLOCKFARE — Multi-Era Voxel Combined Arms FPS</title>
-  <link rel="stylesheet" href="./style.css?v=132" />
+  <link rel="stylesheet" href="./style.css?v=133" />
   <script type="importmap">
     {
       "imports": {
@@ -466,6 +466,9 @@
     <!-- 3D World-Space Projected Markers (Flags A-E, Friendly Chevrons, Revive Crosses, Pings) -->
     <div id="world-markers"></div>
 
+    <!-- Optional Tactical Death Cam Banner (Hidden when OFF for Realism) -->
+    <div id="death-cam-hud" class="hidden"></div>
+
     <!-- BattleBit Downed / Incapacitated Overlay (Wait for Medic Revive or Hold Space) -->
     <div id="downed-overlay" class="hidden">
       <div class="downed-card">
@@ -478,6 +481,11 @@
         </div>
         <div class="giveup-bar-bg">
           <div id="giveup-bar-fill"></div>
+        </div>
+        <div class="downed-deathcam-row">
+          <button type="button" id="downed-deathcam-toggle-btn" class="downed-deathcam-btn" title="Optional Forensic Death Cam (OFF by default to preserve realism) — Press [V] or click to reveal Killer &amp; 3D Shot Trajectory">
+            🎥 [V] OPTIONAL DEATH CAM: OFF (REALISTIC)
+          </button>
         </div>
       </div>
     </div>
@@ -1475,6 +1483,7 @@
             </select>
           </label>
           <button type="button" id="deploy-doctrine-toggle-btn" class="deploy-tool-btn active" style="border:1px solid #2ecc71;color:#7bed9f;background:rgba(46,204,113,0.18);" title="Toggle Squad Specialized Licenses, Engineer-Only Walls &amp; Base/FOB Gunsmith ON/OFF">🎖️ Doctrine: ON</button>
+          <button type="button" id="deploy-deathcam-toggle-btn" class="deploy-tool-btn" style="border:1px solid rgba(149,165,166,0.55);color:#dfe6e9;background:rgba(255,255,255,0.08);" title="Optional Forensic Death Cam &amp; 3D Shot Trajectory (OFF by default to preserve realism)">🎥 Killcam: OFF</button>
           <button type="button" id="deploy-gunsmith-btn" class="deploy-tool-btn armory" title="Customize Weapons, 16 Optics, Attachments, Body Armor &amp; Armory Cases [L]">🔧 [L] Armory (<span id="deploy-cash-val">🏦 $100,000</span>)</button>
           <button type="button" id="deploy-backpack-btn" class="deploy-tool-btn backpack" title="Open Backpack &amp; Extracted Loot Warehouse [I]">🎒 [I] Pack</button>
           <button type="button" id="deploy-help-btn" class="deploy-tool-btn help" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp()" style="border:1px solid rgba(0,210,211,0.65);color:#81ecec;background:rgba(0,210,211,0.15);" title="Open Searchable Field &amp; Flight Controls Manual [? / F1]">📖 [?] Help</button>
@@ -1683,6 +1692,6 @@
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=132"></script>
+  <script type="module" src="./src/main.js?v=133"></script>
 </body>
 </html>

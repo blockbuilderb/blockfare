@@ -1,14 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=132';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=132';
+import { sound } from './audio.js?v=133';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=133';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=132';
-import { createVehicleMesh } from './models/vehicle-model.js?v=132';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=132';
-import { events, makeEventBridge } from './events.js?v=132';
+} from './assets/vehicle-defs.js?v=133';
+import { createVehicleMesh } from './models/vehicle-model.js?v=133';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=133';
+import { events, makeEventBridge } from './events.js?v=133';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -21,7 +21,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=132';
+} from './core/StateMachines.js?v=133';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -2694,7 +2694,7 @@ export class VehicleManager {
         attackerTeam,
         `${weaponName} (CRASHED — FAILED TO EJECT [E])`,
         onKillFn,
-        vehicle.pos
+        att?.attackerPos || vehicle.pos
       );
     }
 

@@ -1,4 +1,4 @@
-import { sound } from '../audio.js?v=132';
+import { sound } from '../audio.js?v=133';
 
 export const SettingsModal = {
   bindSettingsEvents() {
@@ -47,6 +47,28 @@ export const SettingsModal = {
     this.updateBuildingDestructionUI();
     this.updateFriendlyFireUI();
     this.updateSquadDoctrineUI();
+    this.updateDeathCamUI();
+  },
+
+  updateDeathCamUI() {
+    const enabled = Boolean(this.player && this.player.deathCamEnabled);
+    const dcBtn = this.el('deploy-deathcam-toggle-btn');
+    if (dcBtn) {
+      dcBtn.textContent = enabled ? '🎥 Killcam: ON' : '🎥 Killcam: OFF';
+      dcBtn.classList.toggle('active', enabled);
+      dcBtn.style.borderColor = enabled ? '#ff4757' : 'rgba(149, 165, 166, 0.55)';
+      dcBtn.style.color = enabled ? '#ff9f9f' : '#dfe6e9';
+      dcBtn.style.background = enabled
+        ? 'rgba(231, 76, 60, 0.22)'
+        : 'rgba(255, 255, 255, 0.08)';
+    }
+    const downedDcBtn = this.el('downed-deathcam-toggle-btn');
+    if (downedDcBtn) {
+      downedDcBtn.classList.toggle('active', enabled);
+      downedDcBtn.textContent = enabled
+        ? '🎥 [V] OPTIONAL DEATH CAM: ON — SHOWING KILLER & 3D SHOT TRACE'
+        : '🎥 [V] OPTIONAL DEATH CAM: OFF (REALISTIC — PRESS [V] TO REVEAL HOW YOU DIED)';
+    }
   },
 
   updateSquadDoctrineUI() {
@@ -459,6 +481,27 @@ export const SettingsModal = {
         </div>
       </div>
 
+      <!-- CATEGORY 11: OPTIONAL TACTICAL DEATH CAM & 3D SHOT TRAJECTORY (DEFAULT: OFF FOR REALISM) -->
+      <div style="background:rgba(16,26,36,0.88);border:1px solid rgba(255,71,87,0.45);border-left:4px solid #ff4757;border-radius:6px;padding:10px 14px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <div>
+            <span style="font-size:13px;font-weight:900;color:#ff6b81;">11. OPTIONAL DEATH CAM &amp; 3D SHOT TRACE (DEFAULT: OFF FOR REALISM)</span>
+            <div style="font-size:10px;color:#bdc3c7;">OFF preserves hardcore mil-sim fog of war. Turn ON (or press <b>[V]</b> when downed) to see Killer Zoom, 3D Bullet Trajectory, Hit Zone &amp; 3.8s Killer Replay.</div>
+          </div>
+          <button type="button" id="settings-deathcam-btn" style="background:${
+            this.player?.deathCamEnabled ? 'rgba(231,76,60,0.28)' : 'rgba(255,255,255,0.08)'
+          };border:1.5px solid ${
+            this.player?.deathCamEnabled ? '#ff4757' : 'rgba(189,195,199,0.4)'
+          };color:${
+            this.player?.deathCamEnabled ? '#ff9f9f' : '#dfe6e9'
+          };border-radius:4px;padding:6px 12px;font-size:11.5px;font-weight:900;cursor:pointer;white-space:nowrap;">${
+            this.player?.deathCamEnabled
+              ? '🎥 DEATH CAM: ON (3D TRACE + REPLAY)'
+              : '🪖 DEATH CAM: OFF (REALISTIC DEFAULT)'
+          }</button>
+        </div>
+      </div>
+
       <!-- FOOTER ACTIONS -->
       <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,0.12);padding-top:12px;">
         <button type="button" id="settings-reset-btn" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.28);color:#dfe6e9;border-radius:4px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer;">↺ Reset to Defaults</button>
@@ -678,6 +721,15 @@ export const SettingsModal = {
       });
     });
 
+    const deathCamBtn = modal.querySelector('#settings-deathcam-btn');
+    if (deathCamBtn && this.player && typeof this.player.toggleDeathCamEnabled === 'function') {
+      deathCamBtn.addEventListener('click', () => {
+        this.player.toggleDeathCamEnabled();
+        this.renderSettingsModalContent(modal);
+        this.updateDeathCamUI();
+      });
+    }
+
     const resetBtn = modal.querySelector('#settings-reset-btn');
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {
@@ -688,6 +740,9 @@ export const SettingsModal = {
         }
         if (this.player && typeof this.player.setSquadDoctrineEnabled === 'function') {
           this.player.setSquadDoctrineEnabled(true);
+        }
+        if (this.player && typeof this.player.setDeathCamEnabled === 'function') {
+          this.player.setDeathCamEnabled(false);
         }
         this.renderSettingsModalContent(modal);
         this.updateAudioSettingsHud();

@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=132';
-import { sound } from '../audio.js?v=132';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=132';
+import { VOXEL_SIZE } from '../world.js?v=133';
+import { sound } from '../audio.js?v=133';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=133';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=132';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=132';
-import { events, makeEventBridge } from '../events.js?v=132';
-import { GunsmithMethods } from './GunsmithState.js?v=132';
-import { FortificationMethods } from './FortificationBuilder.js?v=132';
-import { CommanderMethods } from './CommanderAbilities.js?v=132';
-import { VehicleControlMethods } from './VehicleControl.js?v=132';
-import { CombatMethods } from './PlayerCombat.js?v=132';
+} from '../utils/KeyboardShortcuts.js?v=133';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=133';
+import { events, makeEventBridge } from '../events.js?v=133';
+import { GunsmithMethods } from './GunsmithState.js?v=133';
+import { FortificationMethods } from './FortificationBuilder.js?v=133';
+import { CommanderMethods } from './CommanderAbilities.js?v=133';
+import { VehicleControlMethods } from './VehicleControl.js?v=133';
+import { CombatMethods } from './PlayerCombat.js?v=133';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +23,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=132';
+} from '../core/StateMachines.js?v=133';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -203,6 +203,26 @@ export class PlayerController {
     // Respawn Timer
     this.respawnTimer = 0;
     this.respawnDelay = PLAYER.RESPAWN_DELAY; // seconds
+
+    // Optional Tactical Death Cam (Default: OFF = false so hardcore mil-sim realism is preserved!)
+    this.deathCamEnabled = false;
+    try {
+      const savedDeathCam = localStorage.getItem('bb_death_cam_enabled');
+      if (savedDeathCam !== null) {
+        this.deathCamEnabled = savedDeathCam === 'true' || savedDeathCam === '1';
+      }
+    } catch (_) {}
+    this.lastDeathReport = null;
+    this.deathCamPostTimer = 0;
+    this.deathCamPostMax = 3.8;
+    this._deathCamBlend = 0;
+    this._deathCamFocusVec = new THREE.Vector3();
+    this._deathCamLookVec = new THREE.Vector3();
+    this._deathCamShotDir = new THREE.Vector3();
+    this._deathCamRightVec = new THREE.Vector3();
+    this._deathCamTargetQuat = new THREE.Quaternion();
+    this._deathCamBaseQuat = new THREE.Quaternion();
+    this._deathCamLookMat = new THREE.Matrix4();
 
     // Rally Point
     this.rallyPoint = null;       // { pos: Vector3, mesh: Group, timer: 90 }
@@ -389,6 +409,221 @@ export class PlayerController {
 
   toggleSquadDoctrineEnabled() {
     return this.setSquadDoctrineEnabled(!this.squadDoctrineEnabled);
+  }
+
+  setDeathCamEnabled(val) {
+    this.deathCamEnabled = Boolean(val);
+    try {
+      localStorage.setItem('bb_death_cam_enabled', this.deathCamEnabled ? 'true' : 'false');
+    } catch (_) {}
+    if (!this.deathCamEnabled) {
+      this._deathCamBlend = 0;
+      this.clearDeathCamVisuals?.();
+      this.resetDeathCamFov();
+      if (this.dead && this.deathCamPostTimer > 0) {
+        this.finishPostDeathCam();
+      }
+    } else if (
+      (this.downed || (this.dead && this.deathCamPostTimer > 0)) &&
+      this.lastDeathReport?.hasKillerOrigin
+    ) {
+      this.syncDeathCamVisuals?.(true);
+    }
+    if (typeof window !== 'undefined' && window.game?.ui) {
+      window.game.ui.updateDeathCamUI?.();
+    }
+    return this.deathCamEnabled;
+  }
+
+  toggleDeathCamEnabled() {
+    const nextVal = this.setDeathCamEnabled(!this.deathCamEnabled);
+    sound.playRadioBeep?.(true);
+    if (this.onAwardXp) {
+      this.onAwardXp(
+        0,
+        nextVal
+          ? '🎥 OPTIONAL DEATH CAM: ON (3D SHOT TRAJECTORY, KILLER ZOOM & POST-DEATH REPLAY)'
+          : '🪖 OPTIONAL DEATH CAM: OFF (REALISTIC MODE — NO KILLER POSITION OR SHOT TRACE)'
+      );
+    }
+    return nextVal;
+  }
+
+  resetDeathCamFov() {
+    if (this.camera && Math.abs((this.camera.fov || 75) - 75) > 0.05) {
+      this.camera.fov = 75;
+      if (typeof this.camera.updateProjectionMatrix === 'function') {
+        this.camera.updateProjectionMatrix();
+      }
+    }
+  }
+
+  getLiveKillerFocusPos(outVec = null) {
+    const target = outVec || this._deathCamFocusVec || new THREE.Vector3();
+    const report = this.lastDeathReport;
+    if (!report) return target.set(this.pos.x, this.pos.y + 1.5, this.pos.z);
+
+    const veh =
+      report.killerVehicle && !report.killerVehicle.dead
+        ? report.killerVehicle
+        : report.killerUnit?.activeVehicle && !report.killerUnit.activeVehicle.dead
+        ? report.killerUnit.activeVehicle
+        : null;
+    if (veh && veh.pos) {
+      report.killerLiveHp = Math.max(0, Math.round(veh.hp ?? report.killerHp));
+      report.killerLiveMaxHp = Math.max(1, Math.round(veh.maxHp || report.killerMaxHp || 1000));
+      return target.set(veh.pos.x, veh.pos.y + (veh.isAircraft ? 0 : 2.15), veh.pos.z);
+    }
+
+    const unit = report.killerUnit;
+    if (unit && !unit.dead && unit.pos) {
+      if (typeof unit.hp === 'number') {
+        report.killerLiveHp = Math.max(0, Math.round(unit.hp));
+        report.killerLiveMaxHp = Math.max(1, Math.round(unit.maxHp || 100));
+      }
+      return target.set(unit.pos.x, unit.pos.y + 1.48, unit.pos.z);
+    }
+
+    if (report.killerOriginPos) {
+      return target.copy(report.killerOriginPos);
+    }
+    return target.set(this.pos.x, this.pos.y + 1.5, this.pos.z);
+  }
+
+  ensureDeathCamTargetVisible() {
+    if (!this.deathCamEnabled) return;
+    if (!this.downed && !(this.dead && this.deathCamPostTimer > 0)) return;
+    const report = this.lastDeathReport;
+    if (!report) return;
+    if (report.killerUnit?.mesh && !report.killerUnit.dead) {
+      report.killerUnit.mesh.visible = true;
+    }
+    const veh = report.killerVehicle || report.killerUnit?.activeVehicle;
+    if (veh?.mesh && !veh.dead) {
+      veh.mesh.visible = true;
+    }
+  }
+
+  updateDeathCamCamera(dt, isPostDeath = false) {
+    const report = this.lastDeathReport;
+    if (!this.deathCamEnabled || !report || !report.hasKillerOrigin || !this.camera) {
+      if (!isPostDeath) {
+        this.resetDeathCamFov();
+        this.syncCameraTransform();
+      }
+      return false;
+    }
+
+    this.syncDeathCamVisuals?.(true);
+    if (this._deathCamTraceGroup?.userData?.originBeacon) {
+      this._deathCamTraceGroup.userData.originBeacon.rotation.y += dt * 1.9;
+    }
+
+    const focusPos = this.getLiveKillerFocusPos(this._deathCamFocusVec);
+    this.ensureDeathCamTargetVisible();
+
+    if (!isPostDeath) {
+      // Phase 1 (Downed): Smoothly turn victim camera toward killer + auto-zoom FOV + 3D trajectory line
+      const pivotPos = new THREE.Vector3(this.pos.x, this.pos.y + 1.02, this.pos.z);
+      if (typeof this.resolveCameraWallCollision === 'function') {
+        const safeCam = this.resolveCameraWallCollision(
+          new THREE.Vector3(this.pos.x, this.pos.y + 0.55, this.pos.z),
+          pivotPos,
+          0.32
+        );
+        this.camera.position.copy(safeCam);
+      } else {
+        this.camera.position.copy(pivotPos);
+      }
+
+      const baseEuler = new THREE.Euler(
+        Math.min(Math.PI / 2 - 0.05, this.pitch),
+        this.yaw,
+        PLAYER.EYE_HEIGHT_DOWNED,
+        'YXZ'
+      );
+      this._deathCamBaseQuat.setFromEuler(baseEuler);
+
+      this._deathCamLookMat.lookAt(this.camera.position, focusPos, new THREE.Vector3(0, 1, 0));
+      this._deathCamTargetQuat.setFromRotationMatrix(this._deathCamLookMat);
+
+      this._deathCamBlend = Math.min(1, (this._deathCamBlend || 0) + dt * 3.4);
+      const smoothT = 1 - Math.pow(1 - this._deathCamBlend, 3);
+      this.camera.quaternion.copy(this._deathCamBaseQuat).slerp(this._deathCamTargetQuat, smoothT);
+
+      const distToKiller = Math.max(1, this.camera.position.distanceTo(focusPos));
+      const zoomFactor = Math.min(3.15, Math.max(1.0, distToKiller / 28));
+      const targetFov = Math.min(68, Math.max(24, 75 / zoomFactor));
+      const curFov = this.camera.fov || 75;
+      const nextFov = curFov + (targetFov - curFov) * Math.min(1, dt * 6.5);
+      if (Math.abs(nextFov - curFov) > 0.02) {
+        this.camera.fov = nextFov;
+        if (typeof this.camera.updateProjectionMatrix === 'function') {
+          this.camera.updateProjectionMatrix();
+        }
+      }
+      this.camera.updateMatrixWorld();
+      return true;
+    }
+
+    // Phase 2 (Post-Death 3.8s Replay): Over-The-Shoulder 3rd-Person Killer Vantage Replay
+    const victimPos = report.victimSnapshotPos || this.pos;
+    this._deathCamShotDir.subVectors(victimPos, focusPos);
+    const shotDist = Math.max(1, this._deathCamShotDir.length());
+    this._deathCamShotDir.divideScalar(shotDist);
+
+    const isAirKiller = report.killerKind === 'aircraft' || Boolean(report.killerVehicle?.isAircraft);
+    const isVehKiller = report.killerKind === 'vehicle' || Boolean(report.killerVehicle && !isAirKiller);
+    const backDist = isAirKiller ? 18.5 : isVehKiller ? 9.5 : 3.8;
+    const upLift = isAirKiller ? 4.8 : isVehKiller ? 3.2 : 1.15;
+    const sideOffset = isAirKiller ? 2.8 : isVehKiller ? 1.8 : 0.85;
+
+    this._deathCamRightVec.set(-this._deathCamShotDir.z, 0, this._deathCamShotDir.x);
+    if (this._deathCamRightVec.lengthSq() > 0.0001) {
+      this._deathCamRightVec.normalize();
+    } else {
+      this._deathCamRightVec.set(1, 0, 0);
+    }
+
+    const desiredCam = new THREE.Vector3(
+      focusPos.x - this._deathCamShotDir.x * backDist + this._deathCamRightVec.x * sideOffset,
+      focusPos.y - this._deathCamShotDir.y * (backDist * 0.35) + upLift,
+      focusPos.z - this._deathCamShotDir.z * backDist + this._deathCamRightVec.z * sideOffset
+    );
+    if (this.world && typeof this.world.getGroundHeightAt === 'function') {
+      const groundY = this.world.getGroundHeightAt(desiredCam.x, desiredCam.z);
+      if (Number.isFinite(groundY)) {
+        desiredCam.y = Math.max(desiredCam.y, groundY + 1.15);
+      }
+    }
+    if (!isAirKiller && typeof this.resolveCameraWallCollision === 'function') {
+      const safeReplayCam = this.resolveCameraWallCollision(focusPos, desiredCam, 0.42);
+      this.camera.position.copy(safeReplayCam);
+    } else {
+      this.camera.position.copy(desiredCam);
+    }
+
+    // Look past the killer down the 3D shot trajectory toward the player's impact point
+    this._deathCamLookVec.lerpVectors(focusPos, victimPos, 0.58);
+    this.camera.lookAt(this._deathCamLookVec);
+    if (Math.abs((this.camera.fov || 75) - 56) > 0.05) {
+      this.camera.fov = 56;
+      if (typeof this.camera.updateProjectionMatrix === 'function') {
+        this.camera.updateProjectionMatrix();
+      }
+    }
+    this.camera.updateMatrixWorld();
+    return true;
+  }
+
+  finishPostDeathCam() {
+    this.deathCamPostTimer = 0;
+    this._deathCamBlend = 0;
+    this.clearDeathCamVisuals?.();
+    this.resetDeathCamFov();
+    if (typeof window !== 'undefined' && window.game && this.dead && !window.game.matchEnded) {
+      window.game.ui?.showDeployScreen?.();
+    }
   }
 
   startWeaponInspect() {
@@ -626,6 +861,27 @@ export class PlayerController {
           }
         }
       }
+      if (this.dead && this.deathCamPostTimer > 0) {
+        if (!e.repeat && !hasAnyModifier(e) && e.code === 'KeyV') {
+          e.preventDefault();
+          this.toggleDeathCamEnabled();
+          return;
+        }
+        if (
+          !e.repeat &&
+          (e.code === 'Space' ||
+            e.code === 'Enter' ||
+            e.code === 'NumpadEnter' ||
+            e.code === 'Escape')
+        ) {
+          e.preventDefault();
+          if (typeof e.stopImmediatePropagation === 'function') {
+            e.stopImmediatePropagation();
+          }
+          this.finishPostDeathCam();
+          return;
+        }
+      }
       if (this.dead) return;
 
       // Handle Escape / [F] / [Space] while a pop-out modal (Loot / Backpack / Gunsmith / Map / Settings) is open
@@ -776,6 +1032,11 @@ export class PlayerController {
             }
           }
         }
+      }
+      if (this.downed && !hasAnyModifier(e) && e.code === 'KeyV' && !e.repeat) {
+        e.preventDefault();
+        this.toggleDeathCamEnabled();
+        return;
       }
       if (this.downed) return;
 
@@ -1426,6 +1687,10 @@ export class PlayerController {
       }
     }
     this.resetVisionSensors();
+    this.deathCamPostTimer = 0;
+    this._deathCamBlend = 0;
+    this.clearDeathCamVisuals?.();
+    this.resetDeathCamFov();
   }
 
   deploy(team, role, spawnPointVec) {
@@ -1615,7 +1880,14 @@ export class PlayerController {
       } else {
         this.giveUpProgress = Math.max(0, this.giveUpProgress - dt * 2);
       }
-      this.syncCameraTransform();
+      if (this.deathCamEnabled && this.lastDeathReport?.hasKillerOrigin) {
+        this.updateDeathCamCamera(dt, false);
+      } else {
+        this._deathCamBlend = 0;
+        this.clearDeathCamVisuals?.();
+        this.resetDeathCamFov();
+        this.syncCameraTransform();
+      }
       if (this.downedTimer <= 0 || this.giveUpProgress >= 1) {
         this.finalizeDeath();
       }

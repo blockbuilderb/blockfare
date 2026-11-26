@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=132';
-import { VehicleManager } from './vehicles.js?v=132';
-import { BotManager } from './bots.js?v=132';
-import { PlayerController } from './player.js?v=132';
-import { NetworkManager } from './network.js?v=132';
-import { UIManager } from './ui.js?v=132';
-import { TelemetryLogger } from './telemetry.js?v=132';
-import { sound } from './audio.js?v=132';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=132';
-import { events, makeEventBridge } from './events.js?v=132';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=132';
+import { VoxelWorld } from './world.js?v=133';
+import { VehicleManager } from './vehicles.js?v=133';
+import { BotManager } from './bots.js?v=133';
+import { PlayerController } from './player.js?v=133';
+import { NetworkManager } from './network.js?v=133';
+import { UIManager } from './ui.js?v=133';
+import { TelemetryLogger } from './telemetry.js?v=133';
+import { sound } from './audio.js?v=133';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=133';
+import { events, makeEventBridge } from './events.js?v=133';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=133';
 
 class BattleBitGame {
   constructor() {
@@ -783,8 +783,17 @@ class BattleBitGame {
       });
       // Tickets are deducted upon RESPAWN (-1 per soldier respawn), so if a Medic revives a downed soldier,
       // no ticket is lost!
+      // When Optional Death Cam is ON (`deathCamPostTimer > 0`), `loop()` runs the 3.8s Over-The-Shoulder
+      // Killer Replay first (skippable via [Space]/[Enter]/[Esc]) before opening the Deploy Screen.
+      if (
+        this.player.deathCamEnabled &&
+        this.player.deathCamPostTimer > 0 &&
+        this.player.lastDeathReport?.hasKillerOrigin
+      ) {
+        return;
+      }
       setTimeout(() => {
-        if (this.player.dead && !this.matchEnded) {
+        if (this.player.dead && !this.matchEnded && !(this.player.deathCamPostTimer > 0)) {
           this.ui.showDeployScreen();
         }
       }, 1600);
@@ -1708,14 +1717,28 @@ class BattleBitGame {
     this.vehicleManager.update(dt, this.player, this.botManager, onDeployMenu, this.camera);
 
     if (this.player.dead) {
-      this.orbitAngle += dt * MATCH.ORBIT_SPEED;
-      this.camera.position.set(
-        Math.cos(this.orbitAngle) * MATCH.ORBIT_RADIUS_X,
-        MATCH.ORBIT_HEIGHT,
-        Math.sin(this.orbitAngle) * MATCH.ORBIT_RADIUS_Z
-      );
-      this.camera.lookAt(0, 4, 0);
-      this.camera.updateMatrixWorld();
+      if (
+        !onDeployMenu &&
+        !this.matchEnded &&
+        this.player.deathCamEnabled &&
+        this.player.deathCamPostTimer > 0 &&
+        this.player.lastDeathReport?.hasKillerOrigin
+      ) {
+        this.player.deathCamPostTimer = Math.max(0, this.player.deathCamPostTimer - dt);
+        this.player.updateDeathCamCamera(dt, true);
+        if (this.player.deathCamPostTimer <= 0) {
+          this.player.finishPostDeathCam();
+        }
+      } else {
+        this.orbitAngle += dt * MATCH.ORBIT_SPEED;
+        this.camera.position.set(
+          Math.cos(this.orbitAngle) * MATCH.ORBIT_RADIUS_X,
+          MATCH.ORBIT_HEIGHT,
+          Math.sin(this.orbitAngle) * MATCH.ORBIT_RADIUS_Z
+        );
+        this.camera.lookAt(0, 4, 0);
+        this.camera.updateMatrixWorld();
+      }
     } else {
       this.player.update(dt);
       this.camera.updateMatrixWorld();
@@ -1733,6 +1756,10 @@ class BattleBitGame {
         this.vehicleManager,
         this.player.onAwardXp
       );
+    }
+
+    if (this.player.deathCamEnabled && (this.player.downed || this.player.deathCamPostTimer > 0)) {
+      this.player.ensureDeathCamTargetVisible?.();
     }
 
     // Squad-Aligned AAS Ticket Economy:
