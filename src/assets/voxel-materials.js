@@ -3,7 +3,7 @@
 // Edit this file to patch voxel block colors, HP, roughness, or batch limits.
 // ============================================================================
 
-import { MAT_HP } from '../config.js?v=141';
+import { MAT_HP } from '../config.js?v=142';
 
 export const VOXEL_SIZE = 1.25;
 

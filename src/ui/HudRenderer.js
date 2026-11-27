@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
-import { UI, getEraRoles } from '../config.js?v=141';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=141';
+import { UI, getEraRoles } from '../config.js?v=142';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=142';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -77,12 +77,24 @@ export const HudRenderer = {
         : `${this.frameMsSmoothed.toFixed(1)} ms`;
     const sorted = [...this.frameHistory].sort((a, b) => a - b);
     const lowFps = Math.round(sorted[Math.max(0, Math.floor(sorted.length * 0.1))] || avgFps);
+    const wd = typeof window !== 'undefined' ? window.game?.watchdog : null;
     const isUncapped = typeof window !== 'undefined' && window.game ? window.game.uncappedFps !== false : true;
+    const nowWall = typeof performance !== 'undefined' ? performance.now() : 0;
 
     if (this.fpsValEl) this.fpsValEl.textContent = String(avgFps);
     if (this.fpsMsValEl) this.fpsMsValEl.textContent = msStr;
     if (this.fpsLowValEl) {
-      this.fpsLowValEl.textContent = `LOW: ${lowFps} • ${isUncapped ? 'MAX' : 'VSYNC'}`;
+      const recentSpike = wd?.lastSpike && nowWall - wd.lastSpike.atMs < 6000 ? wd.lastSpike : null;
+      const stageTag = recentSpike
+        ? ` • ⚠️${recentSpike.totalMs}ms[${recentSpike.stage}]`
+        : wd && wd.slowestMs >= 1.0
+        ? ` • ${wd.slowestStage.toUpperCase()}:${wd.slowestMs.toFixed(1)}ms`
+        : '';
+      this.fpsLowValEl.textContent = `LOW: ${lowFps} • ${isUncapped ? 'MAX' : 'VSYNC'}${stageTag}`;
+    }
+    if (wd && this.fpsPillEl) {
+      const s = wd.stageMs;
+      this.fpsPillEl.title = `Watchdog Timer [F2] — CPU ${s.total}ms (World ${s.world}ms | Bots ${s.bots}ms | Veh ${s.vehicles}ms | Plr ${s.player}ms | Aud ${s.audio}ms | UI ${s.ui}ms | Rnd ${s.render}ms) • Max Spike: ${wd.maxSpikeMs}ms • Recovered Errs: ${wd.recoveredErrors}`;
     }
 
     this.fpsPillEl.classList.toggle('fps-warn', avgFps >= 30 && avgFps < 50);

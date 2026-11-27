@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=141';
-import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=141';
-import { getMapDefinition } from '../maps/index.js?v=141';
-import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=141';
-import { events, makeEventBridge } from '../events.js?v=141';
-import { TerrainGenerator } from './TerrainGenerator.js?v=141';
-import { BuildingFactory } from './BuildingFactory.js?v=141';
-import { ConquestSystem } from './ConquestSystem.js?v=141';
-import { ProjectileManager } from './ProjectileManager.js?v=141';
-import { WeatherSystem } from './WeatherSystem.js?v=141';
+import { TEXTURES } from '../assets/textures.js?v=142';
+import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=142';
+import { getMapDefinition } from '../maps/index.js?v=142';
+import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=142';
+import { events, makeEventBridge } from '../events.js?v=142';
+import { TerrainGenerator } from './TerrainGenerator.js?v=142';
+import { BuildingFactory } from './BuildingFactory.js?v=142';
+import { ConquestSystem } from './ConquestSystem.js?v=142';
+import { ProjectileManager } from './ProjectileManager.js?v=142';
+import { WeatherSystem } from './WeatherSystem.js?v=142';
 
 export { VOXEL_SIZE, MAT_DEFS };
 
@@ -264,15 +264,22 @@ export class VoxelWorld {
    * exposed exterior faces (`!hasVoxel(neighbor)`) with baked BattleBit directional shading,
    * vertical lower-edge AO, damage darkening, and per-chunk GPU frustum culling (`frustumCulled = true`).
    */
-  flushDirtyVoxelChunks() {
+  flushDirtyVoxelChunks(maxBudgetMs = Infinity) {
     if (!this._dirtyVoxelChunkKeys || this._dirtyVoxelChunkKeys.size === 0) return;
+    const useBudget = Number.isFinite(maxBudgetMs) && maxBudgetMs > 0;
+    const tStart = useBudget && typeof performance !== 'undefined' ? performance.now() : 0;
+    let built = 0;
     for (const ck of this._dirtyVoxelChunkKeys) {
       const chunk = this._voxelChunks.get(ck);
+      this._dirtyVoxelChunkKeys.delete(ck);
       if (chunk) {
         this._rebuildSingleVoxelChunk(chunk);
+        built++;
+      }
+      if (useBudget && built >= 2 && performance.now() - tStart >= maxBudgetMs) {
+        break;
       }
     }
-    this._dirtyVoxelChunkKeys.clear();
   }
 
   _rebuildSingleVoxelChunk(chunk) {
@@ -1288,7 +1295,7 @@ export class VoxelWorld {
     if (typeof this.updateLootPacks === 'function') {
       this.updateLootPacks(dt);
     }
-    this.flushDirtyVoxelChunks();
+    this.flushDirtyVoxelChunks(8.5);
   }
 }
 

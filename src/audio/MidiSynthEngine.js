@@ -471,7 +471,8 @@ export class MidiSynthEngine {
     this.musicBus = null;
     this.musicFilter = null;
     this._loopAnchorTime = 0;
-    this._scheduledUpToSec = 0;
+    this._scheduledCycle = 0;
+    this._scheduledPosInCycle = 0;
     this._lastTickWallMs = 0;
     this._combatHoldUntilMs = 0;
   }
@@ -945,7 +946,8 @@ export class MidiSynthEngine {
     if (this.currentCueKey !== targetCue) {
       this.currentCueKey = targetCue;
       this._loopAnchorTime = now + 0.05;
-      this._scheduledUpToSec = 0;
+      this._scheduledCycle = 0;
+      this._scheduledPosInCycle = 0;
       const score = this.scoreBank[targetCue];
       if (score) {
         for (const p of score.programs) {
@@ -956,34 +958,52 @@ export class MidiSynthEngine {
     }
 
     const score = this.scoreBank[this.currentCueKey];
-    if (!score || !score.loopDurationSec) return;
+    if (!score || !(score.loopDurationSec > 0.25)) return;
 
     const lookaheadSec = 0.28;
     const elapsed = now - this._loopAnchorTime;
     if (elapsed < -0.1) return;
 
-    const targetWindowEnd = Math.max(0, elapsed + lookaheadSec);
     const loopLen = score.loopDurationSec;
+    const targetWindowEnd = Math.max(0, elapsed + lookaheadSec);
+    const currentScheduledSec = this._scheduledCycle * loopLen + this._scheduledPosInCycle;
 
-    // Schedule any notes falling inside [this._scheduledUpToSec, targetWindowEnd)
-    while (this._scheduledUpToSec < targetWindowEnd) {
-      const cycleIdx = Math.floor(this._scheduledUpToSec / loopLen);
-      const cycleStartSec = cycleIdx * loopLen;
-      const localFrom = this._scheduledUpToSec - cycleStartSec;
-      const localTo = Math.min(loopLen, targetWindowEnd - cycleStartSec);
+    // If tab was backgrounded or clock jumped > 1 loop ahead, fast-forward cleanly instead of bursting notes
+    if (targetWindowEnd - currentScheduledSec > loopLen) {
+      const safeNow = Math.max(0, elapsed);
+      this._scheduledCycle = Math.floor(safeNow / loopLen);
+      this._scheduledPosInCycle = Math.max(0, Math.min(loopLen - 1e-4, safeNow - this._scheduledCycle * loopLen));
+    }
 
-      for (let i = 0; i < score.notes.length; i++) {
-        const n = score.notes[i];
-        if (n.timeSec >= localFrom && n.timeSec < localTo) {
-          const playWhen = this._loopAnchorTime + cycleStartSec + n.timeSec;
-          const prog = this.channelPrograms[n.channel & 0x0f] || 48;
-          this.triggerMidiNote(n.channel, prog, n.note, n.velocity, playWhen, n.durationSec);
+    // Integer-cycle lookahead scheduler (immune to IEEE-754 (k*loopLen)/loopLen rounding traps + hard step cap!)
+    let safetySteps = 0;
+    while (safetySteps++ < 6) {
+      const cycleStartSec = this._scheduledCycle * loopLen;
+      const absCursor = cycleStartSec + this._scheduledPosInCycle;
+      if (absCursor >= targetWindowEnd - 1e-6) break;
+
+      const localFrom = this._scheduledPosInCycle;
+      const remainingInWindow = targetWindowEnd - cycleStartSec;
+      const wrapsCycle = remainingInWindow >= loopLen - 1e-6;
+      const localTo = wrapsCycle ? loopLen : remainingInWindow;
+
+      if (localTo > localFrom) {
+        for (let i = 0; i < score.notes.length; i++) {
+          const n = score.notes[i];
+          if (n.timeSec >= localFrom && n.timeSec < localTo) {
+            const playWhen = this._loopAnchorTime + cycleStartSec + n.timeSec;
+            const prog = this.channelPrograms[n.channel & 0x0f] || 48;
+            this.triggerMidiNote(n.channel, prog, n.note, n.velocity, playWhen, n.durationSec);
+          }
         }
       }
 
-      this._scheduledUpToSec = cycleStartSec + localTo;
-      if (localTo >= loopLen) {
-        this._scheduledUpToSec = (cycleIdx + 1) * loopLen;
+      if (wrapsCycle) {
+        this._scheduledCycle += 1;
+        this._scheduledPosInCycle = 0;
+      } else {
+        this._scheduledPosInCycle = localTo;
+        break;
       }
     }
   }

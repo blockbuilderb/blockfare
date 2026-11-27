@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { BotManager } from '../src/bots/BotManager.js?v=141';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=141';
+import { BotManager } from '../src/bots/BotManager.js?v=142';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=142';
 
 function createTacticalMockWorld() {
   const voxels = new Map();

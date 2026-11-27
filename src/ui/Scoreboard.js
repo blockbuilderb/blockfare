@@ -1,5 +1,5 @@
-import { SQUAD_DEFS } from '../bots.js?v=141';
-import { resolveUnitPlaystyleTitle } from '../player/MarksmanSystem.js?v=141';
+import { SQUAD_DEFS } from '../bots.js?v=142';
+import { resolveUnitPlaystyleTitle } from '../player/MarksmanSystem.js?v=142';
 
 export const Scoreboard = {
   computeBattleStats() {

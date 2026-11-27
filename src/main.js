@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=141';
-import { VehicleManager } from './vehicles.js?v=141';
-import { BotManager } from './bots.js?v=141';
-import { PlayerController } from './player.js?v=141';
-import { NetworkManager } from './network.js?v=141';
-import { UIManager } from './ui.js?v=141';
-import { TelemetryLogger } from './telemetry.js?v=141';
-import { sound } from './audio.js?v=141';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=141';
-import { events, makeEventBridge } from './events.js?v=141';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=141';
+import { VoxelWorld } from './world.js?v=142';
+import { VehicleManager } from './vehicles.js?v=142';
+import { BotManager } from './bots.js?v=142';
+import { PlayerController } from './player.js?v=142';
+import { NetworkManager } from './network.js?v=142';
+import { UIManager } from './ui.js?v=142';
+import { TelemetryLogger } from './telemetry.js?v=142';
+import { sound } from './audio.js?v=142';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=142';
+import { events, makeEventBridge } from './events.js?v=142';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=142';
 
 class BattleBitGame {
   constructor() {
@@ -172,7 +172,71 @@ class BattleBitGame {
       };
     }
     this.lastTime = performance.now();
+    this.watchdog = {
+      frameCount: 0,
+      stageMs: { world: 0, vehicles: 0, player: 0, bots: 0, network: 0, audio: 0, ui: 0, render: 0, total: 0 },
+      peakStageMs: { world: 0, vehicles: 0, player: 0, bots: 0, network: 0, audio: 0, ui: 0, render: 0, total: 0 },
+      slowestStage: 'none',
+      slowestMs: 0,
+      maxSpikeMs: 0,
+      lastSpike: null,
+      recentSpikes: [],
+      recoveredErrors: 0,
+      heartbeatRestarts: 0,
+      lastError: null,
+      lastToastAtMs: 0
+    };
+    window.getWatchdogReport = () => ({
+      frameCount: this.watchdog.frameCount,
+      msSinceLastFrame: Math.round((performance.now() - this.lastTime) * 10) / 10,
+      stageMs: { ...this.watchdog.stageMs },
+      peakStageMs: { ...this.watchdog.peakStageMs },
+      maxSpikeMs: this.watchdog.maxSpikeMs,
+      lastSpike: this.watchdog.lastSpike,
+      recentSpikes: [...this.watchdog.recentSpikes],
+      recoveredErrors: this.watchdog.recoveredErrors,
+      heartbeatRestarts: this.watchdog.heartbeatRestarts,
+      lastError: this.watchdog.lastError
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        this.lastTime = performance.now();
+        if (!this._framePending) this.scheduleNextFrame();
+      }
+    });
+    this._watchdogTimerId = setInterval(() => {
+      if (document.hidden) return;
+      const idleMs = performance.now() - this.lastTime;
+      if (idleMs > 900) {
+        this.watchdog.heartbeatRestarts++;
+        this._framePending = false;
+        this.lastTime = performance.now();
+        console.warn(`[Blockfare Watchdog] Frame loop stalled for ${Math.round(idleMs)}ms — restarting heartbeat!`);
+        this.scheduleNextFrame();
+      }
+    }, 750);
     this.scheduleNextFrame();
+  }
+
+  _runTimedStage(stageName, fn) {
+    const t0 = performance.now();
+    try {
+      fn();
+    } catch (err) {
+      this.watchdog.recoveredErrors++;
+      const msg = err?.message || String(err);
+      if (this.watchdog.lastError !== `${stageName}:${msg}`) {
+        this.watchdog.lastError = `${stageName}:${msg}`;
+        console.error(`[Blockfare Watchdog] Recovered error in '${stageName}':`, err);
+        this.telemetry?.logEvent?.('WATCHDOG_RECOVERED_ERROR', { stage: stageName, error: msg });
+      }
+    }
+    const elapsed = performance.now() - t0;
+    this.watchdog.stageMs[stageName] = Math.round(elapsed * 100) / 100;
+    if (elapsed > (this.watchdog.peakStageMs[stageName] || 0)) {
+      this.watchdog.peakStageMs[stageName] = Math.round(elapsed * 100) / 100;
+    }
+    return elapsed;
   }
 
   syncMatchTicketsForArmyScale(countPerSide = 250, resetCurrent = false) {
@@ -1683,10 +1747,12 @@ class BattleBitGame {
 
   loop() {
     this.scheduleNextFrame();
-    const now = performance.now();
+    const frameT0 = performance.now();
+    const now = frameT0;
     const rawDt = Math.max(0.00002, (now - this.lastTime) / 1000);
     const dt = Math.min(0.05, rawDt);
     this.lastTime = now;
+    this.watchdog.frameCount++;
 
     const allUnits = this._allUnits || (this._allUnits = []);
     allUnits.length = 0;
@@ -1708,60 +1774,72 @@ class BattleBitGame {
     );
 
     if (!preRoundWaitingToStart) {
-      this.world.update(
-        dt,
-        allUnits,
-        this.player.onExplosionDamage,
-        (payload) => this.network.send(payload),
-        null,
-        this.vehicleManager.vehicles
-      );
+      this._runTimedStage('world', () => {
+        this.world.update(
+          dt,
+          allUnits,
+          this.player.onExplosionDamage,
+          (payload) => this.network.send(payload),
+          null,
+          this.vehicleManager.vehicles
+        );
+      });
+    } else {
+      this.watchdog.stageMs.world = 0;
     }
 
-    this.vehicleManager.update(dt, this.player, this.botManager, onDeployMenu, this.camera);
+    this._runTimedStage('vehicles', () => {
+      this.vehicleManager.update(dt, this.player, this.botManager, onDeployMenu, this.camera);
+    });
 
-    if (this.player.dead) {
-      if (
-        !onDeployMenu &&
-        !this.matchEnded &&
-        this.player.deathCamEnabled &&
-        this.player.deathCamPostTimer > 0 &&
-        this.player.lastDeathReport?.hasKillerOrigin
-      ) {
-        this.player.deathCamPostTimer = Math.max(0, this.player.deathCamPostTimer - dt);
-        this.player.updateDeathCamCamera(dt, true);
-        if (this.player.deathCamPostTimer <= 0) {
-          this.player.finishPostDeathCam();
+    this._runTimedStage('player', () => {
+      if (this.player.dead) {
+        if (
+          !onDeployMenu &&
+          !this.matchEnded &&
+          this.player.deathCamEnabled &&
+          this.player.deathCamPostTimer > 0 &&
+          this.player.lastDeathReport?.hasKillerOrigin
+        ) {
+          this.player.deathCamPostTimer = Math.max(0, this.player.deathCamPostTimer - dt);
+          this.player.updateDeathCamCamera(dt, true);
+          if (this.player.deathCamPostTimer <= 0) {
+            this.player.finishPostDeathCam();
+          }
+        } else {
+          this.orbitAngle += dt * MATCH.ORBIT_SPEED;
+          this.camera.position.set(
+            Math.cos(this.orbitAngle) * MATCH.ORBIT_RADIUS_X,
+            MATCH.ORBIT_HEIGHT,
+            Math.sin(this.orbitAngle) * MATCH.ORBIT_RADIUS_Z
+          );
+          this.camera.lookAt(0, 4, 0);
+          this.camera.updateMatrixWorld();
         }
+      } else if (!onDeployMenu) {
+        this.player.update(dt);
+        this.camera.updateMatrixWorld();
       } else {
-        this.orbitAngle += dt * MATCH.ORBIT_SPEED;
-        this.camera.position.set(
-          Math.cos(this.orbitAngle) * MATCH.ORBIT_RADIUS_X,
-          MATCH.ORBIT_HEIGHT,
-          Math.sin(this.orbitAngle) * MATCH.ORBIT_RADIUS_Z
-        );
-        this.camera.lookAt(0, 4, 0);
         this.camera.updateMatrixWorld();
       }
-    } else if (!onDeployMenu) {
-      this.player.update(dt);
-      this.camera.updateMatrixWorld();
-    } else {
-      this.camera.updateMatrixWorld();
-    }
+    });
 
     if (!preRoundWaitingToStart) {
-      this.botManager.update(
-        dt,
-        this.player,
-        this.player.onKillEvent,
-        (team, amount, category = 'SOLDIER', botName = 'SOLDIER') => {
-          if (onDeployMenu || this.matchEnded) return;
-          this.spendRespawnTickets(team, category, botName, amount);
-        },
-        this.vehicleManager,
-        this.player.onAwardXp
-      );
+      this._runTimedStage('bots', () => {
+        this.botManager.update(
+          dt,
+          this.player,
+          this.player.onKillEvent,
+          (team, amount, category = 'SOLDIER', botName = 'SOLDIER') => {
+            if (onDeployMenu || this.matchEnded) return;
+            this.spendRespawnTickets(team, category, botName, amount);
+          },
+          this.vehicleManager,
+          this.player.onAwardXp
+        );
+      });
+    } else {
+      this.watchdog.stageMs.bots = 0;
     }
 
     if (this.player.deathCamEnabled && (this.player.downed || this.player.deathCamPostTimer > 0)) {
@@ -1769,10 +1847,6 @@ class BattleBitGame {
     }
 
     // Squad-Aligned AAS Ticket Economy:
-    // 1. ZERO passive ticket generation (tickets never tick upward on their own!)
-    // 2. Asset Losses & Respawns consume tickets: Soldiers -1 (0 if revived), Cars -5, IFV/APCs -10, Tanks -15
-    // 3. Flag Captures grant +20 (Neutral) or +30 / -10 Enemy (40-ticket swing)
-    // 4. Midpoint Territory Bleed (3/5 flags = -6/m, 4/5 flags = -15/m, 5/5 flags = -60/m Mercy Bleed)
     if (!this.matchEnded && !onDeployMenu) {
       this.matchTimeRemaining = Math.max(0, this.matchTimeRemaining - dt);
       const bleedInfo = this.computeTeamBleedRates();
@@ -1789,7 +1863,6 @@ class BattleBitGame {
         this.ticketStats.RU.lostBleed = (this.ticketStats.RU.lostBleed || 0) + lossRU;
       }
 
-      // Periodic HUD Ticket Feed notification showing Territory Bleed or Mercy Bleed
       this.bleedPopupTimer -= dt;
       if (this.bleedPopupTimer <= 0) {
         this.bleedPopupTimer = MATCH.BLEED_POPUP_INTERVAL;
@@ -1815,49 +1888,98 @@ class BattleBitGame {
       }
     }
 
-    this.network.update(dt);
-    if (this.stateMachines) this.stateMachines.update(dt);
-    sound.updateAdaptiveAudio?.({
-      listenerPos: this.player?.pos,
-      world: this.world,
-      inAircraft: Boolean(this.player?.activeVehicle?.isAircraft),
-      onDeployMenu,
-      matchEnded: this.matchEnded,
-      era: this.world?.era || 'modern',
-      minTickets: Math.min(this.ticketsUS, this.ticketsRU),
-      matchTimeRemaining: this.matchTimeRemaining,
-      inCombat: Boolean(
-        (this.player?.suppressionLevel || 0) > 0.12 ||
-          this.currentBleedInfo?.bleedUSPerMin > 0 ||
-          this.currentBleedInfo?.bleedRUPerMin > 0
-      )
+    this._runTimedStage('network', () => {
+      this.network.update(dt);
+      if (this.stateMachines) this.stateMachines.update(dt);
     });
-    try {
-      this.ui.update(dt, this.ticketsUS, this.ticketsRU, this.matchTimeRemaining, rawDt);
-    } catch (uiErr) {
-      if (this._lastLoggedUiErr !== uiErr?.message) {
-        this._lastLoggedUiErr = uiErr?.message;
-        console.error('[Blockfare UI Update Error]', uiErr);
-      }
-    }
-    if (this.telemetry) this.telemetry.update(dt);
 
-    const flirRestore = this.syncThermalSceneState();
-    let savedDayHazeDensity = null;
-    if (!flirRestore && this.scene.fog && this.player && !this.player.dead) {
-      const inAir = Boolean(this.player.activeVehicle && this.player.activeVehicle.isAircraft);
-      const curFov = this.camera?.fov || 75;
-      if (inAir || curFov < 42) {
-        savedDayHazeDensity = this.scene.fog.density;
-        // Electro-Optical (EO) Day-TV haze-penetration filter so AC-130 / Jet / Sniper zoom sees crisp ground infantry up to 2,500m!
-        this.scene.fog.density = savedDayHazeDensity * (inAir && curFov < 36 ? 0.34 : 0.48);
+    this._runTimedStage('audio', () => {
+      sound.updateAdaptiveAudio?.({
+        listenerPos: this.player?.pos,
+        world: this.world,
+        inAircraft: Boolean(this.player?.activeVehicle?.isAircraft),
+        onDeployMenu,
+        matchEnded: this.matchEnded,
+        era: this.world?.era || 'modern',
+        minTickets: Math.min(this.ticketsUS, this.ticketsRU),
+        matchTimeRemaining: this.matchTimeRemaining,
+        inCombat: Boolean(
+          (this.player?.suppressionLevel || 0) > 0.12 ||
+            this.currentBleedInfo?.bleedUSPerMin > 0 ||
+            this.currentBleedInfo?.bleedRUPerMin > 0
+        )
+      });
+    });
+
+    this._runTimedStage('ui', () => {
+      this.ui.update(dt, this.ticketsUS, this.ticketsRU, this.matchTimeRemaining, rawDt);
+      if (this.telemetry) this.telemetry.update(dt);
+    });
+
+    this._runTimedStage('render', () => {
+      const flirRestore = this.syncThermalSceneState();
+      let savedDayHazeDensity = null;
+      if (!flirRestore && this.scene.fog && this.player && !this.player.dead) {
+        const inAir = Boolean(this.player.activeVehicle && this.player.activeVehicle.isAircraft);
+        const curFov = this.camera?.fov || 75;
+        if (inAir || curFov < 42) {
+          savedDayHazeDensity = this.scene.fog.density;
+          this.scene.fog.density = savedDayHazeDensity * (inAir && curFov < 36 ? 0.34 : 0.48);
+        }
+      }
+      try {
+        this.renderer.render(this.scene, this.camera);
+      } finally {
+        if (savedDayHazeDensity !== null && this.scene.fog) {
+          this.scene.fog.density = savedDayHazeDensity;
+        }
+        if (flirRestore) this.restorePostRenderThermalAtmosphere(flirRestore);
+      }
+    });
+
+    // Record total frame CPU time & detect any frame-spike bottleneck (>55ms)
+    const totalCpuMs = Math.round((performance.now() - frameT0) * 100) / 100;
+    this.watchdog.stageMs.total = totalCpuMs;
+    if (totalCpuMs > this.watchdog.peakStageMs.total) {
+      this.watchdog.peakStageMs.total = totalCpuMs;
+    }
+
+    let topStage = 'render';
+    let topMs = 0;
+    const stages = this.watchdog.stageMs;
+    for (const k of ['world', 'vehicles', 'player', 'bots', 'network', 'audio', 'ui', 'render']) {
+      if (stages[k] > topMs) {
+        topMs = stages[k];
+        topStage = k;
       }
     }
-    this.renderer.render(this.scene, this.camera);
-    if (savedDayHazeDensity !== null && this.scene.fog) {
-      this.scene.fog.density = savedDayHazeDensity;
+    this.watchdog.slowestStage = topStage;
+    this.watchdog.slowestMs = topMs;
+
+    if (totalCpuMs >= 55 && this.watchdog.frameCount > 5) {
+      const spikeEntry = {
+        totalMs: Math.round(totalCpuMs),
+        stage: topStage.toUpperCase(),
+        stageMs: Math.round(topMs),
+        atMs: Math.round(now)
+      };
+      this.watchdog.lastSpike = spikeEntry;
+      if (totalCpuMs > this.watchdog.maxSpikeMs) {
+        this.watchdog.maxSpikeMs = Math.round(totalCpuMs);
+      }
+      this.watchdog.recentSpikes.push(spikeEntry);
+      if (this.watchdog.recentSpikes.length > 12) {
+        this.watchdog.recentSpikes.shift();
+      }
+      if (totalCpuMs >= 160 && now - this.watchdog.lastToastAtMs > 8000) {
+        this.watchdog.lastToastAtMs = now;
+        console.warn(
+          `[Blockfare Watchdog] Frame spike ${spikeEntry.totalMs}ms (slowest: ${spikeEntry.stage} ${spikeEntry.stageMs}ms)`,
+          this.watchdog.stageMs
+        );
+        this.telemetry?.logEvent?.('WATCHDOG_FRAME_SPIKE', spikeEntry);
+      }
     }
-    if (flirRestore) this.restorePostRenderThermalAtmosphere(flirRestore);
   }
 
   /**
