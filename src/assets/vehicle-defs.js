@@ -4,13 +4,13 @@
 // Positions stored as arrays [x, y, z] — y is computed at runtime via getGroundHeightAt.
 // =========================================================================
 
-import { VEHICLE_STATS } from '../config.js?v=143';
+import { VEHICLE_STATS } from '../config.js?v=144';
 
 export const VEHICLE_DEFS = [
   // ===================== US FLEET (Open Motor Pool Apron aligned with 28m Main Gate at x = -904..-884, z = -10..+10) =====================
   {
     id: 'us_abrams_hq',
-    name: 'M1A2 ABRAMS MBT (120MM + COAX)',
+    name: 'M1A2 ABRAMS MBT (120MM + COAX + .50 CROWS)',
     type: 'tank',
     team: 'US',
     spawnPos: [-1456, 0, -5],
@@ -144,7 +144,7 @@ export const VEHICLE_DEFS = [
   // ===================== RU FLEET (Open Motor Pool Apron aligned with 28m Main Gate at x = +884..+904, z = -10..+10) =====================
   {
     id: 'ru_t90_hq',
-    name: 'T-90M PRORYV MBT (125MM + COAX)',
+    name: 'T-90M PRORYV MBT (125MM + COAX + 12.7 KORD)',
     type: 'tank',
     team: 'RU',
     spawnPos: [1456, 0, 5],

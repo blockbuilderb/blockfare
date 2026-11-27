@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=143';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=143';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=143';
-import { VehicleManager } from '../src/vehicles.js?v=143';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=144';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=144';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=144';
+import { VehicleManager } from '../src/vehicles.js?v=144';
 import {
   evaluateMarksmanShot,
   resolveUnitPlaystyleTitle
-} from '../src/player/MarksmanSystem.js?v=143';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=143';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=143';
-import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=143';
-import { PlayerController } from '../src/player/PlayerController.js?v=143';
+} from '../src/player/MarksmanSystem.js?v=144';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=144';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=144';
+import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=144';
+import { PlayerController } from '../src/player/PlayerController.js?v=144';
 
 function makeMockElement(id = '') {
   const classes = new Set();
@@ -309,12 +309,13 @@ test('v138: Hybrid Blocky 3D Downtown Skyscrapers, Greedy Chunk Merging, Walkabl
   assert.ok(coreHit && coreHit.isSkyscraperCore, 'Bullets/LOS should hit the solid 3D skyscraper core');
 
   // Verify walkable 'wood' U-turn staircase exists on every story up to the roof!
+  const storyH = tallTower.floorHeight || 4;
   for (let f = 0; f < tallTower.floors; f++) {
-    const fBaseGy = tallTower.groundGy + f * 4;
+    const fBaseGy = tallTower.groundGy + f * storyH;
     const step1 = world.getVoxel(tallTower.startGx + 1, fBaseGy, tallTower.startGz + 3);
-    const step4 = world.getVoxel(tallTower.startGx + 3, fBaseGy + 3, tallTower.startGz + 3);
+    const stepTop = world.getVoxel(tallTower.startGx + 3, fBaseGy + storyH - 1, tallTower.startGz + 3);
     assert.equal(step1?.type, 'wood', `Missing stair Flight A step on floor ${f + 1}`);
-    assert.equal(step4?.type, 'wood', `Missing stair Flight B top step on floor ${f + 1}`);
+    assert.equal(stepTop?.type, 'wood', `Missing stair Flight B top step on floor ${f + 1}`);
   }
 
   // Verify steelBeam resists small arms / autocannons (< 160) and breaks under heavy demolition (>= 160)

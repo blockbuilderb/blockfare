@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=143';
-import { sound } from '../audio.js?v=143';
-import { DISTANCES } from '../config.js?v=143';
-import { events } from '../events.js?v=143';
+import { VOXEL_SIZE } from '../world.js?v=144';
+import { sound } from '../audio.js?v=144';
+import { DISTANCES } from '../config.js?v=144';
+import { events } from '../events.js?v=144';
 
 export const FortificationMethods = {
   getBlueprintName() {
@@ -128,7 +128,7 @@ export const FortificationMethods = {
     }
 
     const flatFwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
-    const distAhead = isSquadEmplace ? 4.2 : isHouse ? 6.8 : 6.0;
+    const distAhead = isSquadEmplace ? 4.8 : isHouse ? 8.8 : 7.8;
     const centerWx = this.pos.x + flatFwd.x * distAhead;
     const centerWz = this.pos.z + flatFwd.z * distAhead;
 

@@ -11,7 +11,7 @@
 // - Context-Smart Pill: Auto-shows Revive, Bandage, Board/Exit Vehicle, Resupply & Ride
 // ============================================================================
 
-import { sound } from '../audio.js?v=143';
+import { sound } from '../audio.js?v=144';
 
 const TOUCH_MODE_STORAGE_KEY = 'bb_mobile_touch_mode_v1';
 const TOUCH_SENS_STORAGE_KEY = 'bb_mobile_touch_sens_v1';
@@ -192,8 +192,9 @@ export class MobileTouchControls {
         <button type="button" id="mt-zoom-btn" class="mt-scope-pill">🔍 ZOOM</button>
       </div>
 
-      <!-- 6. Context-Smart Action Pill (Revive, Bandage, Enter/Exit Vehicle, Resupply) -->
+      <!-- 6. Context-Smart Action Pill (Revive, Bandage, Shotgun Shell Cycle, Enter/Exit Vehicle, Resupply) -->
       <div id="mt-context-bar">
+        <button type="button" id="mt-shell-btn" class="mt-context-pill hidden">🐚 00 BUCK</button>
         <button type="button" id="mt-context-btn" class="mt-context-pill hidden">➕ REVIVE</button>
         <button type="button" id="mt-heal-btn" class="mt-context-pill mt-heal-pill hidden">🩹 HEAL</button>
         <button type="button" id="mt-exit-veh-btn" class="mt-context-pill mt-veh-exit hidden">🚪 EXIT</button>
@@ -652,8 +653,12 @@ export class MobileTouchControls {
         const idx = Number(btn.dataset.slot || 0);
         if (!this.player || this.player.dead || this.player.downed) return;
         if (this.player.activeVehicle) {
-          this.player.activeVehicle.activeWeaponSlot = idx;
-          sound.playWeaponSwitch?.();
+          if (typeof this.player.switchVehicleWeaponSlot === 'function') {
+            this.player.switchVehicleWeaponSlot(idx);
+          } else {
+            this.player.activeVehicle.activeWeaponSlot = idx;
+            sound.playWeaponSwitch?.();
+          }
         } else if (typeof this.player.switchSlot === 'function') {
           this.player.switchSlot(idx);
         } else if (this.player.slots?.[idx]) {
@@ -716,6 +721,11 @@ export class MobileTouchControls {
 
     this._bindTapButton(this.exitVehBtnEl, () => {
       this.player?.handleVehicleAndDragKey?.();
+    });
+    this.shellBtnEl = this.rootEl.querySelector('#mt-shell-btn');
+    this._bindTapButton(this.shellBtnEl, () => {
+      this.player?.cycleShotgunShellType?.();
+      this._vibrate(14);
     });
     this._bindTapButton(this.camVehBtnEl, () => {
       if (this.player?.activeVehicle) {
@@ -966,7 +976,12 @@ export class MobileTouchControls {
         const lbl = btn.querySelector('.mt-slot-name');
         if (lbl) {
           if (inVeh) {
-            lbl.textContent = idx === 0 ? 'MAIN GUN' : idx === 1 ? 'COAX / 2ND' : idx === 2 ? 'ORDNANCE' : 'AUX';
+            if (p.activeVehicle.type === 'tank') {
+              lbl.textContent =
+                idx === 0 ? '120MM' : idx === 1 ? '7.62 COAX' : idx === 2 ? '.50 AA' : 'ATGM';
+            } else {
+              lbl.textContent = idx === 0 ? 'MAIN GUN' : idx === 1 ? 'COAX / 2ND' : idx === 2 ? 'ORDNANCE' : 'AUX';
+            }
           } else {
             const s = p.slots?.[idx];
             lbl.textContent = s?.def?.shortName || `SLOT ${idx + 1}`;
@@ -984,6 +999,17 @@ export class MobileTouchControls {
 
     this.exitVehBtnEl.classList.toggle('hidden', !inVeh);
     this.camVehBtnEl.classList.toggle('hidden', !inVeh);
+
+    const curWep = !inVeh && typeof p.currentWeapon === 'function' ? p.currentWeapon() : null;
+    const holdingShotgun = Boolean(
+      curWep?.def && (curWep.def.isShotgun || curWep.def.activeShellBadge)
+    );
+    if (this.shellBtnEl) {
+      this.shellBtnEl.classList.toggle('hidden', !holdingShotgun);
+      if (holdingShotgun) {
+        this.shellBtnEl.textContent = `${curWep.def.activeShellBadge || '🐚 00 BUCK'} ⟳`;
+      }
+    }
 
     const showHeal = Boolean(!inVeh && (p.bleeding || p.hp < 88) && (p.bandages || 0) > 0);
     this.healBtnEl.classList.toggle('hidden', !showHeal);

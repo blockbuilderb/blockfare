@@ -18,7 +18,7 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=143';
+import { TEXTURES } from '../assets/textures.js?v=144';
 
 // Cached shared geometries & materials for 1st-person Spec-Ops Operator Arms, Watch & Articulated Tactical Gloves
 const _fpArmGeos = {
@@ -1329,7 +1329,7 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     const isMp5sd = wId === 'mp5sd';
     const isVector = wId === 'vector';
     const isMp7 = wId === 'mp7';
-    const isShotgun = wId === 'm1014';
+    const isShotgun = wId === 'm1014' || wId === 'rem870' || wId === 'aa12';
     const isBoxLmg = wId === 'm249' || wId === 'pkp';
     const isAmr = wId === 'barrett_m82' || wId === 'gm6_lynx' || wId === 'ntw20';
     const isSniper =

@@ -4,8 +4,8 @@
 // attachment overlay graphics, and gear/grid size metadata.
 // ============================================================================
 
-import { WEAPON_DEFS } from './weapon-defs.js?v=143';
-import { ATTACHMENT_CATALOG } from './attachment-defs.js?v=143';
+import { WEAPON_DEFS } from './weapon-defs.js?v=144';
+import { ATTACHMENT_CATALOG } from './attachment-defs.js?v=144';
 
 export const CLASS_META = [
   { id: 'engineer', label: 'ENGINEER', short: 'ENG', icon: '🛠️', gadgetId: 'rpg7', gadget: 'RPG-7 HEAT + HAMMER' },
@@ -38,7 +38,9 @@ export const WEAPON_GRID_SIZES = {
   mp7: { cols: 3, rows: 2, label: '3×2', cat: 'AP PDW', weight: '2.1 kg' },
   mp5sd: { cols: 3, rows: 2, label: '3×2', cat: 'SUPPRESSED SMG', weight: '3.1 kg' },
   p90: { cols: 3, rows: 2, label: '3×2', cat: '50R BULLPUP PDW', weight: '2.6 kg' },
+  rem870: { cols: 4, rows: 2, label: '4×2', cat: '12G PUMP SHOTGUN', weight: '3.6 kg' },
   m1014: { cols: 4, rows: 2, label: '4×2', cat: 'COMBAT SHOTGUN', weight: '3.8 kg' },
+  aa12: { cols: 5, rows: 2, label: '5×2', cat: 'AUTO DRUM SHOTGUN', weight: '5.2 kg' },
   m249: { cols: 5, rows: 2, label: '5×2', cat: 'SQUAD LMG', weight: '7.5 kg' },
   pkp: { cols: 5, rows: 2, label: '5×2', cat: 'HEAVY LMG', weight: '8.2 kg' },
   sv98: { cols: 5, rows: 2, label: '5×2', cat: 'BOLT SNIPER', weight: '5.8 kg' },
@@ -333,7 +335,7 @@ export function buildWeaponSvg(weaponId, attMap = {}, opts = {}) {
   const isSniper = weaponId === 'sv98' || weaponId === 'awm' || weaponId === 'mk14' || weaponId === 'sr25';
   const isLmg = weaponId === 'm249' || weaponId === 'pkp';
   const isSmg = weaponId === 'vector' || weaponId === 'mp7' || weaponId === 'p90' || weaponId === 'mp5sd';
-  const isShotgun = weaponId === 'm1014';
+  const isShotgun = weaponId === 'm1014' || weaponId === 'rem870' || weaponId === 'aa12';
   const isAk = weaponId === 'ak15';
   const isScar = weaponId === 'scar_h' || weaponId === 'mcx_spear';
   const isAsVal = weaponId === 'as_val';

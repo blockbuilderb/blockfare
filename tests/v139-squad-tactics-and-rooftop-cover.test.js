@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { BotManager } from '../src/bots/BotManager.js?v=143';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=143';
+import { BotManager } from '../src/bots/BotManager.js?v=144';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=144';
 
 function createTacticalMockWorld() {
   const voxels = new Map();
@@ -289,7 +289,7 @@ test('v139: Stance-Aware Rooftop Sightlines, Unalerted Street Gaze Cone & Solid 
   const vWorld = new VoxelWorld(realScene, 'frugis_river');
   const tallTower = vWorld.buildings.find((b) => b.isHybridSkyscraper);
   assert.ok(tallTower, 'Downtown C should have hybrid skyscrapers');
-  const topGy = tallTower.groundGy + tallTower.floors * 4;
+  const topGy = tallTower.groundGy + tallTower.floors * (tallTower.floorHeight || 4);
   // South edge (z = startGz + depth - 1) is outside stairwell headhouse and must have 100% solid parapet blocks!
   const southGz = tallTower.startGz + tallTower.depth - 1;
   for (let gx = tallTower.startGx; gx < tallTower.startGx + tallTower.width; gx++) {

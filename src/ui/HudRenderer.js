@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
-import { UI, getEraRoles } from '../config.js?v=143';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=143';
+import { UI, getEraRoles } from '../config.js?v=144';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=144';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -2375,15 +2375,18 @@ export const HudRenderer = {
             ? activeVeh.ordnancePools.slot0
             : null;
         const maxTankShells = activeVeh.maxOrdnancePools?.slot0 || 24;
-        if (this.player.vehicleSeatIndex === 2) {
-          const rwsRds = activeVeh.ordnancePools?.slot1 ?? 1200;
-          this._setText(this.ammoClipEl, activeVeh.coaxOverheated ? 'HOT' : `${rwsRds}`);
-          this._setText(this.ammoReserveEl, '.50 RWS');
+        const elevDegNow = Math.round(((this.player.pitch || 0) * 180) / Math.PI);
+        const aimingHighRws = (this.player.pitch || 0) > 0.36;
+        if (this.player.vehicleSeatIndex === 2 || activeSlot === 2) {
+          const rwsRds =
+            activeVeh.ordnancePools?.roofHmg ?? activeVeh.ordnancePools?.slot1 ?? 1200;
+          this._setText(this.ammoClipEl, activeVeh.roofHmgOverheated ? 'HOT' : `${rwsRds}`);
+          this._setText(this.ammoReserveEl, '.50 AA');
           this._setText(
             this.fireModeEl,
-            'ROOF .50 CAL CROWS / KORD RWS (+60° HIGH-ANGLE ELEVATION [LMB / SPACE]) • [F1–F3] SEATS'
+            `🔼 [3] ROOF .50 CROWS / 12.7MM KORD AA HMG (ELEV ${elevDegNow >= 0 ? `+${elevDegNow}` : elevDegNow}° / +62° MAX [LMB/SPACE]) • [1] 120MM • [2] COAX • [4] ATGM`
           );
-        } else if (activeSlot === 2) {
+        } else if (activeSlot === 3) {
           const atgmLeft = activeVeh.ordnancePools?.slot2 ?? 4;
           const maxAtgm = activeVeh.maxOrdnancePools?.slot2 || 4;
           this._setText(
@@ -2393,15 +2396,17 @@ export const HudRenderer = {
           this._setText(this.ammoReserveEl, `/${maxAtgm} ATGM`);
           this._setText(
             this.fireModeEl,
-            '[3] LASER-GUIDED ATGM (STEERS TO CROSSHAIR [LMB]) • [1] APFSDS SABOT • [2] COAX'
+            '[4] LASER-GUIDED GUN-ATGM (+20° LIMIT [LMB]) • [1] 120MM • [2] COAX • [3] +62° ROOF .50 HMG'
           );
         } else if (activeSlot === 1) {
           const coaxRds = activeVeh.ordnancePools?.slot1 ?? 1200;
           this._setText(this.ammoClipEl, activeVeh.coaxOverheated ? 'HOT' : `${coaxRds}`);
-          this._setText(this.ammoReserveEl, '7.62 AP');
+          this._setText(this.ammoReserveEl, '7.62 MG');
           this._setText(
             this.fireModeEl,
-            '[2] COAX 7.62MM MG (+20° MANTLET LIMIT) • [3] GUIDED ATGM • [F3] ROOF .50 RWS'
+            aimingHighRws
+              ? `🔼 ELEV +${elevDegNow}° (> +20° MANTLET) — HOLD [SPACE] OR PRESS [3] FOR +62° ROOF .50 AA HMG!`
+              : '[2] 950 RPM 7.62MM COAX MG (-10°..+20° [LMB/SPACE]) • [1] 120MM • [3] +62° ROOF .50 HMG • [4] ATGM'
           );
         } else {
           this._setText(
@@ -2418,7 +2423,9 @@ export const HudRenderer = {
           );
           this._setText(
             this.fireModeEl,
-            '[1] 780 M/S APFSDS SABOT [LMB] • [2/SPACE] COAX • [3] GUIDED ATGM • [F3] .50 RWS'
+            aimingHighRws
+              ? `🔼 ELEV +${elevDegNow}° (> +20° CANNON STOP) — HOLD [SPACE] OR PRESS [3] TO FIRE +62° ROOF .50 AA HMG!`
+              : '[1] 120MM SABOT (+20° MAX [LMB]) • [2/SPACE] 7.62 COAX • [3] +62° ROOF .50 AA HMG • [4] ATGM'
           );
         }
       } else if (activeVeh.weaponType === 'autocannon') {
@@ -2506,6 +2513,24 @@ export const HudRenderer = {
           ? `⚔️ RMB ${gDir} PARRY: ACTIVE (-60% MELEE / -25% ARROW)`
           : 'HOLD RMB: 4-DIR ZWEIHÄNDER PARRY (-60% DMG)';
         fireModeStr = `${dirTag} • ${blockTag}`;
+      } else if (cur.def.isShotgun || (cur.def.pellets && cur.def.pellets > 1) || cur.def.activeShellBadge) {
+        const shellBadge = cur.def.activeShellBadge || '🐚 00 BUCK';
+        const shellName = cur.def.activeShellName || '00 BUCKSHOT';
+        const pCnt = cur.def.isSlugAmmo ? '1 SLUG' : `${cur.def.pellets || 8} PELLETS`;
+        const mv = cur.def.muzzleVelocity ? ` • ${cur.def.muzzleVelocity} M/S` : '';
+        fireModeStr = `${shellBadge}: ${shellName} (${pCnt}${mv}) • PRESS [B] TO SWITCH SHELLS`;
+        if (this.fireModeEl && !this.fireModeEl._shotgunClickBound) {
+          this.fireModeEl._shotgunClickBound = true;
+          this.fireModeEl.style.cursor = 'pointer';
+          this.fireModeEl.style.pointerEvents = 'auto';
+          this.fireModeEl.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const c = this.player?.currentWeapon?.();
+            if (c?.def && (c.def.isShotgun || c.def.activeShellBadge)) {
+              this.player?.cycleShotgunShellType?.();
+            }
+          });
+        }
       } else {
         const mv = cur.def.muzzleVelocity ? ` • ${cur.def.muzzleVelocity} M/S` : '';
         fireModeStr = `${cur.def.caliber}${mv} • [F/V] INSPECT`;

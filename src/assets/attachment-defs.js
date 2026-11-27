@@ -577,18 +577,55 @@ export const ATTACHMENT_CATALOG = {
       desc: '+15% Stopping Power & +15% High-Velocity Muzzle Speed, +6% Recoil kick.'
     },
     {
+      id: 'flechette_12g',
+      name: '12G FIN-STABILIZED STEEL FLECHETTE DARTS (14 DARTS)',
+      shortName: '12G FLECHETTE',
+      price: 1450,
+      dmgMult: 1.04,
+      armorPenMult: 1.55,
+      recoilMult: 0.94,
+      spreadMult: 0.66,
+      voxelMult: 0.95,
+      velocityMult: 1.14,
+      isFlechetteAmmo: true,
+      causesBleed: true,
+      desc: 'Loads 14 hardened steel fin-darts in 12G Shotguns (-34% tighter spread, 1.55× armor pen & guaranteed bleed)!'
+    },
+    {
       id: 'ap20_slug',
       name: '12G AP-20 ARMOR-PIERCING SOLID SLUG / SNIPER SABOT',
       shortName: 'AP-20 SLUG',
       price: 2100,
       dmgMult: 1.10,
-      armorPenMult: 1.55,
+      armorPenMult: 1.65,
       recoilMult: 1.08,
       spreadMult: 0.35,
-      voxelMult: 1.4,
-      velocityMult: 1.22,
+      voxelMult: 1.5,
+      velocityMult: 1.24,
       isSlugAmmo: true,
-      desc: 'Converts 12G Shotguns to 1-Shot Precision Slugs (<110m) & +55% AP on rifles!'
+      causesBleed: true,
+      desc: 'Converts 12G Shotguns to 1-Shot Precision Solid Slugs (<115m) & +65% AP on rifles!'
+    },
+    {
+      id: 'frag12_he',
+      name: '12G FRAG-12 HIGH-EXPLOSIVE FIN-STABILIZED SLUG',
+      shortName: 'FRAG-12 HE',
+      price: 2950,
+      dmgMult: 1.08,
+      armorPenMult: 1.45,
+      recoilMult: 1.16,
+      spreadMult: 0.45,
+      voxelMult: 2.2,
+      velocityMult: 0.82,
+      isSlugAmmo: true,
+      isFrag12He: true,
+      causesBleed: true,
+      explosiveSplash: {
+        radius: 2.8,
+        damage: 76,
+        weaponName: '12G FRAG-12 HE'
+      },
+      desc: '19mm fin-stabilized micro-HE grenade slug (2.8m fragmentation blast): clears rooms, sandbags & light trucks!'
     },
     {
       id: 'm855a1_bp',

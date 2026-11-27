@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../textures.js?v=143';
-import { TERRAIN } from '../config.js?v=143';
-import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=143';
+import { TEXTURES } from '../textures.js?v=144';
+import { TERRAIN } from '../config.js?v=144';
+import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=144';
 
 const VOXEL_SIZE = 1.25;
 
@@ -1939,9 +1939,9 @@ export const TerrainGenerator = {
       // 4. Grand Central Stone Keep Donjon — Built out of Real Destructible Voxels with Walkable Great Hall,
       //    Arrow Slit Windows, Internal Timber Floor, and Crenellated Roof Battlements!
       const keepGx = cgx + (site.isHQ ? (site.faction === 'US' ? -11 : 11) : 0);
-      const keepGz = cgz + (site.isHQ ? 0 : -8);
-      const keepHalfW = 5; // 11 voxels wide (13.75m)
-      const keepHalfD = 4; // 9 voxels deep (11.25m)
+      const keepGz = cgz + (site.isHQ ? 0 : -7);
+      const keepHalfW = 7; // 15 voxels wide (18.75m)
+      const keepHalfD = 6; // 13 voxels deep (16.25m)
       const keepVoxels = [];
 
       for (let kx = -keepHalfW; kx <= keepHalfW; kx++) {
@@ -1952,9 +1952,9 @@ export const TerrainGenerator = {
             sinkCastleFoundation(keepGx + kx, keepGz + kz);
           }
           for (let h = 0; h < site.keepH; h++) {
-            // Grand arched doorway facing the castle courtyard center
+            // Grand 4-voxel tall × 3-voxel wide arched doorway facing the castle courtyard center
             const isKeepDoor =
-              h < 3 &&
+              h < 4 &&
               ((!site.isHQ && kz === keepHalfD && Math.abs(kx) <= 1) ||
                 (site.isHQ && kx === (site.faction === 'US' ? keepHalfW : -keepHalfW) && Math.abs(kz) <= 1));
             if (isKeepDoor) continue;
@@ -2074,7 +2074,14 @@ export const TerrainGenerator = {
       { gx: 405, gz: 115, w: 8, d: 7, faction: 'RU' }
     ];
 
-    for (const th of tudorHouses) {
+    for (const rawTh of tudorHouses) {
+      const th = {
+        ...rawTh,
+        gx: rawTh.gx - 1,
+        gz: rawTh.gz - 1,
+        w: rawTh.w + 3,
+        d: rawTh.d + 3
+      };
       // Sample terrain across the Tudor House footprint & sink a deep 4-voxel fieldstone foundation
       // so houses on hills NEVER have a floating bottom edge in mid-air!
       let maxHouseGy = this.getBaseGy(th.gx + Math.floor(th.w / 2), th.gz + Math.floor(th.d / 2));
@@ -2102,10 +2109,13 @@ export const TerrainGenerator = {
             );
             if (fv) houseVoxels.push(fv);
           }
-          // Ground floor (h = 0..3): Medieval fieldstone masonry ('darkConcrete') with timber corner posts ('wood')
-          for (let h = 0; h < 4; h++) {
-            const isDoor = h < 2 && z === 0 && Math.abs(x - Math.floor(th.w / 2)) <= 1;
-            const isWin = h === 2 && isPerim && !isCorner && (x === 2 || x === th.w - 3 || z === 3);
+          // Ground floor (h = 0..4): Medieval fieldstone masonry ('darkConcrete') with 3×3 wide walk-in doors!
+          for (let h = 0; h < 5; h++) {
+            const isDoor =
+              h < 3 &&
+              (z === 0 || z === th.d - 1) &&
+              Math.abs(x - Math.floor(th.w / 2)) <= 1;
+            const isWin = h === 2 && isPerim && !isCorner && !isDoor && (x === 2 || x === th.w - 3 || z === Math.floor(th.d / 2));
             if (isDoor || isWin) continue;
             if (isPerim) {
               const v = this.addVoxel(
@@ -2117,16 +2127,16 @@ export const TerrainGenerator = {
               if (v) houseVoxels.push(v);
             }
           }
-          // Upper Tudor Jetty Floor (h = 4..7): Half-timbered oak beams ('wood') & warm brick/plaster nogging ('brick'/'concrete')
-          for (let h = 4; h < 8; h++) {
-            if (h === 4 && !(x >= 1 && x <= 2 && z >= 1 && z <= 2)) {
+          // Upper Tudor Jetty Floor (h = 5..8): Half-timbered oak beams ('wood') & warm brick/plaster nogging ('brick'/'concrete')
+          for (let h = 5; h < 9; h++) {
+            if (h === 5 && !(x >= 1 && x <= 3 && z >= 1 && z <= 3)) {
               const fv = this.addVoxel(th.gx + x, baseGy + h, th.gz + z, 'wood');
               if (fv) houseVoxels.push(fv);
             }
             if (isPerim) {
-              const isWin = h === 6 && !isCorner && (x === Math.floor(th.w / 2) || z === Math.floor(th.d / 2));
+              const isWin = h === 7 && !isCorner && (x === Math.floor(th.w / 2) || z === Math.floor(th.d / 2));
               if (isWin) continue;
-              const isTimberBeam = isCorner || h === 4 || h === 7 || (x + z) % 2 === 0;
+              const isTimberBeam = isCorner || h === 5 || h === 8 || (x + z) % 2 === 0;
               const uv = this.addVoxel(
                 th.gx + x,
                 baseGy + h,
@@ -2138,13 +2148,13 @@ export const TerrainGenerator = {
           }
           // Steep-Gabled Medieval Timber Roof (stepped voxel gable peak along X)
           const roofStep = Math.min(x, th.w - 1 - x);
-          const roofGy = baseGy + 8 + Math.min(3, roofStep);
+          const roofGy = baseGy + 9 + Math.min(4, roofStep);
           const rv = this.addVoxel(th.gx + x, roofGy, th.gz + z, 'wood');
           if (rv) houseVoxels.push(rv);
         }
       }
 
-      registerMedievalFootprint(th.gx, th.gz, th.w, th.d, baseGy, baseGy + 11, houseVoxels);
+      registerMedievalFootprint(th.gx, th.gz, th.w, th.d, baseGy, baseGy + 13, houseVoxels);
     }
 
     // =========================================================================
@@ -2163,12 +2173,12 @@ export const TerrainGenerator = {
       const baseH = this.getGroundHeightAt(wm.wx, wm.wz);
       const baseGy = Math.max(0, Math.floor(baseH / VOXEL_SIZE));
 
-      // Voxel Stone & Timber Mill Tower (5x5 footprint, 10 voxels tall + deep 3-voxel buried stone foundation)
+      // Voxel Stone & Timber Mill Tower (7x7 footprint = 8.75m wide, 11 voxels tall + wide 3x3 walk-in mill door)
       const millVoxels = [];
-      for (let dx = -2; dx <= 2; dx++) {
-        for (let dz = -2; dz <= 2; dz++) {
-          if (Math.abs(dx) === 2 && Math.abs(dz) === 2) continue;
-          const isEdge = Math.abs(dx) === 2 || Math.abs(dz) === 2;
+      for (let dx = -3; dx <= 3; dx++) {
+        for (let dz = -3; dz <= 3; dz++) {
+          if (Math.abs(dx) === 3 && Math.abs(dz) === 3) continue;
+          const isEdge = Math.abs(dx) === 3 || Math.abs(dz) === 3;
           if (isEdge) {
             const localGy = this.getBaseGy(wgx + dx, wgz + dz);
             for (let fy = Math.min(localGy - 3, baseGy - 2); fy < baseGy; fy++) {
@@ -2176,9 +2186,9 @@ export const TerrainGenerator = {
               if (fv) millVoxels.push(fv);
             }
           }
-          for (let h = 0; h < 10; h++) {
-            if (h < 2 && dx === 0 && dz === 2) continue; // Mill doorway
-            if (isEdge || h === 9) {
+          for (let h = 0; h < 11; h++) {
+            if (h < 3 && Math.abs(dx) <= 1 && dz === 3) continue; // Wide 3x3 Mill doorway
+            if (isEdge || h === 10) {
               const mv = this.addVoxel(
                 wgx + dx,
                 baseGy + h,
@@ -2192,17 +2202,17 @@ export const TerrainGenerator = {
           }
         }
       }
-      registerMedievalFootprint(wgx - 2, wgz - 2, 5, 5, baseGy, baseGy + 10, millVoxels);
+      registerMedievalFootprint(wgx - 3, wgz - 3, 7, 7, baseGy, baseGy + 11, millVoxels);
 
       // Conical Wooden Mill Cap + 4-Bladed Timber & Canvas Windmill Sails
       const millGroup = new THREE.Group();
-      const topY = (baseGy + 10) * VOXEL_SIZE;
-      const cap = new THREE.Mesh(new THREE.ConeGeometry(3.6, 3.8, 8), timberMat);
-      cap.position.set(wm.wx, topY + 1.8, wm.wz);
+      const topY = (baseGy + 11) * VOXEL_SIZE;
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(4.8, 4.4, 8), timberMat);
+      cap.position.set(wm.wx, topY + 2.1, wm.wz);
       millGroup.add(cap);
 
       const sailHub = new THREE.Group();
-      sailHub.position.set(wm.wx + Math.sin(wm.yaw) * 3.1, topY - 1.2, wm.wz + Math.cos(wm.yaw) * 3.1);
+      sailHub.position.set(wm.wx + Math.sin(wm.yaw) * 4.2, topY - 1.2, wm.wz + Math.cos(wm.yaw) * 4.2);
       sailHub.rotation.y = wm.yaw;
       sailHub.rotation.z = 0.38;
       for (let b = 0; b < 4; b++) {

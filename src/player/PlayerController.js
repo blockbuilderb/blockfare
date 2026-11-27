@@ -1,22 +1,22 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=143';
-import { sound } from '../audio.js?v=143';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=143';
+import { VOXEL_SIZE } from '../world.js?v=144';
+import { sound } from '../audio.js?v=144';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=144';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=143';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=143';
-import { events, makeEventBridge } from '../events.js?v=143';
-import { GunsmithMethods } from './GunsmithState.js?v=143';
-import { FortificationMethods } from './FortificationBuilder.js?v=143';
-import { CommanderMethods } from './CommanderAbilities.js?v=143';
-import { VehicleControlMethods } from './VehicleControl.js?v=143';
-import { CombatMethods } from './PlayerCombat.js?v=143';
-import { loadMarksmanProfile } from './MarksmanSystem.js?v=143';
+} from '../utils/KeyboardShortcuts.js?v=144';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=144';
+import { events, makeEventBridge } from '../events.js?v=144';
+import { GunsmithMethods } from './GunsmithState.js?v=144';
+import { FortificationMethods } from './FortificationBuilder.js?v=144';
+import { CommanderMethods } from './CommanderAbilities.js?v=144';
+import { VehicleControlMethods } from './VehicleControl.js?v=144';
+import { CombatMethods } from './PlayerCombat.js?v=144';
+import { loadMarksmanProfile } from './MarksmanSystem.js?v=144';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -24,7 +24,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=143';
+} from '../core/StateMachines.js?v=144';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -58,7 +58,7 @@ export class PlayerController {
     this.warehouseCash = 350;
     this.matchCash = PLAYER.STARTING_CASH;
     this.cash = this.matchCash + this.warehouseCash;
-    this.ownedWeapons = new Set(['m4a1', 'ak15', 'vector', 'm249', 'sv98', 'mp443']);
+    this.ownedWeapons = new Set(['m4a1', 'ak15', 'vector', 'm249', 'sv98', 'rem870', 'mp443']);
     this.classLoadoutSelections = {
       engineer: { primary: 'm4a1', secondary: 'mp443' },
       assault: { primary: 'ak15', secondary: 'mp443' },
@@ -1368,9 +1368,9 @@ export class PlayerController {
           // In AC-130 Gunship & Helicopters, [Q] = Collective Climb UP & [Z] = Descend DOWN (Weapons use [1], [2], [3])!
         } else if (this.activeVehicle && typeof this.switchVehicleWeaponSlot === 'function') {
           const maxSlots =
-            this.activeVehicle.isAircraft ||
-            this.activeVehicle.type === 'tank' ||
-            this.activeVehicle.type === 'apc'
+            this.activeVehicle.type === 'tank'
+              ? 4
+              : this.activeVehicle.isAircraft || this.activeVehicle.type === 'apc'
               ? 3
               : 2;
           const nextSlot = ((this.activeVehicle.activeWeaponSlot || 0) + 1) % maxSlots;
@@ -1405,7 +1405,17 @@ export class PlayerController {
           }
         }
       }
-      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit4' && !this.activeVehicle) this.switchSlot(3);
+      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit4' && !e.repeat) {
+        if (
+          this.activeVehicle &&
+          this.activeVehicle.type === 'tank' &&
+          typeof this.switchVehicleWeaponSlot === 'function'
+        ) {
+          this.switchVehicleWeaponSlot(3);
+        } else if (!this.activeVehicle) {
+          this.switchSlot(3);
+        }
+      }
       if (!hasAnyModifier(e) && e.code === 'KeyR' && !e.repeat) {
         if (this.activeVehicle && this.activeVehicle.isAircraft) {
           if (typeof this.handleAircraftRKey === 'function') {
@@ -1495,8 +1505,18 @@ export class PlayerController {
       if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Backslash' && !e.repeat && !this.activeVehicle) {
         this.toggleQuickBinoculars?.();
       }
-      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'KeyB' && !this.activeVehicle) {
-        this.buildBlueprintIndex = (this.buildBlueprintIndex + 1) % this.buildBlueprints.length;
+      if (!hasAnyModifier(e) && e.code === 'KeyB' && !e.repeat && !this.activeVehicle) {
+        const curForB = typeof this.currentWeapon === 'function' ? this.currentWeapon() : null;
+        if (
+          !e.shiftKey &&
+          curForB?.def &&
+          (curForB.def.isShotgun || (curForB.def.pellets && curForB.def.pellets > 1)) &&
+          typeof this.cycleShotgunShellType === 'function'
+        ) {
+          this.cycleShotgunShellType();
+        } else {
+          this.buildBlueprintIndex = (this.buildBlueprintIndex + 1) % this.buildBlueprints.length;
+        }
       }
       // [5] Place Squad Leader Rally Point (mobile squad spawn)
       if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Digit5' && !this.activeVehicle) {
@@ -1683,8 +1703,9 @@ export class PlayerController {
           return;
         }
         if (this.activeVehicle.type === 'tank' || this.activeVehicle.type === 'apc') {
+          const nSlots = this.activeVehicle.type === 'tank' ? 4 : 3;
           const curSlot = this.activeVehicle.activeWeaponSlot || 0;
-          const nextSlot = e.deltaY > 0 ? (curSlot + 1) % 3 : (curSlot + 2) % 3;
+          const nextSlot = e.deltaY > 0 ? (curSlot + 1) % nSlots : (curSlot + nSlots - 1) % nSlots;
           this.switchVehicleWeaponSlot(nextSlot);
         }
         return;

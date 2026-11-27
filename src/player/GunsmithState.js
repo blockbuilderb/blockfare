@@ -1,5 +1,6 @@
 import {
   WEAPON_DEFS,
+  SHOTGUN_SHELL_TYPES,
   CLASS_LOADOUTS,
   ATTACHMENT_CATALOG,
   CASE_PRICE,
@@ -7,11 +8,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=143';
-import { sound } from '../audio.js?v=143';
-import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=143';
-import { events } from '../events.js?v=143';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=143';
+} from '../weapons.js?v=144';
+import { sound } from '../audio.js?v=144';
+import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=144';
+import { events } from '../events.js?v=144';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=144';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',
@@ -676,6 +677,17 @@ export const GunsmithMethods = {
     }
     if (this.equippedHammerSkin === undefined) {
       this.equippedHammerSkin = null;
+    }
+    // Ensure all $0 free base weapons (including Remington 870 12G Pump) are always unlocked
+    if (this.ownedWeapons instanceof Set) {
+      for (const [wId, wDef] of Object.entries(WEAPON_DEFS)) {
+        if (wDef && wDef.warehousePrice === 0 && (wDef.slot === 'primary' || wDef.slot === 'secondary')) {
+          this.ownedWeapons.add(wId);
+        }
+      }
+    }
+    if (typeof this.activeShotgunShellId !== 'string' || !SHOTGUN_SHELL_TYPES.some((s) => s.id === this.activeShotgunShellId)) {
+      this.activeShotgunShellId = 'buckshot_00';
     }
     if (typeof this.casesOpenedCount !== 'number') {
       this.casesOpenedCount = 0;
@@ -2752,9 +2764,28 @@ export const GunsmithMethods = {
       muzzleSpreadMult;
     const rpmMult = grip ? grip.rpmMult : 1.0;
 
-    // Tarkov AP-20 Precision Solid Slug conversion for multi-pellet 12G shotguns!
+    // Live 12-Gauge Shell Selection ([B] in-field or Gunsmith Ammo Type: 00 Buckshot / Flechette / AP-20 Slug / FRAG-12 HE)
+    const isBaseShotgun = Boolean(baseDef.isShotgun || (baseDef.pellets && baseDef.pellets > 1));
+    let activeShellSpec = null;
+    if (isBaseShotgun) {
+      const gunsmithShellId =
+        ammo?.id === 'flechette_12g'
+          ? 'flechette_12g'
+          : ammo?.id === 'frag12_he'
+          ? 'frag12_he'
+          : ammo?.isSlugAmmo
+          ? 'slug_ap20'
+          : null;
+      const chosenShellId = this._shotgunShellFieldOverride
+        ? this.activeShotgunShellId || 'buckshot_00'
+        : gunsmithShellId || this.activeShotgunShellId || 'buckshot_00';
+      activeShellSpec =
+        SHOTGUN_SHELL_TYPES.find((s) => s.id === chosenShellId) || SHOTGUN_SHELL_TYPES[0];
+    }
     const isShotgunSlug = Boolean(
-      ammo && ammo.isSlugAmmo && baseDef.pellets && baseDef.pellets > 1
+      isBaseShotgun
+        ? activeShellSpec?.isSlug
+        : ammo && ammo.isSlugAmmo && baseDef.pellets && baseDef.pellets > 1
     );
 
     // Explicit 'factory' selects bare iron sights even on factory-scoped sniper rifles (SV-98 / AWM)
@@ -2791,7 +2822,11 @@ export const GunsmithMethods = {
     if (mag && mag.id !== 'std_mag') tags.push(mag.shortName);
     if (useCustomOptic) tags.push(optic.shortName);
     if (grip && grip.id !== 'std_grip') tags.push(grip.shortName);
-    if (ammo && ammo.id !== 'fmj') tags.push(ammo.shortName);
+    if (activeShellSpec && activeShellSpec.id !== 'buckshot_00') {
+      tags.push(activeShellSpec.shortName);
+    } else if (ammo && ammo.id !== 'fmj') {
+      tags.push(ammo.shortName);
+    }
 
     const isIntegralSuppressed = Boolean(baseDef.silenced);
     const finalFlashMult = isIntegralSuppressed
@@ -2801,9 +2836,15 @@ export const GunsmithMethods = {
       : 1.0;
 
     const gravMult = ammo && typeof ammo.bulletGravityMult === 'number' ? ammo.bulletGravityMult : 1.0;
-    const finalBulletGravity = Number(((baseDef.bulletGravity ?? 9.81) * gravMult).toFixed(2));
+    const finalBulletGravity =
+      activeShellSpec && typeof activeShellSpec.bulletGravity === 'number'
+        ? activeShellSpec.bulletGravity
+        : Number(((baseDef.bulletGravity ?? 9.81) * gravMult).toFixed(2));
     const finalExplosiveSplash =
-      (ammo && ammo.explosiveSplash) || baseDef.explosiveSplash || null;
+      (activeShellSpec && activeShellSpec.explosiveSplash) ||
+      (ammo && ammo.explosiveSplash) ||
+      baseDef.explosiveSplash ||
+      null;
     const finalHasBipod = Boolean(
       baseDef.hasBipod || (grip && (grip.hasBipod || grip.id === 'bipod_grip'))
     );
@@ -2841,38 +2882,68 @@ export const GunsmithMethods = {
           : activeSkinFinish === 'pure_blue'
           ? 0x00d2d3
           : baseDef.accentColor,
-      pellets: isShotgunSlug ? 1 : baseDef.pellets,
-      damage: isShotgunSlug
+      pellets: activeShellSpec
+        ? activeShellSpec.fixedPellets || Math.max(1, Math.round((baseDef.pellets || 8) * (activeShellSpec.pelletsMult || 1.0)))
+        : isShotgunSlug
+        ? 1
+        : baseDef.pellets,
+      damage: activeShellSpec
+        ? Math.max(1, Math.round(baseDef.damage * (activeShellSpec.dmgMult || 1.0) * (activeShellSpec.id === 'buckshot_00' ? dmgMult : 1.0)))
+        : isShotgunSlug
         ? Math.round(baseDef.damage * 4.8 * dmgMult)
         : Math.max(1, Math.round(baseDef.damage * dmgMult)),
-      headshotMult: isShotgunSlug ? 2.1 : baseDef.headshotMult,
-      damageFalloffStart: isShotgunSlug ? 35 : baseDef.damageFalloffStart,
-      damageFalloffEnd: isShotgunSlug ? 110 : baseDef.damageFalloffEnd,
-      maxEffectiveRange: isShotgunSlug ? 160 : baseDef.maxEffectiveRange,
-      muzzleVelocity: isShotgunSlug ? 510 : finalMuzzleVel,
+      headshotMult: activeShellSpec?.headshotMult || (isShotgunSlug ? 2.1 : baseDef.headshotMult),
+      chestMult: activeShellSpec?.chestMult || baseDef.chestMult || 1.0,
+      damageFalloffStart: activeShellSpec ? activeShellSpec.falloffStart : isShotgunSlug ? 35 : baseDef.damageFalloffStart,
+      damageFalloffEnd: activeShellSpec ? activeShellSpec.falloffEnd : isShotgunSlug ? 110 : baseDef.damageFalloffEnd,
+      minDamageMult: activeShellSpec ? activeShellSpec.minDamageMult : baseDef.minDamageMult,
+      maxEffectiveRange: activeShellSpec ? activeShellSpec.maxRange : isShotgunSlug ? 160 : baseDef.maxEffectiveRange,
+      muzzleVelocity: activeShellSpec
+        ? Math.round(activeShellSpec.muzzleVelocity * (muzzle && muzzle.velocityMult ? muzzle.velocityMult : 1.0))
+        : isShotgunSlug
+        ? 510
+        : finalMuzzleVel,
       bulletGravity: finalBulletGravity,
       explosiveSplash: finalExplosiveSplash,
       hasBipod: finalHasBipod,
       hasRaptarLrf: finalHasRaptarLrf,
       hasSmartPipper: finalHasSmartPipper,
       hasStraightPull: finalHasStraightPull,
-      voxelDamage: Math.max(1, Math.round((baseDef.voxelDamage || 20) * voxelMult)),
-      armorPenMult: Number(armorPenMult.toFixed(2)),
+      voxelDamage: Math.max(
+        1,
+        Math.round((baseDef.voxelDamage || 20) * (activeShellSpec ? activeShellSpec.voxelMult || 1.0 : voxelMult))
+      ),
+      armorPenMult: Number(
+        (
+          (baseDef.armorPenMult || 1.0) *
+          (activeShellSpec ? activeShellSpec.armorPenMult || 1.0 : ammo && ammo.armorPenMult ? ammo.armorPenMult : 1.0)
+        ).toFixed(2)
+      ),
       clipSize: newClip,
       reserveAmmo: newReserve,
       spareMagSlots: totalSpareMags,
       maxLooseAmmo,
       vestSwapMult,
       reloadTime: Number((baseDef.reloadTime * (mag ? mag.reloadMult : 1.0) * vestSwapMult * classReloadMult).toFixed(2)),
-      recoilPitch: Number((baseDef.recoilPitch * recoilMult).toFixed(4)),
-      recoilYaw: Number((baseDef.recoilYaw * recoilMult).toFixed(4)),
-      spreadHip: isShotgunSlug
-        ? Number((0.028 * gripSpreadMult * muzzleSpreadMult).toFixed(4))
-        : Number((baseDef.spreadHip * spreadMult).toFixed(4)),
-      spreadAds: isShotgunSlug
-        ? Number((0.0004 * gripSpreadMult * muzzleSpreadMult).toFixed(4))
-        : Number(((baseDef.spreadAds || 0.0001) * spreadMult).toFixed(4)),
-      rpm: Math.round(baseDef.rpm * rpmMult),
+      recoilPitch: Number(
+        (baseDef.recoilPitch * recoilMult * (activeShellSpec?.recoilMult || 1.0)).toFixed(4)
+      ),
+      recoilYaw: Number(
+        (baseDef.recoilYaw * recoilMult * (activeShellSpec?.recoilMult || 1.0)).toFixed(4)
+      ),
+      spreadHip:
+        activeShellSpec && activeShellSpec.spreadHipOverride
+          ? Number((activeShellSpec.spreadHipOverride * gripSpreadMult * muzzleSpreadMult).toFixed(4))
+          : isShotgunSlug
+          ? Number((0.028 * gripSpreadMult * muzzleSpreadMult).toFixed(4))
+          : Number((baseDef.spreadHip * spreadMult * (activeShellSpec?.spreadMult || 1.0)).toFixed(4)),
+      spreadAds:
+        activeShellSpec && activeShellSpec.spreadAdsOverride
+          ? Number((activeShellSpec.spreadAdsOverride * gripSpreadMult * muzzleSpreadMult).toFixed(4))
+          : isShotgunSlug
+          ? Number((0.0004 * gripSpreadMult * muzzleSpreadMult).toFixed(4))
+          : Number(((baseDef.spreadAds || 0.0001) * spreadMult * (activeShellSpec?.spreadMult || 1.0)).toFixed(4)),
+      rpm: Math.max(30, Math.round(baseDef.rpm * rpmMult * (activeShellSpec?.rpmMult || 1.0))),
       opticId: explicitBareIron ? 'factory' : useCustomOptic ? optic.id : baseDef.opticType || 'factory',
       opticName: explicitBareIron ? 'IRON SIGHTS' : useCustomOptic ? optic.name : baseDef.opticType ? baseDef.opticType.toUpperCase() : 'IRON SIGHTS',
       opticType: finalOpticType,
@@ -2892,8 +2963,14 @@ export const GunsmithMethods = {
         ? baseDef.zoomFovs
         : null,
       isThermal: Boolean(!explicitBareIron && ((useCustomOptic && optic.isThermal) || baseDef.isThermal)),
-      isSlugAmmo: Boolean(ammo && ammo.isSlugAmmo),
-      isIncendiaryAmmo: Boolean(ammo && ammo.isIncendiaryAmmo),
+      isSlugAmmo: Boolean(isShotgunSlug || (ammo && ammo.isSlugAmmo)),
+      isFlechetteAmmo: Boolean(activeShellSpec?.id === 'flechette_12g' || ammo?.isFlechetteAmmo),
+      isFrag12He: Boolean(activeShellSpec?.isFrag12He || ammo?.isFrag12He),
+      causesBleed: Boolean(activeShellSpec?.causesBleed || ammo?.causesBleed),
+      activeShellId: activeShellSpec ? activeShellSpec.id : null,
+      activeShellBadge: activeShellSpec ? activeShellSpec.badge : null,
+      activeShellName: activeShellSpec ? activeShellSpec.shortName : null,
+      isIncendiaryAmmo: Boolean(baseDef.isIncendiaryAmmo || (ammo && ammo.isIncendiaryAmmo)),
       hasCantedSight: finalHasCanted,
       isScoped: finalIsScoped,
       flashMult: finalFlashMult,
@@ -2905,6 +2982,43 @@ export const GunsmithMethods = {
           ? `${baseDef.caliber.split('•')[0].trim()} • ${tags.join(' + ')}`
           : baseDef.caliber
     };
+  },
+
+  /**
+   * Cycles 12-Gauge Combat Shotgun Shell Types in the field ([B] key or Mobile Shell Pill):
+   * 00 BUCKSHOT -> FLECHETTE DARTS -> AP-20 SOLID SLUG -> FRAG-12 HE!
+   */
+  cycleShotgunShellType(explicitShellId = null) {
+    this.ensureWarehouseStructures?.();
+    const curIdx = Math.max(
+      0,
+      SHOTGUN_SHELL_TYPES.findIndex((s) => s.id === (this.activeShotgunShellId || 'buckshot_00'))
+    );
+    const nextSpec = explicitShellId
+      ? SHOTGUN_SHELL_TYPES.find((s) => s.id === explicitShellId) || SHOTGUN_SHELL_TYPES[0]
+      : SHOTGUN_SHELL_TYPES[(curIdx + 1) % SHOTGUN_SHELL_TYPES.length];
+
+    this.activeShotgunShellId = nextSpec.id;
+    this._shotgunShellFieldOverride = true;
+
+    // Immediately update any equipped shotgun slot(s) in-place without losing loaded clip/reserve counts!
+    if (Array.isArray(this.slots)) {
+      for (let i = 0; i < this.slots.length; i++) {
+        const sl = this.slots[i];
+        const baseId = sl?.def?.id;
+        const baseDef = baseId ? WEAPON_DEFS[baseId] : null;
+        if (baseDef && (baseDef.isShotgun || (baseDef.pellets && baseDef.pellets > 1))) {
+          sl.def = this.buildCustomizedWeaponDef(baseDef, i === 0, baseId);
+        }
+      }
+    }
+
+    sound.playReload?.();
+    this.recoilKickZ = 0.08;
+    if (this.onAwardXp) {
+      this.onAwardXp(0, `${nextSpec.badge} LOADED [B]: ${nextSpec.name} — ${nextSpec.desc}`);
+    }
+    return nextSpec;
   },
 
   applyCustomizationsToActiveLoadout(refillAmmoAndArmor = false) {

@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=143';
-import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=143';
-import { getMapDefinition } from '../maps/index.js?v=143';
-import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=143';
-import { events, makeEventBridge } from '../events.js?v=143';
-import { TerrainGenerator } from './TerrainGenerator.js?v=143';
-import { BuildingFactory } from './BuildingFactory.js?v=143';
-import { ConquestSystem } from './ConquestSystem.js?v=143';
-import { ProjectileManager } from './ProjectileManager.js?v=143';
-import { WeatherSystem } from './WeatherSystem.js?v=143';
+import { TEXTURES } from '../assets/textures.js?v=144';
+import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=144';
+import { getMapDefinition } from '../maps/index.js?v=144';
+import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=144';
+import { events, makeEventBridge } from '../events.js?v=144';
+import { TerrainGenerator } from './TerrainGenerator.js?v=144';
+import { BuildingFactory } from './BuildingFactory.js?v=144';
+import { ConquestSystem } from './ConquestSystem.js?v=144';
+import { ProjectileManager } from './ProjectileManager.js?v=144';
+import { WeatherSystem } from './WeatherSystem.js?v=144';
 
 export { VOXEL_SIZE, MAT_DEFS };
 
@@ -888,6 +888,7 @@ export class VoxelWorld {
       const gx = Math.round(px * invVoxelSize);
       const gy = Math.floor(py * invVoxelSize);
       const gz = Math.round(pz * invVoxelSize);
+      const isIgnoredSet = ignoreVoxelKey instanceof Set;
 
       const cellChanged = gx !== prevGx || gy !== prevGy || gz !== prevGz;
       if (cellChanged) {
@@ -895,8 +896,8 @@ export class VoxelWorld {
         if (prevGx !== null && gx !== prevGx && gz !== prevGz) {
           const seamA = this.getVoxel(prevGx, gy, gz);
           const seamB = this.getVoxel(gx, gy, prevGz);
-          const validA = seamA && seamA.key !== ignoreVoxelKey;
-          const validB = seamB && seamB.key !== ignoreVoxelKey;
+          const validA = seamA && (isIgnoredSet ? !ignoreVoxelKey.has(seamA.key) : seamA.key !== ignoreVoxelKey);
+          const validB = seamB && (isIgnoredSet ? !ignoreVoxelKey.has(seamB.key) : seamB.key !== ignoreVoxelKey);
           if (validA && validB) {
             return {
               voxel: seamA,
@@ -919,7 +920,7 @@ export class VoxelWorld {
 
         // 2. Direct voxel hit check
         const v = this.getVoxel(gx, gy, gz);
-        if (v && v.key !== ignoreVoxelKey) {
+        if (v && (isIgnoredSet ? !ignoreVoxelKey.has(v.key) : v.key !== ignoreVoxelKey)) {
           const normal = new THREE.Vector3(
             prevGx !== null ? Math.sign(prevGx - gx) : 0,
             prevGy !== null ? Math.sign(prevGy - gy) : 0,
@@ -950,7 +951,7 @@ export class VoxelWorld {
           for (let dz = -1; dz <= 1; dz++) {
             if (dx === 0 && dz === 0) continue;
             const nv = this.getVoxel(gx + dx, gy, gz + dz);
-            if (!nv || nv.key === ignoreVoxelKey) continue;
+            if (!nv || (isIgnoredSet ? ignoreVoxelKey.has(nv.key) : nv.key === ignoreVoxelKey)) continue;
             const clampedX = px < nv.minX ? nv.minX : px > nv.maxX ? nv.maxX : px;
             const clampedY = py < nv.minY ? nv.minY : py > nv.maxY ? nv.maxY : py;
             const clampedZ = pz < nv.minZ ? nv.minZ : pz > nv.maxZ ? nv.maxZ : pz;

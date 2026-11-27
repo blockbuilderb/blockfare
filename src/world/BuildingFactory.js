@@ -5,7 +5,7 @@ import {
   createSkyscraper3DMesh,
   RADAR_TOWER_SPEC,
   POWER_TOWER_SPEC
-} from '../models/prop-models.js?v=143';
+} from '../models/prop-models.js?v=144';
 
 const VOXEL_SIZE = 1.25;
 const SPATIAL_MIN_X = -2048;
@@ -608,7 +608,51 @@ export const BuildingFactory = {
     return group;
   },
 
-  buildApartmentBlock(startGx, startGz, width, depth, floors = 3, wallMat = 'brick') {
+  buildApartmentBlock(rawStartGx, rawStartGz, rawWidth, rawDepth, floors = 3, wallMat = 'brick') {
+    // Scale up building footprints so NO town/village/industrial building is cramped or hard to enter:
+    // - Small/medium buildings (< 18 voxels) scale up ~25% (minimum 14×12 voxels = 17.5m × 15.0m!).
+    // - Large high-rises (>= 18 voxels) gain +1..+2 voxels while staying centered and clear of river/roads.
+    const width =
+      rawWidth < 6
+        ? Math.max(8, rawWidth + 3)
+        : rawWidth < 18
+        ? Math.max(14, Math.round(rawWidth * 1.25))
+        : rawWidth >= 20
+        ? rawWidth
+        : rawWidth + 2;
+    const depth =
+      rawDepth < 6
+        ? Math.max(8, rawDepth + 3)
+        : rawDepth < 16
+        ? Math.max(12, Math.round(rawDepth * 1.25))
+        : rawDepth >= 18
+        ? rawDepth
+        : rawDepth + 2;
+
+    const origCenterGx = rawStartGx + rawWidth * 0.5;
+    const origCenterGz = rawStartGz + rawDepth * 0.5;
+    let startGx = Math.round(origCenterGx - width * 0.5);
+    let startGz = Math.round(origCenterGz - depth * 0.5);
+
+    // Keep expanded walls safely clear of the sunken river gorge & main central highway
+    const origCenterWz = origCenterGz * VOXEL_SIZE;
+    const rCx = typeof this.getRiverCenterX === 'function' ? this.getRiverCenterX(origCenterWz) : 0;
+    const origCenterWx = origCenterGx * VOXEL_SIZE;
+    if (Math.abs(origCenterWx - rCx) > 20) {
+      if (origCenterWx < rCx && (startGx + width) * VOXEL_SIZE > rCx - 27.5) {
+        startGx = Math.floor((rCx - 27.5) / VOXEL_SIZE) - width;
+      } else if (origCenterWx > rCx && startGx * VOXEL_SIZE < rCx + 27.5) {
+        startGx = Math.ceil((rCx + 27.5) / VOXEL_SIZE);
+      }
+    }
+    if (Math.abs(origCenterWz) > 14) {
+      if (origCenterWz > 0 && startGz * VOXEL_SIZE < 11.5) {
+        startGz = Math.ceil(11.5 / VOXEL_SIZE);
+      } else if (origCenterWz < 0 && (startGz + depth) * VOXEL_SIZE > -11.5) {
+        startGz = Math.floor(-11.5 / VOXEL_SIZE) - depth;
+      }
+    }
+
     // 1. Sample terrain across the building footprint so the foundation & entrances adapt to hillsides
     let maxFootprintGy = this.getBaseGy(
       startGx + Math.floor(width / 2),
@@ -621,7 +665,8 @@ export const BuildingFactory = {
       }
     }
     const groundGy = maxFootprintGy;
-    const floorHeight = 4;
+    // 5 voxels per story = 6.25m story height (4 full voxels = 5.0m grand interior ceiling clearance!)
+    const floorHeight = 5;
     const blueprintBlocks = [];
     const addBuildingVoxel = (gx, gy, gz, mat, isProp = false) => {
       const v = this.addVoxel(gx, gy, gz, mat, isProp);
@@ -654,12 +699,14 @@ export const BuildingFactory = {
     const hasSwitchbackStairs = width >= 9 && depth >= 8;
     const isModernSkyscraper = floors >= 8 && width >= 14 && depth >= 12;
     const hasExpressLadder = floors >= 4 && width >= 10 && depth >= 8;
-    const hasEastWing = !isModernSkyscraper && width >= 11;
-    const partX = hasEastWing ? Math.max(hasSwitchbackStairs ? 6 : 4, Math.floor(width * 0.54)) : -1;
-    const hasSuiteSplit = !isModernSkyscraper && depth >= 10 && width >= 11;
-    const partZ = hasSuiteSplit ? Math.max(4, Math.floor(depth * 0.52)) : -1;
+    // Only subdivide large >= 17-wide buildings so medium/small buildings have spacious open rooms!
+    const hasEastWing = !isModernSkyscraper && width >= 17;
+    const partX = hasEastWing ? Math.max(hasSwitchbackStairs ? 8 : 5, Math.floor(width * 0.56)) : -1;
+    const hasSuiteSplit = !isModernSkyscraper && depth >= 16 && width >= 18;
+    const partZ = hasSuiteSplit ? Math.max(6, Math.floor(depth * 0.54)) : -1;
     const midX = Math.floor(width / 2);
     const midZ = Math.floor(depth / 2);
+    const doorHalfSpan = width >= 16 ? 2 : 1; // 3.75m to 6.25m wide cardinal entrances!
     const useSteelFrame = floors >= 2 && (this.era || 'modern') === 'modern';
 
     // 3. Terrain-Adaptive Exterior Entry Porches & Steps at all 4 Cardinal Entrances
@@ -675,8 +722,8 @@ export const BuildingFactory = {
         for (let fy = baseStepGy; fy <= stepTopGy; fy++) {
           addBuildingVoxel(rx, fy, rz, 'darkConcrete');
         }
-        // Ensure 3-voxel vertical headroom above every exterior step so slopes never block doorways
-        for (let ch = 1; ch <= 3; ch++) {
+        // Ensure 4-voxel (5.0m) vertical headroom above every exterior step so slopes never block doorways
+        for (let ch = 1; ch <= 4; ch++) {
           if (this.hasVoxel(rx, stepTopGy + ch, rz)) {
             this.destroyVoxel(rx, stepTopGy + ch, rz, false);
           }
@@ -684,7 +731,7 @@ export const BuildingFactory = {
       }
     };
 
-    for (let d = -1; d <= 1; d++) {
+    for (let d = -doorHalfSpan; d <= doorHalfSpan; d++) {
       const dx = midX + d;
       if (dx > 0 && dx < width - 1 && dx !== partX) {
         buildTerrainEntryRamp(startGx + dx, startGz, 0, -1);
@@ -704,7 +751,7 @@ export const BuildingFactory = {
       // and Top Sniper Floor + Roof Deck (`f = floors - 1`) are real destructible voxel blocks, while intermediate
       // floors (`f = 2 .. floors - 2`) use the fast 3D Blocky Structural Core (`bld.archMesh` + `bld.solidHullBox`)
       // with ONLY the compact walkable U-Turn Stairwell & Express Ladder Shaft (`x = 0..6, z = 0..7`) built in voxels!
-      const isHybridCoreFloor = isModernSkyscraper && f >= 2 && f < floors - 1;
+      const isHybridCoreFloor = isModernSkyscraper && f >= 1 && f < floors - 1;
 
       for (let x = 0; x < width; x++) {
         for (let z = 0; z < depth; z++) {
@@ -756,16 +803,16 @@ export const BuildingFactory = {
 
               const isGroundDoor =
                 f === 0 &&
-                y < 3 &&
-                (((z === 0 || z === depth - 1) && Math.abs(x - midX) <= (isModernSkyscraper ? 2 : 1) && x !== partX) ||
-                  ((x === 0 || x === width - 1) && Math.abs(z - midZ) <= (isModernSkyscraper ? 2 : 1) && z !== partZ));
+                y < 4 &&
+                (((z === 0 || z === depth - 1) && Math.abs(x - midX) <= doorHalfSpan && x !== partX) ||
+                  ((x === 0 || x === width - 1) && Math.abs(z - midZ) <= doorHalfSpan && z !== partZ));
 
               const isBalconyDoor =
                 f > 0 &&
                 (!isModernSkyscraper || f <= 1) &&
                 width >= 9 &&
                 z === 0 &&
-                y < 2 &&
+                y < 3 &&
                 Math.abs(x - midX) <= 1 &&
                 x !== partX;
 
@@ -773,12 +820,12 @@ export const BuildingFactory = {
               const isWindow =
                 !isPerimeterSteelPier &&
                 (isModernSkyscraper
-                  ? (y === 1 || y === 2) &&
+                  ? (y === 1 || y === 2 || y === 3) &&
                     !isGroundDoor &&
                     !isBalconyDoor &&
                     ((isEdgeZ && x > 1 && x < width - 2 && x % 3 !== 0) ||
                       (isEdgeX && z > 1 && z < depth - 2 && z % 3 !== 0))
-                  : (y === 1 || (y === 2 && (x + z) % 4 === 0)) &&
+                  : (y === 1 || y === 2) &&
                     !isGroundDoor &&
                     !isBalconyDoor &&
                     ((isEdgeZ && x > 1 && x < width - 2 && x !== partX && x % 2 === 0) ||
@@ -851,6 +898,7 @@ export const BuildingFactory = {
         const topSuiteSlabGy = baseGy + floorHeight - 1;
         for (let x = 0; x < width; x++) {
           for (let z = 0; z < depth; z++) {
+            if (x <= 6 && z <= 7) continue; // Already placed in core stairwell loop
             const isStairCut = x >= 1 && x <= 4 && z >= 3 && z <= 6;
             const isExpCut = hasExpressLadder && x === 5 && z >= 5 && z <= 6;
             if (!isStairCut && !isExpCut) {
@@ -860,30 +908,30 @@ export const BuildingFactory = {
         }
       }
 
-      // Continuous Walkable Floor-to-Floor Staircase System (1F -> Every Story -> Roof Deck!):
+      // Continuous Walkable 5-Step Floor-to-Floor Staircase System (1F -> Every Story -> Roof Deck!):
       if (hasSwitchbackStairs) {
         // Flight A (Southbound `x = 1..2`): Step 1 (`z = 3, gy = baseGy`), Step 2 (`z = 4, gy = baseGy + 1`)
         for (let sx = 1; sx <= 2; sx++) {
           addBuildingVoxel(startGx + sx, baseGy, startGz + 3, 'wood');
           addBuildingVoxel(startGx + sx, baseGy + 1, startGz + 4, 'wood');
         }
-        // Wide 4×2 Mid-Story U-Turn Landing (`x = 1..4, z = 5..6, gy = baseGy + 1`)
+        // Wide 4×2 Mid-Story U-Turn Landing (`x = 1..4, z = 5..6, gy = baseGy + 2`)
         for (let sx = 1; sx <= 4; sx++) {
           for (let sz = 5; sz <= 6; sz++) {
-            addBuildingVoxel(startGx + sx, baseGy + 1, startGz + sz, 'wood');
+            addBuildingVoxel(startGx + sx, baseGy + 2, startGz + sz, 'wood');
           }
         }
-        // Flight B (Northbound `x = 3..4`): Step 3 (`z = 4, gy = baseGy + 2`), Step 4 (`z = 3, gy = baseGy + 3`)
-        // stepping flush onto the `z = 1..2, x = 1..4` upper landing slab (`gy = baseGy + 3`)!
+        // Flight B (Northbound `x = 3..4`): Step 4 (`z = 4, gy = baseGy + 3`), Step 5 (`z = 3, gy = baseGy + 4`)
+        // stepping flush onto the `z = 1..2, x = 1..4` upper landing slab (`gy = baseGy + 4`)!
         for (let sx = 3; sx <= 4; sx++) {
-          addBuildingVoxel(startGx + sx, baseGy + 2, startGz + 4, 'wood');
-          addBuildingVoxel(startGx + sx, baseGy + 3, startGz + 3, 'wood');
+          addBuildingVoxel(startGx + sx, baseGy + 3, startGz + 4, 'wood');
+          addBuildingVoxel(startGx + sx, baseGy + 4, startGz + 3, 'wood');
         }
         const deskX = startGx + width - 2;
         const deskZ = startGz + depth - 2;
         addBuildingVoxel(deskX, baseGy, deskZ, 'wood', true);
       } else if (width >= 6 && depth >= 6) {
-        // Compact 4-step straight staircase along `z = 1, x = 1..4` reaching `baseGy + 3` cleanly
+        // Compact 5-step straight staircase along `z = 1, x = 1..5` reaching `baseGy + 4` cleanly
         for (let step = 0; step < floorHeight; step++) {
           const sx = startGx + 1 + Math.min(step, width - 3);
           addBuildingVoxel(sx, baseGy + step, startGz + 1, 'wood');
@@ -1071,7 +1119,7 @@ export const BuildingFactory = {
     // Register weighted per-story load-bearing keys (`steelBeam` columns = 3x structural load capacity vs masonry infill = 1x)
     const floorSupportKeys = [];
     for (let f = 0; f < floors; f++) {
-      if (isModernSkyscraper && f >= 2 && f < floors - 1) {
+      if (isModernSkyscraper && f >= 1 && f < floors - 1) {
         // Intermediate 3D structural core floors are solid static 3D architecture (`bld.solidHullBox`)
         floorSupportKeys.push([]);
         continue;
@@ -1105,7 +1153,7 @@ export const BuildingFactory = {
     let solidHullBox = null;
     if (isModernSkyscraper) {
       const lobbyBaseY = (groundGy - 0.5) * VOXEL_SIZE;
-      const curtainMinY = (groundGy + 2 * floorHeight) * VOXEL_SIZE;
+      const curtainMinY = (groundGy + 1 * floorHeight) * VOXEL_SIZE;
       const curtainMaxY = (groundGy + (floors - 1) * floorHeight - 1) * VOXEL_SIZE;
       const roofTopY = topGy * VOXEL_SIZE;
       archMesh = createSkyscraper3DMesh({
@@ -1151,6 +1199,7 @@ export const BuildingFactory = {
       width,
       depth,
       floors,
+      floorHeight,
       wallMat,
       isHybridSkyscraper: Boolean(isModernSkyscraper),
       archMesh,
@@ -1180,7 +1229,7 @@ export const BuildingFactory = {
       const keyFloor = isModernSkyscraper
         ? bldId % 4 === 0
           ? floors - 1
-          : 1
+          : 0
         : floors >= 5
         ? Math.min(floors - 1, 2 + (bldId % 3))
         : bldId % 4 === 0 && floors >= 2
@@ -1278,7 +1327,7 @@ export const BuildingFactory = {
           keyObj.velY = 0;
           keyObj._falling = false;
           keyObj._checkedEpoch = curEpoch;
-          keyObj.floor = Math.max(1, Math.round((supportSurfaceY - terrainY) / (4 * VOXEL_SIZE)) + 1);
+          keyObj.floor = Math.max(1, Math.round((supportSurfaceY - terrainY) / (5 * VOXEL_SIZE)) + 1);
         }
       } else {
         keyObj.pos.y = restPosY;
@@ -1506,10 +1555,12 @@ export const BuildingFactory = {
   },
 
   buildShippingContainer(startGx, startGz, alongX = true, matType = 'containerRed', offsetGy = 0) {
-    const baseGy = this.getBaseGy(startGx + 2, startGz + 1) + offsetGy;
-    const len = 6;
-    const wid = 3;
-    const h = 3;
+    // High-Cube Combined-Arms ISO Container: 8×4×4 voxels (10.0m × 5.0m × 5.0m outer, 2.5m wide × 3.75m tall walk-through interior!)
+    const baseGy = this.getBaseGy(startGx + 3, startGz + 2) + offsetGy * (offsetGy > 0 ? 1 : 0);
+    const actualBaseGy = offsetGy > 0 ? this.getBaseGy(startGx + 3, startGz + 2) + Math.round((offsetGy / 3) * 4) : baseGy;
+    const len = 8;
+    const wid = 4;
+    const h = 4;
     const maxX = alongX ? len : wid;
     const maxZ = alongX ? wid : len;
 
@@ -1517,18 +1568,19 @@ export const BuildingFactory = {
       for (let z = 0; z < maxZ; z++) {
         if (offsetGy === 0 && (x === 0 || x === maxX - 1 || z === 0 || z === maxZ - 1)) {
           const localGy = this.getBaseGy(startGx + x, startGz + z);
-          for (let fy = Math.min(localGy - 2, baseGy - 1); fy < baseGy; fy++) {
+          for (let fy = Math.min(localGy - 2, actualBaseGy - 1); fy < actualBaseGy; fy++) {
             this.addVoxel(startGx + x, fy, startGz + z, 'darkConcrete');
           }
         }
         for (let y = 0; y < h; y++) {
           const isShell =
             x === 0 || x === maxX - 1 || z === 0 || z === maxZ - 1 || y === h - 1;
+          // Wide 2-voxel × 3-voxel (2.5m × 3.75m) open double cargo doors at both ends!
           const isOpenDoor = alongX
-            ? (x === 0 || x === maxX - 1) && z === 1 && y < 2
-            : (z === 0 || z === maxZ - 1) && x === 1 && y < 2;
+            ? (x === 0 || x === maxX - 1) && (z === 1 || z === 2) && y < 3
+            : (z === 0 || z === maxZ - 1) && (x === 1 || x === 2) && y < 3;
           if (isShell && !isOpenDoor) {
-            this.addVoxel(startGx + x, baseGy + y, startGz + z, matType);
+            this.addVoxel(startGx + x, actualBaseGy + y, startGz + z, matType);
           }
         }
       }
@@ -1539,7 +1591,7 @@ export const BuildingFactory = {
         startGz,
         maxX,
         maxZ,
-        baseGy,
+        baseGy: actualBaseGy,
         minWx: (startGx - 0.5) * VOXEL_SIZE,
         maxWx: (startGx + maxX - 0.5) * VOXEL_SIZE,
         minWz: (startGz - 0.5) * VOXEL_SIZE,
@@ -1552,18 +1604,18 @@ export const BuildingFactory = {
   },
 
   buildWatchtower(startGx, startGz) {
-    // Combined-Arms Scale Guard Watchtower: 6×6 voxels (7.5m × 7.5m outer, 5.0m × 5.0m sniper deck)
-    // rising 9 voxels (11.25m) above ground with an open climb-through hatch & 100% climbable ladder!
-    const baseGy = this.getBaseGy(startGx + 2, startGz + 2);
-    const span = 5; // indices 0..5 = 6 voxels (7.5m)
-    const deckGy = baseGy + 8;
-    for (let y = -3; y < 8; y++) {
+    // Scaled-Up Combined-Arms Guard Watchtower: 7×7 voxels (8.75m × 8.75m outer, 6.25m × 6.25m sniper deck)
+    // rising 10 voxels (12.5m) above ground with a wide climb-through hatch & 100% climbable ladder!
+    const baseGy = this.getBaseGy(startGx + 3, startGz + 3);
+    const span = 6; // indices 0..6 = 7 voxels (8.75m)
+    const deckGy = baseGy + 9;
+    for (let y = -3; y < 9; y++) {
       this.addVoxel(startGx, baseGy + y, startGz, 'wood');
       this.addVoxel(startGx + span, baseGy + y, startGz, 'wood');
       this.addVoxel(startGx, baseGy + y, startGz + span, 'wood');
       this.addVoxel(startGx + span, baseGy + y, startGz + span, 'wood');
-      // Horizontal cross-ties halfway up for visual structural scale (still leaves 5.0m clear ground passage!)
-      if (y === 4) {
+      // Horizontal cross-ties halfway up for visual structural scale (leaves 6.25m clear ground passage!)
+      if (y === 5) {
         for (let i = 1; i < span; i++) {
           this.addVoxel(startGx + i, baseGy + y, startGz, 'wood');
           this.addVoxel(startGx + i, baseGy + y, startGz + span, 'wood');
@@ -1571,14 +1623,14 @@ export const BuildingFactory = {
           this.addVoxel(startGx + span, baseGy + y, startGz + i, 'wood');
         }
       }
-      // Visible vertical climb ladder column at (x = 2, z = 1)
+      // Visible vertical climb ladder column at (x = 3, z = 1)
       if (y >= 0) {
-        this.addVoxel(startGx + 2, baseGy + y, startGz, 'darkConcrete', true);
+        this.addVoxel(startGx + 3, baseGy + y, startGz, 'darkConcrete', true);
       }
     }
     for (let x = 0; x <= span; x++) {
       for (let z = 0; z <= span; z++) {
-        const isLadderHatch = x === 2 && z === 1;
+        const isLadderHatch = (x === 3 || x === 2) && z === 1;
         if (!isLadderHatch) {
           this.addVoxel(startGx + x, deckGy, startGz + z, 'wood');
         }
@@ -1591,12 +1643,12 @@ export const BuildingFactory = {
         }
       }
     }
-    const groundY = this.getGroundHeightAt((startGx + 2) * VOXEL_SIZE, (startGz + 1) * VOXEL_SIZE);
+    const groundY = this.getGroundHeightAt((startGx + 3) * VOXEL_SIZE, (startGz + 1) * VOXEL_SIZE);
     const deckTopY = (deckGy + 1) * VOXEL_SIZE;
     this.registerClimbableLadder({
-      x: (startGx + 2) * VOXEL_SIZE,
+      x: (startGx + 3) * VOXEL_SIZE,
       z: (startGz + 1) * VOXEL_SIZE,
-      radius: 0.98,
+      radius: 1.05,
       minY: groundY,
       maxY: deckTopY,
       topExitY: deckTopY,
@@ -1619,17 +1671,20 @@ export const BuildingFactory = {
   },
 
   buildSandbagBunker(centerGx, centerGz) {
+    // Spacious 7×7 voxel (8.75m × 8.75m outer, 6.25m × 6.25m interior) walk-in sandbag bunker
     const baseGy = this.getBaseGy(centerGx, centerGz);
-    for (let dx = -2; dx <= 2; dx++) {
-      this.addVoxel(centerGx + dx, baseGy, centerGz - 2, 'sandbag');
-      this.addVoxel(centerGx + dx, baseGy, centerGz + 2, 'sandbag');
-      if (Math.abs(dx) === 2) {
-        this.addVoxel(centerGx + dx, baseGy + 1, centerGz - 2, 'sandbag');
-        this.addVoxel(centerGx + dx, baseGy + 1, centerGz + 2, 'sandbag');
+    for (let dx = -3; dx <= 3; dx++) {
+      this.addVoxel(centerGx + dx, baseGy, centerGz - 3, 'sandbag');
+      this.addVoxel(centerGx + dx, baseGy, centerGz + 3, 'sandbag');
+      if (Math.abs(dx) >= 2) {
+        this.addVoxel(centerGx + dx, baseGy + 1, centerGz - 3, 'sandbag');
+        this.addVoxel(centerGx + dx, baseGy + 1, centerGz + 3, 'sandbag');
       }
     }
-    this.addVoxel(centerGx - 2, baseGy, centerGz - 1, 'sandbag');
-    this.addVoxel(centerGx + 2, baseGy, centerGz + 1, 'sandbag');
+    this.addVoxel(centerGx - 3, baseGy, centerGz - 2, 'sandbag');
+    this.addVoxel(centerGx - 3, baseGy, centerGz + 2, 'sandbag');
+    this.addVoxel(centerGx + 3, baseGy, centerGz - 2, 'sandbag');
+    this.addVoxel(centerGx + 3, baseGy, centerGz + 2, 'sandbag');
   },
 
   buildRadarTower(wx, wz) {
@@ -1909,10 +1964,11 @@ export const BuildingFactory = {
     broadcastFn = null
   ) {
     const isHouse = String(variant || '').toUpperCase().includes('HOUSE');
-    const width = isHouse ? 6 : 5;
-    const depth = isHouse ? 6 : 5;
+    // Scaled-up roomy walk-in footprints: 9×9 voxels (11.25m) for Tactical House, 8×8 voxels (10.0m) for Command Bunker!
+    const width = isHouse ? 9 : 8;
+    const depth = isHouse ? 9 : 8;
     const floors = isHouse ? 2 : 1;
-    const floorHeight = 4;
+    const floorHeight = 5;
     const wallMat = isHouse ? 'brick' : 'concrete';
 
     const centerGrid = this.worldToGrid(centerWx, this.getGroundHeightAt(centerWx, centerWz), centerWz, _tmpGrid);
@@ -1960,6 +2016,9 @@ export const BuildingFactory = {
       }
     }
 
+    const midX = Math.floor(width / 2);
+    const midZ = Math.floor(depth / 2);
+
     if (isHouse) {
       for (let f = 0; f < floors; f++) {
         const baseGy = groundGy + f * floorHeight;
@@ -1971,7 +2030,7 @@ export const BuildingFactory = {
             const isEdgeZ = z === 0 || z === depth - 1;
             const isWall = isEdgeX || isEdgeZ;
 
-            const isStairCutout = x === 1 && z >= 1 && z <= 3;
+            const isStairCutout = x === 1 && z >= 1 && z <= 5;
             if (!isStairCutout) {
               addStructureVoxel(gx, baseGy + floorHeight - 1, gz, 'concrete');
             }
@@ -1980,17 +2039,18 @@ export const BuildingFactory = {
 
             for (let y = 0; y < floorHeight - 1; y++) {
               const gy = baseGy + y;
+              // Wide 3-voxel × 3-voxel (3.75m × 3.75m) walk-in doors on all 4 walls!
               const isDoor =
                 f === 0 &&
-                y < 2 &&
-                (((z === 0 || z === depth - 1) && (x === 2 || x === 3)) ||
-                  ((x === 0 || x === width - 1) && (z === 2 || z === 3)));
+                y < 3 &&
+                (((z === 0 || z === depth - 1) && Math.abs(x - midX) <= 1) ||
+                  ((x === 0 || x === width - 1) && Math.abs(z - midZ) <= 1));
               const isWindow =
-                y === 1 &&
+                (y === 1 || y === 2) &&
                 isWall &&
                 !isDoor &&
-                ((isEdgeZ && (x === 1 || x === width - 2)) ||
-                  (isEdgeX && (z === 1 || z === depth - 2)));
+                ((isEdgeZ && (x === 2 || x === width - 3)) ||
+                  (isEdgeX && (z === 2 || z === depth - 3)));
 
               if (!isDoor && !isWindow) {
                 const mat = y === 0 ? 'darkConcrete' : wallMat;
@@ -2000,7 +2060,7 @@ export const BuildingFactory = {
           }
         }
 
-        for (let step = 0; step < floorHeight - 1; step++) {
+        for (let step = 0; step < floorHeight; step++) {
           addStructureVoxel(startGx + 1, baseGy + step, startGz + 1 + step, 'wood');
         }
       }
@@ -2025,35 +2085,40 @@ export const BuildingFactory = {
           const isCorner = isEdgeX && isEdgeZ;
           const isWall = isEdgeX || isEdgeZ;
 
-          const isRoofHatch = x === 1 && (z === 1 || z === 2);
+          const isRoofHatch = x === 1 && z >= 1 && z <= 4;
           if (!isRoofHatch) {
-            addStructureVoxel(gx, baseGy + 3, gz, 'darkConcrete');
+            addStructureVoxel(gx, baseGy + 4, gz, 'darkConcrete');
           }
 
           if (!isWall) continue;
 
-          for (let y = 0; y < 3; y++) {
+          for (let y = 0; y < 4; y++) {
             const gy = baseGy + y;
-            const isDoor = y < 2 && ((z === depth - 1 && x === 2) || (x === 0 && z === 2));
+            // Wide 2-voxel × 3-voxel (2.5m × 3.75m) walk-in bunker blast doors on South & West!
+            const isDoor =
+              y < 3 &&
+              ((z === depth - 1 && (x === 3 || x === 4)) ||
+                (x === 0 && (z === 3 || z === 4)));
             const isFiringSlit =
               y === 1 &&
               !isCorner &&
               !isDoor &&
-              ((isEdgeZ && (x === 1 || x === 2 || x === 3)) ||
-                (isEdgeX && (z === 1 || z === 2 || z === 3)));
+              ((isEdgeZ && x >= 2 && x <= width - 3) ||
+                (isEdgeX && z >= 2 && z <= depth - 3));
 
             if (!isDoor && !isFiringSlit) {
-              const mat = isCorner || y === 2 ? 'darkConcrete' : y === 0 ? 'sandbag' : 'concrete';
+              const mat = isCorner || y >= 2 ? 'darkConcrete' : y === 0 ? 'sandbag' : 'concrete';
               addStructureVoxel(gx, gy, gz, mat);
             }
           }
         }
       }
 
-      addStructureVoxel(startGx + 1, baseGy, startGz + 1, 'wood');
-      addStructureVoxel(startGx + 1, baseGy + 1, startGz + 2, 'wood');
+      for (let step = 0; step < 4; step++) {
+        addStructureVoxel(startGx + 1, baseGy + step, startGz + 1 + step, 'wood');
+      }
 
-      const topGy = baseGy + 4;
+      const topGy = baseGy + 5;
       for (let x = 0; x < width; x++) {
         for (let z = 0; z < depth; z++) {
           if (x === 0 || x === width - 1 || z === 0 || z === depth - 1) {

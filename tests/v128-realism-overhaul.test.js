@@ -2,29 +2,29 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
 
-import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=143';
-import { VEHICLE_STATS } from '../src/config.js?v=143';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=143';
-import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=143';
-import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=143';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=143';
-import { createWeaponViewModel } from '../src/models/weapon-model.js?v=143';
-import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=143';
-import { BotManager } from '../src/bots/BotManager.js?v=143';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=143';
-import { CombatMethods } from '../src/player/PlayerCombat.js?v=143';
-import { PlayerController } from '../src/player/PlayerController.js?v=143';
-import { SoundManager } from '../src/audio/SoundManager.js?v=143';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=143';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=143';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=143';
-import { BotAIMethods } from '../src/bots/BotAI.js?v=143';
-import { updateMedicRescue } from '../src/bots/MedicAI.js?v=143';
+import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=144';
+import { VEHICLE_STATS } from '../src/config.js?v=144';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=144';
+import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=144';
+import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=144';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=144';
+import { createWeaponViewModel } from '../src/models/weapon-model.js?v=144';
+import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=144';
+import { BotManager } from '../src/bots/BotManager.js?v=144';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=144';
+import { CombatMethods } from '../src/player/PlayerCombat.js?v=144';
+import { PlayerController } from '../src/player/PlayerController.js?v=144';
+import { SoundManager } from '../src/audio/SoundManager.js?v=144';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=144';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=144';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=144';
+import { BotAIMethods } from '../src/bots/BotAI.js?v=144';
+import { updateMedicRescue } from '../src/bots/MedicAI.js?v=144';
 import {
   createDefaultMarksmanProfile,
   evaluateMarksmanShot,
   computeBallisticSolution
-} from '../src/player/MarksmanSystem.js?v=143';
+} from '../src/player/MarksmanSystem.js?v=144';
 
 function buildPilotHarness(role = 'fighter', team = 'US') {
   const scene = new THREE.Scene();
@@ -353,7 +353,7 @@ test('v128 Item 3: Downtown FOB C Tall Skyscrapers Intact (Zero Batch Overflow),
 
   const tallTower = downtownSkyscrapers.find((b) => b.floors >= 16) || downtownSkyscrapers[0];
   assert.ok(tallTower.width * 1.25 >= 27.0 && tallTower.depth * 1.25 >= 24.5, 'Pinnacle skyscraper roof >= 27.5m × 25m for 4 corner snipers + landed UH-60M');
-  const roofSlabGy = tallTower.groundGy + tallTower.floors * 4 - 1;
+  const roofSlabGy = tallTower.groundGy + tallTower.floors * (tallTower.floorHeight || 4) - 1;
   assert.ok(roofSlabGy * 1.25 >= 78.0, `Pinnacle skyscraper roof height >= 78m (got ${(roofSlabGy * 1.25).toFixed(1)}m)`);
   const midGx = tallTower.startGx + Math.floor(tallTower.width / 2);
   const midGz = tallTower.startGz + Math.floor(tallTower.depth / 2);
@@ -1736,10 +1736,10 @@ test('v137: Sniper Marksman Shot-Difficulty Badges, 2D Trajectory/Anatomy Replay
 });
 
 test('v137b: Tank cannon passes past walking teammates, Coax MG hits close-in enemies in CHASE_3P, and Headshots/Explosions have high instant-KIA chance', async () => {
-  const { PlayerController } = await import('../src/player.js?v=143');
-  const { BotManager, evaluateCatastrophicKill } = await import('../src/bots.js?v=143');
-  const { VehicleManager, initVehicleOrdnance } = await import('../src/vehicles.js?v=143');
-  const { ProjectileManager } = await import('../src/world/ProjectileManager.js?v=143');
+  const { PlayerController } = await import('../src/player.js?v=144');
+  const { BotManager, evaluateCatastrophicKill } = await import('../src/bots.js?v=144');
+  const { VehicleManager, initVehicleOrdnance } = await import('../src/vehicles.js?v=144');
+  const { ProjectileManager } = await import('../src/world/ProjectileManager.js?v=144');
 
   const prevDoc = globalThis.document;
   const prevWin = globalThis.window;

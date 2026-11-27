@@ -505,12 +505,29 @@ export function buildTankModel(ctx) {
         for (const rx of [-0.52, 0, 0.52]) {
           p.push(_part(ctx.getBox(0.04, 0.42, 0.04), rx, 0.06, -3.19));
         }
-        // CROWS II .50 cal M2HB barrel pointing +Z
-        p.push(_part(ctx.getCyl(0.028, 0.034, 0.88, 8), 0.66, 0.66, 0.26, Math.PI / 2, 0, 0));
       },
       true,
       false
     );
+
+    // Articulated High-Elevation (-18° to +62°) CROWS II .50 Cal M2HB Roof RWS Pivot!
+    const usRwsPivot = new THREE.Group();
+    usRwsPivot.name = 'roofRwsPivot';
+    usRwsPivot.position.set(0.66, 0.66, -0.18);
+    _addMerged(
+      usRwsPivot,
+      'tank:us:roofRwsGun',
+      ctx,
+      barrelMat,
+      (p) => {
+        p.push(_part(ctx.getBox(0.16, 0.14, 0.34), 0, 0, 0.06));
+        p.push(_part(ctx.getCyl(0.028, 0.034, 0.88, 8), 0, 0.01, 0.48, Math.PI / 2, 0, 0));
+      },
+      true,
+      false
+    );
+    turretPivot.add(usRwsPivot);
+    group.userData.roofRwsPivot = usRwsPivot;
 
     _addMerged(
       turretPivot,
@@ -654,13 +671,31 @@ export function buildTankModel(ctx) {
         for (let cy = -0.18; cy <= 0.22; cy += 0.13) {
           p.push(_part(ctx.getBox(2.08, 0.03, 0.035), 0, cy, -2.18));
         }
-        // Roof 12.7mm Kord heavy MG barrel pointing +Z + rear whip antenna
-        p.push(_part(ctx.getCyl(0.028, 0.035, 0.92, 8), 0.62, 0.62, 0.32, Math.PI / 2, 0, 0));
+        // Rear whip antenna
         p.push(_part(ctx.getCyl(0.016, 0.024, 1.3, 6), -0.88, 0.96, -1.85, -0.1, 0, 0));
       },
       true,
       false
     );
+
+    // Articulated High-Elevation (-18° to +62°) UDP T05BV-1 12.7mm Kord Roof RWS Pivot!
+    const ruRwsPivot = new THREE.Group();
+    ruRwsPivot.name = 'roofRwsPivot';
+    ruRwsPivot.position.set(0.62, 0.62, -0.14);
+    _addMerged(
+      ruRwsPivot,
+      'tank:ru:roofRwsGun',
+      ctx,
+      barrelMat,
+      (p) => {
+        p.push(_part(ctx.getBox(0.15, 0.14, 0.34), 0, 0, 0.06));
+        p.push(_part(ctx.getCyl(0.028, 0.035, 0.92, 8), 0, 0.01, 0.5, Math.PI / 2, 0, 0));
+      },
+      true,
+      false
+    );
+    turretPivot.add(ruRwsPivot);
+    group.userData.roofRwsPivot = ruRwsPivot;
 
     _addMerged(
       turretPivot,

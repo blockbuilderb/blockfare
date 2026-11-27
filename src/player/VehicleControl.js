@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=143';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=143';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=143';
-import { getRideShortcutLabel } from '../utils/KeyboardShortcuts.js?v=143';
-import { events } from '../events.js?v=143';
+import { sound } from '../audio.js?v=144';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=144';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=144';
+import { getRideShortcutLabel } from '../utils/KeyboardShortcuts.js?v=144';
+import { events } from '../events.js?v=144';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -12,7 +12,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=143';
+} from '../core/StateMachines.js?v=144';
 
 function markShared(asset) {
   if (asset) {
@@ -1960,7 +1960,7 @@ export const VehicleControlMethods = {
       v.activeWeaponSlot = 0;
       return;
     }
-    const maxSlots = v.isAircraft || v.type === 'tank' || v.type === 'apc' ? 3 : 2;
+    const maxSlots = v.type === 'tank' ? 4 : v.isAircraft || v.type === 'apc' ? 3 : 2;
     const clamped = Math.max(0, Math.min(maxSlots - 1, slotIndex));
     if (v.activeWeaponSlot === clamped) return;
     v.activeWeaponSlot = clamped;
@@ -2045,16 +2045,21 @@ export const VehicleControlMethods = {
           this.switchSlot(targetIdx);
         }
       }
+    } else if (v.type === 'tank') {
+      label =
+        clamped === 0
+          ? '⚡ [1] 120MM/125MM APFSDS MAIN CANNON (-10°..+20° MANTLET • LMB • [SPACE] MG)'
+          : clamped === 1
+          ? '🔥 [2] 7.62MM COAXIAL MG (950 RPM ANTI-INFANTRY • -10°..+20° MANTLET • LMB / SPACE)'
+          : clamped === 2
+          ? '🔼 [3] ROOF .50 CAL CROWS / 12.7MM KORD AA HMG (-18°..+62° HIGH-ELEVATION AA & ROOFTOP • LMB / SPACE)'
+          : '🚀 [4] 120MM LAHAT / 9M119M REFLEKS LASER-GUIDED GUN-ATGM (STEERS TO CROSSHAIR • LMB)';
     } else {
       label =
         clamped === 0
-          ? v.type === 'tank'
-            ? '⚡ [1] 120MM/125MM APFSDS HYPER-VELOCITY SABOT SELECTED (780 M/S FLAT • LMB)'
-            : '⚡ [1] 30MM HIGH-VELOCITY AUTOCANNON SELECTED (460 M/S • LMB)'
+          ? '⚡ [1] 30MM HIGH-VELOCITY AUTOCANNON SELECTED (460 M/S • LMB)'
           : clamped === 1
           ? '🔥 [2] 7.62MM COAXIAL MG SELECTED (LMB / SPACE)'
-          : v.type === 'tank'
-          ? '🚀 [3] 9M119M REFLEKS / LAHAT LASER-GUIDED ATGM SELECTED (STEERS TO CROSSHAIR • LMB)'
           : '🚀 [3] BGM-71 TOW-2B / 9M133 KORNET WIRE-GUIDED ATGM SELECTED (STEERS TO CROSSHAIR • LMB)';
     }
     if (this.onAwardXp && !v.isSecretOmegaFlyer && v.aircraftRole !== 'wright_flyer') {
@@ -2169,8 +2174,12 @@ export const VehicleControlMethods = {
 
     const trackDamaged = v.subsystems && v.subsystems.tracks === 'DAMAGED';
     const engineCritical = v.subsystems && v.subsystems.engine === 'CRITICAL';
+    const amrEngineSeized = (v.amrEngineSeizedTimer || 0) > 0;
     const turretDamaged = v.subsystems && v.subsystems.turret === 'DAMAGED';
-    const subsystemSpeedMult = (trackDamaged ? 0.72 : 1.0) * (engineCritical ? 0.82 : 1.0);
+    const subsystemSpeedMult =
+      (trackDamaged ? 0.72 : 1.0) *
+      (engineCritical ? 0.82 : 1.0) *
+      (amrEngineSeized ? 0.25 : 1.0);
     const subsystemTurnMult = trackDamaged ? 0.75 : 1.0;
 
     const accelRate =
@@ -2512,18 +2521,21 @@ export const VehicleControlMethods = {
       this.vehicleCameraMode || (this.thirdPersonVehicle ? 'CHASE_3P' : 'COCKPIT_1P');
     this.thirdPersonVehicle = camMode === 'CHASE_3P';
 
-    // Enforce turret depression & elevation limits (with extra downward camera depression in CHASE_3P
-    // so the elevated 3rd-person chase camera can aim directly at close-in infantry 2m–15m ahead of the hull!):
+    // Enforce turret depression & elevation limits:
+    // - Main Battle Tank 120mm/125mm Cannon & Coax MG are mechanically limited to -10°..+20° (-0.18..+0.35 rad)
+    //   by the turret breech & mantlet, while the Roof .50 Cal CROWS / 12.7mm Kord RWS elevates all the way to +62° (1.08 rad)!
     const isTankCommanderRws = v.type === 'tank' && seatIdx === 2;
+    const tankMantletLimits = { min: -0.18, max: 0.35 };
+    const tankRoofRwsLimits = { min: -0.32, max: 1.08 };
     const basePitchLimits =
       isWarhorse
         ? { min: -0.58, max: 0.65 }
         : isTankCommanderRws
-        ? { min: -0.38, max: 1.05 }
+        ? { min: -0.38, max: 1.08 }
+        : v.type === 'tank'
+        ? tankMantletLimits
         : this.vehicleManager && typeof this.vehicleManager.getVehiclePitchLimits === 'function'
         ? this.vehicleManager.getVehiclePitchLimits(v)
-        : v.type === 'tank'
-        ? { min: -0.30, max: 0.38 }
         : v.type === 'apc'
         ? { min: -0.30, max: 0.55 }
         : isAaVehicle
@@ -2534,8 +2546,11 @@ export const VehicleControlMethods = {
     const minViewPitch =
       camMode === 'CHASE_3P' && !isWarhorse && !isMortar
         ? Math.min(basePitchLimits.min, -0.54)
+        : v.type === 'tank'
+        ? tankRoofRwsLimits.min
         : basePitchLimits.min;
-    this.pitch = THREE.MathUtils.clamp(this.pitch, minViewPitch, basePitchLimits.max);
+    const maxViewPitch = v.type === 'tank' ? tankRoofRwsLimits.max : basePitchLimits.max;
+    this.pitch = THREE.MathUtils.clamp(this.pitch, minViewPitch, maxViewPitch);
 
     if (canControlTurret) {
       if (turretDamaged && (v.type === 'tank' || v.type === 'apc')) {
@@ -2548,6 +2563,11 @@ export const VehicleControlMethods = {
         v.turretYaw = this.yaw;
       }
       v.turretPitch = THREE.MathUtils.clamp(this.pitch, basePitchLimits.min, basePitchLimits.max);
+      if (v.type === 'tank') {
+        v.roofRwsPitch = THREE.MathUtils.clamp(this.pitch, tankRoofRwsLimits.min, tankRoofRwsLimits.max);
+      }
+    } else if (isTankCommanderRws) {
+      v.roofRwsPitch = THREE.MathUtils.clamp(this.pitch, tankRoofRwsLimits.min, tankRoofRwsLimits.max);
     }
     this.pos.copy(v.pos);
 
@@ -2752,24 +2772,57 @@ export const VehicleControlMethods = {
 
     // =========================================================================
     // SEPARATE TANK / ARMOR / AA / EMPLACEMENT WEAPON CONTROLS & FCS CONVERGENCE
+    // - Tank Slot [1] (0): 120mm/125mm Main Cannon (-10°..+20° mantlet limit)
+    // - Tank Slot [2] (1): 7.62mm Coaxial MG (-10°..+20° mantlet limit; also fires via [SPACE]/[F] when <= +20°)
+    // - Tank Slot [3] (2): Roof .50 Cal CROWS / 12.7mm Kord AA HMG (-18°..+62° high-angle sky/rooftop elevation!
+    //                      Fires via [LMB] on Slot [3], [F3] Commander Seat, OR automatically via [SPACE]/[F] when aiming > +20°!)
+    // - Tank Slot [4] (3): 120mm LAHAT / 9M119M Refleks Gun-Launched ATGM (-10°..+20° mantlet limit)
     // =========================================================================
     const activeSlot = v.activeWeaponSlot || 0;
     const hasCoax = v.type === 'tank' || v.type === 'apc';
-    const wantFireCommanderRws =
-      isTankCommanderRws &&
-      !v.coaxOverheated &&
-      (this.isFiring || Boolean(this.keys['Space']) || Boolean(this.keys['KeyF']));
-    const wantFirePrimary = canControlTurret && this.isFiring && activeSlot === 0;
+    const isTankAimingHigh = v.type === 'tank' && this.pitch > 0.36; // Above +20.6° mantlet trunnion stop!
+    const secondaryMgKeyHeld = Boolean(this.keys['Space']) || Boolean(this.keys['KeyF']);
+
+    if (
+      v.type === 'tank' &&
+      canControlTurret &&
+      this.isFiring &&
+      (activeSlot === 0 || activeSlot === 1 || activeSlot === 3) &&
+      this.pitch > 0.40
+    ) {
+      const nowWarnMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (nowWarnMs - (v._lastMantletElevWarnMs || 0) > 1600 && this.onAwardXp) {
+        v._lastMantletElevWarnMs = nowWarnMs;
+        this.onAwardXp(
+          0,
+          '⚠️ TURRET MANTLET MAX ELEVATION +20° — PRESS [3] OR HOLD [SPACE] TO FIRE +62° ROOF .50 AA HMG!'
+        );
+      }
+    }
+
+    const wantFireRoofHmg =
+      v.type === 'tank' &&
+      !v.roofHmgOverheated &&
+      ((isTankCommanderRws && (this.isFiring || secondaryMgKeyHeld)) ||
+        (canControlTurret && activeSlot === 2 && (this.isFiring || secondaryMgKeyHeld)) ||
+        (canControlTurret && isTankAimingHigh && secondaryMgKeyHeld));
+    const wantFirePrimary =
+      canControlTurret &&
+      this.isFiring &&
+      activeSlot === 0 &&
+      !(v.type === 'tank' && this.pitch > 0.40);
     const wantFireAtgm =
       canControlTurret &&
-      (v.type === 'tank' || v.type === 'apc') &&
-      this.isFiring &&
-      activeSlot === 2;
+      ((v.type === 'tank' && activeSlot === 3 && this.pitch <= 0.40) ||
+        (v.type === 'apc' && activeSlot === 2)) &&
+      this.isFiring;
     const wantFireSecondaryOrCoax =
       canControlTurret &&
-      (Boolean(this.keys['Space']) ||
-        Boolean(this.keys['KeyF']) ||
-        (this.isFiring && activeSlot === 1));
+      (v.type === 'tank'
+        ? !isTankAimingHigh &&
+          activeSlot !== 2 &&
+          (secondaryMgKeyHeld || (this.isFiring && activeSlot === 1))
+        : secondaryMgKeyHeld || (this.isFiring && activeSlot === 1));
     const wantFireCoax = hasCoax && !v.coaxOverheated && wantFireSecondaryOrCoax;
 
     const turHorizFwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
@@ -3231,27 +3284,38 @@ export const VehicleControlMethods = {
       }
     }
 
-    // Tank Seat [F3] COMMANDER Roof .50 Cal CROWS M153 / 12.7mm Kord RWS (-18° to +60° High-Angle Anti-Rooftop/Heli!)
+    // Tank Roof .50 Cal CROWS M153 / 12.7mm Kord RWS (-18° to +62° High-Elevation Anti-Air & Rooftop HMG!)
+    // Independent cooldown (`v.roofHmgCooldown`), heat (`v.roofHmgHeat`), and 1,200-rd `.50 BMG` chest (`roofHmg`)!
+    if (typeof v.roofHmgCooldown === 'number' && v.roofHmgCooldown > -0.2) {
+      v.roofHmgCooldown -= dt;
+    }
+    if ((v.roofHmgHeat || 0) > 0 && !wantFireRoofHmg) {
+      v.roofHmgHeat = Math.max(0, (v.roofHmgHeat || 0) - dt * 0.34);
+      if (v.roofHmgHeat <= 0.25) v.roofHmgOverheated = false;
+    }
     let rwsCatchUp = 0;
-    while (wantFireCommanderRws && !v.coaxOverheated && v.coaxCooldown <= 0 && rwsCatchUp < 4) {
+    while (wantFireRoofHmg && !v.roofHmgOverheated && (v.roofHmgCooldown || 0) <= 0 && rwsCatchUp < 4) {
       rwsCatchUp++;
-      if (!this.consumeVehicleOrdnance(v, 'slot1', 1, 'COMMANDER .50 CAL RWS')) {
+      const rwsPoolKey =
+        v.ordnancePools && typeof v.ordnancePools.roofHmg === 'number' ? 'roofHmg' : 'slot1';
+      if (!this.consumeVehicleOrdnance(v, rwsPoolKey, 1, 'ROOF .50 CAL CROWS HMG')) {
         break;
       }
-      const rwsInterval = 60 / 750;
-      const rwsDebt = v.coaxCooldown < 0 ? Math.max(-rwsInterval * 3.0, v.coaxCooldown) : 0;
-      v.coaxCooldown = Math.max(rwsInterval * 0.12, rwsInterval + rwsDebt);
-      v.coaxHeat = Math.min(1.0, (v.coaxHeat || 0) + rwsInterval * 0.18 * (v.customCoaxHeatMult || 1.0));
-      if (v.coaxHeat >= 1.0) v.coaxOverheated = true;
+      const rwsInterval = 60 / 680;
+      const curCd = v.roofHmgCooldown || 0;
+      const rwsDebt = curCd < 0 ? Math.max(-rwsInterval * 3.0, curCd) : 0;
+      v.roofHmgCooldown = Math.max(rwsInterval * 0.12, rwsInterval + rwsDebt);
+      v.roofHmgHeat = Math.min(1.0, (v.roofHmgHeat || 0) + rwsInterval * 0.16 * (v.customCoaxHeatMult || 1.0));
+      if (v.roofHmgHeat >= 1.0) v.roofHmgOverheated = true;
       this.recoilOffsetPitch += 0.0015;
       if (rwsCatchUp === 1) {
         this.addShake(0.028);
         sound.playGunshot('hmg', 0);
       }
-      const rwsOrigin = v.pos.clone().add(new THREE.Vector3(0, 2.95, 0)).addScaledVector(turHorizFwd, 1.2);
-      const rwsAim = this.computeVehicleAimTarget(camOrigin, camDir, v, 240);
+      const rwsOrigin = v.pos.clone().add(new THREE.Vector3(0, 2.95, 0)).addScaledVector(turHorizFwd, 1.05);
+      const rwsAim = this.computeVehicleAimTarget(camOrigin, camDir, v, 360);
       const rwsBaseDir = rwsAim.point.clone().sub(rwsOrigin).normalize();
-      const rwsSpread = 0.0015;
+      const rwsSpread = 0.0014;
       const rwsDir = rwsBaseDir
         .add(
           new THREE.Vector3(
@@ -3264,12 +3328,12 @@ export const VehicleControlMethods = {
       this.fireBallisticRay(
         rwsOrigin,
         rwsDir,
-        72,
+        78,
         2.0,
-        115,
+        120,
         v.team === 'RU' ? '12.7MM KORD ROOF RWS' : '.50 CAL CROWS RWS',
-        1.9,
-        { isMountedMg: true, muzzleVelocity: 900, maxEffectiveRange: 700, tracerEveryShots: 2 },
+        2.05,
+        { isMountedMg: true, muzzleVelocity: 900, maxEffectiveRange: 850, tracerEveryShots: 2 },
         1,
         rwsOrigin
       );

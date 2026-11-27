@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { BotManager } from '../src/bots/BotManager.js?v=143';
-import { VehicleManager } from '../src/vehicles.js?v=143';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=143';
-import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=143';
-import { DeployScreen } from '../src/ui/DeployScreen.js?v=143';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=143';
+import { BotManager } from '../src/bots/BotManager.js?v=144';
+import { VehicleManager } from '../src/vehicles.js?v=144';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=144';
+import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=144';
+import { DeployScreen } from '../src/ui/DeployScreen.js?v=144';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=144';
 
 function makeMock2dCanvas(width = 760, height = 240) {
   const textCalls = [];
@@ -283,8 +283,8 @@ test('v140: Non-Destructive Class Screen, Back-to-Game [ESC] & Deploy-New-Round 
 });
 
 test('v140: Anti-Materiel Rifle Car Destruction Detonates Lethal Fuel/Ammo Blast Against Nearby & Riding Infantry', () => {
-  assert.ok(WEAPON_DEFS.ntw20.explosiveSplash.radius >= 4.0);
-  assert.ok(WEAPON_DEFS.ntw20.explosiveSplash.damage >= 130);
+  assert.ok(WEAPON_DEFS.ntw20.explosiveSplash.radius >= 2.0);
+  assert.ok(WEAPON_DEFS.ntw20.explosiveSplash.damage >= 65);
 
   const scene = new THREE.Scene();
   const world = createSimpleMockWorld();

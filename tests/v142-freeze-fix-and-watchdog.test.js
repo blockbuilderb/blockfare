@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SoundManager, MidiSynthEngine } from '../src/audio/index.js?v=143';
+import { SoundManager, MidiSynthEngine } from '../src/audio/index.js?v=144';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');

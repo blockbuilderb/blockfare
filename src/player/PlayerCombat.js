@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=143';
+import { sound } from '../audio.js?v=144';
 import {
   PLAYER,
   COMBAT,
@@ -8,17 +8,17 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=143';
-import { events } from '../events.js?v=143';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=143';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=143';
+} from '../config.js?v=144';
+import { events } from '../events.js?v=144';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=144';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=144';
 import {
   evaluateMarksmanShot,
   computeBallisticSolution,
   syncActiveMarksmanTitle,
   saveMarksmanProfile,
   loadMarksmanProfile
-} from './MarksmanSystem.js?v=143';
+} from './MarksmanSystem.js?v=144';
 
 function markShared(asset) {
   if (asset) {
@@ -1165,7 +1165,7 @@ export const CombatMethods = {
   },
 
   currentWeapon() {
-    return this.slots[this.currentSlotIndex];
+    return Array.isArray(this.slots) ? this.slots[this.currentSlotIndex || 0] : null;
   },
 
   // =========================================================================
@@ -1647,7 +1647,9 @@ export const CombatMethods = {
         def.damage,
         def.headshotMult,
         def.voxelDamage,
-        def.shortName,
+        def.activeShellName && def.isShotgun
+          ? `${def.shortName} [${def.activeShellName}]`
+          : def.shortName,
         armorPenMult,
         def,
         pelletCount,
@@ -1925,8 +1927,18 @@ export const CombatMethods = {
       maxCollateralTargets,
       collateralFalloff,
       penetratedCover: false,
+      coverPenCount: 0,
+      maxCoverPenetrations:
+        wepDef && typeof wepDef.maxCoverPenetrations === 'number'
+          ? wepDef.maxCoverPenetrations
+          : wepDef?.isAntiMateriel
+          ? wepDef.id === 'ntw20'
+            ? 2
+            : 1
+          : 1,
       coverPenMult: 1.0,
       ignoredVoxelKey: null,
+      ignoredVoxelKeys: null,
       hitBots: new Set(),
       collateralHits: 0,
       collateralKills: 0,
@@ -2043,102 +2055,121 @@ export const CombatMethods = {
     bullet.flightTime += dt;
 
     // 2. Check 3D Voxel Grid along this frame's segment `[prevPos, prevPos + stepDir * stepDist]`
+    const ignoreArg = bullet.ignoredVoxelKeys || bullet.ignoredVoxelKey;
     let voxelHit = this.world.raycastVoxel(
       _stepPrevPos,
       _stepDir,
       stepDist,
       0,
-      bullet.ignoredVoxelKey
+      ignoreArg
     );
     let maxSegmentEntityDist = stepDist;
     let stoppedByVoxel = null;
 
-    if (voxelHit && voxelHit.distance <= stepDist) {
-      if (voxelHit.voxel && !bullet.penetratedCover) {
-        const vType = voxelHit.voxel.type;
-        const isWoodOrProp = Boolean(voxelHit.voxel.isProp || vType === 'wood');
-        const isAmrRound = Boolean(bullet.wepDef?.isAntiMateriel);
-        const isSandbagOrBrick =
-          vType === 'sandbag' ||
-          (bullet.isHeavyPenCaliber && vType === 'brick') ||
-          ((bullet.isMountedMg || isAmrRound) && (vType === 'brick' || vType === 'concrete'));
+    const maxCoverPens = bullet.maxCoverPenetrations || 1;
+    let guardPenLoops = 0;
+    while (
+      voxelHit &&
+      voxelHit.distance <= stepDist &&
+      voxelHit.voxel &&
+      (bullet.coverPenCount || 0) < maxCoverPens &&
+      guardPenLoops < 3
+    ) {
+      guardPenLoops++;
+      const vType = voxelHit.voxel.type;
+      const isWoodOrProp = Boolean(voxelHit.voxel.isProp || vType === 'wood');
+      const isAmrRound = Boolean(bullet.wepDef?.isAntiMateriel);
+      const isMasonryOrSandbag =
+        vType === 'sandbag' ||
+        (bullet.isHeavyPenCaliber && vType === 'brick') ||
+        ((bullet.isMountedMg || isAmrRound) &&
+          (vType === 'brick' || vType === 'concrete' || vType === 'darkConcrete'));
 
-        if (isWoodOrProp && bullet.damage >= 22) {
-          bullet.penetratedCover = true;
-          bullet.coverPenMult = bullet.isMountedMg
-            ? 0.9
-            : bullet.isHeavyPenCaliber
-            ? 0.78
-            : 0.6;
-          bullet.ignoredVoxelKey = voxelHit.voxel.key;
-          this.world.damageVoxel(
-            voxelHit.voxel.gx,
-            voxelHit.voxel.gy,
-            voxelHit.voxel.gz,
-            bullet.voxelDamage,
-            this.onBroadcast
-          );
-          this.world.spawnBulletImpact(
-            voxelHit.point,
-            voxelHit.normal,
-            voxelHit.voxel.baseColor
-          );
-          const secondHit = this.world.raycastVoxel(
-            _stepPrevPos,
-            _stepDir,
-            stepDist,
-            0,
-            bullet.ignoredVoxelKey
-          );
-          if (secondHit && secondHit.distance <= stepDist) {
-            maxSegmentEntityDist = secondHit.distance;
-            stoppedByVoxel = secondHit;
-          }
-        } else if (
-          isSandbagOrBrick &&
-          (bullet.isMountedMg || bullet.isHeavyPenCaliber || bullet.armorPenMult > 1.05)
-        ) {
-          bullet.penetratedCover = true;
-          bullet.coverPenMult = bullet.isMountedMg
-            ? 0.82
-            : bullet.isHeavyPenCaliber
-            ? 0.68
-            : 0.52;
-          bullet.ignoredVoxelKey = voxelHit.voxel.key;
-          const chipDmg = bullet.isMountedMg
-            ? Math.max(24, Math.round(bullet.voxelDamage * 0.65))
-            : Math.max(8, Math.round(bullet.voxelDamage * 0.45));
-          this.world.damageVoxel(
-            voxelHit.voxel.gx,
-            voxelHit.voxel.gy,
-            voxelHit.voxel.gz,
-            chipDmg,
-            this.onBroadcast
-          );
-          this.world.spawnBulletImpact(
-            voxelHit.point,
-            voxelHit.normal,
-            voxelHit.voxel.baseColor
-          );
-          const secondHit = this.world.raycastVoxel(
-            _stepPrevPos,
-            _stepDir,
-            stepDist,
-            0,
-            bullet.ignoredVoxelKey
-          );
-          if (secondHit && secondHit.distance <= stepDist) {
-            maxSegmentEntityDist = secondHit.distance;
-            stoppedByVoxel = secondHit;
-          }
-        } else {
-          maxSegmentEntityDist = voxelHit.distance;
-          stoppedByVoxel = voxelHit;
+      let didPierce = false;
+      if (isWoodOrProp && bullet.damage >= 22) {
+        didPierce = true;
+        bullet.penetratedCover = true;
+        bullet.coverPenCount = (bullet.coverPenCount || 0) + 1;
+        bullet.coverPenMult *= isAmrRound
+          ? 0.92
+          : bullet.isMountedMg
+          ? 0.9
+          : bullet.isHeavyPenCaliber
+          ? 0.78
+          : 0.6;
+        this.world.damageVoxel(
+          voxelHit.voxel.gx,
+          voxelHit.voxel.gy,
+          voxelHit.voxel.gz,
+          bullet.voxelDamage,
+          this.onBroadcast
+        );
+      } else if (
+        isMasonryOrSandbag &&
+        (isAmrRound || bullet.isMountedMg || bullet.isHeavyPenCaliber || bullet.armorPenMult > 1.05)
+      ) {
+        didPierce = true;
+        bullet.penetratedCover = true;
+        bullet.coverPenCount = (bullet.coverPenCount || 0) + 1;
+        bullet.coverPenMult *= isAmrRound
+          ? bullet.wepDef?.id === 'ntw20'
+            ? 0.85
+            : 0.78
+          : bullet.isMountedMg
+          ? 0.82
+          : bullet.isHeavyPenCaliber
+          ? 0.68
+          : 0.52;
+        const chipDmg = isAmrRound
+          ? Math.max(55, Math.round(bullet.voxelDamage * 0.85))
+          : bullet.isMountedMg
+          ? Math.max(24, Math.round(bullet.voxelDamage * 0.65))
+          : Math.max(8, Math.round(bullet.voxelDamage * 0.45));
+        this.world.damageVoxel(
+          voxelHit.voxel.gx,
+          voxelHit.voxel.gy,
+          voxelHit.voxel.gz,
+          chipDmg,
+          this.onBroadcast
+        );
+        // Real-world AMR concrete/masonry back-face spall cone!
+        if (isAmrRound && typeof this.world.spawnDebris === 'function') {
+          const spallExit = voxelHit.point.clone().addScaledVector(_stepDir, 1.15);
+          this.world.spawnDebris(spallExit, voxelHit.voxel.baseColor || _hitGroundColor, 5);
         }
-      } else {
-        maxSegmentEntityDist = voxelHit.distance;
-        stoppedByVoxel = voxelHit;
       }
+
+      if (!didPierce) break;
+
+      this.world.spawnBulletImpact(
+        voxelHit.point,
+        voxelHit.normal,
+        voxelHit.voxel.baseColor
+      );
+      if ((bullet.coverPenCount || 0) === 1 && maxCoverPens <= 1) {
+        bullet.ignoredVoxelKey = voxelHit.voxel.key;
+      } else {
+        if (!bullet.ignoredVoxelKeys) {
+          bullet.ignoredVoxelKeys = new Set();
+          if (bullet.ignoredVoxelKey !== null && bullet.ignoredVoxelKey !== undefined) {
+            bullet.ignoredVoxelKeys.add(bullet.ignoredVoxelKey);
+          }
+        }
+        bullet.ignoredVoxelKeys.add(voxelHit.voxel.key);
+        bullet.ignoredVoxelKey = voxelHit.voxel.key;
+      }
+      voxelHit = this.world.raycastVoxel(
+        _stepPrevPos,
+        _stepDir,
+        stepDist,
+        0,
+        bullet.ignoredVoxelKeys || bullet.ignoredVoxelKey
+      );
+    }
+
+    if (voxelHit && voxelHit.distance <= stepDist) {
+      maxSegmentEntityDist = voxelHit.distance;
+      stoppedByVoxel = voxelHit;
     }
 
     // 3. Broadphase-Filtered Raycast against Soldiers & Vehicles within `[0, maxSegmentEntityDist]`
@@ -2351,8 +2382,16 @@ export const CombatMethods = {
           }
 
           const isFriendlyBot = bot.team === this.team;
+          if (!isFriendlyBot && bullet.wepDef?.causesBleed && !bot.dead) {
+            bot.bleeding = true;
+          }
           if (hitThroughCover && penIndex === 0 && !isFriendlyBot && this.onAwardXp) {
-            this.onAwardXp(25, '🧱 COVER PENETRATION WALLBANG!');
+            this.onAwardXp(
+              bullet.wepDef?.isAntiMateriel ? 40 : 25,
+              bullet.wepDef?.isAntiMateriel
+                ? `🧱 AMR MASONRY WALLBANG + SPALL! (${bullet.coverPenCount || 1} WALL${(bullet.coverPenCount || 1) > 1 ? 'S' : ''} PIERCED)`
+                : '🧱 COVER PENETRATION WALLBANG!'
+            );
           }
 
           bullet.hitBots.add(bot);
@@ -2620,8 +2659,13 @@ export const CombatMethods = {
               });
             }
             if (this.onHitmarker) {
-              if (veh.lastSubsystemCrit === 'OPTICS') {
-                this.onHitmarker('armor', '🔭 OPTICS CRACKED! (0 HULL DMG)');
+              if (veh.lastSubsystemCrit === 'ENGINE_SEIZED') {
+                this.onHitmarker('armor', `🔥 ENGINE BLOCK SEIZED! (-${actualDmg})`);
+              } else if (veh.lastSubsystemCrit === 'OPTICS') {
+                this.onHitmarker(
+                  'armor',
+                  actualDmg > 0 ? `🔭 OPTICS SHATTERED -${actualDmg}` : '🔭 OPTICS CRACKED! (0 HULL DMG)'
+                );
               } else if (veh.lastSubsystemCrit === 'SENSORS') {
                 this.onHitmarker(
                   'armor',

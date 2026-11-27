@@ -9,11 +9,12 @@
 
 export {
   WEAPON_DEFS,
+  SHOTGUN_SHELL_TYPES,
   CLASS_LOADOUTS,
   CASE_PRICE,
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from './assets/weapon-defs.js?v=143';
-export { ATTACHMENT_CATALOG } from './assets/attachment-defs.js?v=143';
-export { createWeaponViewModel } from './models/weapon-model.js?v=143';
+} from './assets/weapon-defs.js?v=144';
+export { ATTACHMENT_CATALOG } from './assets/attachment-defs.js?v=144';
+export { createWeaponViewModel } from './models/weapon-model.js?v=144';

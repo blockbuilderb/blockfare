@@ -11,8 +11,8 @@ export const AUDIO_PACK = {
   // 1. INFANTRY WEAPONS & BALLISTICS (assets/audio/infantry/)
   infantry: {
     rifle: {
-      url: './assets/audio/infantry/rifle_ar15.wav?v=143',
-      altUrl: './assets/audio/infantry/rifle_ak47.wav?v=143',
+      url: './assets/audio/infantry/rifle_ar15.wav?v=144',
+      altUrl: './assets/audio/infantry/rifle_ak47.wav?v=144',
       volume: 0.66,
       pitch: 1.0,
       pitchJitter: 0.035,
@@ -24,8 +24,8 @@ export const AUDIO_PACK = {
       maxRange: 340
     },
     rifle_heavy: {
-      url: './assets/audio/infantry/rifle_ak47.wav?v=143',
-      altUrl: './assets/audio/heavy_762_shot.wav?v=143',
+      url: './assets/audio/infantry/rifle_ak47.wav?v=144',
+      altUrl: './assets/audio/heavy_762_shot.wav?v=144',
       volume: 0.72,
       pitch: 0.94,
       pitchJitter: 0.03,
@@ -37,8 +37,8 @@ export const AUDIO_PACK = {
       maxRange: 390
     },
     smg: {
-      url: './assets/audio/infantry/smg_9mm.wav?v=143',
-      altUrl: './assets/audio/mp5_shot.ogg?v=143',
+      url: './assets/audio/infantry/smg_9mm.wav?v=144',
+      altUrl: './assets/audio/mp5_shot.ogg?v=144',
       volume: 0.58,
       pitch: 1.02,
       pitchJitter: 0.04,
@@ -50,8 +50,8 @@ export const AUDIO_PACK = {
       maxRange: 250
     },
     shotgun: {
-      url: './assets/audio/infantry/shotgun_12g.wav?v=143',
-      altUrl: './assets/audio/remington_shot.ogg?v=143',
+      url: './assets/audio/infantry/shotgun_12g.wav?v=144',
+      altUrl: './assets/audio/remington_shot.ogg?v=144',
       volume: 0.84,
       pitch: 0.96,
       pitchJitter: 0.03,
@@ -63,8 +63,8 @@ export const AUDIO_PACK = {
       maxRange: 320
     },
     lmg: {
-      url: './assets/audio/infantry/lmg_762.wav?v=143',
-      altUrl: './assets/audio/heavy_762_shot.wav?v=143',
+      url: './assets/audio/infantry/lmg_762.wav?v=144',
+      altUrl: './assets/audio/heavy_762_shot.wav?v=144',
       volume: 0.70,
       pitch: 0.95,
       pitchJitter: 0.03,
@@ -76,8 +76,8 @@ export const AUDIO_PACK = {
       maxRange: 420
     },
     sniper: {
-      url: './assets/audio/infantry/sniper_308.wav?v=143',
-      altUrl: './assets/audio/sniper_308_shot.wav?v=143',
+      url: './assets/audio/infantry/sniper_308.wav?v=144',
+      altUrl: './assets/audio/sniper_308_shot.wav?v=144',
       volume: 0.84,
       pitch: 0.98,
       pitchJitter: 0.02,
@@ -89,8 +89,8 @@ export const AUDIO_PACK = {
       maxRange: 680
     },
     sniper_heavy: {
-      url: './assets/audio/awp_shot.ogg?v=143',
-      altUrl: './assets/audio/infantry/sniper_308.wav?v=143',
+      url: './assets/audio/awp_shot.ogg?v=144',
+      altUrl: './assets/audio/infantry/sniper_308.wav?v=144',
       volume: 0.88,
       pitch: 0.92,
       pitchJitter: 0.02,
@@ -102,8 +102,8 @@ export const AUDIO_PACK = {
       maxRange: 820
     },
     amr: {
-      url: './assets/audio/infantry/amr_50bmg.wav?v=143',
-      altUrl: './assets/audio/awp_shot.ogg?v=143',
+      url: './assets/audio/infantry/amr_50bmg.wav?v=144',
+      altUrl: './assets/audio/awp_shot.ogg?v=144',
       volume: 0.95,
       pitch: 0.94,
       pitchJitter: 0.02,
@@ -115,8 +115,8 @@ export const AUDIO_PACK = {
       maxRange: 980
     },
     pistol: {
-      url: './assets/audio/infantry/pistol_9mm.wav?v=143',
-      altUrl: './assets/audio/infantry/pistol_45.wav?v=143',
+      url: './assets/audio/infantry/pistol_9mm.wav?v=144',
+      altUrl: './assets/audio/infantry/pistol_45.wav?v=144',
       volume: 0.56,
       pitch: 1.02,
       pitchJitter: 0.03,
@@ -126,7 +126,7 @@ export const AUDIO_PACK = {
       maxRange: 195
     },
     pistol_heavy: {
-      url: './assets/audio/infantry/pistol_45.wav?v=143',
+      url: './assets/audio/infantry/pistol_45.wav?v=144',
       volume: 0.64,
       pitch: 0.97,
       pitchJitter: 0.03,
@@ -138,8 +138,8 @@ export const AUDIO_PACK = {
       maxRange: 230
     },
     magnum: {
-      url: './assets/audio/deagle_shot.ogg?v=143',
-      altUrl: './assets/audio/infantry/pistol_45.wav?v=143',
+      url: './assets/audio/deagle_shot.ogg?v=144',
+      altUrl: './assets/audio/infantry/pistol_45.wav?v=144',
       volume: 0.78,
       pitch: 0.95,
       pitchJitter: 0.025,
@@ -151,7 +151,7 @@ export const AUDIO_PACK = {
       maxRange: 340
     },
     silenced_rifle: {
-      url: './assets/audio/infantry/silenced_shot.ogg?v=143',
+      url: './assets/audio/infantry/silenced_shot.ogg?v=144',
       volume: 0.54,
       pitch: 1.0,
       pitchJitter: 0.03,
@@ -161,7 +161,7 @@ export const AUDIO_PACK = {
       maxRange: 85
     },
     silenced_pistol: {
-      url: './assets/audio/infantry/silenced_pistol.ogg?v=143',
+      url: './assets/audio/infantry/silenced_pistol.ogg?v=144',
       volume: 0.50,
       pitch: 1.04,
       pitchJitter: 0.03,
@@ -171,7 +171,7 @@ export const AUDIO_PACK = {
       maxRange: 72
     },
     bullet_crack: {
-      url: './assets/audio/infantry/bullet_crack.wav?v=143',
+      url: './assets/audio/infantry/bullet_crack.wav?v=144',
       volume: 0.82,
       pitch: 1.0,
       pitchJitter: 0.08,
@@ -181,7 +181,7 @@ export const AUDIO_PACK = {
       maxRange: 42
     },
     reload_rifle: {
-      url: './assets/audio/infantry/reload_rifle.ogg?v=143',
+      url: './assets/audio/infantry/reload_rifle.ogg?v=144',
       volume: 0.50,
       pitch: 1.0,
       pitchJitter: 0.0,
@@ -191,8 +191,8 @@ export const AUDIO_PACK = {
       maxRange: 24
     },
     reload_sniper: {
-      url: './assets/audio/infantry/reload_sniper.ogg?v=143',
-      altUrl: './assets/audio/awp_reload.ogg?v=143',
+      url: './assets/audio/infantry/reload_sniper.ogg?v=144',
+      altUrl: './assets/audio/awp_reload.ogg?v=144',
       volume: 0.44,
       pitch: 1.05,
       pitchJitter: 0.0,
@@ -202,7 +202,7 @@ export const AUDIO_PACK = {
       maxRange: 24
     },
     reload_shotgun: {
-      url: './assets/audio/remington_reload.ogg?v=143',
+      url: './assets/audio/remington_reload.ogg?v=144',
       volume: 0.48,
       pitch: 1.0,
       pitchJitter: 0.02,
@@ -212,7 +212,7 @@ export const AUDIO_PACK = {
       maxRange: 24
     },
     reload_pistol: {
-      url: './assets/audio/deagle_reload.ogg?v=143',
+      url: './assets/audio/deagle_reload.ogg?v=144',
       volume: 0.46,
       pitch: 1.04,
       pitchJitter: 0.0,
@@ -222,7 +222,7 @@ export const AUDIO_PACK = {
       maxRange: 22
     },
     reload_rpg: {
-      url: './assets/audio/rpg_reload.ogg?v=143',
+      url: './assets/audio/rpg_reload.ogg?v=144',
       volume: 0.52,
       pitch: 1.0,
       pitchJitter: 0.0,
@@ -232,7 +232,7 @@ export const AUDIO_PACK = {
       maxRange: 26
     },
     weapon_click: {
-      url: './assets/audio/infantry/weapon_click.ogg?v=143',
+      url: './assets/audio/infantry/weapon_click.ogg?v=144',
       volume: 0.34,
       pitch: 1.18,
       pitchJitter: 0.05,
@@ -246,7 +246,7 @@ export const AUDIO_PACK = {
   // 2. ARMOR & VEHICLE WEAPONS (assets/audio/armor/)
   armor: {
     autocannon: {
-      url: './assets/audio/armor/autocannon_30mm.wav?v=143',
+      url: './assets/audio/armor/autocannon_30mm.wav?v=144',
       volume: 0.72,
       pitch: 1.0,
       pitchJitter: 0.03,
@@ -258,7 +258,7 @@ export const AUDIO_PACK = {
       maxRange: 520
     },
     hmg: {
-      url: './assets/audio/armor/hmg_50cal.wav?v=143',
+      url: './assets/audio/armor/hmg_50cal.wav?v=144',
       volume: 0.68,
       pitch: 1.0,
       pitchJitter: 0.03,
@@ -270,7 +270,7 @@ export const AUDIO_PACK = {
       maxRange: 480
     },
     tank_cannon: {
-      url: './assets/audio/armor/tank_cannon_120mm.wav?v=143',
+      url: './assets/audio/armor/tank_cannon_120mm.wav?v=144',
       volume: 0.92,
       pitch: 0.98,
       pitchJitter: 0.025,
@@ -280,7 +280,7 @@ export const AUDIO_PACK = {
       maxRange: 950
     },
     armor_ricochet: {
-      url: './assets/audio/armor/armor_ricochet.ogg?v=143',
+      url: './assets/audio/armor/armor_ricochet.ogg?v=144',
       volume: 0.40,
       pitch: 1.28,
       pitchJitter: 0.06,
@@ -294,7 +294,7 @@ export const AUDIO_PACK = {
   // 3. ORDNANCE & EXPLOSIVES (assets/audio/ordnance/)
   ordnance: {
     rpg_launch: {
-      url: './assets/audio/ordnance/rpg_launch.ogg?v=143',
+      url: './assets/audio/ordnance/rpg_launch.ogg?v=144',
       volume: 0.74,
       pitch: 1.02,
       pitchJitter: 0.04,
@@ -304,8 +304,8 @@ export const AUDIO_PACK = {
       maxRange: 420
     },
     explosion: {
-      url: './assets/audio/ordnance/explosion_blast.wav?v=143',
-      altUrl: './assets/audio/ordnance/concussion_boom.ogg?v=143',
+      url: './assets/audio/ordnance/explosion_blast.wav?v=144',
+      altUrl: './assets/audio/ordnance/concussion_boom.ogg?v=144',
       volume: 0.88,
       pitch: 1.0,
       pitchJitter: 0.05,
@@ -315,7 +315,7 @@ export const AUDIO_PACK = {
       maxRange: 900
     },
     concussion_boom: {
-      url: './assets/audio/ordnance/concussion_boom.ogg?v=143',
+      url: './assets/audio/ordnance/concussion_boom.ogg?v=144',
       volume: 0.82,
       pitch: 0.92,
       pitchJitter: 0.04,
@@ -325,7 +325,7 @@ export const AUDIO_PACK = {
       maxRange: 850
     },
     distant_boom: {
-      url: './assets/audio/ordnance/distant_boom.wav?v=143',
+      url: './assets/audio/ordnance/distant_boom.wav?v=144',
       volume: 0.85,
       pitch: 0.96,
       pitchJitter: 0.05,
@@ -335,7 +335,7 @@ export const AUDIO_PACK = {
       maxRange: 1400
     },
     autocannon_impact: {
-      url: './assets/audio/ordnance/autocannon_impact.wav?v=143',
+      url: './assets/audio/ordnance/autocannon_impact.wav?v=144',
       volume: 0.52,
       pitch: 1.0,
       pitchJitter: 0.05,
@@ -345,7 +345,7 @@ export const AUDIO_PACK = {
       maxRange: 240
     },
     grenade_throw: {
-      url: './assets/audio/ordnance/grenade_throw.ogg?v=143',
+      url: './assets/audio/ordnance/grenade_throw.ogg?v=144',
       volume: 0.46,
       pitch: 1.0,
       pitchJitter: 0.04,
@@ -355,7 +355,7 @@ export const AUDIO_PACK = {
       maxRange: 30
     },
     smoke_hiss: {
-      url: './assets/audio/ordnance/smoke_hiss.ogg?v=143',
+      url: './assets/audio/ordnance/smoke_hiss.ogg?v=144',
       volume: 0.44,
       pitch: 1.0,
       pitchJitter: 0.03,

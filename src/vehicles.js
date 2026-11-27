@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=143';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=143';
+import { sound } from './audio.js?v=144';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=144';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=143';
-import { createVehicleMesh } from './models/vehicle-model.js?v=143';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=143';
-import { getRideShortcutLabel } from './utils/KeyboardShortcuts.js?v=143';
-import { events, makeEventBridge } from './events.js?v=143';
+} from './assets/vehicle-defs.js?v=144';
+import { createVehicleMesh } from './models/vehicle-model.js?v=144';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=144';
+import { getRideShortcutLabel } from './utils/KeyboardShortcuts.js?v=144';
+import { events, makeEventBridge } from './events.js?v=144';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -22,7 +22,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=143';
+} from './core/StateMachines.js?v=144';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -152,7 +152,7 @@ export function initVehicleOrdnance(v) {
       maxPools = { slot0: 500, slot1: 6, slot2: 4 }; // 500× 20mm M61 Vulcan, 6× AIM-120D AMRAAM, 4× JDAM/GBU-28
     }
   } else if (v.type === 'tank') {
-    maxPools = { slot0: 24, slot1: 1200, slot2: 4 }; // 24× 120mm/125mm APFSDS/HE Shells, 1,200× Coax/.50 MG, 4× Gun-Launched ATGMs
+    maxPools = { slot0: 24, slot1: 1200, roofHmg: 1200, slot2: 4 }; // 24× 120mm/125mm Shells, 1,200× 7.62mm Coax MG, 1,200× .50/12.7mm Roof RWS AA HMG, 4× Gun-Launched ATGMs
   } else if (v.type === 'apc') {
     maxPools = { slot0: 210, slot1: 1200, slot2: 6 }; // 210× 30mm Autocannon, 1,200× Coax MG, 6× Wire-Guided TOW-2B / Kornet ATGMs
   } else if (v.type === 'aa' || v.type === 'emplace_aa') {
@@ -232,8 +232,22 @@ export function classifyWeaponBallistics(weaponName = '') {
       w.includes('R-73') ||
       w.includes('R-77'));
 
+  const is20mmAmr =
+    w.includes('NTW-20') || w.includes('20MM AMR') || w.includes('20MM SAPHEI') || w.includes('20×82');
+  const is50BmgAmr =
+    !is20mmAmr &&
+    (w.includes('BARRETT') ||
+      w.includes('M82') ||
+      w.includes('GM6') ||
+      w.includes('LYNX') ||
+      w.includes('RAUFOSS') ||
+      w.includes('MK211') ||
+      w.includes('ANTI-MATERIEL'));
+  const isAntiMaterielRifle = is20mmAmr || is50BmgAmr;
+
   const isAutocannon =
     !isHeavyAntiArmor &&
+    !isAntiMaterielRifle &&
     (w.includes('30MM') ||
       w.includes('25MM') ||
       w.includes('40MM') ||
@@ -254,6 +268,7 @@ export function classifyWeaponBallistics(weaponName = '') {
 
   const isHeavyMg50 =
     !isHeavyAntiArmor &&
+    !isAntiMaterielRifle &&
     !isAutocannon &&
     (w.includes('.50') ||
       w.includes('50 CAL') ||
@@ -275,7 +290,8 @@ export function classifyWeaponBallistics(weaponName = '') {
     w.includes('VENOM') ||
     w.includes('TALON');
 
-  const isSmallArms = !isHeavyAntiArmor && !isAutocannon && !isHeavyMg50 && !isMeleeOrPrimitive;
+  const isSmallArms =
+    !isHeavyAntiArmor && !isAntiMaterielRifle && !isAutocannon && !isHeavyMg50 && !isMeleeOrPrimitive;
   const isRotaryMinigun =
     isSmallArms &&
     (w.includes('M134') || w.includes('MINIGUN') || w.includes('PKT DOOR'));
@@ -299,6 +315,9 @@ export function classifyWeaponBallistics(weaponName = '') {
 
   return {
     isHeavyAntiArmor,
+    isAntiMaterielRifle,
+    is20mmAmr,
+    is50BmgAmr,
     isAutocannon,
     isHeavyMg50,
     isSmallArms,
@@ -320,12 +339,14 @@ const SHARED_AI_TANK_SHELL_MAT = markShared(new THREE.MeshBasicMaterial({ color:
 const SHARED_AI_AUTO_SHELL_GEO = markShared(new THREE.BoxGeometry(0.16, 0.16, 0.48));
 const SHARED_AI_AUTO_SHELL_MAT = markShared(new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
 
-const PITCH_LIMITS_DEFAULT = Object.freeze({ min: -0.30, max: 0.38 });
+const PITCH_LIMITS_DEFAULT = Object.freeze({ min: -0.18, max: 0.35 }); // -10° to +20° authentic MBT turret mantlet elevation!
+export const PITCH_LIMITS_TANK_CANNON = PITCH_LIMITS_DEFAULT;
+export const PITCH_LIMITS_TANK_ROOF_HMG = Object.freeze({ min: -0.32, max: 1.08 }); // -18° to +62° Tank Roof .50 Cal CROWS / 12.7mm Kord AA HMG!
 const PITCH_LIMITS_AA = Object.freeze({ min: -0.22, max: 1.48 });
 const PITCH_LIMITS_MORTAR = Object.freeze({ min: -0.35, max: 0.85 });
 const PITCH_LIMITS_APC = Object.freeze({ min: -0.30, max: 0.55 });
 export const PITCH_LIMITS_CAR = Object.freeze({ min: -0.32, max: 1.05 }); // -18° to +60° real-world CROWS / OGPK Roof .50 Cal elevation!
-export const PITCH_LIMITS_COMMANDER_RWS = Object.freeze({ min: -0.38, max: 1.05 }); // -22° to +60° Tank Commander Roof .50 Cal RWS!
+export const PITCH_LIMITS_COMMANDER_RWS = Object.freeze({ min: -0.38, max: 1.08 }); // -22° to +62° Tank Commander Roof .50 Cal RWS!
 
 const COLOR_FIRE_ORANGE = new THREE.Color(0xff7f11);
 const COLOR_ERA_SPARK = new THREE.Color(0xff9f1a);
@@ -3559,6 +3580,28 @@ export class VehicleManager {
               amount = Math.min(2, Math.max(1, vehicle.hp - minHpFloor));
             }
           }
+        } else if (ballistics.isAntiMaterielRifle) {
+          // Real-Life Anti-Materiel Rifle (.50 BMG Mk 211 / 20×82mm NTW-20) vs Aircraft & Helicopters:
+          // Doctrinally fielded to shred helicopter turboshafts, rotor swashplates, parked aircraft & TGP sensor pods out to 1,800m+!
+          const isTargetHeli = Boolean(
+            vehicle.isHelicopter || aRole === 'heli_transport' || aRole === 'heli_attack'
+          );
+          if (distToAttacker > 2200) {
+            vehicle.lastArmorRicochet = true;
+            return false;
+          }
+          if (critRng < (ballistics.is20mmAmr ? 0.55 : 0.38)) {
+            vehicle.sensorGlitchTimer = Math.max(vehicle.sensorGlitchTimer || 0, 6.0);
+            vehicle.lastSubsystemCrit = 'SENSORS';
+          }
+          if (isTargetHeli) {
+            amount = Math.max(45, Math.round(amount * (ballistics.is20mmAmr ? 1.85 : 1.65)));
+            vehicle.lastHitDesc = '🚁 AMR TURBOSHAFT / ROTOR HUB PENETRATION!';
+          } else if (aRole === 'cas') {
+            amount = Math.max(12, Math.round(amount * (ballistics.is20mmAmr ? 0.55 : 0.3)));
+          } else {
+            amount = Math.max(35, Math.round(amount * (ballistics.is20mmAmr ? 1.45 : 1.25)));
+          }
         } else if (ballistics.isHeavyMg50) {
           if (distToAttacker > 680) {
             vehicle.lastArmorRicochet = true;
@@ -3588,6 +3631,109 @@ export class VehicleManager {
     // =========================================================================
     const isArmoredHull =
       vehicle.type === 'tank' || vehicle.type === 'apc' || vehicle.type === 'aa';
+
+    // =========================================================================
+    // REAL-LIFE ANTI-MATERIEL RIFLE (.50 BMG MK 211 / 12.7MM / 20MM NTW-20) DOCTRINE VS GROUND VEHICLES
+    // - Soft / Light-Armored Vehicles (Cars, Humvees, 6×6 Trucks, Bikes, ATVs):
+    //     * Punches cleanly through ballistic glass & engine hoods (1.45×–1.65× materiel damage).
+    //     * Direct hits to the FRONT Engine Block crack cylinder blocks & ignite fuel/oil lines,
+    //       catastrophically seizing the engine (`amrEngineSeizedTimer = 6.5s`, `subsystems.engine = 'CRITICAL'`)!
+    // - Heavy MBTs (`tank`):
+    //     * .50 BMG / 20mm CANNOT penetrate 600mm+ Chobham/Relikt hull armor (0 hull HP on front/sides;
+    //       20mm NTW-20 only chips 24–34 HP into thin Rear Engine Louvers!).
+    //     * Doctrinally used by Recon/Engineers to SHATTER Tank CITV / Gunner Thermal Periscopes (65% crit!)
+    //       and snap external Track Links with 20mm SAPHEI!
+    // =========================================================================
+    if (!vehicle.isAircraft && ballistics.isAntiMaterielRifle) {
+      if (!vehicle.subsystems) {
+        vehicle.subsystems = { tracks: 'OK', turret: 'OK', engine: 'OK', optics: 'OK' };
+      }
+      let frontDotAmr = 0;
+      const refAmrPt = hitPoint || attackerPos;
+      if (refAmrPt && vehicle.pos) {
+        const dxA = refAmrPt.x - vehicle.pos.x;
+        const dzA = refAmrPt.z - vehicle.pos.z;
+        const hLen = Math.hypot(dxA, dzA);
+        if (hLen > 0.15) {
+          const fwdX = -Math.sin(vehicle.yaw || 0);
+          const fwdZ = -Math.cos(vehicle.yaw || 0);
+          frontDotAmr = (dxA * fwdX + dzA * fwdZ) / hLen;
+        }
+      }
+      if (!isArmoredHull && vehicle.type !== 'warhorse' && vehicle.type !== 'trex_mount' && vehicle.type !== 'raptor_mount') {
+        amount = Math.max(40, Math.round(amount * (ballistics.is20mmAmr ? 1.65 : 1.45)));
+        if (frontDotAmr >= 0.32 || (ballistics.is20mmAmr && critRng < 0.6)) {
+          vehicle.subsystems.engine = 'CRITICAL';
+          vehicle.amrEngineSeizedTimer = Math.max(vehicle.amrEngineSeizedTimer || 0, 6.5);
+          vehicle.amrEngineFireTimer = Math.max(vehicle.amrEngineFireTimer || 0, 4.5);
+          vehicle.lastSubsystemCrit = 'ENGINE_SEIZED';
+          vehicle.lastHitDesc = '🔥 AMR CRACKED ENGINE BLOCK — ENGINE SEIZED & BURNING!';
+          this.world?.spawnDebris?.(
+            tmpVec3(vehicle.pos.x, vehicle.pos.y + 1.2, vehicle.pos.z),
+            COLOR_FIRE_ORANGE,
+            6
+          );
+          if (onAwardXp) {
+            onAwardXp(
+              35,
+              `🔥 ANTI-MATERIEL ENGINE-BLOCK HIT! (${vehicle.name.split(' (')[0]} ENGINE SEIZED!)`
+            );
+          }
+        }
+      } else if (vehicle.type === 'tank') {
+        const hitRearEngineDeck = frontDotAmr <= -0.52;
+        if (critRng < 0.65) {
+          vehicle.subsystems.optics = 'DAMAGED';
+          vehicle.opticsGlitchTimer = 16.0;
+          vehicle.lastSubsystemCrit = 'OPTICS';
+        }
+        if (ballistics.is20mmAmr && Math.abs(frontDotAmr) < 0.52 && critRng < 0.55) {
+          vehicle.subsystems.tracks = 'DAMAGED';
+        }
+        if (ballistics.is20mmAmr && hitRearEngineDeck) {
+          amount = Math.min(34, Math.max(22, Math.round(amount * 0.22)));
+          vehicle.subsystems.engine = 'SMOKING';
+          vehicle.lastHitDesc = '🔥 20MM AMR PENETRATED MBT REAR ENGINE LOUVERS!';
+        } else {
+          vehicle.lastArmorRicochet = true;
+          vehicle.lastHitDesc =
+            vehicle.lastSubsystemCrit === 'OPTICS'
+              ? '🔭 AMR SHATTERED TANK CITV / THERMAL OPTIC (0 HULL DMG — TANK BLINDED 16S)!'
+              : vehicle.subsystems.tracks === 'DAMAGED'
+              ? '⚙️ 20MM AMR DAMAGED TANK TRACK PIN (0 HULL DMG — MOBILITY DEGRADED)!'
+              : '🛡️ MBT COMPOSITE ARMOR STOPPED AMR ROUND (AIM AT OPTICS OR REAR LOUVERS!)';
+          if (vehicle.lastSubsystemCrit === 'OPTICS' && onAwardXp) {
+            onAwardXp(30, '🔭 ANTI-MATERIEL CRIT: SHATTERED ENEMY TANK OPTICS!');
+          }
+          if (vehicle.driver && typeof vehicle.driver.notifyVehicleHit === 'function') {
+            vehicle.driver.notifyVehicleHit(0, attackerName, vehicle.lastHitDesc, attackerPos);
+          }
+          return false;
+        }
+      } else if (vehicle.type === 'apc' || vehicle.type === 'aa') {
+        if (critRng < 0.48) {
+          vehicle.subsystems.optics = 'DAMAGED';
+          vehicle.opticsGlitchTimer = 15.0;
+          vehicle.lastSubsystemCrit = 'OPTICS';
+        }
+        if (frontDotAmr >= 0.55 && !ballistics.is20mmAmr) {
+          vehicle.lastArmorRicochet = true;
+          vehicle.lastHitDesc =
+            vehicle.lastSubsystemCrit === 'OPTICS'
+              ? '🔭 .50 AMR SHATTERED IFV FRONT OPTICS (0 HULL DMG)!'
+              : '🛡️ .50 AMR DEFLECTED BY SLOPED IFV GLACIS — FLANK SIDE/REAR!';
+          return false;
+        }
+        amount = Math.max(
+          16,
+          Math.round(amount * (ballistics.is20mmAmr ? (frontDotAmr >= 0.55 ? 0.25 : 0.62) : 0.38))
+        );
+        if (ballistics.is20mmAmr && Math.abs(frontDotAmr) < 0.55) {
+          vehicle.subsystems.tracks = 'DAMAGED';
+        }
+      }
+    }
+
     if (isArmoredHull && (ballistics.isSmallArms || (ballistics.isHeavyMg50 && vehicle.type === 'tank'))) {
       if (!vehicle.subsystems) {
         vehicle.subsystems = { tracks: 'OK', turret: 'OK', engine: 'OK', optics: 'OK' };
@@ -6400,11 +6546,36 @@ export class VehicleManager {
         v.mesh.position.copy(v.pos);
         v.mesh.rotation.y = v.yaw;
       }
+      if (v.amrEngineSeizedTimer > 0) {
+        v.amrEngineSeizedTimer = Math.max(0, v.amrEngineSeizedTimer - dt);
+        v.forwardSpeed = (v.forwardSpeed || 0) * Math.max(0.2, 1 - dt * 4.5);
+      }
+      if (v.amrEngineFireTimer > 0 && !v.dead) {
+        const prevFire = v.amrEngineFireTimer;
+        v.amrEngineFireTimer = Math.max(0, v.amrEngineFireTimer - dt);
+        v.hp = Math.max(1, (v.hp || 100) - 24 * dt);
+        if (Math.floor(prevFire * 2) !== Math.floor(v.amrEngineFireTimer * 2)) {
+          this.world?.spawnDebris?.(
+            tmpVec3(v.pos.x, v.pos.y + 1.25, v.pos.z),
+            COLOR_SMOKE_DARK,
+            2
+          );
+        }
+      }
       v.turretPivot.rotation.y = v.turretYaw - v.yaw + Math.PI;
       if (v.barrelGroup && !v.isAircraft && v.type !== 'emplace_mortar' && v.type !== 'trebuchet') {
         const pLim = this.getVehiclePitchLimits(v);
         const clampedP = THREE.MathUtils.clamp(v.turretPitch || 0, pLim.min, pLim.max);
         v.barrelGroup.rotation.x = -clampedP;
+      }
+      const roofRwsPivot = v.mesh?.userData?.roofRwsPivot;
+      if (roofRwsPivot && v.type === 'tank') {
+        const rwsP = THREE.MathUtils.clamp(
+          typeof v.roofRwsPitch === 'number' ? v.roofRwsPitch : v.turretPitch || 0,
+          PITCH_LIMITS_TANK_ROOF_HMG.min,
+          PITCH_LIMITS_TANK_ROOF_HMG.max
+        );
+        roofRwsPivot.rotation.x = -rwsP;
       }
     }
 
