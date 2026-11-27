@@ -85,7 +85,7 @@ export const AUDIO_PACK = {
   // 2. ARMOR & VEHICLE WEAPONS (assets/audio/armor/)
   armor: {
     autocannon: {
-      url: './assets/audio/armor/autocannon_30mm.wav?v=136',
+      url: './assets/audio/armor/autocannon_30mm.wav?v=139',
       volume: 0.56,
       pitch: 1.0,
       pitchJitter: 0.03,
@@ -94,7 +94,7 @@ export const AUDIO_PACK = {
       maxRange: 175
     },
     hmg: {
-      url: './assets/audio/armor/hmg_50cal.wav?v=136',
+      url: './assets/audio/armor/hmg_50cal.wav?v=139',
       volume: 0.54,
       pitch: 1.0,
       pitchJitter: 0.03,
@@ -103,7 +103,7 @@ export const AUDIO_PACK = {
       maxRange: 175
     },
     tank_cannon: {
-      url: './assets/audio/armor/tank_cannon_120mm.wav?v=136',
+      url: './assets/audio/armor/tank_cannon_120mm.wav?v=139',
       volume: 0.76,
       pitch: 1.0,
       pitchJitter: 0.025,
@@ -134,7 +134,7 @@ export const AUDIO_PACK = {
       maxRange: 185
     },
     explosion: {
-      url: './assets/audio/ordnance/explosion_blast.wav?v=136',
+      url: './assets/audio/ordnance/explosion_blast.wav?v=139',
       volume: 0.72,
       pitch: 1.0,
       pitchJitter: 0.05,
@@ -143,7 +143,7 @@ export const AUDIO_PACK = {
       maxRange: 250
     },
     autocannon_impact: {
-      url: './assets/audio/ordnance/autocannon_impact.wav?v=136',
+      url: './assets/audio/ordnance/autocannon_impact.wav?v=139',
       volume: 0.44,
       pitch: 1.0,
       pitchJitter: 0.05,

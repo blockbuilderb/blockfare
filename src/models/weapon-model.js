@@ -18,7 +18,7 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=136';
+import { TEXTURES } from '../assets/textures.js?v=139';
 
 // Cached shared geometries & materials for 1st-person Spec-Ops Operator Arms, Watch & Articulated Tactical Gloves
 const _fpArmGeos = {
@@ -323,6 +323,40 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     leftArm.rotation.set(0.2, 0.35, 0);
     rightArm.position.set(0.04, -0.08, -0.14);
     rightArm.rotation.set(0.15, -0.1, 0);
+    leftArm.userData.basePos = leftArm.position.clone();
+    leftArm.userData.baseRot = leftArm.rotation.clone();
+    rightArm.userData.basePos = rightArm.position.clone();
+    rightArm.userData.baseRot = rightArm.rotation.clone();
+    group.add(leftArm, rightArm);
+  } else if (def.type === 'binoculars') {
+    // Dual-Tube Rubber-Armored AN/PVS-21 Recon Laser Rangefinder Binoculars
+    const binoGroup = new THREE.Group();
+    binoGroup.position.set(0, -0.025, -0.22);
+    const barrelGeo = new THREE.CylinderGeometry(0.032, 0.026, 0.165, 14);
+    const lensGeo = new THREE.CylinderGeometry(0.027, 0.027, 0.004, 14);
+    const lensCoatMat = new THREE.MeshBasicMaterial({ color: 0x00a8a8, transparent: true, opacity: 0.72 });
+    for (const side of [-1, 1]) {
+      const tube = new THREE.Mesh(barrelGeo, bodyMat);
+      tube.rotation.x = Math.PI / 2;
+      tube.position.set(side * 0.044, 0, 0);
+      const lens = new THREE.Mesh(lensGeo, lensCoatMat);
+      lens.rotation.x = Math.PI / 2;
+      lens.position.set(side * 0.044, 0, -0.083);
+      binoGroup.add(tube, lens);
+    }
+    const hingeBridge = new THREE.Mesh(new THREE.BoxGeometry(0.056, 0.024, 0.095), darkSteelMat);
+    const lrfEmitter = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.022, 0.075), accentMat);
+    lrfEmitter.position.set(0, 0.024, -0.02);
+    const lrfButton = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.007, 0.007, 0.008, 10),
+      new THREE.MeshBasicMaterial({ color: 0x00d2d3 })
+    );
+    lrfButton.position.set(0.036, 0.032, 0.02);
+    binoGroup.add(hingeBridge, lrfEmitter, lrfButton);
+    group.add(binoGroup);
+
+    leftArm.position.set(-0.085, -0.055, -0.21);
+    rightArm.position.set(0.085, -0.055, -0.21);
     leftArm.userData.basePos = leftArm.position.clone();
     leftArm.userData.baseRot = leftArm.rotation.clone();
     rightArm.userData.basePos = rightArm.position.clone();
@@ -1285,19 +1319,26 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       wId === 'usp45' ||
       wId === 'g18' ||
       wId === 'deagle';
-    const isBullpup = wId === 'p90' || wId === 'aug_a3' || wId === 'ash12';
+    const isBullpup = wId === 'p90' || wId === 'aug_a3' || wId === 'ash12' || wId === 'gm6_lynx';
     const isAsh12 = wId === 'ash12';
     const isAkFamily = wId === 'ak15';
     const isScar = wId === 'scar_h' || wId === 'mcx_spear';
     const isMcx = wId === 'mcx_spear';
     const isHk416 = wId === 'hk416';
-    const isAsVal = wId === 'as_val';
+    const isAsVal = wId === 'as_val' || wId === 'dvl10';
     const isMp5sd = wId === 'mp5sd';
     const isVector = wId === 'vector';
     const isMp7 = wId === 'mp7';
     const isShotgun = wId === 'm1014';
     const isBoxLmg = wId === 'm249' || wId === 'pkp';
-    const isSniper = wId === 'sv98' || wId === 'awm';
+    const isAmr = wId === 'barrett_m82' || wId === 'gm6_lynx' || wId === 'ntw20';
+    const isSniper =
+      wId === 'sv98' ||
+      wId === 'awm' ||
+      wId === 'm40a5' ||
+      wId === 'dvl10' ||
+      wId === 'm200_intervention' ||
+      isAmr;
     const isDmr = wId === 'mk14' || wId === 'sr25';
 
     const length = isPistol
@@ -1306,6 +1347,10 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
         : wId === 'five_seven'
         ? 0.275
         : 0.26
+      : wId === 'ntw20' || wId === 'barrett_m82' || wId === 'm200_intervention'
+      ? 0.98
+      : wId === 'gm6_lynx'
+      ? 0.78
       : isSniper
       ? 0.88
       : isDmr
@@ -1603,25 +1648,42 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       carryGrip.position.set(0.054, 0.022, -0.34);
       group.add(carryGrip);
     } else if (isSniper) {
-      // SV-98 / AWM .338 folding front bipod + spherical bolt handle knob + rear monopod spike
+      // Sniper / Anti-Materiel folding front bipod + bolt handle knob + AMR signature muzzle brake / hydraulic damper
       const bipodL = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.006, 0.006, 0.15, 6),
+        new THREE.CylinderGeometry(isAmr ? 0.008 : 0.006, isAmr ? 0.008 : 0.006, isAmr ? 0.175 : 0.15, 6),
         darkSteelMat
       );
-      bipodL.position.set(-0.042, -0.065, -0.22 - length * 0.56);
+      bipodL.position.set(-0.044, -0.068, -0.22 - length * 0.56);
       bipodL.rotation.set(0.45, 0, -0.25);
       const bipodR = bipodL.clone();
-      bipodR.position.x = 0.042;
+      bipodR.position.x = 0.044;
       bipodR.rotation.z = 0.25;
       group.add(bipodL, bipodR);
 
-      // Spherical bolt knob on right side of sniper receiver
-      const boltKnob = new THREE.Mesh(
-        new THREE.SphereGeometry(0.013, 8, 8),
-        darkSteelMat
-      );
-      boltKnob.position.set(0.056, 0.018, -0.14);
-      group.add(boltKnob);
+      // Spherical bolt knob on bolt-action sniper receivers
+      if (wId !== 'barrett_m82' && wId !== 'gm6_lynx') {
+        const boltKnob = new THREE.Mesh(
+          new THREE.SphereGeometry(wId === 'ntw20' ? 0.017 : 0.013, 8, 8),
+          darkSteelMat
+        );
+        boltKnob.position.set(0.058, 0.018, -0.14);
+        group.add(boltKnob);
+      }
+      if (isAmr && (!custom || !custom.muzzle || custom.muzzle === 'stock')) {
+        // Signature Arrowhead Dual-Chamber .50 BMG / 20mm Anti-Materiel Tank-Style Muzzle Brake!
+        const amrBrake = new THREE.Mesh(
+          new THREE.BoxGeometry(wId === 'ntw20' ? 0.064 : 0.054, 0.036, 0.095),
+          darkSteelMat
+        );
+        amrBrake.position.set(0, 0.014, -0.22 - length * 0.96);
+        group.add(amrBrake);
+      }
+      if (wId === 'ntw20') {
+        // Denel NTW-20 side-mounted 3-round 20mm box magazine + upper hydraulic recoil cylinder
+        const sideMag = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.045, 0.115), accentMat);
+        sideMag.position.set(-0.068, 0.012, -0.25);
+        group.add(sideMag);
+      }
     } else if (isDmr) {
       // MK14 EBR / KAC SR-25: Exposed underbarrel gas block / precision folding DMR bipod
       if (wId === 'sr25') {
@@ -1917,7 +1979,20 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     }
 
     const gripId = custom && custom.grip ? custom.grip : 'std_grip';
-    const hasLaserMod = gripId === 'match_laser' || gripId === 'mawl_c1';
+    const hasLaserMod = gripId === 'match_laser' || gripId === 'mawl_c1' || gripId === 'raptar_lrf';
+
+    if (gripId === 'raptar_lrf' && !isPistol) {
+      // Wilcox RAPTAR-S Rail-Mounted Ballistic LRF & Laser Designator Pod
+      const raptarBox = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.024, 0.088), accentMat);
+      raptarBox.position.set(0.034, 0.038, -0.22 - length * 0.44);
+      const raptarLens = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0065, 0.0065, 0.008, 10),
+        new THREE.MeshBasicMaterial({ color: 0x00d2d3 })
+      );
+      raptarLens.rotation.x = Math.PI / 2;
+      raptarLens.position.set(0.034, 0.041, -0.22 - length * 0.44 - 0.046);
+      group.add(raptarBox, raptarLens);
+    }
 
     if (!isPistol && (!isBullpup || hasLaserMod) && !isSniper) {
       if (gripId === 'mawl_c1') {
@@ -2076,10 +2151,18 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       wardenCan.position.set(0, 0.014, barrelTipZ - 0.042);
       wardenCan.name = 'muzzleAttachmentMesh';
       group.add(wardenCan);
-    } else if (muzzleId === 'silencer' || muzzleId === 'qdc_suppressor') {
-      const isQdc = muzzleId === 'qdc_suppressor';
-      const silLen = isPistol ? (isQdc ? 0.165 : 0.14) : isQdc ? 0.245 : 0.21;
-      const silRad = isQdc ? 0.0275 : 0.025;
+    } else if (muzzleId === 'silencer' || muzzleId === 'qdc_suppressor' || muzzleId === 'tbac_338_ultra') {
+      const isQdc = muzzleId === 'qdc_suppressor' || muzzleId === 'tbac_338_ultra';
+      const silLen = isPistol
+        ? isQdc
+          ? 0.165
+          : 0.14
+        : muzzleId === 'tbac_338_ultra'
+        ? 0.285
+        : isQdc
+        ? 0.245
+        : 0.21;
+      const silRad = muzzleId === 'tbac_338_ultra' ? 0.031 : isQdc ? 0.0275 : 0.025;
       const silGroup = new THREE.Group();
       silGroup.name = 'muzzleAttachmentMesh';
       const silMesh = new THREE.Mesh(
@@ -2300,7 +2383,15 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       sniperFlir: 'sniperFlir',
       sniper8x: 'sniper8x',
       nightforce_12x: 'sniper12x',
-      sniper12x: 'sniper12x'
+      sniper12x: 'sniper12x',
+      raptor_fvm40_13x: 'raptor13x',
+      raptor13x: 'raptor13x',
+      leupold_mark5_16x: 'sniper16x',
+      sniper16x: 'sniper16x',
+      hensoldt_elr_27x: 'sniper27x',
+      sniper27x: 'sniper27x',
+      ballistic_40x: 'sniper40x',
+      sniper40x: 'sniper40x'
     };
     const rawOpticKey =
       custom && custom.optic
@@ -2373,7 +2464,11 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
         activeOptic === 'valday6x' ||
         activeOptic === 'lpvo36' ||
         activeOptic === 'sniper8x' ||
-        activeOptic === 'sniper12x';
+        activeOptic === 'sniper12x' ||
+        activeOptic === 'raptor13x' ||
+        activeOptic === 'sniper16x' ||
+        activeOptic === 'sniper27x' ||
+        activeOptic === 'sniper40x';
       const isMidPrism =
         activeOptic === 'prism2x' || activeOptic === 'acog' || activeOptic === 'elcan4x';
       const isHoloFam =

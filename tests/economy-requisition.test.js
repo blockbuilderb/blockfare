@@ -1,9 +1,9 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { ECONOMY, VEHICLE_STATS, SQUAD_KIT_CAPS, PROJECTILES } from '../src/config.js?v=136';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=136';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=136';
+import { ECONOMY, VEHICLE_STATS, SQUAD_KIT_CAPS, PROJECTILES } from '../src/config.js?v=139';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=139';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=139';
 import {
   VehicleManager,
   PITCH_LIMITS_CAR,
@@ -11,14 +11,14 @@ import {
   classifyWeaponBallistics,
   getVehicleSeatLayout,
   initVehicleOrdnance
-} from '../src/vehicles.js?v=136';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=136';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=136';
-import { sound } from '../src/audio/SoundManager.js?v=136';
-import { BotManager, SQUAD_9MAN_ROSTERS, evaluateCatastrophicKill } from '../src/bots.js?v=136';
-import { NetworkManager } from '../src/network.js?v=136';
-import { ConquestSystem } from '../src/world/ConquestSystem.js?v=136';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=136';
+} from '../src/vehicles.js?v=139';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=139';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=139';
+import { sound } from '../src/audio/SoundManager.js?v=139';
+import { BotManager, SQUAD_9MAN_ROSTERS, evaluateCatastrophicKill } from '../src/bots.js?v=139';
+import { NetworkManager } from '../src/network.js?v=139';
+import { ConquestSystem } from '../src/world/ConquestSystem.js?v=139';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=139';
 
 function createEconomyPlayerHarness(overrides = {}) {
   const storage = new Map();
@@ -373,22 +373,26 @@ describe('Squad Caliber Penetration, Optics/Sensor Crits, Avionics FCS & Beyond-
     assert.equal(fcs.interceptPos.z < -10, true);
   });
 
-  test('triggers Beyond-Rescue ("Dead-Dead") + 3D Ragdoll launch on AC-130/Tank/RPG core hits while keeping Frag Grenades & Rifles revivable', () => {
-    // 1. Hand Grenades & Rifles are ALWAYS 0% Beyond-Rescue (Medics can rescue!)
-    assert.equal(evaluateCatastrophicKill('M67 FRAG GRENADE', 0.5, 5.0, () => 0.01).beyondRescue, false);
+  test('triggers Beyond-Rescue ("Dead-Dead") + 3D Ragdoll launch on Explosions & Headshots while keeping non-headshot Rifle wounds revivable', () => {
+    // 1. Non-headshot standard Rifles & Bleed remain 0% Beyond-Rescue (Medics can rescue!)
     assert.equal(evaluateCatastrophicKill('M4A1 Tactical', 0, 0, () => 0.01).beyondRescue, false);
+    assert.equal(evaluateCatastrophicKill('BLEED', 0, 0, () => 0.01).beyondRescue, false);
 
-    // 2. RPG-7: 75% Beyond-Rescue inside 2.8m core, 0% Beyond-Rescue on >2.8m outer shrapnel!
+    // 2. Explosions (M67 Frag Grenades & RPG-7) have a large chance (62%–88%) of instant KIA, with rare outer survival
+    const fragInner = evaluateCatastrophicKill('M67 FRAG GRENADE', 1.2, 5.0, () => 0.5);
+    assert.equal(fragInner.beyondRescue, true, 'Inner frag grenade blast kills outright at 80% chance');
+    assert.equal(evaluateCatastrophicKill('M67 FRAG GRENADE', 4.2, 5.0, () => 0.92).beyondRescue, false);
     assert.equal(evaluateCatastrophicKill('RPG-7 HEAT', 1.5, 5.0, () => 0.5).beyondRescue, true);
-    assert.equal(evaluateCatastrophicKill('RPG-7 HEAT', 4.2, 5.0, () => 0.01).beyondRescue, false);
+    assert.equal(evaluateCatastrophicKill('RPG-7 HEAT', 4.2, 5.0, () => 0.5).beyondRescue, true);
+    assert.equal(evaluateCatastrophicKill('RPG-7 HEAT', 4.2, 5.0, () => 0.95).beyondRescue, false);
 
-    // 3. AC-130 105mm & Tank 120mm: 92-100% Beyond-Rescue + heavy ragdoll launch velocity!
+    // 3. AC-130 105mm & Tank 120mm: 94-100% Beyond-Rescue + heavy ragdoll launch velocity!
     const howCat = evaluateCatastrophicKill('105MM M102 HOWITZER', 3.0, 14.5, () => 0.4);
     assert.equal(howCat.beyondRescue, true);
     assert.equal(howCat.hSpeed >= 13.5, true);
     assert.equal(howCat.upSpeed >= 6.5, true);
 
-    // 4. BotManager.damageBot puts Grenade victim into revivable `downed`, while launching 105mm victim as Beyond-Rescue ragdoll!
+    // 4. BotManager.damageBot puts rifle body-shot victim into revivable `downed`, while launching explosive/headshot victims as Beyond-Rescue KIA!
     const bmStub = {
       world: { era: 'modern', getGroundHeightAt: () => 0, spawnDebris: () => {}, spawnEnemyLootPack: () => {} },
       player: { team: 'US' },
@@ -412,15 +416,23 @@ describe('Squad Caliber Penetration, Optics/Sensor Crits, Avionics FCS & Beyond-
       parts: {}
     });
 
+    const rifleBodyVictim = makeBot('RU_BODY_1', 2, 0);
+    bmStub.damageBot(rifleBodyVictim, 120, 'VIPER_1', 'US', 'M4A1 5.56MM', false, () => {}, null, {
+      hitZone: 'thorax',
+      rng: () => 0.01
+    });
+    assert.equal(rifleBodyVictim.downed, true, 'Standard rifle thorax kill enters revivable downed state');
+    assert.equal(rifleBodyVictim.dead, false);
+
     const grenVictim = makeBot('RU_GREN_1', 2, 0);
     bmStub.damageBot(grenVictim, 180, 'VIPER_1', 'US', 'M67 FRAG GRENADE', false, () => {}, null, {
       origin: new THREE.Vector3(0, 0, 0),
       dist: 2.0,
       radius: 5.0,
-      rng: () => 0.01
+      rng: () => 0.4
     });
-    assert.equal(grenVictim.downed, true, 'Frag grenade victim enters revivable downed state');
-    assert.equal(grenVictim.dead, false);
+    assert.equal(grenVictim.dead, true, 'Frag grenade victim has high chance of instant KIA without revive');
+    assert.equal(grenVictim.downed, false);
 
     const howitzerVictim = makeBot('RU_105_1', 4, 0);
     const res105 = bmStub.damageBot(
@@ -533,7 +545,7 @@ describe('Squad Caliber Penetration, Optics/Sensor Crits, Avionics FCS & Beyond-
       buildConquestSyncPacket: NetworkManager.prototype.buildConquestSyncPacket
     };
 
-    // Stale peer still sitting on Round 1 Victory Screen (or legacy ?v=119 peer without roundEpoch) sends ticketsRU: 0
+    // Stale peer still sitting on Round 1 Victory Screen (or legacy ?v=139 peer without roundEpoch) sends ticketsRU: 0
     netStub.applyRemoteConquestSync({
       type: 'conquest_sync',
       ticketsUS: 640,

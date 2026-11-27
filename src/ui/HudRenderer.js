@@ -1,5 +1,6 @@
-import { UI, getEraRoles } from '../config.js?v=136';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=136';
+import * as THREE from '../../vendor/three.module.js';
+import { UI, getEraRoles } from '../config.js?v=139';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=139';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -186,6 +187,7 @@ export const HudRenderer = {
               ['[O] / [V] Keys', '[O] Toggle Scope On/Off (Laptop/Trackpad friendly!) • [V] Variable Zoom (1x ⇄ 4x/12x) or Inspect'],
               ['[V] / [C] (When Downed)', '[V] Toggle Optional Death Cam • [C] Switch Battlefield Zoom ⇄ Killer\'s Eyes POV'],
               ['[⌥+R / Alt+R] (2-Step Ride)', 'Mac: Option(⌥)+R, Control(⌃)+R, or ⌘+R in-game (PC: Alt+R) — 1st press: Pickup Here • 2nd press: Set Drop-Off!'],
+              ['[3] / [\\] / [F] (Sniper LRF)', 'Recon [3] swaps LRF Binoculars ⇄ C4 ([\\] Quick-Binos) • [F] while Scoped fires Laser Rangefinder & Auto-Zeros Rifle!'],
               ['[X] / [N] Keys', 'Cycle Scope Zeroing (100m–400m) / Toggle NVG or Thermal Scope Polarity (WHOT/BHOT)'],
               ['[R] / 2× [R] / [P]', 'Tactical Mag Swap / Emergency Speed-Drop Reload / Tarkov Bullet-by-Bullet Mag Pack']
             ]
@@ -874,6 +876,7 @@ export const HudRenderer = {
     // Downed State Overlay & Optional Forensic Death Cam HUD
     this.updateDeathCamHud?.(dt);
     this.updateRideStatusHud?.(dt);
+    this.updateMarksmanHud?.(dt);
     if (this.player.downed) {
       const dcActive = Boolean(
         this.player.deathCamEnabled && this.player.lastDeathReport?.hasKillerOrigin
@@ -918,7 +921,7 @@ export const HudRenderer = {
       if (this.player.beyondRescue) {
         this._setText(
           this.downedMedicDistEl,
-          '☠️ BEYOND MEDIC RESCUE — LETHAL OVERPRESSURE / HEAVY CALIBER (RETURNING TO DEPLOY...)'
+          '☠️ FATAL TRAUMA (BEYOND MEDIC RESCUE) — HEADSHOT / EXPLOSIVE KIA (RETURNING TO DEPLOY...)'
         );
       } else {
         // Find nearest friendly Medic or Squadmate distance who still has Field Dressings (> 0) to revive!
@@ -1585,7 +1588,12 @@ export const HudRenderer = {
           !this.player.useCantedSight &&
           (opticType === 'sniper8x' ||
             opticType === 'sniper12x' ||
+            opticType === 'raptor13x' ||
+            opticType === 'sniper16x' ||
+            opticType === 'sniper27x' ||
+            opticType === 'sniper40x' ||
             opticType === 'sniperFlir' ||
+            opticType === 'binos' ||
             opticType === 'lpvo36' ||
             opticType === 'flir' ||
             ((opticType === 'elcan4x' || opticType === 'valday6x' || opticType === 'holo3x') &&
@@ -1619,12 +1627,84 @@ export const HudRenderer = {
           lpvo36: `EOTECH VUDU • ${activeZoom || '3.0X-6.0X'} DUAL-ZOOM${zHint}${breathHint}`,
           flir: `FLIR RS-32 ${polStr} THERMAL • ${activeZoom || '2.5X'}${zHint} • [N] POLARITY${breathHint}`,
           sniperFlir: `AN/PAS-13G ${polStr} THERMAL SNIPER • ${activeZoom || '6.0X'}${zHint} • [N] POLARITY${breathHint}`,
-          sniper8x: `RAZOR HD • 8.0X MIL-DOT (ZERO ${this.player.zeroDistance}M)${breathHint}`,
-          sniper12x: `NIGHTFORCE ATACR • ${activeZoom || '12.0X'} BALLISTIC${zHint}${breathHint}`,
+          sniper8x: `RAZOR HD • 8.0X MIL-DOT (ZERO ${this.player.zeroDistance}M)${breathHint} • [F] LRF ZERO`,
+          sniper12x: `NIGHTFORCE ATACR • ${activeZoom || '12.0X'} BALLISTIC${zHint}${breathHint} • [F] LRF ZERO`,
+          raptor13x: `RAPTOR-FVM40 • 13.0X SMART-LRF BALLISTIC PIPPER${breathHint} • [F] ◆1688 LASER PAINT`,
+          sniper16x: `LEUPOLD MARK 5HD • ${activeZoom || '16.0X'} TREMOR3${zHint}${breathHint} • [F] LRF ZERO`,
+          sniper27x: `HENSOLDT ZF ELR • ${activeZoom || '27.0X'} HORUS${zHint}${breathHint} • [F] LRF ZERO`,
+          sniper40x: `MARCH GENESIS ELR • ${activeZoom || '40.0X'} TELEPHOTO${zHint}${breathHint} • [F] LRF ZERO`,
+          binos: `AN/PEQ-1 SOFLAM BINOCULARS • ${activeZoom || '8.0X'}${zHint} • [LMB] ◆1688 LASER PAINT & [J] LASER GBU`,
           rpgSight: 'PGO-7V • ROCKET OPTICAL GRID'
         };
         if (this.opticLabelEl) {
           this._setText(this.opticLabelEl, opticLabels[opticType] || 'OPTIC SIGHT');
+        }
+        const lrfEl = this.el('scope-lrf-readout');
+        const pipperEl = this.el('scope-ballistic-pipper');
+        const showLiveLrf =
+          !this.player.useCantedSight &&
+          (opticType === 'binos' ||
+            opticType === 'sniper8x' ||
+            opticType === 'sniper12x' ||
+            opticType === 'raptor13x' ||
+            opticType === 'sniper16x' ||
+            opticType === 'sniper27x' ||
+            opticType === 'sniper40x' ||
+            opticType === 'sniperFlir' ||
+            opticType === 'valday6x' ||
+            opticType === 'lpvo36' ||
+            Boolean(curWepDef?.hasRaptarLrf));
+        if (lrfEl) {
+          if (showLiveLrf && typeof this.player.sampleLaserRangefinder === 'function') {
+            this._lrfSampleAccum = (this._lrfSampleAccum || 0) + (dt || 0.016);
+            if (!this._cachedScopeLrf || this._lrfSampleAccum >= 0.1) {
+              this._lrfSampleAccum = 0;
+              this._cachedScopeLrf = this.player.sampleLaserRangefinder(2500);
+            }
+            const lrf = this._cachedScopeLrf;
+            if (lrf) {
+              lrfEl.classList.remove('hidden');
+              lrfEl.classList.toggle('enemy-lock', Boolean(lrf.isEnemy));
+              const holdSign = lrf.solution.holdoverM >= 0 ? '+' : '';
+              const leadTxt =
+                lrf.targetSpeedMps >= 1.6 ? ` • LEAD ${lrf.solution.leadMeters.toFixed(1)}M` : '';
+              const actKey = opticType === 'binos' ? 'LMB' : 'F';
+              const activeDesig = this.world?.activeLaserDesignations?.[this.player.team || 'US'];
+              const desigTxt =
+                activeDesig && activeDesig.timer > 0
+                  ? ` • ◆1688 ACTIVE (${Math.ceil(activeDesig.timer)}S — [J] STRIKE)`
+                  : '';
+              this._setText(
+                lrfEl,
+                `📡 LRF ${Math.round(lrf.distM)}M (${lrf.targetLabel}) • DROP ${lrf.solution.rawGravityDropM.toFixed(
+                  2
+                )}M (HOLD ${holdSign}${lrf.solution.holdoverM.toFixed(2)}M)${leadTxt} • [${actKey}] ZERO ${
+                  lrf.solution.recommendedZeroM
+                }M${desigTxt}`
+              );
+              if (pipperEl) {
+                const showPipper = Boolean(
+                  !this.player.useCantedSight &&
+                    (opticType === 'raptor13x' || curWepDef?.hasSmartPipper)
+                );
+                pipperEl.classList.toggle('hidden', !showPipper);
+                if (showPipper) {
+                  // Project holdover angle onto the scope lens vertical axis!
+                  const fovRad = ((this.player.camera?.fov || 10) * Math.PI) / 180;
+                  const dropAngleRad = Math.atan2(lrf.solution.holdoverM, Math.max(10, lrf.distM));
+                  const pctOffset = THREE.MathUtils.clamp(
+                    (dropAngleRad / Math.max(0.02, fovRad * 0.58)) * 50,
+                    -42,
+                    42
+                  );
+                  pipperEl.style.top = `${(50 + pctOffset).toFixed(2)}%`;
+                }
+              }
+            }
+          } else {
+            if (!lrfEl.classList.contains('hidden')) lrfEl.classList.add('hidden');
+            if (pipperEl && !pipperEl.classList.contains('hidden')) pipperEl.classList.add('hidden');
+          }
         }
         if (opticType === 'flir' || opticType === 'sniperFlir') {
           this.renderFlirThermalLens?.(opticType);
@@ -2057,6 +2137,15 @@ export const HudRenderer = {
     }
     const curSpeedMps = this.player.horizSpeed || Math.hypot(this.player.vel?.x || 0, this.player.vel?.z || 0);
     const isBhopping = !activeVeh && !this.player.parachuting && !this.player.downed && curSpeedMps > 10.3;
+    const isLedgeRest =
+      !activeVeh &&
+      !this.player.parachuting &&
+      !this.player.downed &&
+      typeof this.player.isRestingOnCoverLedge === 'function' &&
+      this.player.isRestingOnCoverLedge();
+    const isBipodRest = Boolean(
+      cur?.def?.hasBipod && (this.player.prone || this.player.crouching || isLedgeRest)
+    );
     const stanceStr = activeVeh
       ? activeVeh.isAircraft
         ? '✈️ PILOT [E EJECT]'
@@ -2082,11 +2171,30 @@ export const HudRenderer = {
       : isBhopping
       ? `⚡ BHOP ${curSpeedMps.toFixed(1)} M/S`
       : this.player.prone
-      ? 'PRONE [Z]'
+      ? isBipodRest
+        ? '🐍 PRONE + BIPOD [Z] (-75% REC • -72% PROFILE)'
+        : '🐍 PRONE [Z] (-55% REC • -72% PROFILE)'
       : this.player.crouching
-      ? 'CROUCHED [C]'
-      : 'STANDING';
+      ? isBipodRest
+        ? '🧎 ONE-KNEE + BIPOD [C] (-60% REC • -35% PROFILE)'
+        : '🧎 ONE-KNEE [C] (-32% REC • -35% PROFILE)'
+      : isLedgeRest
+      ? '🧍 STAND + LEDGE REST (-22% REC)'
+      : '🧍 STAND [C:KNEEL • Z:PRONE]';
     this._setText(this.stanceBadgeEl, stanceStr);
+    if (this.stanceBadgeEl) {
+      const stanceCol =
+        !activeVeh && this.player.prone
+          ? '#00ffcc'
+          : !activeVeh && (this.player.crouching || isLedgeRest)
+          ? '#7bed9f'
+          : '';
+      if (this.stanceBadgeEl._lastStanceCol !== stanceCol) {
+        this.stanceBadgeEl._lastStanceCol = stanceCol;
+        this.stanceBadgeEl.style.color = stanceCol;
+        this.stanceBadgeEl.style.borderColor = stanceCol ? `${stanceCol}88` : '';
+      }
+    }
     if (!inAircraftVitals) {
       const maxPlayerDressings =
         this.player.maxBandages || (this.player.role === 'medic' ? 9 : 2);
@@ -2400,11 +2508,15 @@ export const HudRenderer = {
         (cur && cur.def && (cur.def.isBow || cur.def.isCrossbow))
     );
     if (this.zeroBadgeEl) {
+      const lrfTag = this.player.isExactLrfZero ? ' 🎯LRF' : '';
+      const mmTitle = this.player.marksmanProfile?.activeTitle
+        ? ` • ${this.player.marksmanProfile.activeTitleIcon || '🏅'} ${this.player.marksmanProfile.activeTitle}`
+        : '';
       this._setText(
         this.zeroBadgeEl,
         isBowOrXbowActive
-          ? `ELEV [X]: ${this.player.zeroDistance || 50}M`
-          : `ZERO [X]: ${this.player.zeroDistance}m`
+          ? `ELEV [X]: ${this.player.zeroDistance || 50}M${mmTitle}`
+          : `ZERO [X/F]: ${this.player.zeroDistance}m${lrfTag}${mmTitle}`
       );
     }
     if (this.cantedBadgeEl && (cur || (activeVeh && activeVeh.type === 'warhorse'))) {
@@ -2505,8 +2617,11 @@ export const HudRenderer = {
         const sDef = this.player.slots[i]?.def;
         if (sDef) {
           const isEngSlot3 = i === 2 && this.player.role === 'engineer';
+          const isRecSlot3 = i === 2 && this.player.role === 'recon' && (sDef.id === 'rangefinder_binos' || sDef.id === 'c4');
           const shortLbl = isEngSlot3
             ? `${sDef.shortName || sDef.name} [AT/AA]`
+            : isRecSlot3
+            ? `${sDef.shortName || sDef.name} [3:SWAP]`
             : sDef.shortName || sDef.name;
           const expectedText = `${i + 1}:${shortLbl}`;
           if (slotEl.dataset.label !== expectedText) {
@@ -2578,8 +2693,9 @@ export const HudRenderer = {
     // Commo Rose chat callout decay
     this.updateCommoCallout(dt);
 
-    // Airstrike inbound countdown
+    // Airstrike inbound countdown + Pilot Role-Matched Teammate Tasking Radio Card
     this.updateAirstrikeHUD();
+    this.updatePilotSupportHud();
   },
 
   /**
@@ -5795,6 +5911,121 @@ export const HudRenderer = {
     }
   },
 
+  updatePilotSupportHud() {
+    if (!this.player || !this.hudEl || !this.vehicleManager) return;
+    let el = this.el('pilot-tasking-hud');
+    const activeVeh =
+      this.player.activeVehicle && !this.player.activeVehicle.dead ? this.player.activeVehicle : null;
+    const show = Boolean(
+      !this.player.dead &&
+        !this.player.downed &&
+        activeVeh &&
+        activeVeh.isAircraft &&
+        !activeVeh.isSecretOmegaFlyer &&
+        typeof this.vehicleManager.getActivePilotSupportRequestForVehicle === 'function'
+    );
+    const req = show
+      ? this.vehicleManager.getActivePilotSupportRequestForVehicle(activeVeh, this.player.team)
+      : null;
+    const desig = show ? this.world?.activeLaserDesignations?.[this.player.team] : null;
+    const hasLiveDesig = Boolean(desig && desig.timer > 0);
+
+    if (!show || (!req && !hasLiveDesig)) {
+      if (el && !el.classList.contains('hidden')) {
+        el.classList.add('hidden');
+      }
+      this._lastPilotTaskSig = '';
+      return;
+    }
+
+    if (!el && typeof document !== 'undefined') {
+      el = document.createElement('div');
+      el.id = 'pilot-tasking-hud';
+      el.style.cssText = `
+        position: fixed; top: 96px; right: 16px; width: 320px;
+        background: rgba(8, 16, 26, 0.88); border: 1.5px solid #00d2d3;
+        border-left: 4px solid #00ffcc; border-radius: 6px; padding: 7px 10px;
+        font-family: 'Rajdhani', 'Segoe UI', sans-serif; color: #ecf0f1;
+        z-index: 910; pointer-events: auto; box-shadow: 0 6px 20px rgba(0,0,0,0.65);
+      `;
+      this.hudEl.appendChild(el);
+      if (this._domCache) this._domCache.set('pilot-tasking-hud', el);
+    }
+    if (!el) return;
+    if (el.classList.contains('hidden')) el.classList.remove('hidden');
+
+    const distM = req && req.pos ? Math.round(activeVeh.pos.distanceTo(req.pos)) : 0;
+    const paxCnt = Array.isArray(activeVeh.aiPassengers) ? activeVeh.aiPassengers.length : 0;
+    const progBucket = req ? Math.floor((req.progress || 0) / 20) : 0;
+    const desigSec = hasLiveDesig ? Math.ceil(desig.timer) : 0;
+    const sig = `${req?.id || 'NONE'}|${req?.phase || ''}|${Math.floor(distM / 8)}|${paxCnt}|${progBucket}|${desigSec}`;
+    if (this._lastPilotTaskSig === sig) return;
+    this._lastPilotTaskSig = sig;
+
+    const accentCol =
+      req?.kind === 'AIRLIFT'
+        ? '#00ffcc'
+        : req?.kind === 'CAP_INTERCEPT'
+        ? '#ff6b81'
+        : req?.kind === 'CARPET_BOMB'
+        ? '#ffd32a'
+        : req?.kind === 'GUNSHIP_ORBIT'
+        ? '#a29bfe'
+        : '#ff9f43';
+    el.style.borderLeftColor = accentCol;
+    el.style.borderColor = `${accentCol}88`;
+
+    const progressHtml =
+      req?.kind === 'AIRLIFT'
+        ? `<span style="color:#00ffcc;font-weight:900;">PAX ABOARD: ${
+            req.phase === 'DROP_AT_LZ' ? Math.max(paxCnt, req.boardedCount || 2) : paxCnt
+          }/4</span>`
+        : req?.goal
+        ? `<span style="color:${accentCol};font-weight:900;">EFFECT: ${Math.min(
+            100,
+            Math.round(((req.progress || 0) / req.goal) * 100)
+          )}%</span>`
+        : `<span style="color:${accentCol};font-weight:900;">ACTIVE</span>`;
+
+    const orbitBtnHtml =
+      req?.kind === 'GUNSHIP_ORBIT' && activeVeh.aircraftRole === 'gunship'
+        ? `<button type="button" id="pilot-snap-orbit-btn" style="margin-top:5px;padding:2px 8px;background:rgba(162,155,254,0.2);border:1px solid #a29bfe;border-radius:4px;color:#dfe6e9;font-size:10.5px;font-weight:900;cursor:pointer;">🛰️ SNAP PYLON ORBIT TO TARGET</button>`
+        : '';
+
+    const laserHtml = hasLiveDesig
+      ? `<div style="margin-top:4px;padding:3px 6px;background:rgba(0,255,204,0.12);border:1px solid rgba(0,255,204,0.55);border-radius:4px;font-size:10.5px;font-weight:900;color:#00ffcc;">🔶◆ BUDDY LASER 1688 ACTIVE: ${
+          desig.label || 'TARGET'
+        } (${desigSec}S) — FIRE AGM!</div>`
+      : '';
+
+    el.innerHTML = req
+      ? `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:12px;font-weight:900;color:${accentCol};">
+          <span>${req.title}</span>
+          <span style="color:#7ef9ff;white-space:nowrap;">${distM}m</span>
+        </div>
+        <div style="font-size:10.5px;color:#dfe6e9;margin-top:2px;line-height:1.25;">${req.sub}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;font-size:10px;color:#b2bec3;">
+          ${progressHtml}
+          <span style="color:#ffeaa7;font-weight:800;">REWARD: +${req.xpReward} XP • +$${req.cashReward}</span>
+        </div>
+        ${orbitBtnHtml}
+        ${laserHtml}
+      `
+      : laserHtml;
+
+    const snapBtn = el.querySelector('#pilot-snap-orbit-btn');
+    if (snapBtn && req && req.pos) {
+      snapBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        activeVeh.orbitCenterX = req.pos.x;
+        activeVeh.orbitCenterZ = req.pos.z;
+        activeVeh.gunshipManualFlight = false;
+        this.player?.onAwardXp?.(0, `🛰️ AC-130 PYLON ORBIT LOCKED OVER OBJECTIVE ${req.flagId || 'TARGET'}!`);
+      });
+    }
+  },
+
   updateRideStatusHud() {
     if (!this.player || !this.hudEl) return;
     let el = this.el('ride-status-hud');
@@ -5931,6 +6162,286 @@ export const HudRenderer = {
         this.updateRideStatusHud();
       });
     });
+  },
+
+  /**
+   * Renders the Top-Right Sniper Marksman Shot-Difficulty Badge Card (`#marksman-shot-card`)
+   * with:
+   *  - Metallic Tier Emblem + Difficulty Grade (`C` / `B` / `A` / `S` / `S+` / `★`)
+   *  - Exact Distance (`m`), Damage Dealt (`DMG`), and Anatomical Hit Zone
+   *  - Animated 2D Parabolic Bullet Trajectory Replay Canvas (elevation profile + gravity drop + target lead)
+   *  - 6-Zone Anatomical Body-Part Impact SVG Diagram with pulsing bullseye at the exact impact spot!
+   */
+  updateMarksmanHud() {
+    if (!this.player || !this.hudEl) return;
+    const shot = this.player.lastMarksmanShot;
+    let cardEl = this.el('marksman-shot-card');
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const ageSec = shot && shot.timestamp ? (nowMs - shot.timestamp) / 1000 : 999;
+    const cardDuration = shot?.isKill ? 5.2 : 3.4;
+
+    if (!shot || this.player.dead || ageSec > cardDuration) {
+      if (cardEl && !cardEl.classList.contains('hidden')) {
+        cardEl.classList.add('hidden');
+      }
+      return;
+    }
+
+    if (!cardEl && typeof document !== 'undefined') {
+      cardEl = document.createElement('div');
+      cardEl.id = 'marksman-shot-card';
+      this.hudEl.appendChild(cardEl);
+      if (this._domCache) this._domCache.set('marksman-shot-card', cardEl);
+    }
+    if (!cardEl) return;
+    if (cardEl.classList.contains('hidden')) {
+      cardEl.classList.remove('hidden');
+    }
+
+    // Build DOM skeleton once per unique shot timestamp; animate canvas smoothly each frame!
+    if (this._lastMarksmanRenderedTs !== shot.timestamp) {
+      this._lastMarksmanRenderedTs = shot.timestamp;
+      const b = shot.badge || { icon: '🎯', badgeName: 'MARKSMAN', color: '#ffd32a', accent: '#f39c12' };
+      const variant = shot.cardVariant || 'standard';
+      cardEl.style.borderColor = b.color;
+      cardEl.style.borderLeftColor = b.color;
+      cardEl.style.background =
+        variant === 'friendly_fire'
+          ? 'linear-gradient(135deg, rgba(48, 8, 14, 0.95), rgba(22, 10, 14, 0.94))'
+          : variant === 'smoke_piercer'
+          ? 'linear-gradient(135deg, rgba(10, 28, 34, 0.95), rgba(14, 22, 30, 0.94))'
+          : variant === 'medic_sniped'
+          ? 'linear-gradient(135deg, rgba(38, 12, 20, 0.95), rgba(14, 18, 28, 0.94))'
+          : variant === 'double_shot'
+          ? 'linear-gradient(135deg, rgba(38, 22, 10, 0.95), rgba(14, 18, 28, 0.94))'
+          : 'rgba(10, 16, 26, 0.94)';
+
+      const recPill = shot.isNewRecord
+        ? `<span style="background:#ff4757;color:#fff;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:900;">★ NEW PB!</span>`
+        : variant === 'friendly_fire'
+        ? `<span style="background:#ff3838;color:#fff;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:900;">${
+            shot.penaltyText || 'CEASE FIRE!'
+          }</span>`
+        : '';
+      const activeTitle = this.player.marksmanProfile?.activeTitle;
+      const titleTag = !shot.isFriendly && activeTitle ? ` • 🏅 ${activeTitle}` : '';
+      const hitStatus = shot.isFriendly
+        ? shot.isKill
+          ? '⚠️ ALLY KIA'
+          : '⚠️ ALLY HIT'
+        : shot.isKill
+        ? shot.oneShotKill
+          ? 'LETHAL 1-SHOT'
+          : 'ELIMINATED'
+        : 'CRIPPLING HIT';
+      const subMetaTxt = shot.isFriendly
+        ? `${shot.weaponLabel} • TARGET: ${shot.victimName || 'ALLY'} • ${shot.penaltyText || 'CHECK PID'}`
+        : `${shot.weaponLabel} • DIFF ${shot.difficultyScore} PTS${
+            shot.bonusXp > 0 ? ` • +${shot.bonusXp} XP` : ''
+          }${titleTag}`;
+      const ribbonsHtml = (shot.ribbons || [])
+        .map(
+          (r) =>
+            `<span class="mm-ribbon-pill" style="color:${r.color};border-color:${r.color}66;">${r.label}</span>`
+        )
+        .join('');
+
+      const zKey = shot.anatomy?.zoneKey || 'thorax';
+      const hiCol = shot.isFriendly ? '#ff3838' : shot.isKill ? '#ff4757' : '#ffa502';
+      const baseCol = shot.isFriendly ? '#1c3b57' : '#223344';
+      const zFill = (k) => (zKey === k ? hiCol : baseCol);
+      const bx = shot.anatomy?.svgX ?? 22;
+      const by = shot.anatomy?.svgY ?? 21;
+      const medicCrossSvg = shot.isMedicTarget
+        ? `<rect x="20.7" y="19" width="2.6" height="8" fill="#ffffff" opacity="0.9"/><rect x="18" y="21.7" width="8" height="2.6" fill="#ffffff" opacity="0.9"/>`
+        : '';
+
+      cardEl.innerHTML = `
+        <div class="mm-card-header">
+          <div class="mm-grade-stamp" style="background:linear-gradient(135deg,${b.color},${b.accent});">${shot.grade}</div>
+          <div class="mm-title-col">
+            <div class="mm-badge-title" style="color:${b.color};">
+              <span>${b.icon} ${b.badgeName}</span>
+              ${recPill}
+            </div>
+            <div class="mm-sub-meta">${subMetaTxt}</div>
+          </div>
+        </div>
+        <div class="mm-metrics-row">
+          <div class="mm-metric-box">
+            <div class="mm-metric-val" style="color:#7ef9ff;">${shot.distanceM}m</div>
+            <div class="mm-metric-lbl">RANGE (${shot.flightTimeS}s)</div>
+          </div>
+          <div class="mm-metric-box">
+            <div class="mm-metric-val" style="color:${shot.isFriendly ? '#ff3838' : '#ff6b81'};">${shot.damageDealt} DMG</div>
+            <div class="mm-metric-lbl">${hitStatus}</div>
+          </div>
+          <div class="mm-metric-box">
+            <div class="mm-metric-val" style="color:#ffd32a;font-size:11.5px;">${shot.anatomy?.shortPart || 'THORAX'}</div>
+            <div class="mm-metric-lbl">DROP ${shot.gravityDropM}m</div>
+          </div>
+        </div>
+        <div class="mm-replay-split">
+          <div class="mm-traj-wrap">
+            <canvas id="mm-traj-canvas" width="246" height="74" style="width:100%;height:74px;display:block;"></canvas>
+          </div>
+          <div class="mm-anat-wrap" title="${shot.anatomy?.partLabel || 'IMPACT'}">
+            <svg viewBox="0 0 44 58" width="50" height="66">
+              <circle cx="22" cy="8" r="5.2" fill="${zFill('head')}" stroke="#637d96" stroke-width="1"/>
+              <rect x="15" y="15" width="14" height="18" rx="2.5" fill="${zFill('thorax')}" stroke="#637d96" stroke-width="1"/>
+              ${medicCrossSvg}
+              <rect x="8" y="16" width="5.5" height="17" rx="2" fill="${zFill('leftArm')}" stroke="#637d96" stroke-width="1"/>
+              <rect x="30.5" y="16" width="5.5" height="17" rx="2" fill="${zFill('rightArm')}" stroke="#637d96" stroke-width="1"/>
+              <rect x="15" y="35" width="6" height="20" rx="2" fill="${zFill('leftLeg')}" stroke="#637d96" stroke-width="1"/>
+              <rect x="23" y="35" width="6" height="20" rx="2" fill="${zFill('rightLeg')}" stroke="#637d96" stroke-width="1"/>
+              <circle cx="${bx}" cy="${by}" r="4.6" fill="none" stroke="${shot.isFriendly ? '#ff3838' : '#ffd32a'}" stroke-width="1.3"/>
+              <circle cx="${bx}" cy="${by}" r="1.9" fill="#ffffff"/>
+            </svg>
+          </div>
+        </div>
+        ${ribbonsHtml ? `<div class="mm-ribbons-row">${ribbonsHtml}</div>` : ''}
+      `;
+    }
+
+    const fadeOpacity = ageSec > cardDuration - 0.5 ? Math.max(0, (cardDuration - ageSec) / 0.5) : 1;
+    cardEl.style.opacity = fadeOpacity.toFixed(2);
+
+    // Animate the 2D Parabolic Bullet Replay Canvas (~1.65s looping slow-mo flight + smoke cloud + impact flash!)
+    const canvas = cardEl.querySelector('#mm-traj-canvas');
+    if (canvas && typeof canvas.getContext === 'function') {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const W = canvas.width;
+        const H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+
+        // Subtle tactical range grid
+        ctx.strokeStyle = 'rgba(116, 185, 255, 0.1)';
+        ctx.lineWidth = 1;
+        for (let gx = 40; gx < W; gx += 48) {
+          ctx.beginPath();
+          ctx.moveTo(gx, 4);
+          ctx.lineTo(gx, H - 4);
+          ctx.stroke();
+        }
+
+        const elev = shot.elevDeltaM || 0;
+        const elevShift = Math.max(-18, Math.min(20, elev * 0.24));
+        const sx = 20;
+        const sy = 38 - elevShift;
+        const tx = W - 24;
+        const ty = 38 + elevShift * 0.65;
+        const archPx = Math.min(22, Math.max(5, shot.gravityDropM * 18 + shot.distanceM * 0.025));
+
+        // Ground / rooftop silhouette blocks under shooter & target
+        ctx.fillStyle = 'rgba(46, 204, 113, 0.22)';
+        ctx.fillRect(sx - 6, sy + 2, 12, H - sy);
+        ctx.fillStyle = shot.isFriendly ? 'rgba(52, 152, 219, 0.34)' : 'rgba(255, 71, 87, 0.25)';
+        ctx.fillRect(tx - 5, ty + 2, 10, H - ty);
+
+        // Billowing Smoke Cloud Puffs on Replay Canvas when shot pierced smoke or target was inside smoke!
+        if (shot.throughSmoke || shot.targetInSmoke) {
+          const sU = shot.targetInSmoke && !shot.throughSmoke ? 0.92 : shot.smokeNormPos || 0.65;
+          const smX = sx + (tx - sx) * sU;
+          const smY = sy + (ty - sy) * sU - 4 * sU * (1 - sU) * archPx * 0.6;
+          const drift = Math.sin(ageSec * 2.4) * 2.2;
+          ctx.save();
+          ctx.fillStyle = 'rgba(186, 214, 224, 0.34)';
+          for (const [ox, oy, rr] of [
+            [-9 + drift, 2, 11],
+            [0 - drift * 0.5, -4, 13.5],
+            [9 + drift * 0.7, 3, 10.5],
+            [2, 6, 9.5]
+          ]) {
+            ctx.beginPath();
+            ctx.arc(smX + ox, smY + oy, rr, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.fillStyle = '#81ecec';
+          ctx.font = 'bold 8.5px Consolas, monospace';
+          ctx.fillText('SMOKE', smX - 14, Math.max(20, smY - 15));
+          ctx.restore();
+        }
+
+        // Dashed straight line-of-sight reference
+        ctx.save();
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = 'rgba(236, 240, 241, 0.26)';
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(tx, ty);
+        ctx.stroke();
+        ctx.restore();
+
+        const cyclePos = (ageSec % 1.7) / 1.35;
+        const prog = Math.min(1, Math.max(0.04, cyclePos));
+
+        // Draw curved parabolic bullet path up to `prog`
+        ctx.strokeStyle = shot.badge?.color || '#ffd32a';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        let headX = sx;
+        let headY = sy;
+        const steps = 24;
+        const maxStep = Math.max(1, Math.round(steps * prog));
+        for (let i = 0; i <= maxStep; i++) {
+          const u = (i / maxStep) * prog;
+          const px = sx + (tx - sx) * u;
+          const py = sy + (ty - sy) * u - 4 * u * (1 - u) * archPx;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+          headX = px;
+          headY = py;
+        }
+        ctx.stroke();
+
+        // Shooter & Target markers (including 2nd collateral/double-shot target dot when `isDoubleShot`!)
+        ctx.fillStyle = '#00ffcc';
+        ctx.beginPath();
+        ctx.arc(sx, sy, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (shot.isDoubleShot) {
+          ctx.fillStyle = '#ff9f43';
+          ctx.beginPath();
+          ctx.arc(tx - 13, ty - 2, 3.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.fillStyle = shot.isFriendly ? '#48dbfb' : prog >= 0.99 ? '#ffd32a' : '#ff4757';
+        ctx.beginPath();
+        ctx.arc(tx, ty, prog >= 0.99 ? 4.8 : 3.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Glowing in-flight projectile head or impact shockwave ring
+        if (prog < 0.99) {
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(headX, headY, 2.7, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          const ringR = 5 + ((ageSec % 1.7) - 1.35) * 26;
+          ctx.strokeStyle = shot.isFriendly ? 'rgba(255, 56, 56, 0.9)' : 'rgba(255, 211, 42, 0.85)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(tx, ty, Math.max(4, ringR), 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // Compact telemetry caption inside replay strip
+        ctx.fillStyle = '#dfe6e9';
+        ctx.font = 'bold 9.5px Consolas, monospace';
+        const leadCapt = shot.leadMeters >= 0.3 ? ` • LEAD ${shot.leadMeters}m` : '';
+        const elevCapt = Math.abs(elev) >= 6 ? ` • ELEV ${elev > 0 ? '+' : ''}${elev}m` : '';
+        ctx.fillText(`REPLAY: ${shot.distanceM}m${elevCapt}${leadCapt}`, 6, 11);
+        ctx.fillStyle = shot.isFriendly ? '#ff3838' : '#ffd32a';
+        ctx.fillText(
+          shot.isFriendly ? '⚠️ BLUE-ON-BLUE TEAMFIRE!' : `${shot.anatomy?.partLabel || 'IMPACT'}`,
+          6,
+          H - 5
+        );
+      }
+    }
   }
 };
 

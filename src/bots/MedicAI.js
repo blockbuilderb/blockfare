@@ -1,11 +1,11 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT } from '../config.js?v=136';
-import { tmpVec3 } from '../utils/VectorPool.js?v=136';
-import { events } from '../events.js?v=136';
+import { BOT } from '../config.js?v=139';
+import { tmpVec3 } from '../utils/VectorPool.js?v=139';
+import { events } from '../events.js?v=139';
 import {
   MEDIC_RESCUE_EVENTS,
   createMedicRescueFSM
-} from '../core/StateMachines.js?v=136';
+} from '../core/StateMachines.js?v=139';
 
 const REVIVE_PARTICLE_COLOR = new THREE.Color(0x2ecc71);
 const SHARED_SMOKE_PUFF_GEO = new THREE.BoxGeometry(1.5, 1.3, 1.5);
@@ -124,7 +124,7 @@ export function findImmediateRescueThreat(
     const dCasSq = targetPos.distanceToSquared(player.pos);
     if (
       (dMedicSq <= medicRangeSq || dCasSq <= casualtyRangeSq) &&
-      this.canBotSeeTarget(bot, 'PLAYER', player.pos, false)
+      this.canBotSeeTarget(bot, 'PLAYER', player.pos, false, player)
     ) {
       bestScoreSq = Math.min(dMedicSq, dCasSq);
       if (player.activeVehicle && !player.activeVehicle.dead) {
@@ -810,34 +810,12 @@ export function updateMedicRescue(bot, dt, player, onKillFn) {
         targetPos.z - bot.pos.z
       ).normalize();
       const targetSpd = distantThreat ? BOT.SPEED_APPROACH_SLOW : BOT.SPEED_APPROACH_FAST;
-      const curSpd = Math.hypot(bot.velX || 0, bot.velZ || 0);
-      const spd = Math.min(targetSpd, curSpd + 10.5 * dt);
-      bot.velX = toDowned.x * spd;
-      bot.velZ = toDowned.z * spd;
-      const nx = bot.pos.x + toDowned.x * spd * dt;
-      const nz = bot.pos.z + toDowned.z * spd * dt;
-      if (!this.isPointBlocked(nx, bot.pos.y, nz, 0.48)) {
-        bot.pos.x = nx;
-        bot.pos.z = nz;
-      } else if (!this.isPointBlocked(nx, bot.pos.y, bot.pos.z, 0.48)) {
-        bot.pos.x = nx;
-      } else if (!this.isPointBlocked(bot.pos.x, bot.pos.y, nz, 0.48)) {
-        bot.pos.z = nz;
-      } else {
-        const perpX = bot.pos.x - toDowned.z * spd * dt;
-        const perpZ = bot.pos.z + toDowned.x * spd * dt;
-        if (!this.isPointBlocked(perpX, bot.pos.y, perpZ, 0.48)) {
-          bot.pos.x = perpX;
-          bot.pos.z = perpZ;
-        }
-      }
-      bot.pos.y = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
-      bot.yaw = Math.atan2(toDowned.x, toDowned.z);
-      bot.mesh.rotation.y = bot.yaw;
+      stepMedicWithInertia(this, bot, toDowned.x, toDowned.z, targetSpd, dt, 0.48, toDowned.x, toDowned.z);
 
       // Low tactical approach animation
       const crouchOffset = distantThreat ? 0.16 : 0;
-      bot.animPhase += dt * 15;
+      const curApproachSpd = Math.hypot(bot.velX || 0, bot.velZ || 0);
+      bot.animPhase += dt * Math.max(4.5, curApproachSpd * 2.35);
       parts.pelvisGroup.position.y =
         0.78 - crouchOffset + Math.abs(Math.sin(bot.animPhase)) * 0.055;
       parts.upperBody.position.y = parts.pelvisGroup.position.y;
@@ -870,8 +848,19 @@ export function updateMedicRescue(bot, dt, player, onKillFn) {
     } else {
       toSafe.normalize();
       const dragSpeed = BOT.DRAG_SPEED;
-      const nx = bot.pos.x + toSafe.x * dragSpeed * dt;
-      const nz = bot.pos.z + toSafe.z * dragSpeed * dt;
+      const dvDx = toSafe.x * dragSpeed - (bot.velX || 0);
+      const dvDz = toSafe.z * dragSpeed - (bot.velZ || 0);
+      const dvDLen = Math.hypot(dvDx, dvDz);
+      const maxDvD = 18.5 * dt;
+      if (dvDLen <= maxDvD) {
+        bot.velX = toSafe.x * dragSpeed;
+        bot.velZ = toSafe.z * dragSpeed;
+      } else {
+        bot.velX = (bot.velX || 0) + (dvDx / dvDLen) * maxDvD;
+        bot.velZ = (bot.velZ || 0) + (dvDz / dvDLen) * maxDvD;
+      }
+      const nx = bot.pos.x + bot.velX * dt;
+      const nz = bot.pos.z + bot.velZ * dt;
       const dragTrailX = nx - toSafe.x * 1.05;
       const dragTrailZ = nz - toSafe.z * 1.05;
       const dragTrailY = this.world.getGroundHeightAt(dragTrailX, dragTrailZ);
@@ -881,31 +870,67 @@ export function updateMedicRescue(bot, dt, player, onKillFn) {
       ) {
         bot.pos.x = nx;
         bot.pos.z = nz;
-        bot.pos.y = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
+        const gYm = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
+        bot.pos.y =
+          gYm > bot.pos.y + 0.06 && gYm - bot.pos.y <= 1.45
+            ? Math.min(gYm, bot.pos.y + 6.5 * dt)
+            : gYm;
 
-        // Pull the wounded soldier along the ground right in front of the rescuer!
+        // Smoothly pull the wounded soldier with physical inertia (never 1-frame snap by 1.15m!)
+        const maxPullStep = (dragSpeed + 2.4) * dt;
         if (bot.rescueTarget === 'PLAYER') {
-          player.pos.set(dragTrailX, dragTrailY, dragTrailZ);
+          const pdx = dragTrailX - player.pos.x;
+          const pdz = dragTrailZ - player.pos.z;
+          const pDist = Math.hypot(pdx, pdz);
+          if (pDist <= maxPullStep) {
+            player.pos.x = dragTrailX;
+            player.pos.z = dragTrailZ;
+          } else if (pDist > 0.001) {
+            player.pos.x += (pdx / pDist) * maxPullStep;
+            player.pos.z += (pdz / pDist) * maxPullStep;
+          }
+          player.pos.y = this.world.getGroundHeightAt(player.pos.x, player.pos.z);
           player.downedTimer = Math.max(player.downedTimer, 8.0);
         } else {
-          bot.rescueTarget.pos.set(dragTrailX, dragTrailY + 0.22, dragTrailZ);
-          bot.rescueTarget.mesh.rotation.x = -Math.PI / 2;
-          bot.rescueTarget.mesh.rotation.y = Math.atan2(toSafe.x, toSafe.z);
+          const cas = bot.rescueTarget;
+          const cdx = dragTrailX - cas.pos.x;
+          const cdz = dragTrailZ - cas.pos.z;
+          const cDist = Math.hypot(cdx, cdz);
+          if (cDist <= maxPullStep) {
+            cas.pos.x = dragTrailX;
+            cas.pos.z = dragTrailZ;
+          } else if (cDist > 0.001) {
+            cas.pos.x += (cdx / cDist) * maxPullStep;
+            cas.pos.z += (cdz / cDist) * maxPullStep;
+          }
+          const cGy = this.world.getGroundHeightAt(cas.pos.x, cas.pos.z) + 0.22;
+          cas.pos.y =
+            cGy > cas.pos.y + 0.05 && cGy - cas.pos.y <= 1.45
+              ? Math.min(cGy, cas.pos.y + 6.5 * dt)
+              : cGy;
+          cas.mesh.rotation.x = -Math.PI / 2;
+          const desCasYaw = Math.atan2(toSafe.x, toSafe.z);
+          let cYawDiff = desCasYaw - (cas.mesh.rotation.y || 0);
+          while (cYawDiff > Math.PI) cYawDiff -= Math.PI * 2;
+          while (cYawDiff < -Math.PI) cYawDiff += Math.PI * 2;
+          cas.mesh.rotation.y = (cas.mesh.rotation.y || 0) + THREE.MathUtils.clamp(cYawDiff, -5.5 * dt, 5.5 * dt);
           if (bot.mesh.visible) {
-            bot.rescueTarget.mesh.visible = true;
-            bot.rescueTarget.mesh._culledOffFrustum = bot.mesh._culledOffFrustum;
+            cas.mesh.visible = true;
+            cas.mesh._culledOffFrustum = bot.mesh._culledOffFrustum;
           }
         }
       } else {
-        // Reached a wall/cover block — immediately start reviving right in front of it without pushing casualty into the wall!
+        // Reached a wall/cover block — brake & transition cleanly to kneeling revive!
+        bot.velX = 0;
+        bot.velZ = 0;
         bot.medicRescueFSM.send(MEDIC_RESCUE_EVENTS.REACHED_COVER_REVIVE);
         bot.rescueTimer = bot.role === 'MEDIC' ? BOT.MEDIC_REVIVE_TIME : BOT.NON_MEDIC_REVIVE_TIME;
       }
 
-      // Rescuer faces the wounded soldier while stepping backward pulling their vest!
-      bot.yaw = Math.atan2(-toSafe.x, -toSafe.z);
-      bot.mesh.rotation.y = bot.yaw;
-      bot.animPhase -= dt * 9.0; // Backward stride cycle
+      // Rescuer faces the wounded soldier smoothly while stepping backward pulling their vest!
+      smoothRotateBotYaw(bot, -toSafe.x, -toSafe.z, 6.0, dt);
+      const curDragSpd = Math.hypot(bot.velX || 0, bot.velZ || 0);
+      bot.animPhase -= dt * Math.max(3.5, curDragSpd * 2.4); // Backward stride cycle
       parts.pelvisGroup.position.y = 0.62 + Math.abs(Math.sin(bot.animPhase)) * 0.035;
       parts.upperBody.position.y = parts.pelvisGroup.position.y;
       parts.upperBody.rotation.set(0.46, 0, 0);
@@ -934,9 +959,9 @@ export function updateMedicRescue(bot, dt, player, onKillFn) {
       if (!bot.builtRescueWall) {
         this.buildRescueCoverWall(bot, bot.pos, bot.lastShooterPos || null);
       }
+      brakeMedicInertia(this, bot, dt);
       bot.animPhase += dt * 6;
-      bot.yaw = Math.atan2(targetPos.x - bot.pos.x, targetPos.z - bot.pos.z);
-      bot.mesh.rotation.y = bot.yaw;
+      smoothRotateBotYaw(bot, targetPos.x - bot.pos.x, targetPos.z - bot.pos.z, 6.0, dt);
       parts.pelvisGroup.position.y = 0.46;
       parts.upperBody.position.y = 0.46;
       parts.upperBody.rotation.set(0.62, 0, 0);
@@ -948,12 +973,12 @@ export function updateMedicRescue(bot, dt, player, onKillFn) {
       return true;
     }
 
+    brakeMedicInertia(this, bot, dt);
     bot.rescueTimer -= dt;
     bot.animPhase += dt * 12;
 
     // Kneel down beside the fallen comrade and wrap bandage
-    bot.yaw = Math.atan2(targetPos.x - bot.pos.x, targetPos.z - bot.pos.z);
-    bot.mesh.rotation.y = bot.yaw;
+    smoothRotateBotYaw(bot, targetPos.x - bot.pos.x, targetPos.z - bot.pos.z, 6.0, dt);
     parts.pelvisGroup.position.y = 0.52;
     parts.upperBody.position.y = 0.52;
     parts.upperBody.rotation.set(0.54 + Math.sin(bot.animPhase) * 0.08, 0, 0);
@@ -1055,15 +1080,7 @@ export function updateMedicInjuryHeal(bot, dt, player) {
           bestCrate.pos.z - bot.pos.z
         ).normalize();
         const spd = BOT.SPEED_APPROACH_FAST || 6.4;
-        const nx = bot.pos.x + toCrate.x * spd * dt;
-        const nz = bot.pos.z + toCrate.z * spd * dt;
-        if (!this.isPointBlocked(nx, bot.pos.y, nz)) {
-          bot.pos.x = nx;
-          bot.pos.z = nz;
-        }
-        bot.pos.y = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
-        bot.yaw = Math.atan2(toCrate.x, toCrate.z);
-        bot.mesh.rotation.y = bot.yaw;
+        stepMedicWithInertia(this, bot, toCrate.x, toCrate.z, spd, dt, 0.48, toCrate.x, toCrate.z);
         return true;
       }
     }
@@ -1282,10 +1299,10 @@ export function updateMedicInjuryHeal(bot, dt, player) {
   const distToPatient = Math.hypot(targetPos.x - bot.pos.x, targetPos.z - bot.pos.z);
 
   if (distToPatient <= 3.6 || activelyTreatingClose) {
-    // Kneel beside the wounded soldier and channel Field Medkit until 100% healed
+    // Smoothly brake momentum & kneel beside the wounded soldier to channel Field Medkit
+    brakeMedicInertia(this, bot, dt);
     bot.animPhase += dt * 10;
-    bot.yaw = Math.atan2(targetPos.x - bot.pos.x, targetPos.z - bot.pos.z);
-    bot.mesh.rotation.y = bot.yaw;
+    smoothRotateBotYaw(bot, targetPos.x - bot.pos.x, targetPos.z - bot.pos.z, 6.0, dt);
     parts.pelvisGroup.position.y = 0.56;
     parts.upperBody.position.y = 0.56;
     parts.upperBody.rotation.set(0.42 + Math.sin(bot.animPhase) * 0.06, 0, 0);
@@ -1298,23 +1315,12 @@ export function updateMedicInjuryHeal(bot, dt, player) {
     return true;
   }
 
-  // Sprint toward the injured teammate / player to treat their wounds
+  // Sprint toward the injured teammate / player with smooth physical acceleration & step-up inertia
   const toPatient = tmpVec3(targetPos.x - bot.pos.x, 0, targetPos.z - bot.pos.z).normalize();
   const spd = BOT.SPEED_APPROACH_FAST || 6.4;
-  const nx = bot.pos.x + toPatient.x * spd * dt;
-  const nz = bot.pos.z + toPatient.z * spd * dt;
-  if (!this.isPointBlocked(nx, bot.pos.y, nz, 0.48)) {
-    bot.pos.x = nx;
-    bot.pos.z = nz;
-  } else if (!this.isPointBlocked(nx, bot.pos.y, bot.pos.z, 0.48)) {
-    bot.pos.x = nx;
-  } else if (!this.isPointBlocked(bot.pos.x, bot.pos.y, nz, 0.48)) {
-    bot.pos.z = nz;
-  }
-  bot.pos.y = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
-  bot.yaw = Math.atan2(toPatient.x, toPatient.z);
-  bot.mesh.rotation.y = bot.yaw;
-  bot.animPhase += dt * 14;
+  stepMedicWithInertia(this, bot, toPatient.x, toPatient.z, spd, dt, 0.48, toPatient.x, toPatient.z);
+  const curPatSpd = Math.hypot(bot.velX || 0, bot.velZ || 0);
+  bot.animPhase += dt * Math.max(4.5, curPatSpd * 2.2);
   parts.pelvisGroup.position.y = 0.76 + Math.abs(Math.sin(bot.animPhase)) * 0.05;
   parts.upperBody.position.y = parts.pelvisGroup.position.y;
   parts.upperBody.rotation.set(0.25, Math.sin(bot.animPhase) * 0.1, 0);
@@ -1323,6 +1329,86 @@ export function updateMedicInjuryHeal(bot, dt, player) {
   parts.leftShin.rotation.x = Math.max(0, -Math.cos(bot.animPhase) * 0.95);
   parts.rightShin.rotation.x = Math.max(0, Math.cos(bot.animPhase) * 0.95);
   return true;
+}
+
+function smoothRotateBotYaw(bot, faceDirX, faceDirZ, maxRateRadSec, dt) {
+  if (Math.abs(faceDirX) < 1e-5 && Math.abs(faceDirZ) < 1e-5) return;
+  const desiredYaw = Math.atan2(faceDirX, faceDirZ);
+  let diff = desiredYaw - (bot.yaw || 0);
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  const maxStep = maxRateRadSec * dt;
+  bot.yaw = (bot.yaw || 0) + THREE.MathUtils.clamp(diff, -maxStep, maxStep);
+  bot.mesh.rotation.y = bot.yaw;
+}
+
+function brakeMedicInertia(ctx, bot, dt) {
+  const vx = (bot.velX || 0) * Math.pow(0.015, dt);
+  const vz = (bot.velZ || 0) * Math.pow(0.015, dt);
+  bot.velX = Math.abs(vx) < 0.02 ? 0 : vx;
+  bot.velZ = Math.abs(vz) < 0.02 ? 0 : vz;
+  if (bot.velX !== 0 || bot.velZ !== 0) {
+    const nx = bot.pos.x + bot.velX * dt;
+    const nz = bot.pos.z + bot.velZ * dt;
+    if (!ctx.isPointBlocked(nx, bot.pos.y, nz, 0.48)) {
+      bot.pos.x = nx;
+      bot.pos.z = nz;
+      const gY = ctx.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
+      bot.pos.y =
+        gY > bot.pos.y + 0.06 && gY - bot.pos.y <= 1.45
+          ? Math.min(gY, bot.pos.y + 7.5 * dt)
+          : gY;
+    } else {
+      bot.velX = 0;
+      bot.velZ = 0;
+    }
+  }
+}
+
+function stepMedicWithInertia(ctx, bot, dirX, dirZ, targetSpd, dt, pad = 0.48, faceX = dirX, faceZ = dirZ) {
+  const tvx = dirX * targetSpd;
+  const tvz = dirZ * targetSpd;
+  const curSpd = Math.hypot(bot.velX || 0, bot.velZ || 0);
+  const accel = targetSpd > curSpd + 0.15 ? 10.5 : 14.5;
+  const dvx = tvx - (bot.velX || 0);
+  const dvz = tvz - (bot.velZ || 0);
+  const dvMag = Math.hypot(dvx, dvz);
+  const maxDv = accel * dt;
+  if (dvMag <= maxDv) {
+    bot.velX = tvx;
+    bot.velZ = tvz;
+  } else {
+    bot.velX = (bot.velX || 0) + (dvx / dvMag) * maxDv;
+    bot.velZ = (bot.velZ || 0) + (dvz / dvMag) * maxDv;
+  }
+  const nx = bot.pos.x + bot.velX * dt;
+  const nz = bot.pos.z + bot.velZ * dt;
+  if (!ctx.isPointBlocked(nx, bot.pos.y, nz, pad)) {
+    bot.pos.x = nx;
+    bot.pos.z = nz;
+  } else if (!ctx.isPointBlocked(nx, bot.pos.y, bot.pos.z, pad)) {
+    bot.pos.x = nx;
+    bot.velZ *= Math.pow(0.05, dt);
+  } else if (!ctx.isPointBlocked(bot.pos.x, bot.pos.y, nz, pad)) {
+    bot.pos.z = nz;
+    bot.velX *= Math.pow(0.05, dt);
+  } else {
+    const perpX = bot.pos.x - dirZ * Math.hypot(bot.velX, bot.velZ) * dt;
+    const perpZ = bot.pos.z + dirX * Math.hypot(bot.velX, bot.velZ) * dt;
+    if (!ctx.isPointBlocked(perpX, bot.pos.y, perpZ, pad)) {
+      bot.pos.x = perpX;
+      bot.pos.z = perpZ;
+    } else {
+      bot.velX *= Math.pow(0.03, dt);
+      bot.velZ *= Math.pow(0.03, dt);
+    }
+  }
+  const gY = ctx.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
+  bot.pos.y =
+    gY > bot.pos.y + 0.06 && gY - bot.pos.y <= 1.45
+      ? Math.min(gY, bot.pos.y + 7.5 * dt)
+      : gY;
+  smoothRotateBotYaw(bot, faceX, faceZ, 6.2, dt);
 }
 
 export const MedicAIMethods = {

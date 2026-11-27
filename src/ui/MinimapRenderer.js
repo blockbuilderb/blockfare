@@ -299,8 +299,15 @@ export const MinimapRenderer = {
     ctx.fillStyle = '#162318';
     ctx.fillRect(0, 0, w, h);
 
-    const toMapX = (wx) => (wx / 3480 + 0.5) * w;
-    const toMapY = (wz) => (wz / 2120 + 0.5) * h;
+    const zoom = Math.max(1.0, Math.min(6.5, this._cmdMapZoom || 1.0));
+    const panX = zoom <= 1.02 ? 0 : this._cmdMapPanX || 0;
+    const panZ = zoom <= 1.02 ? 0 : this._cmdMapPanZ || 0;
+    const spanX = 3480 / zoom;
+    const spanZ = 2120 / zoom;
+    this._cmdMapTransform = { zoom, panX, panZ, spanX, spanZ };
+
+    const toMapX = (wx) => ((wx - panX) / spanX + 0.5) * w;
+    const toMapY = (wz) => ((wz - panZ) / spanZ + 0.5) * h;
 
     // Subtle tactical grid
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
@@ -319,14 +326,56 @@ export const MinimapRenderer = {
     }
 
     // North-South River
+    const rLeft = toMapX(-26);
+    const rRight = toMapX(26);
     ctx.fillStyle = '#1f536e';
-    ctx.fillRect(toMapX(-24), 0, 12, h);
+    ctx.fillRect(rLeft, 0, Math.max(8, rRight - rLeft), h);
 
     // 3 Grand Bridges & Main Road Network
+    const roadH = Math.max(5, (16 / spanZ) * h);
     ctx.fillStyle = '#2f363d';
-    ctx.fillRect(0, toMapY(-8), w, 6);
-    ctx.fillRect(toMapX(-28), toMapY(-406), 22, 5);
-    ctx.fillRect(toMapX(-28), toMapY(394), 22, 5);
+    ctx.fillRect(0, toMapY(0) - roadH * 0.5, w, roadH);
+    const brSpanW = Math.max(16, toMapX(32) - toMapX(-32));
+    ctx.fillRect(toMapX(-32), toMapY(-400) - roadH * 0.4, brSpanW, roadH * 0.8);
+    ctx.fillRect(toMapX(-32), toMapY(400) - roadH * 0.4, brSpanW, roadH * 0.8);
+
+    // Standing Building & Skyscraper Rooftop Footprints (clickable in RIDE mode!)
+    if (Array.isArray(this.world?.buildings)) {
+      const hovId = this._cmdHoveredBuildingId ?? null;
+      for (let i = 0; i < this.world.buildings.length; i++) {
+        const b = this.world.buildings[i];
+        if (!b) continue;
+        const bx0 = toMapX(b.minWx);
+        const by0 = toMapY(b.minWz);
+        const bw = Math.max(zoom >= 2.5 ? 6 : 3, toMapX(b.maxWx) - bx0);
+        const bh = Math.max(zoom >= 2.5 ? 6 : 3, toMapY(b.maxWz) - by0);
+        if (bx0 + bw < -4 || bx0 > w + 4 || by0 + bh < -4 || by0 > h + 4) continue;
+
+        const isTallRoof = (b.floors || 1) >= 8;
+        const isHov = hovId === b.id;
+        if (b.collapsed) {
+          ctx.fillStyle = 'rgba(60, 45, 40, 0.55)';
+          ctx.fillRect(bx0, by0, bw, bh);
+          continue;
+        }
+        ctx.fillStyle = isHov
+          ? 'rgba(241, 196, 15, 0.85)'
+          : isTallRoof
+          ? 'rgba(0, 210, 211, 0.34)'
+          : 'rgba(189, 195, 199, 0.28)';
+        ctx.fillRect(bx0, by0, bw, bh);
+        ctx.strokeStyle = isHov ? '#fff200' : isTallRoof ? '#00ecec' : 'rgba(236, 240, 241, 0.55)';
+        ctx.lineWidth = isHov ? 2.2 : isTallRoof ? 1.4 : 0.9;
+        ctx.strokeRect(bx0, by0, bw, bh);
+
+        if (bw >= 16 && bh >= 14) {
+          ctx.fillStyle = isHov ? '#08141c' : '#ffeaa7';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(isTallRoof ? `H•${b.floors}F` : `${b.floors}F`, bx0 + bw * 0.5, by0 + bh * 0.5 + 3);
+        }
+      }
+    }
 
     // Base HQs
     const usX = toMapX(this.world.spawns.US_BASE.x);

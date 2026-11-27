@@ -25,19 +25,24 @@ export const PLAYER = {
 
   // Zeroing
   ZERO_DISTANCE_DEFAULT: 100,
-  ZEROING_OPTIONS: [100, 200, 300, 400],
+  ZEROING_OPTIONS: [100, 200, 300, 400, 600, 800],
   ZERO_ELEVATION_FACTOR: 0.00007,
 
-  // Eye heights (stance)
+  // Eye heights (3-stance system: Standing vs. One-Knee Kneel [C] vs. Prone [Z])
   EYE_HEIGHT_DOWNED: 0.32,
-  EYE_HEIGHT_PRONE: 0.48,
-  EYE_HEIGHT_CROUCH: 1.05,
+  EYE_HEIGHT_PRONE: 0.42,
+  EYE_HEIGHT_CROUCH: 1.08,
   EYE_HEIGHT_STAND: 1.65,
 
-  // Recoil
+  // Recoil & Sway Stance Multipliers + Low-Profile Hit Reduction
   RECOIL_KICK_Z: 0.085,
-  RECOIL_SCALE_PRONE: 0.55,   // prone reduces recoil by 45%
-  RECOIL_SCALE_CROUCH: 0.78,  // crouch reduces recoil by 22%
+  RECOIL_SCALE_PRONE: 0.45,   // prone reduces recoil by 55%
+  RECOIL_SCALE_CROUCH: 0.68,  // one-knee kneel reduces recoil by 32%
+  SWAY_SCALE_PRONE: 0.28,     // prone cuts weapon sway by 72%
+  SWAY_SCALE_CROUCH: 0.58,    // one-knee cuts weapon sway by 42%
+  SWAY_SCALE_BIPOD: 0.12,     // deployed bipod / ledge rest cuts sway by 88%
+  PROFILE_HIT_MULT_CROUCH: 0.72, // one-knee lowers exposed profile (-28% AI hit prob)
+  PROFILE_HIT_MULT_PRONE: 0.48,  // prone minimizes silhouette (-52% AI hit prob at >18m)
 
   // Suppression spread
   SUPPRESSION_SPREAD_MULT: 3.5,
@@ -778,9 +783,9 @@ export const WEATHER = {
 // TERRAIN
 // ---------------------------------------------------------------------------
 export const TERRAIN = {
-  MAX_SPAN: 3,          // structural integrity cantilever span
+  MAX_SPAN: 4,          // structural integrity cantilever span
   BRIDGE_DECK_HEIGHT: 1.25,
-  BUILDING_COLLAPSE_THRESHOLD: 0.45, // ratio: <= 0.45 means >55% destroyed -> collapse
+  BUILDING_COLLAPSE_THRESHOLD: 0.40, // ratio: <= 0.40 means >=60% of story load-bearing supports destroyed -> collapse!
   FLAG_RADIUS_DEFAULT: 34,
   FLAG_RADIUS_CHARLIE: 36,
 };
@@ -792,6 +797,7 @@ export const MAT_HP = {
   BRICK: 90,
   CONCRETE: 130,
   DARK_CONCRETE: 165,
+  STEEL_BEAM: 750,
   SANDBAG: 85,
   WOOD: 55,
   CONTAINER: 150,

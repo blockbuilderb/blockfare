@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=136';
-import { BOT } from '../config.js?v=136';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=136';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=136';
-import { events } from '../events.js?v=136';
+import { sound } from '../audio.js?v=139';
+import { BOT } from '../config.js?v=139';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=139';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=139';
+import { events } from '../events.js?v=139';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -93,7 +93,173 @@ export function spawnTracer(start, end, color = 0xffeaa7) {
   this.tracers.push({ line, life: 0.075 });
 }
 
+// Doctrinal 9-Man Tactical Wedge / Staggered Column Slots:
+// [forwardOffsetM, rightOffsetM, fireteamIdx (0 = Alpha Base-of-Fire, 1 = Bravo Maneuver)]
+const WEDGE_FORMATION_SLOTS = [
+  [0.0, 0.0, 0],     // 0: Section / Squad Leader (Command Apex)
+  [-2.2, -3.6, 0],   // 1: Fireteam Alpha Point / Rifleman (Left Wing)
+  [-2.0, 3.6, 1],    // 2: Fireteam Bravo Point / Breacher (Right Wing)
+  [-4.4, -1.8, 0],   // 3: Combat Medic (Protected Inner Left)
+  [-4.6, -6.8, 0],   // 4: Automatic Rifleman / Support LMG (Left Flank Overwatch)
+  [-4.4, 6.8, 1],    // 5: Assault / LAT Engineer (Right Flank Maneuver)
+  [-6.6, 2.2, 1],    // 6: Second Medic / Rifleman (Inner Right)
+  [-7.2, -9.4, 0],   // 7: Rear Left Security Rifleman
+  [-8.0, 5.2, 1]     // 8: Recon Marksman / Rear Overwatch
+];
+
+function computeOrientedSquadOffset(bot, fwdX, fwdZ, spacingMode = 'FAN_OUT', urbanCorridor = false) {
+  const slotIdx = (bot.squadMemberIndex || 0) % 9;
+  const tpl = WEDGE_FORMATION_SLOTS[slotIdx] || WEDGE_FORMATION_SLOTS[1];
+  const scale = spacingMode === 'STAY_CLOSE' ? 0.58 : 1.0;
+  const latCompress = urbanCorridor ? 0.62 : 1.0;
+  const depthStretch = urbanCorridor ? 1.25 : 1.0;
+  const fwdOff = tpl[0] * scale * depthStretch;
+  const rightOff = tpl[1] * scale * latCompress;
+  const rightX = -fwdZ;
+  const rightZ = fwdX;
+  return {
+    offX: fwdX * fwdOff + rightX * rightOff,
+    offZ: fwdZ * fwdOff + rightZ * rightOff,
+    fireteam: bot.role === 'SUPPORT' || bot.role === 'RECON' ? 0 : tpl[2]
+  };
+}
+
+export function updateSquadSections(dt) {
+  if (!this.squadSections) this.squadSections = new Map();
+  for (const sec of this.squadSections.values()) {
+    sec.members.length = 0;
+    sec.leader = null;
+    sec.stragglerCount = 0;
+    if (sec.contactTimer > 0) sec.contactTimer = Math.max(0, sec.contactTimer - dt);
+    if (sec.underSniperAlertTimer > 0) {
+      sec.underSniperAlertTimer = Math.max(0, sec.underSniperAlertTimer - dt);
+    }
+    if (sec.smokeCooldown > 0) sec.smokeCooldown = Math.max(0, sec.smokeCooldown - dt);
+    if (
+      sec.sharedEnemyUnit &&
+      (sec.sharedEnemyUnit.dead || sec.sharedEnemyUnit.downed || sec.contactTimer <= 0)
+    ) {
+      sec.sharedEnemyUnit = null;
+    }
+    sec.boundTimer = (sec.boundTimer || 0) - dt;
+    if (sec.boundTimer <= 0) {
+      sec.boundTimer = 3.6 + ((sec.sectionIdx || 0) % 3) * 0.45;
+      sec.activeBoundFireteam = sec.activeBoundFireteam === 0 ? 1 : 0;
+    }
+  }
+
+  // Single O(N) pass to group active on-foot soldiers into cohesive 9-man tactical sections
+  for (let i = 0; i < this.bots.length; i++) {
+    const b = this.bots[i];
+    if (b.dead || b.downed || b.drivingVehicle || b.ridingVehicle || b.parachuting) {
+      b._sectionRef = null;
+      continue;
+    }
+    const secIdx = Math.floor((b.squadMemberIndex || 0) / 9);
+    const secKey = `${b.team}_${b.squad || 'ALPHA'}_${secIdx}`;
+    let sec = this.squadSections.get(secKey);
+    if (!sec) {
+      const hashChar = (b.squad || 'A').charCodeAt(0) + secIdx;
+      sec = {
+        key: secKey,
+        team: b.team,
+        squad: b.squad || 'ALPHA',
+        sectionIdx: secIdx,
+        leader: null,
+        members: [],
+        centroidX: b.pos.x,
+        centroidZ: b.pos.z,
+        fwdX: b.team === 'US' ? 1 : -1,
+        fwdZ: 0,
+        stragglerCount: 0,
+        contactTimer: 0,
+        underSniperAlertTimer: 0,
+        smokeCooldown: 0,
+        boundTimer: 2.2 + (hashChar % 4) * 0.5,
+        activeBoundFireteam: hashChar % 2,
+        flankSign: hashChar % 2 === 0 ? 1 : -1,
+        flankMagnitude: 18 + (hashChar % 3) * 9,
+        tacticalMode: 'TACTICAL_WEDGE',
+        threatPos: new THREE.Vector3(),
+        hasThreatPos: false,
+        coverAnchor: null,
+        sharedEnemyUnit: null,
+        sharedEnemyIsPlayer: false,
+        sharedEnemyIsVehicle: false
+      };
+      this.squadSections.set(secKey, sec);
+    }
+    b._sectionRef = sec;
+    b._squadUnderSniperAlert = (sec.underSniperAlertTimer || 0) > 0;
+    sec.members.push(b);
+    // Automatic Chain-of-Command Succession: lowest squadMemberIndex non-rescuing soldier leads!
+    if (
+      !b.rescueTarget &&
+      (!sec.leader || (b.squadMemberIndex || 0) < (sec.leader.squadMemberIndex || 0))
+    ) {
+      sec.leader = b;
+    }
+  }
+
+  for (const sec of this.squadSections.values()) {
+    if (!sec.leader && sec.members.length > 0) {
+      sec.leader = sec.members[0];
+    }
+    if (!sec.leader) continue;
+
+    let sumX = 0;
+    let sumZ = 0;
+    let nearCount = 0;
+    const lx = sec.leader.pos.x;
+    const lz = sec.leader.pos.z;
+    for (let m = 0; m < sec.members.length; m++) {
+      const mem = sec.members[m];
+      const d = Math.hypot(mem.pos.x - lx, mem.pos.z - lz);
+      if (d <= 85) {
+        sumX += mem.pos.x;
+        sumZ += mem.pos.z;
+        nearCount++;
+      }
+      if (mem !== sec.leader && d > 16 && d <= 85) {
+        sec.stragglerCount++;
+      }
+    }
+    sec.centroidX = nearCount > 0 ? sumX / nearCount : lx;
+    sec.centroidZ = nearCount > 0 ? sumZ / nearCount : lz;
+
+    // Orient section forward bearing toward active contact threat or objective flag
+    let dirX = sec.team === 'US' ? 1 : -1;
+    let dirZ = 0;
+    const tgtFlag = this.world?.flags?.[sec.leader.targetFlagIndex];
+    if (sec.contactTimer > 0 && sec.hasThreatPos) {
+      dirX = sec.threatPos.x - lx;
+      dirZ = sec.threatPos.z - lz;
+    } else if (tgtFlag) {
+      dirX = tgtFlag.pos.x - lx;
+      dirZ = tgtFlag.pos.z - lz;
+    }
+    const dirLen = Math.hypot(dirX, dirZ);
+    if (dirLen > 0.5) {
+      sec.fwdX = dirX / dirLen;
+      sec.fwdZ = dirZ / dirLen;
+    }
+
+    const distToFlag = tgtFlag ? Math.hypot(tgtFlag.pos.x - lx, tgtFlag.pos.z - lz) : 999;
+    const attackingFlag = Boolean(tgtFlag && (tgtFlag.owner !== sec.team || tgtFlag.contested));
+    if (sec.underSniperAlertTimer > 0) {
+      sec.tacticalMode = 'COVER_SCRAMBLE';
+    } else if (sec.contactTimer > 0 && attackingFlag && distToFlag <= 46) {
+      sec.tacticalMode = 'PINCER_ASSAULT';
+    } else if (sec.contactTimer > 0) {
+      sec.tacticalMode = 'BOUNDING_OVERWATCH';
+    } else {
+      sec.tacticalMode = 'TACTICAL_WEDGE';
+    }
+  }
+}
+
 export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = null, onAwardXp = null) {
+  if (player) this.player = player;
   // 0. Rebuild 2D spatial grids & team lists once at the start of frame for O(1) queries
   this._frameRaycasts = 0;
   if (!this.spatialGrid) {
@@ -134,6 +300,9 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       this.aliveByTeam[b.team].push(b);
     }
   }
+
+  // 0B. Update 9-man Squad Tactical Sections (Acting Leaders, Fireteam Bounding, Flank Arcs & Sniper Alerts)
+  this.updateSquadSections(dt);
 
   // 1. Update Contested / Overrun Base states (Main Bases + Forward Flags A-E) at 4 Hz
   this._contestedTimer = (this._contestedTimer || 0) - dt;
@@ -790,15 +959,44 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         const distToStation = Math.hypot(dxT, dzT);
 
         if (distToStation > 1.65) {
-          const step = Math.min(distToStation, 8.2 * dt);
-          bot.pos.x += (dxT / distToStation) * step;
-          bot.pos.z += (dzT / distToStation) * step;
-          bot.pos.y = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
-          bot.yaw = Math.atan2(dxT, dzT);
-          bot.animPhase = (bot.animPhase || 0) + dt * 13.5;
+          const dirTx = dxT / distToStation;
+          const dirTz = dzT / distToStation;
+          const targetSpdT = Math.min(7.6, Math.max(2.2, distToStation * 1.8));
+          const dvTx = dirTx * targetSpdT - (bot.velX || 0);
+          const dvTz = dirTz * targetSpdT - (bot.velZ || 0);
+          const dvTLen = Math.hypot(dvTx, dvTz);
+          const maxDvT = 10.5 * dt;
+          if (dvTLen <= maxDvT) {
+            bot.velX = dirTx * targetSpdT;
+            bot.velZ = dirTz * targetSpdT;
+          } else {
+            bot.velX = (bot.velX || 0) + (dvTx / dvTLen) * maxDvT;
+            bot.velZ = (bot.velZ || 0) + (dvTz / dvTLen) * maxDvT;
+          }
+          bot.pos.x += bot.velX * dt;
+          bot.pos.z += bot.velZ * dt;
+          const gYt = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
+          bot.pos.y =
+            gYt > bot.pos.y + 0.06 && gYt - bot.pos.y <= 1.45
+              ? Math.min(gYt, bot.pos.y + 7.5 * dt)
+              : gYt;
+          const desYawT = Math.atan2(dxT, dzT);
+          let yDiffT = desYawT - (bot.yaw || 0);
+          while (yDiffT > Math.PI) yDiffT -= Math.PI * 2;
+          while (yDiffT < -Math.PI) yDiffT += Math.PI * 2;
+          bot.yaw = (bot.yaw || 0) + THREE.MathUtils.clamp(yDiffT, -5.2 * dt, 5.2 * dt);
+          bot.animPhase = (bot.animPhase || 0) + dt * Math.max(4.0, Math.hypot(bot.velX, bot.velZ) * 1.85);
         } else {
-          // Crewman is at the Trebuchet winch / boulder sling: face the frame & crank the winch!
-          bot.yaw = Math.atan2(treb.pos.x - bot.pos.x, treb.pos.z - bot.pos.z);
+          // Crewman is at the Trebuchet winch / boulder sling: brake smoothly, face frame & crank the winch!
+          bot.velX = (bot.velX || 0) * Math.pow(0.02, dt);
+          bot.velZ = (bot.velZ || 0) * Math.pow(0.02, dt);
+          bot.pos.x += bot.velX * dt;
+          bot.pos.z += bot.velZ * dt;
+          const desYawT = Math.atan2(treb.pos.x - bot.pos.x, treb.pos.z - bot.pos.z);
+          let yDiffT = desYawT - (bot.yaw || 0);
+          while (yDiffT > Math.PI) yDiffT -= Math.PI * 2;
+          while (yDiffT < -Math.PI) yDiffT += Math.PI * 2;
+          bot.yaw = (bot.yaw || 0) + THREE.MathUtils.clamp(yDiffT, -5.2 * dt, 5.2 * dt);
           bot.animPhase = (bot.animPhase || 0) + dt * 6.5;
           if (parts.upperBody && parts.weaponRig) {
             const crankWave = Math.sin(bot.animPhase);
@@ -927,18 +1125,25 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       if (bot.isGarrisonDefender && garrisonFlagIdx >= 0) {
         bot.targetFlagIndex = garrisonFlagIdx;
         const gFlag = this.world.flags[garrisonFlagIdx];
-        if (gFlag) {
-          // Garrison Defenders walk active security patrol circuits around the base perimeter instead of standing frozen!
-          const seedNum = typeof bot.patrolSeed === 'number' ? bot.patrolSeed : ((bot.name || 'B').charCodeAt(0) % 8) * 0.78;
-          bot._garrisonPatrolClock = (bot._garrisonPatrolClock || seedNum) + 0.16;
-          const legIdx = Math.floor(bot._garrisonPatrolClock) % 4;
-          const patrolAng = seedNum + legIdx * (Math.PI * 0.5);
-          const patrolRad = 11.5 + (seedNum % 2) * 5.5;
-          const rawX = gFlag.pos.x + sp.clusterOffX * 0.45 + Math.cos(patrolAng) * patrolRad;
-          const rawZ = gFlag.pos.z + sp.clusterOffZ * 0.45 + Math.sin(patrolAng) * patrolRad;
-          const safeGoal = this.world.pushOutOfBuildingFootprint(rawX, rawZ, 2.6);
+        if (gFlag && bot._assignedGarrisonFlagIdx !== garrisonFlagIdx) {
+          // Assign a stable, building-clear guard post once per garrison assignment (never thrash every 2s!)
+          bot._assignedGarrisonFlagIdx = garrisonFlagIdx;
+          const seedNum =
+            typeof bot.patrolSeed === 'number'
+              ? bot.patrolSeed
+              : ((bot.name || 'B').charCodeAt(0) * 1.37 + (bot.squadMemberIndex || 0) * 0.91) % (Math.PI * 2);
+          bot.patrolSeed = seedNum;
+          const patrolRad = 10.5 + ((bot.squadMemberIndex || 0) % 4) * 3.8;
+          const rawX = gFlag.pos.x + sp.clusterOffX * 0.35 + Math.cos(seedNum) * patrolRad;
+          const rawZ = gFlag.pos.z + sp.clusterOffZ * 0.35 + Math.sin(seedNum) * patrolRad;
+          const safeGoal = this.world.pushOutOfBuildingFootprint(rawX, rawZ, 2.8);
           bot.waypointOffset.set(safeGoal.x - gFlag.pos.x, 0, safeGoal.z - gFlag.pos.z);
         }
+      } else {
+        bot._assignedGarrisonFlagIdx = -1;
+      }
+      if (bot.isGarrisonDefender && garrisonFlagIdx >= 0) {
+        // Stable garrison post maintained; casual wandering & sentry shifts handled smoothly in base state machine
       } else if (
         bot.playerOrderTimer > 0 &&
         (bot.playerOrderMode === 'OBJECTIVE' || bot.playerOrderMode === 'CHARGE') &&
@@ -1297,7 +1502,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
           }
         } else if (
           dSq < nearestDistSq * (player.isUavStealthMasked ? 0.36 : 1.0) &&
-          this.canBotSeeTarget(bot, 'PLAYER', player.pos, true)
+          this.canBotSeeTarget(bot, 'PLAYER', player.pos, true, player)
         ) {
           nearestDistSq = dSq;
           nearestEnemy = setBotEnemyRef(bot, player.pos, true, false, player);
@@ -1313,7 +1518,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
           if (other.dead || other.downed || other.drivingVehicle || other.team === bot.team) return;
           const dy = other.pos.y - bot.pos.y;
           const dSq = dSq2D + dy * dy;
-          if (dSq < nearestDistSq && this.canBotSeeTarget(bot, other.id, other.pos, true)) {
+          if (dSq < nearestDistSq && this.canBotSeeTarget(bot, other.id, other.pos, true, other)) {
             nearestDistSq = dSq;
             nearestEnemy = setBotEnemyRef(bot, other.pos, false, false, other);
           }
@@ -1330,10 +1535,51 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
           if (dz > maxEngage || dz < -maxEngage) continue;
           const dy = other.pos.y - bot.pos.y;
           const dSq = dx * dx + dy * dy + dz * dz;
-          if (dSq < nearestDistSq && this.canBotSeeTarget(bot, other.id, other.pos, true)) {
+          if (dSq < nearestDistSq && this.canBotSeeTarget(bot, other.id, other.pos, true, other)) {
             nearestDistSq = dSq;
             nearestEnemy = setBotEnemyRef(bot, other.pos, false, false, other);
           }
+        }
+      }
+
+      // Squad Target Sharing: if a squadmate in our 9-man section has spotted an enemy, focus fire together!
+      const secScan = bot._sectionRef;
+      if (!nearestEnemy && secScan && secScan.contactTimer > 0 && secScan.sharedEnemyUnit) {
+        const sharedU = secScan.sharedEnemyUnit;
+        if (!sharedU.dead && !sharedU.downed && !sharedU.drivingVehicle) {
+          const sSq = bot.pos.distanceToSquared(sharedU.pos);
+          const sKey = secScan.sharedEnemyIsPlayer
+            ? 'PLAYER'
+            : secScan.sharedEnemyIsVehicle
+            ? `veh_${sharedU.id || ''}`
+            : sharedU.id || 'SHARED';
+          if (
+            sSq < maxEngage * maxEngage * 1.15 &&
+            this.canBotSeeTarget(bot, sKey, sharedU.pos, false, sharedU)
+          ) {
+            nearestDistSq = sSq;
+            nearestEnemy = setBotEnemyRef(
+              bot,
+              sharedU.pos,
+              secScan.sharedEnemyIsPlayer,
+              secScan.sharedEnemyIsVehicle,
+              sharedU
+            );
+          }
+        }
+      }
+      if (nearestEnemy && nearestEnemy.unit && secScan) {
+        secScan.contactTimer = Math.max(secScan.contactTimer || 0, 5.2);
+        secScan.threatPos.copy(nearestEnemy.pos);
+        secScan.hasThreatPos = true;
+        secScan.sharedEnemyUnit = nearestEnemy.unit;
+        secScan.sharedEnemyIsPlayer = Boolean(nearestEnemy.isPlayer);
+        secScan.sharedEnemyIsVehicle = Boolean(nearestEnemy.isVehicle);
+        if ((secScan.underSniperAlertTimer || 0) <= 0 && secScan.tacticalMode === 'TACTICAL_WEDGE') {
+          const fl = this.world?.flags?.[bot.targetFlagIndex];
+          const dFl = fl ? Math.hypot(fl.pos.x - bot.pos.x, fl.pos.z - bot.pos.z) : 999;
+          const atk = Boolean(fl && (fl.owner !== bot.team || fl.contested));
+          secScan.tacticalMode = atk && dFl <= 46 ? 'PINCER_ASSAULT' : 'BOUNDING_OVERWATCH';
         }
       }
       bot._cachedEnemy = nearestEnemy;
@@ -1355,9 +1601,14 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       }
     }
 
-    // Squad Cohesion: Non-leader squadmates stay grouped around their own Squad Leader via O(1) lookup!
-    let squadLeaderBot = null;
-    if (!seekingVehicle && !bot.isSquadLeader) {
+    // Full-Map Cohesive Squad Section Movement & Tactical Flanking Avenues:
+    // - Section Leader steers along a squad-specific Flanking Avenue of Approach (±18m–36m arc) when pushing enemy/neutral flags
+    //   so squads attack down parallel streets & flanks instead of single-file!
+    // - Non-leader members anchor to their active Section Leader across the ENTIRE march & assault in an oriented
+    //   Tactical Wedge / Staggered Street Column (automatic 2IC leader succession if SL falls!).
+    const secRef = bot._sectionRef;
+    let squadLeaderBot = secRef && secRef.leader ? secRef.leader : null;
+    if (!squadLeaderBot && !bot.isSquadLeader) {
       const cand =
         this.squadLeaders && this.squadLeaders[bot.team]
           ? this.squadLeaders[bot.team][bot.squad]
@@ -1365,9 +1616,68 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       if (cand && !cand.dead && !cand.downed && !cand.drivingVehicle) {
         squadLeaderBot = cand;
       }
-      if (squadLeaderBot && bot.memberClusterOffset && squadLeaderBot.pos.distanceTo(goal) < 55) {
-        goal.copy(squadLeaderBot.pos).add(bot.memberClusterOffset);
+    }
+    const isUrbanZone = Math.abs(bot.pos.x) < 280 && Math.abs(bot.pos.z) < 260;
+    let formationSlotInfo = null;
+    if (!seekingVehicle && !bot.isGarrisonDefender) {
+      if (secRef && secRef.tacticalMode === 'COVER_SCRAMBLE' && secRef.coverAnchor) {
+        const slotOff = computeOrientedSquadOffset(
+          bot,
+          secRef.fwdX,
+          secRef.fwdZ,
+          'STAY_CLOSE',
+          true
+        );
+        formationSlotInfo = slotOff;
+        goal.set(
+          secRef.coverAnchor.x + slotOff.offX * 0.65,
+          bot.pos.y,
+          secRef.coverAnchor.z + slotOff.offZ * 0.65
+        );
         hasDynamicGoal = true;
+      } else if (
+        squadLeaderBot &&
+        squadLeaderBot !== bot &&
+        !(bot.playerOrderTimer > 0 && (bot.playerOrderMode === 'FOLLOW' || bot.playerOrderMode === 'HOLD'))
+      ) {
+        const slotOff = computeOrientedSquadOffset(
+          bot,
+          secRef ? secRef.fwdX : Math.sin(squadLeaderBot.yaw || 0),
+          secRef ? secRef.fwdZ : Math.cos(squadLeaderBot.yaw || 0),
+          bot.spacingMode || 'FAN_OUT',
+          isUrbanZone
+        );
+        formationSlotInfo = slotOff;
+        goal.set(
+          squadLeaderBot.pos.x + slotOff.offX,
+          bot.pos.y,
+          squadLeaderBot.pos.z + slotOff.offZ
+        );
+        hasDynamicGoal = true;
+      } else if (
+        squadLeaderBot === bot &&
+        secRef &&
+        targetFlag &&
+        (targetFlag.owner !== bot.team || targetFlag.contested) &&
+        !(
+          bot.playerOrderTimer > 0 &&
+          (bot.playerOrderMode === 'FOLLOW' ||
+            bot.playerOrderMode === 'HOLD' ||
+            bot.playerOrderMode === 'RETREAT')
+        )
+      ) {
+        // Section Leader curves approach along a tactical flank avenue when 48m–240m out from objective!
+        const fDx = targetFlag.pos.x - bot.pos.x;
+        const fDz = targetFlag.pos.z - bot.pos.z;
+        const fDist = Math.hypot(fDx, fDz);
+        if (fDist > 48 && fDist < 260) {
+          const flankRatio = THREE.MathUtils.clamp((fDist - 42) / 140, 0, 1);
+          const perpFx = (-fDz / fDist) * secRef.flankSign;
+          const perpFz = (fDx / fDist) * secRef.flankSign;
+          goal.x += perpFx * (secRef.flankMagnitude || 24) * flankRatio;
+          goal.z += perpFz * (secRef.flankMagnitude || 24) * flankRatio;
+          hasDynamicGoal = true;
+        }
       }
     }
 
@@ -1720,10 +2030,19 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.isGarrisonDefender ||
         bot.inFriendlyForwardBase;
 
+      const canUseProneStance =
+        !isMedievalEra &&
+        !isMeleeKnight &&
+        !bot.isMountedKnight &&
+        !bot.isDinosaur &&
+        !bot.isSwimming &&
+        (bot.postReviveTimer || 0) <= 0;
+
       if (isRetreatingNow) {
         // Mount & Blade Tactical Retreat / Fighting Withdrawal:
         // Pull back toward rear objective/keep (or directly away from enemy) while keeping weapon aimed at pursuers!
         bot.isCrouching = false;
+        bot.isProne = false;
         bot.leanDir = 0;
         bot.inShieldWall = false;
         if (distToGoal > 4.5 && bot.playerOrderMode === 'RETREAT') {
@@ -1736,6 +2055,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         // Mount & Blade All-Out Charge / Melee Shock Assault:
         // Infantry & Knights charge aggressively toward the enemy line to close into sword/polearm/point-blank range!
         bot.isCrouching = false;
+        bot.isProne = false;
         bot.leanDir = 0;
         bot.inShieldWall = false;
         const stopDist = isMeleeKnight ? 2.4 : 8.5;
@@ -1749,22 +2069,107 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         }
       } else if (isShieldWallDefending) {
         // Mount & Blade Shield Wall / Entrenched Line Defense:
-        // Soldiers hold their line, lock shields (crouching/bracing against arrows), and counter-strike enemies that breach within 6m!
+        // Soldiers hold their line, lock shields (one-knee / prone marksmanship), and counter-strike enemies that breach within 6m!
         bot.inShieldWall = isMedievalEra;
         if (distToGoal > 5.5) {
           bot.isCrouching = false;
+          bot.isProne = false;
           bot.leanDir = 0;
           desiredDir.copy(toGoal);
           desiredSpeed = BOT.SPEED_COMBAT_MED;
         } else if (isMeleeKnight && nearestDistSq <= 6.2 * 6.2) {
           // Enemy reached the shield wall — step forward one pace to strike with sword/polearm!
           bot.isCrouching = false;
+          bot.isProne = false;
           bot.leanDir = 0;
           desiredDir.copy(toEnemy);
           desiredSpeed = 3.2;
         } else {
-          bot.isCrouching = true;
+          const wantProneDefense =
+            canUseProneStance &&
+            nearestDistSq > 34 * 34 &&
+            (bot.role === 'RECON' || bot.role === 'SUPPORT' || (bot.suppressionLevel || 0) > 0.55);
+          bot.isProne = wantProneDefense;
+          bot.isCrouching = !wantProneDefense;
           bot.leanDir = 0;
+          desiredSpeed = 0;
+        }
+      } else if (
+        !isMedievalEra &&
+        !bot.isDinosaur &&
+        secRef &&
+        secRef.tacticalMode === 'COVER_SCRAMBLE' &&
+        secRef.coverAnchor
+      ) {
+        // Coordinated Sniper / Overwatch Reaction:
+        // Support LMG & Recon Marksman drop prone/kneel to lay counter-suppression while Riflemen/Medics sprint to cover as a pack!
+        const isCounterSuppressor =
+          (bot.role === 'RECON' || bot.role === 'SUPPORT') && nearestDistSq <= 155 * 155;
+        if (isCounterSuppressor && canUseProneStance) {
+          bot.isProne = bot.role === 'RECON' || nearestDistSq > 45 * 45;
+          bot.isCrouching = !bot.isProne;
+          bot.leanDir = 0;
+          desiredSpeed = 0;
+        } else if (distToGoal > 3.2) {
+          bot.isProne = false;
+          bot.isCrouching = false;
+          bot.leanDir = 0;
+          desiredDir.copy(toGoal);
+          desiredSpeed = BOT.SPEED_SPRINT;
+        } else {
+          bot.isProne = false;
+          bot.isCrouching = true;
+          bot.leanDir = bot.strafeDir;
+          desiredSpeed = 0;
+        }
+      } else if (
+        !isMedievalEra &&
+        !bot.isDinosaur &&
+        secRef &&
+        !bot.inFriendlyForwardBase &&
+        !bot.isGarrisonDefender &&
+        (secRef.tacticalMode === 'BOUNDING_OVERWATCH' || secRef.tacticalMode === 'PINCER_ASSAULT')
+      ) {
+        // Coordinated Two-Fireteam Tactical Assault (Fireteam Alpha Base-of-Fire + Fireteam Bravo Flank Maneuver):
+        // Every 3.8s, one fireteam kneels/prones and pours suppressive fire while the other fireteam bounds forward together!
+        const slotIndex = (bot.squadMemberIndex || 0) % 9;
+        const myFireteam = formationSlotInfo
+          ? formationSlotInfo.fireteam
+          : bot.role === 'SUPPORT' || bot.role === 'RECON'
+          ? 0
+          : slotIndex % 2;
+        const isBoundingNow =
+          secRef.tacticalMode === 'PINCER_ASSAULT'
+            ? myFireteam === 1 || secRef.activeBoundFireteam === myFireteam
+            : myFireteam === secRef.activeBoundFireteam;
+        const flankPerp = tmpVec3(-toEnemy.z * secRef.flankSign, 0, toEnemy.x * secRef.flankSign);
+
+        if (isBoundingNow && nearestDistSq > 11 * 11) {
+          bot.isProne = false;
+          bot.isCrouching = false;
+          bot.leanDir = 0;
+          const flankWeight =
+            secRef.tacticalMode === 'PINCER_ASSAULT' && myFireteam === 1 ? 0.58 : 0.26;
+          if (targetFlag && (targetFlag.owner !== bot.team || targetFlag.contested)) {
+            const flagDir = tmpVec3(targetFlag.pos.x - bot.pos.x, 0, targetFlag.pos.z - bot.pos.z);
+            if (flagDir.lengthSq() > 0.1) flagDir.normalize();
+            desiredDir.copy(flagDir).addScaledVector(flankPerp, flankWeight).normalize();
+          } else {
+            desiredDir.copy(toEnemy).addScaledVector(flankPerp, flankWeight).normalize();
+          }
+          desiredSpeed =
+            secRef.tacticalMode === 'PINCER_ASSAULT'
+              ? BOT.SPEED_COMBAT_FAST
+              : BOT.SPEED_COMBAT_MED;
+        } else {
+          // Overwatch Fireteam: halt in place, drop to One-Knee or Prone, and suppress the squad's shared contact!
+          const goProneOverwatch =
+            canUseProneStance &&
+            (bot.role === 'RECON' || bot.role === 'SUPPORT') &&
+            nearestDistSq > 30 * 30;
+          bot.isProne = goProneOverwatch;
+          bot.isCrouching = !goProneOverwatch;
+          bot.leanDir = (secRef.boundTimer || 0) > 1.8 ? bot.strafeDir : 0;
           desiredSpeed = 0;
         }
       } else {
@@ -1783,16 +2188,29 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
             distToCapCenter > (assaultFlag.radius || 34) * 0.78
         );
 
-        if (needsPushIntoFob && nearestDistSq > 11 * 11) {
+        if (needsPushIntoFob && nearestDistSq > 11 * 11 && !(bot.role === 'RECON' && nearestDistSq > 52 * 52)) {
           bot.isCrouching = false;
+          bot.isProne = false;
           bot.leanDir = bot.tacticPhase === 1 ? bot.strafeDir : 0;
           desiredDir.copy(toGoal).addScaledVector(perp, bot.strafeDir * 0.28).normalize();
           desiredSpeed = bot.tacticPhase === 0 ? BOT.SPEED_COMBAT_MED : BOT.SPEED_COMBAT_SLOW;
+        } else if (
+          canUseProneStance &&
+          ((bot.role === 'RECON' && nearestDistSq > 32 * 32) ||
+            (bot.role === 'SUPPORT' && bot.tactic === 'ANCHOR_CROUCH' && nearestDistSq > 28 * 28) ||
+            ((bot.suppressionLevel || 0) > 0.62 && nearestDistSq > 24 * 24))
+        ) {
+          bot.isProne = true;
+          bot.isCrouching = false;
+          bot.leanDir = 0;
+          desiredSpeed = 0;
         } else if (bot.tactic === 'ANCHOR_CROUCH') {
+          bot.isProne = false;
           bot.isCrouching = true;
           bot.leanDir = 0;
           desiredSpeed = 0;
         } else if (bot.tactic === 'COVER_PEEK') {
+          bot.isProne = false;
           if (bot.tacticPhase === 0) {
             bot.isCrouching = true;
             bot.leanDir = 0;
@@ -1803,6 +2221,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
             desiredSpeed = 0;
           }
         } else if (bot.tactic === 'ADVANCE_PAUSE') {
+          bot.isProne = false;
           if (bot.tacticPhase === 0 && nearestDistSq > 16 * 16) {
             bot.isCrouching = false;
             bot.leanDir = 0;
@@ -1814,6 +2233,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
             desiredSpeed = 0;
           }
         } else if (bot.tactic === 'FLANK_RUSH') {
+          bot.isProne = false;
           bot.isCrouching = false;
           bot.leanDir = 0;
           if (nearestDistSq > 10 * 10) {
@@ -1823,6 +2243,7 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
             desiredSpeed = 0;
           }
         } else {
+          bot.isProne = false;
           bot.isCrouching = false;
           bot.leanDir = 0;
           if (bot.tacticPhase === 0 && distToGoal > 6) {
@@ -1855,47 +2276,138 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
           (!bot.isSquadLeader && squadLeaderBot && distToSL <= maxClusterDist && distToAnchor <= maxSqDist + 6) ||
           distToGoal <= goalTol);
 
-      if (!squadInPosition && distToGoal > 2.6) {
+      const inBaseArea =
+        (bot.isGarrisonDefender || bot.inFriendlyForwardBase) &&
+        !isFollowOrHold &&
+        targetFlag &&
+        distToGoal <= 24.0;
+
+      if (!squadInPosition && !inBaseArea && distToGoal > 3.2) {
         bot.isCrouching = false;
+        bot.isProne = false;
         bot.leanDir = 0;
         desiredDir.copy(toGoal);
-        // Double-time march sprint when >135m out of combat from objective across the 7,600m valley!
-        desiredSpeed = distToGoal > 135 ? BOT.SPEED_SPRINT * 1.18 : BOT.SPEED_PATROL;
-      } else if ((bot.isGarrisonDefender || bot.inFriendlyForwardBase) && !isFollowOrHold && targetFlag) {
-        // Active Base Perimeter Sentry Patrol: soldiers stationed in a friendly base walk perimeter beats
-        // between watchpoints (`5.2s` walk <-> `2.2s` overwatch scan) instead of standing like statues!
-        bot._baseSentryCycle = ((bot._baseSentryCycle ?? ((bot.name || 'A').charCodeAt(0) % 7)) + dt) % 7.4;
-        if (bot._baseSentryCycle < 5.2) {
-          if (!bot._sentryGoal || bot.pos.distanceToSquared(bot._sentryGoal) < 5.5) {
-            const nextAng = ((bot._sentryLeg || 0) * 1.95 + ((bot.name || 'A').charCodeAt(0) * 0.47)) % (Math.PI * 2);
-            bot._sentryLeg = (bot._sentryLeg || 0) + 1;
-            const rad = 9.5 + (bot._sentryLeg % 3) * 4.8;
+        if (secRef && secRef.tacticalMode === 'COVER_SCRAMBLE') {
+          desiredSpeed = BOT.SPEED_SPRINT * 1.08;
+        } else if (squadLeaderBot && squadLeaderBot !== bot && !isFollowOrHold) {
+          // Squadmates match their Section Leader's pace and sprint to close gaps (>14m) into cohesive wedge formation!
+          const leaderDistToFlag = targetFlag
+            ? Math.hypot(
+                targetFlag.pos.x - squadLeaderBot.pos.x,
+                targetFlag.pos.z - squadLeaderBot.pos.z
+              )
+            : distToGoal;
+          const baseMarchSpeed =
+            leaderDistToFlag > 135 ? BOT.SPEED_SPRINT * 1.12 : BOT.SPEED_PATROL;
+          desiredSpeed =
+            distToGoal > 18
+              ? Math.max(baseMarchSpeed, BOT.SPEED_SPRINT * 1.15)
+              : distToGoal > 8
+              ? baseMarchSpeed * 1.06
+              : Math.min(baseMarchSpeed, Math.max(3.6, distToGoal * 0.95));
+        } else {
+          // Section Leader eases march speed slightly (0.82x) when >=2 squadmates are catching up so the group stays tight!
+          const rawLeadSpeed = distToGoal > 135 ? BOT.SPEED_SPRINT * 1.14 : BOT.SPEED_PATROL;
+          desiredSpeed =
+            secRef && secRef.leader === bot && secRef.stragglerCount >= 2 && distToGoal > 28
+              ? rawLeadSpeed * 0.82
+              : rawLeadSpeed;
+        }
+      } else if (inBaseArea) {
+        // Desynchronized Realistic Base Life (ZERO shared o'clock jitter!):
+        // Each soldier has an independent randomized timer: ~62% hold calm stationary guard watch
+        // (standing relaxed or taking one knee / prone sniper overwatch with gentle head/sector scans),
+        // while ~38% stroll casually between clear perimeter points and pause 7s–17s at each stop!
+        if (typeof bot._baseStateTimer !== 'number') {
+          const hash =
+            ((bot.name || 'S').charCodeAt(0) * 31 +
+              ((bot.name || '0').charCodeAt((bot.name || '0').length - 1) || 17) * 13 +
+              (bot.squadMemberIndex || 0) * 19) %
+            97;
+          bot._baseBehaviorMode = hash % 10 < 6 ? 'GUARD_STAND' : 'WANDER_PAUSE';
+          bot._baseStateTimer = 2.5 + (hash / 97) * 16.0;
+          bot._guardKneel = hash % 5 === 0 && bot.role !== 'MEDIC';
+          bot._guardProne = bot.role === 'RECON' && hash % 3 === 0;
+          bot._idleWatchYaw = bot.yaw || 0;
+          bot._idleScanTimer = 3.0 + (hash % 7) * 1.1;
+        }
+
+        bot._baseStateTimer -= dt;
+        if (bot._baseStateTimer <= 0) {
+          const roll = Math.random();
+          if (roll < 0.62) {
+            // Stand or kneel calmly at current watch post for 10s–24s
+            bot._baseBehaviorMode = 'GUARD_STAND';
+            bot._baseStateTimer = 10.0 + Math.random() * 14.0;
+            bot._guardProne = bot.role === 'RECON' && Math.random() < 0.32 && !bot.isSwimming;
+            bot._guardKneel = !bot._guardProne && bot.role !== 'MEDIC' && Math.random() < 0.36;
+            const enemyAxisYaw = bot.team === 'US' ? Math.PI * 0.5 : -Math.PI * 0.5;
+            bot._idleWatchYaw = enemyAxisYaw + (Math.random() - 0.5) * 1.65;
+          } else {
+            // Stroll casually to a new building-clear point around the base perimeter
+            bot._baseBehaviorMode = 'WANDER_WALK';
+            bot._baseStateTimer = 9.0 + Math.random() * 7.0;
+            bot._guardProne = false;
+            bot._guardKneel = false;
+            const nextAng = Math.random() * Math.PI * 2;
+            const rad = 8.5 + Math.random() * 13.5;
             const candPt = this.world.pushOutOfBuildingFootprint(
               targetFlag.pos.x + Math.cos(nextAng) * rad,
               targetFlag.pos.z + Math.sin(nextAng) * rad,
-              2.6
+              3.1
             );
             if (!bot._sentryGoal) bot._sentryGoal = new THREE.Vector3();
             bot._sentryGoal.set(candPt.x, bot.pos.y, candPt.z);
           }
+        }
+
+        if (bot._baseBehaviorMode === 'WANDER_WALK' && bot._sentryGoal) {
           const sdx = bot._sentryGoal.x - bot.pos.x;
           const sdz = bot._sentryGoal.z - bot.pos.z;
-          const sLen = Math.hypot(sdx, sdz) || 1;
-          bot.isCrouching = false;
-          bot.leanDir = 0;
-          desiredDir.set(sdx / sLen, 0, sdz / sLen);
-          desiredSpeed = BOT.SPEED_PATROL * 0.72;
+          const sDist = Math.hypot(sdx, sdz);
+          if (sDist <= 2.2) {
+            // Reached watchpoint — stop and stand/chat/scan calmly for 7s–16s!
+            bot._baseBehaviorMode = 'WANDER_PAUSE';
+            bot._baseStateTimer = 7.0 + Math.random() * 9.0;
+            bot._idleWatchYaw = Math.atan2(sdx, sdz) + (Math.random() - 0.5) * 0.9;
+            bot.isProne = false;
+            bot.isCrouching = false;
+            bot.leanDir = 0;
+            desiredSpeed = 0;
+          } else {
+            bot.isProne = false;
+            bot.isCrouching = false;
+            bot.leanDir = 0;
+            desiredDir.set(sdx / sDist, 0, sdz / sDist);
+            desiredSpeed = BOT.SPEED_PATROL * 0.58;
+          }
         } else {
-          bot.isCrouching = bot.role !== 'MEDIC';
+          // Calm stationary guard / casual idle pause with slow, natural sector scanning
+          bot.isProne = Boolean(bot._guardProne && !bot.isMountedKnight && !bot.isDinosaur);
+          bot.isCrouching = Boolean(!bot.isProne && bot._guardKneel);
           bot.leanDir = 0;
           desiredSpeed = 0;
+          bot._idleScanTimer = (bot._idleScanTimer || 4.0) - dt;
+          if (bot._idleScanTimer <= 0) {
+            bot._idleScanTimer = 4.5 + Math.random() * 6.5;
+            bot._idleWatchYaw = (bot._idleWatchYaw ?? bot.yaw) + (Math.random() - 0.5) * 0.85;
+          }
         }
       } else {
-        // Hold cohesive Squad overwatch formation using active spacing mode (STAY_CLOSE vs FAN_OUT)!
+        // Hold cohesive Squad overwatch formation (or stay low behind hard cover during COVER_SCRAMBLE)!
+        const scramblingInCover = Boolean(secRef && secRef.tacticalMode === 'COVER_SCRAMBLE');
+        bot.isProne = Boolean(
+          ((isFollowOrHold || scramblingInCover) &&
+            (bot.role === 'RECON' || (scramblingInCover && bot.role === 'SUPPORT'))) &&
+            !bot.isMountedKnight &&
+            !bot.isDinosaur &&
+            !bot.isSwimming
+        );
         bot.isCrouching =
-          (isFollowOrHold || bot.isGarrisonDefender || bot.inFriendlyForwardBase) &&
-          bot.role !== 'MEDIC';
-        bot.leanDir = 0;
+          !bot.isProne &&
+          (scramblingInCover ||
+            (isFollowOrHold && bot.role !== 'MEDIC' && (bot.squadMemberIndex || 0) % 2 === 0));
+        bot.leanDir = scramblingInCover ? bot.strafeDir : 0;
         desiredSpeed = 0;
       }
     }
@@ -1927,104 +2439,173 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       // While stowing medkit / bandages or unslinging rifle, keep pace slow and weapon lowered
       desiredSpeed = Math.min(desiredSpeed, 3.6);
     }
+    bot.lastHorizSpeed = desiredSpeed;
 
     // =======================================================================
-    // BUILDING EXTERIOR REPULSION, VOXEL WALL UNSTUCK, 8-ANGLE FAN WHISKERS & ANTI-STUCK WATCHDOG
+    // BUILDING EXTERIOR REPULSION, PERSISTENT AABB CORNER DETOURS & ANTI-STUCK WATCHDOG
+    // (100% Velocity-Driven Inertia — ZERO 1-Frame Position Teleports in Sniper Scopes!)
     // =======================================================================
     bot._wallRepulseTimer = (bot._wallRepulseTimer || 0) - dt;
     if (bot._wallRepulseTimer <= 0) {
-      bot._wallRepulseTimer = 0.45 + Math.random() * 0.25;
-      if (this.world.isInsideBuildingOrContainer && this.world.isInsideBuildingOrContainer(bot.pos.x, bot.pos.z, 1.15)) {
-        const pushedOut = this.world.pushOutOfBuildingFootprint(bot.pos.x, bot.pos.z, 1.85);
-        bot.pos.x = pushedOut.x;
-        bot.pos.z = pushedOut.z;
+      bot._wallRepulseTimer = 0.35 + Math.random() * 0.2;
+      if (this.world.isInsideBuildingOrContainer && this.world.isInsideBuildingOrContainer(bot.pos.x, bot.pos.z, 1.22)) {
+        const pushedOut = this.world.pushOutOfBuildingFootprint(bot.pos.x, bot.pos.z, 2.45);
+        const rx = pushedOut.x - bot.pos.x;
+        const rz = pushedOut.z - bot.pos.z;
+        const rLen = Math.hypot(rx, rz);
+        if (rLen > 0.05) {
+          bot._unstuckDirX = rx / rLen;
+          bot._unstuckDirZ = rz / rLen;
+          bot._unstuckSlideTimer = Math.min(1.25, Math.max(0.28, rLen / 4.2));
+          bot._detourWaypoint = { x: pushedOut.x, z: pushedOut.z, timer: 2.4 };
+        }
       }
 
-      // Check only if the soldier's center head/chest column is inside a full-height wall voxel
+      // Check if soldier's center head/chest column overlaps a wall voxel; slide smoothly outward via velocity!
       const gCenterHead = this.world.worldToGrid(bot.pos.x, bot.pos.y + 1.75, bot.pos.z);
       if (this.world.voxels.has(this.world.key(gCenterHead.gx, gCenterHead.gy, gCenterHead.gz))) {
         const escapeAngles = [0, Math.PI * 0.5, -Math.PI * 0.5, Math.PI, Math.PI * 0.25, -Math.PI * 0.25];
         for (let aIdx = 0; aIdx < escapeAngles.length; aIdx++) {
           const ang = (bot.yaw || 0) + Math.PI + escapeAngles[aIdx];
-          const tx = bot.pos.x + Math.sin(ang) * 1.65;
-          const tz = bot.pos.z + Math.cos(ang) * 1.65;
+          const ux = Math.sin(ang);
+          const uz = Math.cos(ang);
+          const tx = bot.pos.x + ux * 1.85;
+          const tz = bot.pos.z + uz * 1.85;
           const ty = this.world.getGroundHeightAt(tx, tz);
-          if (!this.isPointBlocked(tx, ty, tz, 0.15)) {
-            bot.pos.set(tx, ty, tz);
+          if (!this.isPointBlocked(tx, ty, tz, 0.25)) {
+            bot._unstuckDirX = ux;
+            bot._unstuckDirZ = uz;
+            bot._unstuckSlideTimer = 0.45;
+            bot._detourWaypoint = { x: tx, z: tz, timer: 2.0 };
             break;
           }
         }
       }
     }
 
+    if ((bot._unstuckSlideTimer || 0) > 0) {
+      bot._unstuckSlideTimer = Math.max(0, bot._unstuckSlideTimer - dt);
+      const slideSpd = 4.4;
+      bot.velX = THREE.MathUtils.lerp(bot.velX || 0, (bot._unstuckDirX || 0) * slideSpd, Math.min(1, dt * 12));
+      bot.velZ = THREE.MathUtils.lerp(bot.velZ || 0, (bot._unstuckDirZ || 0) * slideSpd, Math.min(1, dt * 12));
+      bot.pos.x += bot.velX * dt;
+      bot.pos.z += bot.velZ * dt;
+    }
+
     if (bot.avoidanceTimer > 0) {
       bot.avoidanceTimer = Math.max(0, bot.avoidanceTimer - dt);
     }
 
-    // 8-Angle Fan Whisker Obstacle Avoidance (throttled per bot so 250 bots at FOB C never spike frame time)
+    // Persistent Building AABB Corner Detour + 8-Angle Fan Whisker Obstacle Avoidance:
+    // Holds `bot._detourWaypoint` all the way around wide buildings until within 2.2m of the exterior corner!
     if (desiredSpeed > 0.1) {
+      const navTargetX =
+        bot._baseBehaviorMode === 'WANDER_WALK' && bot._sentryGoal ? bot._sentryGoal.x : goal.x;
+      const navTargetZ =
+        bot._baseBehaviorMode === 'WANDER_WALK' && bot._sentryGoal ? bot._sentryGoal.z : goal.z;
+
+      if (bot._detourWaypoint) {
+        bot._detourWaypoint.timer -= dt;
+        const dCorner = Math.hypot(bot._detourWaypoint.x - bot.pos.x, bot._detourWaypoint.z - bot.pos.z);
+        if (dCorner <= 2.25 || bot._detourWaypoint.timer <= 0) {
+          bot._detourWaypoint = null;
+          bot._cachedSteerAngle = null;
+        } else {
+          desiredDir.set(
+            (bot._detourWaypoint.x - bot.pos.x) / dCorner,
+            0,
+            (bot._detourWaypoint.z - bot.pos.z) / dCorner
+          );
+        }
+      }
+
       bot._whiskerTimer = (bot._whiskerTimer || 0) - dt;
       if (bot._whiskerTimer <= 0) {
-        bot._whiskerTimer = 0.14 + Math.random() * 0.08;
+        bot._whiskerTimer = 0.16 + Math.random() * 0.08;
         const baseAngle = Math.atan2(desiredDir.x, desiredDir.z);
         const centerBlockedNear = this.isPointBlocked(
-          bot.pos.x + Math.sin(baseAngle) * 1.7,
+          bot.pos.x + Math.sin(baseAngle) * 1.85,
           bot.pos.y,
-          bot.pos.z + Math.cos(baseAngle) * 1.7,
-          0.15
+          bot.pos.z + Math.cos(baseAngle) * 1.85,
+          0.35
         );
         const centerBlockedFar =
           centerBlockedNear ||
           this.isPointBlocked(
-            bot.pos.x + Math.sin(baseAngle) * 3.0,
+            bot.pos.x + Math.sin(baseAngle) * 3.4,
             bot.pos.y,
-            bot.pos.z + Math.cos(baseAngle) * 3.0,
-            0.15
+            bot.pos.z + Math.cos(baseAngle) * 3.4,
+            0.35
           );
 
         if (centerBlockedNear || centerBlockedFar) {
-          // 1) Smart Building AABB Exterior Corner Detour: when a wide building blocks the path toward `goal`,
-          //    route directly toward the closest clear exterior corner (+2.8m margin) so bots never oscillate behind walls!
-          let cornerAngle = null;
+          // 1) Smart Persistent Building AABB Exterior Corner Detour (+3.35m clearance around building corners!)
+          let foundDetour = false;
           if (Array.isArray(this.world.buildings)) {
-            const probeX = bot.pos.x + Math.sin(baseAngle) * 2.6;
-            const probeZ = bot.pos.z + Math.cos(baseAngle) * 2.6;
-            for (let bi = 0; bi < this.world.buildings.length; bi++) {
-              const bld = this.world.buildings[bi];
-              if (
-                probeX >= bld.minWx - 1.4 &&
-                probeX <= bld.maxWx + 1.4 &&
-                probeZ >= bld.minWz - 1.4 &&
-                probeZ <= bld.maxWz + 1.4
-              ) {
-                const pad = 2.85;
-                const corners = [
-                  [bld.minWx - pad, bld.minWz - pad],
-                  [bld.maxWx + pad, bld.minWz - pad],
-                  [bld.minWx - pad, bld.maxWz + pad],
-                  [bld.maxWx + pad, bld.maxWz + pad]
-                ];
-                let bestCornerCost = Infinity;
-                for (let ci = 0; ci < 4; ci++) {
-                  const [cx, cz] = corners[ci];
-                  const dBot = Math.hypot(cx - bot.pos.x, cz - bot.pos.z);
-                  if (dBot < 1.2) continue;
-                  const dGoal = Math.hypot(goal.x - cx, goal.z - cz);
-                  const cost = dBot + dGoal * 0.92;
-                  if (cost < bestCornerCost && !this.isPointBlocked(cx, bot.pos.y, cz, 0.15)) {
-                    bestCornerCost = cost;
-                    cornerAngle = Math.atan2(cx - bot.pos.x, cz - bot.pos.z);
-                  }
+            let hitBld = null;
+            for (const stepDist of [2.1, 3.8, 5.6]) {
+              const px = bot.pos.x + Math.sin(baseAngle) * stepDist;
+              const pz = bot.pos.z + Math.cos(baseAngle) * stepDist;
+              for (let bi = 0; bi < this.world.buildings.length; bi++) {
+                const bld = this.world.buildings[bi];
+                if (
+                  px >= bld.minWx - 1.55 &&
+                  px <= bld.maxWx + 1.55 &&
+                  pz >= bld.minWz - 1.55 &&
+                  pz <= bld.maxWz + 1.55
+                ) {
+                  hitBld = bld;
+                  break;
                 }
-                break;
+              }
+              if (hitBld) break;
+            }
+
+            if (hitBld) {
+              const pad = 3.35;
+              const corners = [
+                [hitBld.minWx - pad, hitBld.minWz - pad],
+                [hitBld.maxWx + pad, hitBld.minWz - pad],
+                [hitBld.minWx - pad, hitBld.maxWz + pad],
+                [hitBld.maxWx + pad, hitBld.maxWz + pad]
+              ];
+              let bestCorner = null;
+              let bestCornerCost = Infinity;
+              for (let ci = 0; ci < 4; ci++) {
+                const [cx, cz] = corners[ci];
+                const dBot = Math.hypot(cx - bot.pos.x, cz - bot.pos.z);
+                if (dBot < 1.5) continue;
+                // Reject corners where the midpoint from bot -> corner cuts right through this building's interior!
+                const midX = (bot.pos.x + cx) * 0.5;
+                const midZ = (bot.pos.z + cz) * 0.5;
+                const cutsInterior =
+                  midX > hitBld.minWx + 0.4 &&
+                  midX < hitBld.maxWx - 0.4 &&
+                  midZ > hitBld.minWz + 0.4 &&
+                  midZ < hitBld.maxWz - 0.4;
+                if (cutsInterior) continue;
+                const dGoal = Math.hypot(navTargetX - cx, navTargetZ - cz);
+                const cost = dBot + dGoal * 0.88;
+                if (cost < bestCornerCost && !this.isPointBlocked(cx, bot.pos.y, cz, 0.2)) {
+                  bestCornerCost = cost;
+                  bestCorner = [cx, cz];
+                }
+              }
+              if (bestCorner) {
+                bot._detourWaypoint = {
+                  x: bestCorner[0],
+                  z: bestCorner[1],
+                  timer: Math.min(7.0, Math.max(2.6, Math.hypot(bestCorner[0] - bot.pos.x, bestCorner[1] - bot.pos.z) / 2.2))
+                };
+                const ang = Math.atan2(bestCorner[0] - bot.pos.x, bestCorner[1] - bot.pos.z);
+                bot._cachedSteerAngle = ang;
+                bot.avoidanceTimer = Math.max(bot.avoidanceTimer || 0, 1.4);
+                foundDetour = true;
               }
             }
           }
 
-          if (typeof cornerAngle === 'number') {
-            bot._cachedSteerAngle = cornerAngle;
-            bot.avoidanceTimer = Math.max(bot.avoidanceTimer || 0, 1.1);
-          } else {
+          if (!foundDetour) {
             const sign = bot.avoidanceSign || 1;
             const fanOffsets = [
               0.52 * sign,
@@ -2040,27 +2621,32 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
             for (let fIdx = 0; fIdx < fanOffsets.length; fIdx++) {
               const testAngle = baseAngle + fanOffsets[fIdx];
               const nearClear = !this.isPointBlocked(
-                bot.pos.x + Math.sin(testAngle) * 2.1,
+                bot.pos.x + Math.sin(testAngle) * 2.35,
                 bot.pos.y,
-                bot.pos.z + Math.cos(testAngle) * 2.1,
-                0.15
+                bot.pos.z + Math.cos(testAngle) * 2.35,
+                0.3
               );
               if (nearClear) {
                 chosenAngle = testAngle;
                 if (bot.avoidanceTimer <= 0) {
                   bot.avoidanceSign = Math.sign(fanOffsets[fIdx]) || 1;
-                  bot.avoidanceTimer = 1.5;
+                  bot.avoidanceTimer = 1.6;
                 }
                 break;
               }
             }
             bot._cachedSteerAngle = chosenAngle;
           }
-        } else {
+        } else if (!bot._detourWaypoint && bot.avoidanceTimer <= 0) {
           bot._cachedSteerAngle = null;
         }
       }
-      if (typeof bot._cachedSteerAngle === 'number') {
+      if (bot._detourWaypoint) {
+        const dCx = bot._detourWaypoint.x - bot.pos.x;
+        const dCz = bot._detourWaypoint.z - bot.pos.z;
+        const dCLen = Math.hypot(dCx, dCz) || 1;
+        desiredDir.set(dCx / dCLen, 0, dCz / dCLen);
+      } else if (typeof bot._cachedSteerAngle === 'number') {
         desiredDir.set(Math.sin(bot._cachedSteerAngle), 0, Math.cos(bot._cachedSteerAngle));
       }
     }
@@ -2177,14 +2763,14 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       }
     }
 
-    // Apply horizontal movement & safe low-cover vault (never vault through building windows!)
-    if (actualSpeed > 0.15) {
+    // Apply horizontal movement & safe low-cover vault (continues smoothly down to 0.02 m/s for natural braking inertia!)
+    if (actualSpeed > 0.025) {
       const nextX = bot.pos.x + bot.velX * dt;
       const nextZ = bot.pos.z + bot.velZ * dt;
 
       const entersBuilding =
         this.world.isInsideBuildingOrContainer &&
-        this.world.isInsideBuildingOrContainer(nextX, nextZ, 1.35);
+        this.world.isInsideBuildingOrContainer(nextX, nextZ, 1.42);
       const gWaist = this.world.worldToGrid(nextX, bot.pos.y + 0.8, nextZ);
       const gHead = this.world.worldToGrid(nextX, bot.pos.y + 1.9, nextZ);
       const gAbove = this.world.worldToGrid(nextX, bot.pos.y + 2.9, nextZ);
@@ -2212,30 +2798,32 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.pos.x = nextX;
         bot.pos.z = nextZ;
       } else {
-        // Slide tangentially along the wall instead of getting wedged
+        // Slide tangentially along the wall with smooth momentum preservation instead of snapping or bouncing
         const slideX = bot.pos.x + bot.velX * dt;
         const slideZ = bot.pos.z + bot.velZ * dt;
         if (!this.isPointBlocked(slideX, bot.pos.y, bot.pos.z)) {
           bot.pos.x = slideX;
+          bot.velZ *= Math.pow(0.05, dt);
         } else if (!this.isPointBlocked(bot.pos.x, bot.pos.y, slideZ)) {
           bot.pos.z = slideZ;
+          bot.velX *= Math.pow(0.05, dt);
         } else {
-          bot.velX *= -0.25;
-          bot.velZ *= -0.25;
+          bot.velX *= Math.pow(0.03, dt);
+          bot.velZ *= Math.pow(0.03, dt);
           bot.strafeDir = -bot.strafeDir;
           bot.avoidanceSign = -(bot.avoidanceSign || 1);
-          bot.avoidanceTimer = 1.2;
+          bot.avoidanceTimer = 1.4;
         }
       }
     }
 
-    // Anti-Stuck Progress Watchdog: ensures ZERO bots ever remain trapped behind buildings or walls
+    // Anti-Stuck Progress Watchdog (Inertia-Preserving Detour Steering — ZERO Position Snaps / Teleports!)
     if (!bot.lastProgressPos) {
       bot.lastProgressPos = bot.pos.clone();
     }
-    if (desiredSpeed > 0.85 && !bot.rescueTarget && (bot.postReviveTimer || 0) <= 0) {
+    if (desiredSpeed > 1.35 && !bot.rescueTarget && (bot.postReviveTimer || 0) <= 0) {
       bot.stuckTimer = (bot.stuckTimer || 0) + dt;
-      if (bot.stuckTimer >= 0.55) {
+      if (bot.stuckTimer >= 0.65) {
         const movedDist = Math.hypot(
           bot.pos.x - bot.lastProgressPos.x,
           bot.pos.z - bot.lastProgressPos.z
@@ -2243,34 +2831,48 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.lastProgressPos.copy(bot.pos);
         bot.stuckTimer = 0;
 
-        if (movedDist < 0.7) {
+        if (movedDist < 0.42) {
           bot.stuckCount = (bot.stuckCount || 0) + 1;
           bot.avoidanceSign = -(bot.avoidanceSign || 1);
-          bot.avoidanceTimer = 1.6;
+          bot.avoidanceTimer = 1.8;
           if (bot.stuckCount >= 2) {
             const pushedOut = this.world.pushOutOfBuildingFootprint
-              ? this.world.pushOutOfBuildingFootprint(bot.pos.x, bot.pos.z, 2.8)
+              ? this.world.pushOutOfBuildingFootprint(bot.pos.x, bot.pos.z, 3.1)
               : { x: bot.pos.x, z: bot.pos.z };
             const perpSideX = -desiredDir.z * (bot.avoidanceSign || 1);
             const perpSideZ = desiredDir.x * (bot.avoidanceSign || 1);
-            const candX = pushedOut.x + perpSideX * 2.6 + desiredDir.x * 1.2;
-            const candZ = pushedOut.z + perpSideZ * 2.6 + desiredDir.z * 1.2;
-            if (!this.isPointBlocked(candX, bot.pos.y, candZ)) {
-              bot.pos.x = candX;
-              bot.pos.z = candZ;
-              bot.stuckCount = 0;
-            } else if (bot.stuckCount >= 4) {
+            const candX = pushedOut.x + perpSideX * 3.2 - desiredDir.x * 0.8;
+            const candZ = pushedOut.z + perpSideZ * 3.2 - desiredDir.z * 0.8;
+            let detourX = candX;
+            let detourZ = candZ;
+            if (this.isPointBlocked(detourX, bot.pos.y, detourZ) && bot.stuckCount >= 4) {
               const safePos = this.world.findSafeSpawnPoint(
-                pushedOut.x + perpSideX * 3.8,
-                pushedOut.z + perpSideZ * 3.8
+                pushedOut.x + perpSideX * 4.2,
+                pushedOut.z + perpSideZ * 4.2
               );
-              if (Math.hypot(safePos.x - bot.pos.x, safePos.z - bot.pos.z) <= 22.0) {
-                bot.pos.copy(safePos);
-              }
+              detourX = safePos.x;
+              detourZ = safePos.z;
+            }
+            const dxD = detourX - bot.pos.x;
+            const dzD = detourZ - bot.pos.z;
+            const dLen = Math.hypot(dxD, dzD);
+            if (dLen > 0.25) {
+              const ux = dxD / dLen;
+              const uz = dzD / dLen;
+              bot._detourWaypoint = {
+                x: detourX,
+                z: detourZ,
+                timer: Math.min(5.5, Math.max(1.8, dLen / 3.2))
+              };
+              bot._cachedSteerAngle = Math.atan2(ux, uz);
+              // Smooth velocity steer away from obstruction (never teleports `bot.pos`!)
+              bot._unstuckDirX = ux;
+              bot._unstuckDirZ = uz;
+              bot._unstuckSlideTimer = Math.min(0.85, Math.max(0.32, dLen / 5.5));
+            }
+            if (bot.stuckCount >= 5) {
               bot.stuckCount = 0;
             }
-            bot.velX = 0;
-            bot.velZ = 0;
           }
         } else {
           bot.stuckCount = 0;
@@ -2282,19 +2884,20 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       bot.lastProgressPos.copy(bot.pos);
     }
 
-    // Vertical Gravity, Bridge Voxel Deck Support & River Surface Buoyancy (no walking underwater!)
+    // Vertical Gravity, Smooth Step-Up Inertia, Bridge Voxel Deck Support & River Surface Buoyancy
     bot.velY -= BOT.GRAVITY * dt;
+    const prevPosY = bot.pos.y;
     bot.pos.y += bot.velY * dt;
     let groundY = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
     const riverWaterY = this.world.mapDef?.dimensions?.riverWaterY ?? -0.85;
     if (this.world.era !== 'jurassic' && groundY < riverWaterY - 0.3 && this.world.voxels) {
       // Check if soldier is crossing on top of a solid voxel bridge deck above the river
-      const gBridge = this.world.worldToGrid(bot.pos.x, Math.max(0.2, bot.pos.y - 0.3), bot.pos.z);
+      const gBridge = this.world.worldToGrid(bot.pos.x, Math.max(0.2, prevPosY - 0.3), bot.pos.z);
       for (let bGy = gBridge.gy + 1; bGy >= -1; bGy--) {
         const bVox = this.world.getVoxel ? this.world.getVoxel(gBridge.gx, bGy, gBridge.gz) : null;
         if (bVox && !bVox.isProp) {
           const deckTop = typeof bVox.maxY === 'number' ? bVox.maxY : (bGy + 0.5) * 1.25;
-          if (deckTop > riverWaterY + 0.2 && deckTop <= bot.pos.y + 1.6) {
+          if (deckTop > riverWaterY + 0.2 && deckTop <= prevPosY + 1.6) {
             groundY = Math.max(groundY, deckTop);
             break;
           }
@@ -2302,14 +2905,21 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       }
     }
     if (bot.pos.y <= groundY) {
-      bot.pos.y = groundY;
+      // Smoothly climb steps/curbs up to 1.45m at human stride rate (7.5 m/s) instead of 1-frame head-popping!
+      if (bot.isGrounded && groundY > prevPosY + 0.06 && groundY - prevPosY <= 1.45) {
+        bot.pos.y = Math.min(groundY, prevPosY + 7.5 * dt);
+      } else {
+        bot.pos.y = groundY;
+      }
       bot.velY = 0;
       bot.isGrounded = true;
     }
-    // Buoyant River Surface Swimming: keep soldier head & chest ABOVE `riverWaterY` (`-0.85m`) instead of walking on the `-3.75m` riverbed!
+    // Buoyant River Surface Swimming: smooth buoyant float instead of instant snap!
     if (this.world.era !== 'jurassic' && bot.pos.y < riverWaterY - 0.95) {
       bot.isSwimming = true;
-      bot.pos.y = riverWaterY - 1.08;
+      const swimTargetY = riverWaterY - 1.08;
+      bot.pos.y = THREE.MathUtils.lerp(bot.pos.y, swimTargetY, Math.min(1, dt * 8.5));
+      if (Math.abs(swimTargetY - bot.pos.y) < 0.03) bot.pos.y = swimTargetY;
       bot.velY = 0;
       bot.isGrounded = true;
       bot.isCrouching = false;
@@ -2428,6 +3038,13 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         while (diff < -Math.PI) diff += Math.PI * 2;
         const maxMoveTurn = (isGettingUp || isEquippingWeapon ? 2.0 : 2.8) * dt;
         bot.yaw += THREE.MathUtils.clamp(diff, -maxMoveTurn, maxMoveTurn);
+      } else if (typeof bot._idleWatchYaw === 'number') {
+        // Gentle calm sector scanning when standing/kneeling on base watch (zero twitch!)
+        let diff = bot._idleWatchYaw - bot.yaw;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        const maxIdleTurn = 1.15 * dt;
+        bot.yaw += THREE.MathUtils.clamp(diff, -maxIdleTurn, maxIdleTurn);
       }
     }
 
@@ -2454,9 +3071,12 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       Math.min(1, dt * 12)
     );
 
-    // Smooth Crouch & Lean interpolation
-    const targetCrouch = bot.isCrouching ? 1 : 0;
-    bot.crouchAmount += (targetCrouch - bot.crouchAmount) * Math.min(1, dt * 11);
+    // Smooth 3-Stance Interpolation: Standing vs. Asymmetric One-Knee vs. Full Prone
+    const wantProneNow = Boolean(bot.isProne && actualSpeed <= 0.45 && bot.isGrounded && !bot.isSwimming);
+    const targetProne = wantProneNow ? 1 : 0;
+    bot.proneAmount = ((bot.proneAmount || 0) + (targetProne - (bot.proneAmount || 0)) * Math.min(1, dt * 8.5));
+    const targetCrouch = bot.isCrouching && !wantProneNow ? 1 : 0;
+    bot.crouchAmount += (targetCrouch - bot.crouchAmount) * Math.min(1, dt * 10.5);
 
     const targetLean = bot.leanDir;
     bot.leanAmount += (targetLean - bot.leanAmount) * Math.min(1, dt * 10);
@@ -2490,9 +3110,24 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       continue;
     }
 
-    // Multi-Joint Gait Cycle (Hips + Knees + Pelvis Bounce + Torso Counter-Twist)
+    // Multi-Joint Gait Cycle + True Asymmetric One-Knee & Full Prone Articulation
+    const pr = bot.proneAmount || 0;
+    const cr = bot.crouchAmount || 0;
     let bounceY = 0;
-    if (actualSpeed > 0.2 && bot.isGrounded) {
+    if (pr > 0.08 && actualSpeed <= 0.45) {
+      // Prone Stance: Legs extended straight back on the ground, slightly splayed for stability
+      parts.leftLeg.rotation.x = THREE.MathUtils.lerp(parts.leftLeg.rotation.x, 0.06 * pr, Math.min(1, dt * 10));
+      parts.rightLeg.rotation.x = THREE.MathUtils.lerp(parts.rightLeg.rotation.x, 0.06 * pr, Math.min(1, dt * 10));
+      parts.leftLeg.rotation.z = -0.15 * pr;
+      parts.rightLeg.rotation.z = 0.15 * pr;
+      parts.leftShin.rotation.x = THREE.MathUtils.lerp(parts.leftShin.rotation.x, 0.12 * pr, Math.min(1, dt * 10));
+      parts.rightShin.rotation.x = THREE.MathUtils.lerp(parts.rightShin.rotation.x, 0.12 * pr, Math.min(1, dt * 10));
+      parts.pelvisGroup.rotation.x = 1.48 * pr;
+      parts.pelvisGroup.rotation.z = 0;
+    } else if (actualSpeed > 0.2 && bot.isGrounded) {
+      parts.pelvisGroup.rotation.x = THREE.MathUtils.lerp(parts.pelvisGroup.rotation.x || 0, 0, Math.min(1, dt * 12));
+      parts.leftLeg.rotation.z = 0;
+      parts.rightLeg.rotation.z = 0;
       bot.animPhase += dt * actualSpeed * 1.85 * walkDirSign;
       const isSprinting = !inCombat && actualSpeed > 5.8;
       const hipAmp = isSprinting ? 0.82 : 0.56;
@@ -2505,15 +3140,18 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       const leftKnee = Math.max(0, -Math.cos(bot.animPhase) * kneeAmp) + 0.08;
       const rightKnee = Math.max(0, -Math.cos(bot.animPhase + Math.PI) * kneeAmp) + 0.08;
 
-      parts.leftLeg.rotation.x = leftHip - bot.crouchAmount * 0.45;
-      parts.rightLeg.rotation.x = rightHip - bot.crouchAmount * 0.45;
-      parts.leftShin.rotation.x = leftKnee + bot.crouchAmount * 0.85;
-      parts.rightShin.rotation.x = rightKnee + bot.crouchAmount * 0.85;
+      parts.leftLeg.rotation.x = leftHip - cr * 0.45;
+      parts.rightLeg.rotation.x = rightHip - cr * 0.45;
+      parts.leftShin.rotation.x = leftKnee + cr * 0.85;
+      parts.rightShin.rotation.x = rightKnee + cr * 0.85;
 
       // Vertical pelvis bounce (2x per full stride) + subtle lateral hip sway
       bounceY = Math.abs(Math.sin(bot.animPhase)) * (isSprinting ? 0.068 : 0.042);
       parts.pelvisGroup.rotation.z = Math.cos(bot.animPhase) * 0.045;
     } else if (!bot.isGrounded) {
+      parts.pelvisGroup.rotation.x = 0;
+      parts.leftLeg.rotation.z = 0;
+      parts.rightLeg.rotation.z = 0;
       // Mid-air vault / jump tuck pose
       parts.leftLeg.rotation.x = -0.55;
       parts.rightLeg.rotation.x = -0.25;
@@ -2521,64 +3159,72 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       parts.rightShin.rotation.x = 0.65;
       parts.pelvisGroup.rotation.z = 0;
     } else {
-      // Standing or Crouched Kneeling Stance + subtle breathing idle
-      const idleBreath = Math.sin(performance.now() * 0.003 + bIdx) * 0.015;
+      parts.pelvisGroup.rotation.x = THREE.MathUtils.lerp(parts.pelvisGroup.rotation.x || 0, 0, Math.min(1, dt * 12));
+      parts.leftLeg.rotation.z = 0;
+      parts.rightLeg.rotation.z = 0;
+      // Standing OR True Asymmetric One-Knee-on-the-Ground Marksmanship Pose:
+      // Left leg planted forward at ~90° bracing the lead arm; right thigh vertical & right shin bent 90° flat on ground!
+      const idleBreath = Math.sin(performance.now() * 0.0024 + bIdx * 1.7) * 0.012;
       parts.leftLeg.rotation.x = THREE.MathUtils.lerp(
         parts.leftLeg.rotation.x,
-        -bot.crouchAmount * 0.75,
-        Math.min(1, dt * 10)
-      );
-      parts.rightLeg.rotation.x = THREE.MathUtils.lerp(
-        parts.rightLeg.rotation.x,
-        -bot.crouchAmount * 0.35,
+        -cr * 1.18,
         Math.min(1, dt * 10)
       );
       parts.leftShin.rotation.x = THREE.MathUtils.lerp(
         parts.leftShin.rotation.x,
-        bot.crouchAmount * 1.25,
+        cr * 1.18,
+        Math.min(1, dt * 10)
+      );
+      parts.rightLeg.rotation.x = THREE.MathUtils.lerp(
+        parts.rightLeg.rotation.x,
+        cr * 0.12,
         Math.min(1, dt * 10)
       );
       parts.rightShin.rotation.x = THREE.MathUtils.lerp(
         parts.rightShin.rotation.x,
-        bot.crouchAmount * 0.85,
+        cr * 1.52,
         Math.min(1, dt * 10)
       );
       parts.pelvisGroup.rotation.z = 0;
-      bounceY = idleBreath;
+      bounceY = idleBreath * (1 - cr * 0.5);
     }
 
-    const hipY = 0.78 - bot.crouchAmount * 0.26 + bounceY;
+    const standKneelHipY = 0.78 - cr * 0.30 + bounceY;
+    const hipY = THREE.MathUtils.lerp(standKneelHipY, 0.22, pr);
     parts.pelvisGroup.position.y = hipY;
-    parts.upperBody.position.y = hipY;
+    parts.upperBody.position.y = THREE.MathUtils.lerp(hipY, 0.24, pr);
 
-    // Upper body forward sprint lean, post-revive / weapon-equip torso lean, combat crouch pitch, hit flinch, and Q/E peek tilt
-    const flinchPitch = bot.flinchTimer > 0 ? -0.32 : 0;
+    // Upper body forward sprint lean, one-knee brace, or full prone chest-on-elbows pitch
+    const flinchPitch = bot.flinchTimer > 0 ? -0.32 * (1 - pr * 0.6) : 0;
     const transitionLean = isGettingUp
       ? 0.44 * (1 - (bot.standUpProgress || 0) * 0.5)
       : isEquippingWeapon
         ? 0.32 * Math.min(1, bot.weaponReadyTimer)
         : 0;
-    parts.upperBody.rotation.x =
+    const uprightTorsoPitch =
       (isSprintingOut
         ? 0.26
-        : bot.crouchAmount * 0.16 + transitionLean + bot.aimPitch * 0.35 * (bot.aimRaiseProgress || 0)) +
+        : cr * 0.18 + transitionLean + bot.aimPitch * 0.35 * (bot.aimRaiseProgress || 0)) +
       flinchPitch;
+    parts.upperBody.rotation.x = THREE.MathUtils.lerp(uprightTorsoPitch, 1.38 + flinchPitch, pr);
     parts.upperBody.rotation.y = isSprintingOut ? Math.sin(bot.animPhase) * 0.1 : 0;
-    parts.upperBody.rotation.z = -bot.leanAmount * 0.24;
+    parts.upperBody.rotation.z = -bot.leanAmount * 0.24 * (1 - pr);
 
-    // Head tracks target pitch & tilts into rifle stock when weapon is raised in combat
-    parts.headGroup.rotation.x = isSprintingOut
+    // Head tracks target pitch & tilts upward in prone so eyes align with rifle scope!
+    const uprightHeadPitch = isSprintingOut
       ? -0.18
       : isGettingUp || isEquippingWeapon
         ? 0.22
         : bot.aimPitch * 0.65;
+    parts.headGroup.rotation.x = THREE.MathUtils.lerp(
+      uprightHeadPitch,
+      -1.18 + bot.aimPitch * 0.65,
+      pr
+    );
     parts.headGroup.rotation.y = isSprintingOut ? -Math.sin(bot.animPhase) * 0.08 : 0;
     parts.headGroup.rotation.z = inCombat && (bot.aimRaiseProgress || 0) > 0.7 ? 0.08 : 0;
 
     // Weapon Rig Pose:
-    // 1) Sprinting: Diagonal tactical chest carry
-    // 2) Getting Up / Stowing Medkit / Unslinging Weapon: Lowered across chest, gradually rotating into hands
-    // 3) Low-Ready -> Shouldered Sight Alignment: Smoothly interpolated by `bot.aimRaiseProgress` (0.0 -> 1.0)
     if (bot.mesh.userData?.slungSwordHiltGroup) {
       const isSwordSlung3p = Boolean(
         bot.role === 'MOUNTED_KNIGHT' || (bot.role === 'SWORDSMAN' && isSprintingOut)
@@ -2590,7 +3236,15 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       if (guard3p) guard3p.visible = !isSwordSlung3p;
     }
 
-    if (isSprintingOut) {
+    if (pr > 0.35) {
+      // Prone Bipod / Elbow-Braced Rifle Rig Pose (aimed forward parallel to ground)
+      parts.weaponRig.position.set(0, 0.54, 0.12 - bot.recoilKick * 0.65);
+      parts.weaponRig.rotation.set(
+        -1.36 + bot.aimPitch * 0.7 - bot.recoilKick * 0.85,
+        0,
+        0
+      );
+    } else if (isSprintingOut) {
       parts.weaponRig.position.set(
         0,
         0.46 + Math.abs(Math.cos(bot.animPhase)) * 0.03,
@@ -2671,11 +3325,11 @@ export function getBotMuzzleWorldPosition(bot) {
   const fwdZ = Math.cos(yaw);
   const rightX = -Math.cos(yaw);
   const rightZ = Math.sin(yaw);
-  const height = bot && bot.isCrouching ? 1.08 : 1.38;
+  const height = bot && bot.isProne ? 0.36 : bot && bot.isCrouching ? 0.98 : 1.38;
   return new THREE.Vector3(
-    bot.pos.x + rightX * 0.22 + fwdX * 0.78,
+    bot.pos.x + rightX * 0.22 + fwdX * (bot && bot.isProne ? 0.92 : 0.78),
     bot.pos.y + height,
-    bot.pos.z + rightZ * 0.22 + fwdZ * 0.78
+    bot.pos.z + rightZ * 0.22 + fwdZ * (bot && bot.isProne ? 0.92 : 0.78)
   );
 }
 
@@ -2798,18 +3452,40 @@ export function botFireAt(bot, target, player, onKillFn, vehicleManager = null) 
     : target.isPlayer
     ? 'PLAYER'
     : target.unit?.id || null;
+  const tgtUnit = target.isPlayer ? player : target.unit || null;
+  const tgtStanceTag = tgtUnit
+    ? tgtUnit.prone || tgtUnit.isProne
+      ? 2
+      : tgtUnit.crouching || tgtUnit.isCrouching
+      ? 1
+      : 0
+    : 0;
   const cachedLos = losKey && bot._losCache ? bot._losCache.get(losKey) : null;
-  if (!(cachedLos && !cachedLos.blocked && now - cachedLos.time <= 180)) {
-    const vis = this.hasClearSightline(bot, target.pos, false);
+  if (
+    !(
+      cachedLos &&
+      !cachedLos.blocked &&
+      cachedLos.stanceTag === tgtStanceTag &&
+      now - cachedLos.time <= 180
+    )
+  ) {
+    const vis = this.hasClearSightline(bot, target.pos, false, tgtUnit);
     if (losKey) {
       if (!bot._losCache) bot._losCache = new Map();
       if (cachedLos) {
         cachedLos.blocked = !vis;
         cachedLos.vis = vis;
+        cachedLos.stanceTag = tgtStanceTag;
         cachedLos.time = now;
         cachedLos.exp = now + 260;
       } else {
-        bot._losCache.set(losKey, { blocked: !vis, vis, time: now, exp: now + 260 });
+        bot._losCache.set(losKey, {
+          blocked: !vis,
+          vis,
+          stanceTag: tgtStanceTag,
+          time: now,
+          exp: now + 260
+        });
       }
     }
     if (!vis) return;
@@ -2836,13 +3512,33 @@ export function botFireAt(bot, target, player, onKillFn, vehicleManager = null) 
 
   // Origin is the actual 3D gun barrel muzzle tip (not center of body!)
   const start = this.getBotMuzzleWorldPosition(bot);
-  const targetEye = tmpVec3(target.pos.x, target.pos.y + 1.2, target.pos.z);
+  const tgtProne = target.isPlayer ? Boolean(player?.prone) : Boolean(target.unit?.isProne);
+  const tgtKneel = target.isPlayer ? Boolean(player?.crouching) : Boolean(target.unit?.isCrouching);
+  const targetChestY = target.isVehicle
+    ? 1.35
+    : tgtProne
+    ? 0.34
+    : tgtKneel
+    ? 0.86
+    : 1.2;
+  const targetEye = tmpVec3(target.pos.x, target.pos.y + targetChestY, target.pos.z);
   const dir = tmpVec3Copy(targetEye).sub(start).normalize();
 
-  // Suppression degrades NPC accuracy (wider aim cone when suppressed);
-  // Entrenched Forward Base defenders resting their rifle on sandbags/parapets get -35% tighter spread!
+  // Suppression & steep upward rooftop angles degrade standard rifle accuracy; One-Knee (-25%), Prone (-45%) & Recon optics stabilize!
+  const elevUp = Math.max(0, targetEye.y - start.y);
+  const highAnglePenalty =
+    elevUp > 16
+      ? bot.role === 'RECON'
+        ? 1.0 + Math.min(0.28, (elevUp - 16) / 110)
+        : 1.0 + Math.min(1.05, (elevUp - 16) / 52)
+      : 1.0;
+  const shooterStanceSpreadMult = bot.isProne ? 0.55 : bot.isCrouching ? 0.75 : 1.0;
   const defenderSpreadMult = bot.inFriendlyForwardBase ? 0.65 : 1.0;
-  const suppressionMult = (1 + (bot.suppressionLevel || 0) * 3.0) * defenderSpreadMult;
+  const suppressionMult =
+    (1 + (bot.suppressionLevel || 0) * 3.0) *
+    defenderSpreadMult *
+    shooterStanceSpreadMult *
+    highAnglePenalty;
   dir.x += (Math.random() - 0.5) * 0.075 * suppressionMult;
   dir.y += (Math.random() - 0.5) * 0.055 * suppressionMult;
   dir.z += (Math.random() - 0.5) * 0.075 * suppressionMult;
@@ -2993,9 +3689,24 @@ export function botFireAt(bot, target, player, onKillFn, vehicleManager = null) 
 
   const baseHitChance = Math.max(0.1, 0.42 - distToTarget / 170);
   const defenderAccBonus = bot.inFriendlyForwardBase ? 1.28 : 1.0;
+  const shooterStanceAccBonus = bot.isProne ? 1.22 : bot.isCrouching ? 1.12 : 1.0;
+  // Low-profile stance survival benefit: One-Knee cuts incoming hit probability by 28%; Prone cuts it by 52% beyond 18m!
+  const targetProfileMult = target.isVehicle
+    ? 1.0
+    : tgtProne
+    ? distToTarget > 18
+      ? 0.48
+      : 0.66
+    : tgtKneel
+    ? 0.72
+    : 1.0;
   const hitChance = Math.min(
     0.68,
-    baseHitChance * defenderAccBonus * (1 - (bot.suppressionLevel || 0) * 0.5)
+    baseHitChance *
+      defenderAccBonus *
+      shooterStanceAccBonus *
+      targetProfileMult *
+      (1 - (bot.suppressionLevel || 0) * 0.5)
   );
   const willHit = !hitWall && Math.random() < hitChance;
 
@@ -3078,6 +3789,7 @@ export function botFireAt(bot, target, player, onKillFn, vehicleManager = null) 
 
 export const BotAIMethods = {
   spawnTracer,
+  updateSquadSections,
   update,
   getBotMuzzleWorldPosition,
   botFireRpgAt,

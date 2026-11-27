@@ -8,9 +8,9 @@ import * as THREE from '../../vendor/three.module.js';
 function makeCanvasTexture(width, height, drawFn, repeatX = 1, repeatY = 1) {
   if (typeof document === 'undefined') {
     const tex = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
     if (repeatX > 1 || repeatY > 1) {
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
       tex.repeat.set(repeatX, repeatY);
     }
     tex.needsUpdate = true;
@@ -26,9 +26,9 @@ function makeCanvasTexture(width, height, drawFn, repeatX = 1, repeatY = 1) {
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.anisotropy = 4;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
   if (repeatX > 1 || repeatY > 1) {
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.wrapT = THREE.RepeatWrapping;
     tex.repeat.set(repeatX, repeatY);
   }
   tex.needsUpdate = true;

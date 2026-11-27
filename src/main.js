@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=136';
-import { VehicleManager } from './vehicles.js?v=136';
-import { BotManager } from './bots.js?v=136';
-import { PlayerController } from './player.js?v=136';
-import { NetworkManager } from './network.js?v=136';
-import { UIManager } from './ui.js?v=136';
-import { TelemetryLogger } from './telemetry.js?v=136';
-import { sound } from './audio.js?v=136';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=136';
-import { events, makeEventBridge } from './events.js?v=136';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=136';
+import { VoxelWorld } from './world.js?v=139';
+import { VehicleManager } from './vehicles.js?v=139';
+import { BotManager } from './bots.js?v=139';
+import { PlayerController } from './player.js?v=139';
+import { NetworkManager } from './network.js?v=139';
+import { UIManager } from './ui.js?v=139';
+import { TelemetryLogger } from './telemetry.js?v=139';
+import { sound } from './audio.js?v=139';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=139';
+import { events, makeEventBridge } from './events.js?v=139';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=139';
 
 class BattleBitGame {
   constructor() {
@@ -1811,7 +1811,14 @@ class BattleBitGame {
 
     this.network.update(dt);
     if (this.stateMachines) this.stateMachines.update(dt);
-    this.ui.update(dt, this.ticketsUS, this.ticketsRU, this.matchTimeRemaining, rawDt);
+    try {
+      this.ui.update(dt, this.ticketsUS, this.ticketsRU, this.matchTimeRemaining, rawDt);
+    } catch (uiErr) {
+      if (this._lastLoggedUiErr !== uiErr?.message) {
+        this._lastLoggedUiErr = uiErr?.message;
+        console.error('[Blockfare UI Update Error]', uiErr);
+      }
+    }
     if (this.telemetry) this.telemetry.update(dt);
 
     const flirRestore = this.syncThermalSceneState();
@@ -2123,8 +2130,12 @@ class BattleBitGame {
       }
     }
 
-    // 1. Clear ALL Forward Operating Base (FOB A–E) occupation statuses back to fair NEUTRAL (0%)!
-    this.world?.resetFlagsForNewRound?.();
+    // 1. Rebuild 100% clean world structures, collapsed buildings, crates, keys, loot packs & neutral FOBs!
+    if (typeof this.world?.resetWorldForNewRound === 'function') {
+      this.world.resetWorldForNewRound();
+    } else {
+      this.world?.resetFlagsForNewRound?.();
+    }
     if (this.botManager?.baseState) {
       if (this.botManager.baseState.US) {
         this.botManager.baseState.US.contested = false;
@@ -2135,10 +2146,65 @@ class BattleBitGame {
         this.botManager.baseState.RU.enemiesInBase = 0;
       }
     }
+    if (this.botManager) {
+      if (Array.isArray(this.botManager.smokeClouds)) {
+        for (const sc of this.botManager.smokeClouds) {
+          if (sc?.mesh && this.scene) this.scene.remove(sc.mesh);
+        }
+        this.botManager.smokeClouds.length = 0;
+      }
+      if (Array.isArray(this.botManager.tracers)) {
+        for (const tr of this.botManager.tracers) {
+          if (tr?.mesh && this.scene) this.scene.remove(tr.mesh);
+        }
+        this.botManager.tracers.length = 0;
+      }
+    }
 
-    // 2. Reset player deployables & round stats
+    // 2. Reset player deployables, C4, airstrike jets/markers, bullets & round stats
+    if (Array.isArray(this.player.plantedC4)) {
+      for (const c4 of this.player.plantedC4) {
+        if (c4?.mesh && this.scene) this.scene.remove(c4.mesh);
+      }
+      this.player.plantedC4.length = 0;
+    }
+    if (Array.isArray(this.player.activeBullets)) {
+      for (const bul of this.player.activeBullets) {
+        if (bul?.tracerMesh && this.scene) this.scene.remove(bul.tracerMesh);
+      }
+      this.player.activeBullets.length = 0;
+    }
+    if (this.player.rallyPoint?.mesh && this.scene) {
+      this.scene.remove(this.player.rallyPoint.mesh);
+    }
     this.player.rallyPoint = null;
+    if (this.player.insertionBeacon?.mesh && this.scene) {
+      this.scene.remove(this.player.insertionBeacon.mesh);
+    }
     this.player.insertionBeacon = null;
+    if (this.player.airstrikeTarget) {
+      if (this.player.airstrikeTarget.ringMesh && this.scene) {
+        this.scene.remove(this.player.airstrikeTarget.ringMesh);
+      }
+      if (this.player.airstrikeTarget.smokeMesh && this.scene) {
+        this.scene.remove(this.player.airstrikeTarget.smokeMesh);
+      }
+      this.player.airstrikeTarget = null;
+    }
+    if (Array.isArray(this.player.pendingAirstrikeBombs)) {
+      this.player.pendingAirstrikeBombs.length = 0;
+    }
+    if (Array.isArray(this.player.activeAirstrikeJets)) {
+      for (const jet of this.player.activeAirstrikeJets) {
+        if (jet?.mesh && this.scene) this.scene.remove(jet.mesh);
+      }
+      this.player.activeAirstrikeJets.length = 0;
+    }
+    this.player.uavActive = false;
+    this.player.uavTimer = 0;
+    if (this.player.uavDroneMesh) this.player.uavDroneMesh.visible = false;
+    if (this.player.uavSweepRingMesh) this.player.uavSweepRingMesh.visible = false;
+    this.player.activeRideVehicle = null;
     this.player.kills = 0;
     this.player.deaths = 0;
     this.player.revives = 0;
@@ -2165,42 +2231,10 @@ class BattleBitGame {
     }
 
     // 3. Return all Vehicles to their clean HQ Motor Pool & Airbase Apron bays at 100% HP & 100% Ordnance
-    this.vehicleManager?.clearAllWrecks?.();
-    if (this.vehicleManager?.vehicles) {
-      for (const v of this.vehicleManager.vehicles) {
-        if (!v) continue;
-        if (v.driver) v.driver = null;
-        if (Array.isArray(v.crewSeats)) v.crewSeats.fill(null);
-        if (Array.isArray(v.aiPassengers)) v.aiPassengers.length = 0;
-        this.vehicleManager.rearmVehicleOrdnance?.(v);
-        v.paidByPlayer = null;
-        v._paidAsStock = false;
-        if (v.npcDriver) {
-          v.npcDriver.drivingVehicle = null;
-          v.npcDriver = null;
-        }
-        v.hp = v.maxHp || 1200;
-        v.hullIntegrityPct = 100;
-        v.dead = Boolean(v.b2LockedUntilKills);
-        v.isShotDown = false;
-        v.aiPilotActive = false;
-        v.forwardSpeed = 0;
-        v.pitch = 0;
-        v.roll = 0;
-        v.yaw = v.spawnYaw || 0;
-        v.turretYaw = v.spawnYaw || 0;
-        if (Array.isArray(v.spawnPos)) {
-          const sx = v.spawnPos[0];
-          const sz = v.spawnPos[2];
-          const sy = this.world ? this.world.getGroundHeightAt(sx, sz) : 1.25;
-          v.pos.set(sx, sy, sz);
-          if (v.mesh) {
-            v.mesh.position.copy(v.pos);
-            v.mesh.rotation.set(0, v.yaw, 0, 'YXZ');
-            v.mesh.visible = !v.dead;
-          }
-        }
-      }
+    if (typeof this.vehicleManager?.resetForNewRound === 'function') {
+      this.vehicleManager.resetForNewRound();
+    } else {
+      this.vehicleManager?.clearAllWrecks?.();
     }
 
     // 4. Return all AI Soldiers to their respective Main Bases (US_BASE / RU_BASE) at full HP

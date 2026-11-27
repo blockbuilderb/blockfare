@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=136';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=136';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=136';
-import { getRideShortcutLabel } from '../utils/KeyboardShortcuts.js?v=136';
-import { events } from '../events.js?v=136';
+import { sound } from '../audio.js?v=139';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=139';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=139';
+import { getRideShortcutLabel } from '../utils/KeyboardShortcuts.js?v=139';
+import { events } from '../events.js?v=139';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -12,7 +12,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=136';
+} from '../core/StateMachines.js?v=139';
 
 function markShared(asset) {
   if (asset) {
@@ -2507,28 +2507,35 @@ export const VehicleControlMethods = {
       }
     }
 
-    // Enforce physical turret depression & elevation limits:
-    // - Tank Main Gun & Mantlet Coax MG (`[F1]/[F2]`): -10° to +20° (real M1A2/T-90M armored mantlet roof limit)
-    // - Tank Seat `[F3] COMMANDER` Roof .50 Cal CROWS / Kord RWS: -18° to +60° (+1.05 rad) for rooftops & helicopters!
-    // - Humvee / Tigr / HMG Nest Roof .50 Cal: -15° to +60° (+1.05 rad)
+    // Position camera in 3-Mode Vehicle Camera ('CHASE_3P' | 'COCKPIT_1P' | 'OPTIC_NOSE')
+    const camMode =
+      this.vehicleCameraMode || (this.thirdPersonVehicle ? 'CHASE_3P' : 'COCKPIT_1P');
+    this.thirdPersonVehicle = camMode === 'CHASE_3P';
+
+    // Enforce turret depression & elevation limits (with extra downward camera depression in CHASE_3P
+    // so the elevated 3rd-person chase camera can aim directly at close-in infantry 2m–15m ahead of the hull!):
     const isTankCommanderRws = v.type === 'tank' && seatIdx === 2;
-    const pitchLimits =
+    const basePitchLimits =
       isWarhorse
         ? { min: -0.58, max: 0.65 }
         : isTankCommanderRws
-        ? { min: -0.31, max: 1.05 }
+        ? { min: -0.38, max: 1.05 }
         : this.vehicleManager && typeof this.vehicleManager.getVehiclePitchLimits === 'function'
         ? this.vehicleManager.getVehiclePitchLimits(v)
         : v.type === 'tank'
-        ? { min: -0.18, max: 0.35 }
+        ? { min: -0.30, max: 0.38 }
         : v.type === 'apc'
-        ? { min: -0.18, max: 0.52 }
+        ? { min: -0.30, max: 0.55 }
         : isAaVehicle
-        ? { min: -0.14, max: 1.48 }
+        ? { min: -0.22, max: 1.48 }
         : isMortar
         ? { min: -0.35, max: 0.85 }
-        : { min: -0.26, max: 1.05 };
-    this.pitch = THREE.MathUtils.clamp(this.pitch, pitchLimits.min, pitchLimits.max);
+        : { min: -0.32, max: 1.05 };
+    const minViewPitch =
+      camMode === 'CHASE_3P' && !isWarhorse && !isMortar
+        ? Math.min(basePitchLimits.min, -0.54)
+        : basePitchLimits.min;
+    this.pitch = THREE.MathUtils.clamp(this.pitch, minViewPitch, basePitchLimits.max);
 
     if (canControlTurret) {
       if (turretDamaged && (v.type === 'tank' || v.type === 'apc')) {
@@ -2540,14 +2547,10 @@ export const VehicleControlMethods = {
       } else {
         v.turretYaw = this.yaw;
       }
-      v.turretPitch = this.pitch;
+      v.turretPitch = THREE.MathUtils.clamp(this.pitch, basePitchLimits.min, basePitchLimits.max);
     }
     this.pos.copy(v.pos);
 
-    // Position camera in 3-Mode Vehicle Camera ('CHASE_3P' | 'COCKPIT_1P' | 'OPTIC_NOSE')
-    const camMode =
-      this.vehicleCameraMode || (this.thirdPersonVehicle ? 'CHASE_3P' : 'COCKPIT_1P');
-    this.thirdPersonVehicle = camMode === 'CHASE_3P';
     const lookDir = new THREE.Vector3(
       -Math.sin(this.yaw) * Math.cos(this.pitch),
       Math.sin(this.pitch),
@@ -2562,10 +2565,16 @@ export const VehicleControlMethods = {
       const camH = isWarhorse ? 2.65 : isDinoMount ? 3.85 : isMotoOrAtv ? 2.15 : PLAYER.VEHICLE_3RD_PERSON_HEIGHT;
       const camD = isWarhorse ? -4.85 : isDinoMount ? -7.5 : isMotoOrAtv ? -5.35 : PLAYER.VEHICLE_3RD_PERSON_DIST;
       const pivotPos = v.pos.clone().add(new THREE.Vector3(0, isWarhorse ? 2.1 : 1.85, 0));
+      // Dampen upward camera boom rise when pitching downward so 3rd-person aim reaches point-blank infantry right in front of the hull!
+      const boomOffset = new THREE.Vector3(
+        lookDir.x * camD,
+        (lookDir.y < 0 ? lookDir.y * 0.35 : lookDir.y) * camD,
+        lookDir.z * camD
+      );
       const desiredCamPos = v.pos
         .clone()
         .add(new THREE.Vector3(0, camH, 0))
-        .addScaledVector(lookDir, camD);
+        .add(boomOffset);
       const safeCamPos = this.resolveCameraWallCollision(pivotPos, desiredCamPos, 0.42);
       this.camera.position.copy(safeCamPos);
     } else if (isWarhorse) {
@@ -2763,12 +2772,26 @@ export const VehicleControlMethods = {
         (this.isFiring && activeSlot === 1));
     const wantFireCoax = hasCoax && !v.coaxOverheated && wantFireSecondaryOrCoax;
 
+    const turHorizFwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
     const muzzleOrigin = v.pos
       .clone()
-      .add(new THREE.Vector3(0, v.type === 'tank' ? 2.35 : v.isEmplacement ? 1.55 : 2.8, 0))
-      .addScaledVector(lookDir, v.type === 'tank' ? 4.2 : 2.2);
+      .add(new THREE.Vector3(0, v.type === 'tank' ? 2.25 : v.isEmplacement ? 1.55 : 2.65, 0))
+      .addScaledVector(turHorizFwd, v.type === 'tank' ? 2.25 : 1.75);
 
-    if ((wantFirePrimary || (isWarhorse && this.isFiring)) && v.fireCooldown <= 0) {
+    const isAutoGroundGun =
+      v.weaponType === 'hmg' ||
+      v.weaponType === 'aa_autocannon' ||
+      v.weaponType === 'autocannon' ||
+      v.weaponType === 'moto_pdw' ||
+      v.type === 'bike' ||
+      v.type === 'atv';
+    let groundPrimaryShotsThisFrame = 0;
+    while (
+      (wantFirePrimary || (isWarhorse && this.isFiring)) &&
+      v.fireCooldown <= 0 &&
+      groundPrimaryShotsThisFrame < (isAutoGroundGun ? 4 : 1)
+    ) {
+      groundPrimaryShotsThisFrame++;
       const effectiveRpm =
         v.weaponType === 'aa_autocannon'
           ? Math.max(v.rpm || 1050, 1050)
@@ -2786,7 +2809,11 @@ export const VehicleControlMethods = {
           ? Math.max(v.rpm || 24, 24)
           : v.rpm || 28;
       v.maxFireCooldown = 60 / effectiveRpm;
-      v.fireCooldown = v.maxFireCooldown;
+      const prevGroundDebt =
+        isAutoGroundGun && v.fireCooldown < 0
+          ? Math.max(-v.maxFireCooldown * 3.0, v.fireCooldown)
+          : 0;
+      v.fireCooldown = Math.max(v.maxFireCooldown * 0.12, v.maxFireCooldown + prevGroundDebt);
       events.emit('player:fired', {
         weapon: { shortName: v.weaponType },
         vehicle: v,
@@ -3117,9 +3144,10 @@ export const VehicleControlMethods = {
         this.recoilOffsetPitch += 0.002;
         this.addShake(0.04);
         sound.playGunshot('hmg', 0);
+        const hmgAim = this.computeVehicleAimTarget(camOrigin, camDir, v, 240);
+        const hmgBaseDir = hmgAim.point.clone().sub(muzzleOrigin).normalize();
         const hmgSpread = 0.0015; // Heavy pintle / CROWS mount (~0.085° dispersion)
-        const hmgDir = camDir
-          .clone()
+        const hmgDir = hmgBaseDir
           .add(
             new THREE.Vector3(
               (Math.random() - 0.5) * hmgSpread,
@@ -3129,7 +3157,7 @@ export const VehicleControlMethods = {
           )
           .normalize();
         this.fireBallisticRay(
-          camOrigin,
+          muzzleOrigin,
           hmgDir,
           86,
           2.0,
@@ -3204,21 +3232,27 @@ export const VehicleControlMethods = {
     }
 
     // Tank Seat [F3] COMMANDER Roof .50 Cal CROWS M153 / 12.7mm Kord RWS (-18° to +60° High-Angle Anti-Rooftop/Heli!)
-    if (wantFireCommanderRws && v.coaxCooldown <= 0) {
+    let rwsCatchUp = 0;
+    while (wantFireCommanderRws && !v.coaxOverheated && v.coaxCooldown <= 0 && rwsCatchUp < 4) {
+      rwsCatchUp++;
       if (!this.consumeVehicleOrdnance(v, 'slot1', 1, 'COMMANDER .50 CAL RWS')) {
-        return;
+        break;
       }
       const rwsInterval = 60 / 750;
-      v.coaxCooldown = rwsInterval;
+      const rwsDebt = v.coaxCooldown < 0 ? Math.max(-rwsInterval * 3.0, v.coaxCooldown) : 0;
+      v.coaxCooldown = Math.max(rwsInterval * 0.12, rwsInterval + rwsDebt);
       v.coaxHeat = Math.min(1.0, (v.coaxHeat || 0) + rwsInterval * 0.18 * (v.customCoaxHeatMult || 1.0));
       if (v.coaxHeat >= 1.0) v.coaxOverheated = true;
       this.recoilOffsetPitch += 0.0015;
-      this.addShake(0.028);
-      sound.playGunshot('hmg', 0);
-      const rwsOrigin = v.pos.clone().add(new THREE.Vector3(0, 2.95, 0)).addScaledVector(lookDir, 1.4);
+      if (rwsCatchUp === 1) {
+        this.addShake(0.028);
+        sound.playGunshot('hmg', 0);
+      }
+      const rwsOrigin = v.pos.clone().add(new THREE.Vector3(0, 2.95, 0)).addScaledVector(turHorizFwd, 1.2);
+      const rwsAim = this.computeVehicleAimTarget(camOrigin, camDir, v, 240);
+      const rwsBaseDir = rwsAim.point.clone().sub(rwsOrigin).normalize();
       const rwsSpread = 0.0015;
-      const rwsDir = camDir
-        .clone()
+      const rwsDir = rwsBaseDir
         .add(
           new THREE.Vector3(
             (Math.random() - 0.5) * rwsSpread,
@@ -3228,7 +3262,7 @@ export const VehicleControlMethods = {
         )
         .normalize();
       this.fireBallisticRay(
-        camOrigin,
+        rwsOrigin,
         rwsDir,
         72,
         2.0,
@@ -3336,46 +3370,54 @@ export const VehicleControlMethods = {
         this.onAwardXp(0, '💥 3-ROUND 81MM MORTAR BARRAGE LAUNCHED!');
       }
     } else if (wantFireCoax && v.coaxCooldown <= 0) {
-      if (!this.consumeVehicleOrdnance(v, 'slot1', 1, '7.62MM COAX MG')) {
-        return;
-      }
-      const coaxRpm = Math.max(v.coaxRpm || 950, 950);
-      const coaxInterval = 60 / coaxRpm;
-      v.coaxCooldown = coaxInterval;
-      v.coaxHeat = Math.min(1.0, (v.coaxHeat || 0) + coaxInterval * 0.24);
-      if (v.coaxHeat >= 1.0) {
-        v.coaxOverheated = true;
-      }
-      this.recoilOffsetPitch += 0.0012;
-      this.addShake(0.02);
-      sound.playGunshot('lmg', 0);
-      const coaxOrigin = v.pos
-        .clone()
-        .add(new THREE.Vector3(0, v.type === 'tank' ? 2.35 : 2.65, 0))
-        .addScaledVector(lookDir, 2.4);
-      const coaxSpread = 0.002; // Stabilized turret coax (~0.11° dispersion)
-      const coaxDir = camDir
-        .clone()
-        .add(
-          new THREE.Vector3(
-            (Math.random() - 0.5) * coaxSpread,
-            (Math.random() - 0.5) * coaxSpread,
-            (Math.random() - 0.5) * coaxSpread
+      let coaxCatchUp = 0;
+      while (wantFireCoax && !v.coaxOverheated && v.coaxCooldown <= 0 && coaxCatchUp < 4) {
+        coaxCatchUp++;
+        if (!this.consumeVehicleOrdnance(v, 'slot1', 1, '7.62MM COAX MG')) {
+          break;
+        }
+        const coaxRpm = Math.max(v.coaxRpm || 950, 950);
+        const coaxInterval = 60 / coaxRpm;
+        const coaxDebt = v.coaxCooldown < 0 ? Math.max(-coaxInterval * 3.0, v.coaxCooldown) : 0;
+        v.coaxCooldown = Math.max(coaxInterval * 0.12, coaxInterval + coaxDebt);
+        v.coaxHeat = Math.min(1.0, (v.coaxHeat || 0) + coaxInterval * 0.24);
+        if (v.coaxHeat >= 1.0) {
+          v.coaxOverheated = true;
+        }
+        this.recoilOffsetPitch += 0.0012;
+        if (coaxCatchUp === 1) {
+          this.addShake(0.02);
+          sound.playGunshot('lmg', 0);
+        }
+        const coaxOrigin = v.pos
+          .clone()
+          .add(new THREE.Vector3(0, v.type === 'tank' ? 2.18 : 2.48, 0))
+          .addScaledVector(turHorizFwd, 1.85);
+        const coaxAim = this.computeVehicleAimTarget(camOrigin, camDir, v, 210);
+        const coaxBaseDir = coaxAim.point.clone().sub(coaxOrigin).normalize();
+        const coaxSpread = 0.002; // Stabilized turret coax (~0.11° dispersion)
+        const coaxDir = coaxBaseDir
+          .add(
+            new THREE.Vector3(
+              (Math.random() - 0.5) * coaxSpread,
+              (Math.random() - 0.5) * coaxSpread,
+              (Math.random() - 0.5) * coaxSpread
+            )
           )
-        )
-        .normalize();
-      this.fireBallisticRay(
-        camOrigin,
-        coaxDir,
-        52,
-        1.9,
-        65,
-        '7.62MM COAX MG',
-        1.45,
-        { isMountedMg: true, muzzleVelocity: 840, maxEffectiveRange: 550, tracerEveryShots: 2 },
-        1,
-        coaxOrigin
-      );
+          .normalize();
+        this.fireBallisticRay(
+          coaxOrigin,
+          coaxDir,
+          52,
+          1.9,
+          65,
+          '7.62MM COAX MG',
+          1.45,
+          { isMountedMg: true, muzzleVelocity: 840, maxEffectiveRange: 550, tracerEveryShots: 2 },
+          1,
+          coaxOrigin
+        );
+      }
     }
 
     this.recoilOffsetPitch *= Math.pow(0.08, dt);
@@ -3383,30 +3425,41 @@ export const VehicleControlMethods = {
 
   /**
    * Computes the exact 3D world point under the vehicle's center '+' crosshair (`camOrigin` + `camDir`)
-   * so turret barrels converge accurately on targets in both 1st-person and 3rd-person camera views.
+   * so turret barrels and coaxial MGs converge accurately on targets (including point-blank enemy
+   * infantry 2m–15m right in front of the hull!) in both 1st-person and 3rd-person camera views.
    */
   computeVehicleAimTarget(camOrigin, camDir, activeVeh, defaultDist = 140) {
+    const nowAimMs = typeof performance !== 'undefined' ? performance.now() : 0;
+    if (
+      this._cachedVehAimResult &&
+      this._cachedVehAimDefaultDist === defaultDist &&
+      this._cachedVehAimRef === activeVeh &&
+      nowAimMs - (this._cachedVehAimAtMs || 0) < 4.0
+    ) {
+      return this._cachedVehAimResult;
+    }
     const isAir = Boolean(activeVeh && activeVeh.isAircraft);
     let bestDist = isAir ? 4800 : 420;
     let hitFound = false;
 
     if (this.world && typeof this.world.raycastVoxel === 'function') {
       const vHit = this.world.raycastVoxel(camOrigin, camDir, isAir ? 2400 : 420);
-      if (vHit && vHit.distance > 4.5 && vHit.distance < bestDist) {
+      if (vHit && vHit.distance > 2.2 && vHit.distance < bestDist) {
         bestDist = vHit.distance;
         hitFound = true;
       }
     }
 
-    // For high-altitude aircraft / AC-130J aiming at sloped terrain, ray-march + binary-refine the heightfield along camDir!
-    if (isAir && camDir.y < -0.015 && this.world && typeof this.world.getGroundHeightAt === 'function') {
-      const maxRay = Math.min(bestDist, 4800);
+    // Ray-march + binary-refine terrain heightfield along camDir for BOTH ground vehicles & aircraft looking downward!
+    if (camDir.y < -0.012 && this.world && typeof this.world.getGroundHeightAt === 'function') {
+      const maxRay = Math.min(bestDist, isAir ? 4800 : 420);
       const minYEstimate = -12;
-      const maxPossibleT = Math.min(maxRay, Math.max(20, (minYEstimate - camOrigin.y) / camDir.y));
+      const minStartT = isAir ? 8.0 : 2.0;
+      const maxPossibleT = Math.min(maxRay, Math.max(minStartT + 4, (minYEstimate - camOrigin.y) / camDir.y));
       const steps = 32;
-      let prevT = 8.0;
+      let prevT = minStartT;
       for (let s = 1; s <= steps; s++) {
-        const t = 8.0 + ((maxPossibleT - 8.0) * s) / steps;
+        const t = minStartT + ((maxPossibleT - minStartT) * s) / steps;
         if (t >= bestDist) break;
         const hx = camOrigin.x + camDir.x * t;
         const hy = camOrigin.y + camDir.y * t;
@@ -3444,9 +3497,9 @@ export const VehicleControlMethods = {
         const by = b.pos.y + 0.95 - camOrigin.y;
         const bz = b.pos.z - camOrigin.z;
         const proj = bx * camDir.x + by * camDir.y + bz * camDir.z;
-        if (proj < 3.5 || proj > bestDist) continue;
+        if (proj < 1.5 || proj > bestDist) continue;
         const perpSq = bx * bx + by * by + bz * bz - proj * proj;
-        if (perpSq <= 1.8) {
+        if (perpSq <= 2.25) {
           bestDist = proj;
           hitFound = true;
         }
@@ -3461,7 +3514,7 @@ export const VehicleControlMethods = {
         const vy = veh.pos.y + 1.35 - camOrigin.y;
         const vz = veh.pos.z - camOrigin.z;
         const proj = vx * camDir.x + vy * camDir.y + vz * camDir.z;
-        if (proj < 5.0 || proj > bestDist) continue;
+        if (proj < 3.5 || proj > bestDist) continue;
         const perpSq = vx * vx + vy * vy + vz * vz - proj * proj;
         if (perpSq <= 9.0) {
           bestDist = proj;
@@ -3470,11 +3523,16 @@ export const VehicleControlMethods = {
       }
     }
 
-    const finalDist = hitFound ? Math.max(8, bestDist) : defaultDist;
-    return {
+    const finalDist = hitFound ? Math.max(2.0, bestDist) : defaultDist;
+    const aimRes = {
       distance: finalDist,
       point: camOrigin.clone().addScaledVector(camDir, finalDist)
     };
+    this._cachedVehAimResult = aimRes;
+    this._cachedVehAimDefaultDist = defaultDist;
+    this._cachedVehAimRef = activeVeh;
+    this._cachedVehAimAtMs = typeof performance !== 'undefined' ? performance.now() : 0;
+    return aimRes;
   },
 
   /**
@@ -4738,9 +4796,16 @@ export const VehicleControlMethods = {
 
       // Side-wall building check when flying between Downtown FOB C skyscrapers (up to 105m tall!)
       if (this.world?.voxels && candY < 105.0) {
+        const hitHullCore = Boolean(
+          this.world.hasSolidSkyscraperHullAt &&
+            this.world.hasSolidSkyscraperHullAt(candX, candY, candZ, 2.4, 2.2)
+        );
         const gSide = this.world.worldToGrid(candX, candY + 1.1, candZ, _tmpGrid);
         const sideVox = this.world.getVoxel(gSide.gx, gSide.gy, gSide.gz);
-        if (sideVox && !sideVox.isProp && candY + 0.6 < (sideVox.maxY ?? candY + 2.0)) {
+        if (
+          hitHullCore ||
+          (sideVox && !sideVox.isProp && candY + 0.6 < (sideVox.maxY ?? candY + 2.0))
+        ) {
           if (this.aircraftCollisionAvoidance === false && Math.hypot(v._heliVelX, v._heliVelZ) > 22.0) {
             v.shotDownAttacker = {
               attackerName: this.name || 'PILOT ERROR',
@@ -6511,7 +6576,25 @@ export const VehicleControlMethods = {
       noseMuzzle.y = myGroundHForRadar + 1.4;
     }
 
-    if (wantPrimary && v.fireCooldown <= 0) {
+    const isAutoAirCannon = Boolean(
+      activeSlot === 0 &&
+        !isB2Spirit &&
+        (v.aircraftRole === 'heli_transport' ||
+          v.aircraftRole === 'heli_attack' ||
+          v.aircraftRole === 'cas' ||
+          v.aircraftRole === 'gunship' ||
+          v.aircraftRole === 'fighter' ||
+          isWrightFlyer)
+    );
+    let airPrimaryCatchUp = 0;
+    while (
+      wantPrimary &&
+      v.fireCooldown <= 0 &&
+      airPrimaryCatchUp < (isAutoAirCannon ? 4 : 1)
+    ) {
+      const prevAirDebt =
+        isAutoAirCannon && v.fireCooldown < 0 ? Math.max(-0.18, v.fireCooldown) : 0;
+      airPrimaryCatchUp++;
       if (v.aircraftRole === 'heli_transport') {
         if (activeSlot === 1 || activeSlot === 2) {
           v.maxFireCooldown = activeSlot === 1 ? 0.34 : 1.35;
@@ -6618,8 +6701,8 @@ export const VehicleControlMethods = {
           v.fireCooldown = v.maxFireCooldown;
           v.coaxCooldown = 0;
         } else {
-          // AH-64E Apache / Ka-52 Alligator [3]: AGM-114L Longbow Hellfire / 9K121 Vikhr Top-Attack Tank-Buster ATGM!
-          const hfLabel = v.team === 'RU' ? '9K121 VIKHR LASER ATGM' : 'AGM-114L HELLFIRE ATGM';
+          // AH-64E Apache / Ka-52 Alligator [3]: AGM-114K/L Hellfire / 9K121 Vikhr Laser & Longbow ATGM (locks ◆1688 Buddy Laser up to 2,500m!)
+          const hfLabel = v.team === 'RU' ? '9K121 VIKHR LASER ATGM' : 'AGM-114K HELLFIRE LASER ATGM';
           if (!this.consumeVehicleOrdnance(v, 'slot2', 1, hfLabel)) {
             return;
           }
@@ -6628,21 +6711,35 @@ export const VehicleControlMethods = {
           this.addShake(0.24);
           sound.playRocketLaunch?.(0);
 
-          const aimHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 1600);
+          const aimHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 2400);
           let hellfireTarget = null;
+          let buddyLaserDesig = null;
+          const teamDesig = this.world?.activeLaserDesignations?.[this.team || 'US'];
+          if (teamDesig && teamDesig.timer > 0) {
+            const dPos = teamDesig.targetUnit && !teamDesig.targetUnit.dead ? teamDesig.targetUnit.pos : teamDesig.pos;
+            const toD = dPos.clone().sub(camOrigin);
+            const distD = toD.length();
+            if (distD >= 14 && distD <= 2500 && toD.divideScalar(distD).dot(camDir) >= 0.62) {
+              buddyLaserDesig = teamDesig;
+              hellfireTarget = teamDesig.targetVehicle && !teamDesig.targetVehicle.dead ? teamDesig.targetVehicle : null;
+            }
+          }
           let bestScore = Infinity;
           const allVehs = this.vehicleManager?.vehicles;
-          if (Array.isArray(allVehs)) {
+          if (!hellfireTarget && !buddyLaserDesig && Array.isArray(allVehs)) {
             for (let vi = 0; vi < allVehs.length; vi++) {
               const cand = allVehs[vi];
               if (!cand || cand.dead || cand === v || (v.team && cand.team === v.team)) continue;
+              const isPainted = (cand.jtacLaserTimer || 0) > 0;
+              const maxLockR = isPainted ? 2500 : 1600;
+              const minCos = isPainted ? 0.62 : 0.92;
               const toCand = cand.pos.clone().sub(camOrigin);
               const distC = toCand.length();
-              if (distC < 14 || distC > 1600) continue;
+              if (distC < 14 || distC > maxLockR) continue;
               const dotC = toCand.divideScalar(distC).dot(camDir);
-              if (dotC < 0.92) continue;
-              const anglePenalty = (1 - dotC) * 1600;
-              const score = distC * 0.3 + anglePenalty;
+              if (dotC < minCos) continue;
+              const anglePenalty = (1 - dotC) * (isPainted ? 650 : 1600);
+              const score = distC * (isPainted ? 0.12 : 0.3) + anglePenalty - (isPainted ? 500 : 0);
               if (score < bestScore) {
                 bestScore = score;
                 hellfireTarget = cand;
@@ -6652,6 +6749,8 @@ export const VehicleControlMethods = {
 
           const tgtPt = hellfireTarget
             ? new THREE.Vector3(hellfireTarget.pos.x, hellfireTarget.pos.y + 1.4, hellfireTarget.pos.z)
+            : buddyLaserDesig
+            ? buddyLaserDesig.pos.clone()
             : aimHit.point;
           const hfDir = tgtPt.clone().sub(noseMuzzle).normalize();
           const hfMesh = new THREE.Mesh(_a2aMissileGeo, _a2aMissileMat);
@@ -6659,22 +6758,27 @@ export const VehicleControlMethods = {
           hfMesh.lookAt(tgtPt);
           this.scene.add(hfMesh);
 
+          const hasGuidedLock = Boolean(hellfireTarget || buddyLaserDesig);
           this.world.projectiles.push({
             type: 'air_rocket',
             weaponName: hfLabel,
             weaponLabel: hfLabel,
             mesh: hfMesh,
-            vel: hfDir.multiplyScalar(235),
-            gravity: hellfireTarget ? 0 : 0.25,
-            life: 14.0,
-            turnRate: hellfireTarget ? 4.6 : 0,
+            vel: hfDir.multiplyScalar(240),
+            gravity: hasGuidedLock ? 0 : 0.25,
+            life: 16.0,
+            turnRate: hasGuidedLock ? 5.0 : 0,
             targetVehicle: hellfireTarget,
-            blastRadius: 8.8,
-            blastDamage: 820,
+            laserDesignation: buddyLaserDesig,
+            blastRadius: 9.2,
+            blastDamage: 840,
             owner: this
           });
           if (this.onAwardXp) {
-            const lockTxt = hellfireTarget
+            const isBuddyLased = Boolean(buddyLaserDesig || (hellfireTarget && (hellfireTarget.jtacLaserTimer || 0) > 0));
+            const lockTxt = isBuddyLased
+              ? `🔶 BUDDY LASER 1688 LOCK ON ${hellfireTarget ? hellfireTarget.name.split(' (')[0] : buddyLaserDesig?.label || 'SPOT'}`
+              : hellfireTarget
               ? `LONGBOW LOCK ON ${hellfireTarget.name.split(' (')[0]}`
               : 'LASER BORESIGHT TRACK';
             this.onAwardXp(0, `🎯🚀 ${hfLabel} AWAY (${lockTxt})!`);
@@ -6858,8 +6962,8 @@ export const VehicleControlMethods = {
         v.fireCooldown = v.maxFireCooldown;
         v.coaxCooldown = 0;
       } else if (v.aircraftRole === 'cas' && activeSlot === 2) {
-        // A-10C / Su-25 [3] LMB: AGM-65G Maverick (RU: Kh-29T) Electro-Optical TV-Guided Anti-Tank Missile!
-        if (!this.consumeVehicleOrdnance(v, 'slot2', 1, 'AGM-65G MAVERICK')) {
+        // A-10C / Su-25 [3] LMB: AGM-65E/G Laser Maverick (RU: Kh-29L) — locks Sniper ◆1688 Laser Spots up to 2,500m!
+        if (!this.consumeVehicleOrdnance(v, 'slot2', 1, 'AGM-65E LASER MAVERICK')) {
           return;
         }
         v.maxFireCooldown = 1.55;
@@ -6867,22 +6971,36 @@ export const VehicleControlMethods = {
         this.addShake(0.24);
         sound.playRocketLaunch?.(0);
 
-        const aimHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 1450);
+        const aimHit = this.computeVehicleAimTarget(camOrigin, camDir, v, 2400);
         let maverickTarget = null;
+        let mavLaserDesig = null;
+        const teamDesig = this.world?.activeLaserDesignations?.[this.team || 'US'];
+        if (teamDesig && teamDesig.timer > 0) {
+          const dPos = teamDesig.targetUnit && !teamDesig.targetUnit.dead ? teamDesig.targetUnit.pos : teamDesig.pos;
+          const toD = dPos.clone().sub(camOrigin);
+          const distD = toD.length();
+          if (distD >= 18 && distD <= 2500 && toD.divideScalar(distD).dot(camDir) >= 0.62) {
+            mavLaserDesig = teamDesig;
+            maverickTarget = teamDesig.targetVehicle && !teamDesig.targetVehicle.dead ? teamDesig.targetVehicle : null;
+          }
+        }
         let bestScore = Infinity;
         const allVehs = this.vehicleManager?.vehicles;
-        if (Array.isArray(allVehs)) {
+        if (!maverickTarget && !mavLaserDesig && Array.isArray(allVehs)) {
           for (let vi = 0; vi < allVehs.length; vi++) {
             const cand = allVehs[vi];
             if (!cand || cand.dead || cand === v || (v.team && cand.team === v.team)) continue;
+            const isPainted = (cand.jtacLaserTimer || 0) > 0;
+            const maxR = isPainted ? 2500 : 1450;
+            const minCos = isPainted ? 0.62 : 0.94;
             const toCand = cand.pos.clone().sub(camOrigin);
             const distC = toCand.length();
-            if (distC < 18 || distC > 1450) continue;
+            if (distC < 18 || distC > maxR) continue;
             const dotC = toCand.divideScalar(distC).dot(camDir);
-            if (dotC < 0.94) continue; // ~20° electro-optical TV seeker cone
-            const anglePenalty = (1 - dotC) * 1800;
-            const airPenalty = cand.isAircraft ? 600 : 0;
-            const score = distC * 0.35 + anglePenalty + airPenalty;
+            if (dotC < minCos) continue;
+            const anglePenalty = (1 - dotC) * (isPainted ? 650 : 1800);
+            const airPenalty = cand.isAircraft && !isPainted ? 600 : 0;
+            const score = distC * (isPainted ? 0.12 : 0.35) + anglePenalty + airPenalty - (isPainted ? 500 : 0);
             if (score < bestScore) {
               bestScore = score;
               maverickTarget = cand;
@@ -6892,6 +7010,8 @@ export const VehicleControlMethods = {
 
         const tgtPoint = maverickTarget
           ? new THREE.Vector3(maverickTarget.pos.x, maverickTarget.pos.y + 1.35, maverickTarget.pos.z)
+          : mavLaserDesig
+          ? mavLaserDesig.pos.clone()
           : aimHit.point;
         const mavDir = tgtPoint.clone().sub(noseMuzzle).normalize();
         const mavMesh = new THREE.Mesh(_a2aMissileGeo, _a2aMissileMat);
@@ -6899,23 +7019,30 @@ export const VehicleControlMethods = {
         mavMesh.lookAt(tgtPoint);
         this.scene.add(mavMesh);
 
-        const mavLabel = v.team === 'RU' ? 'KH-29T TV-GUIDED ATGM' : 'AGM-65G MAVERICK ATGM';
+        const isBuddyLased = Boolean(mavLaserDesig || (maverickTarget && (maverickTarget.jtacLaserTimer || 0) > 0));
+        const mavLabel = v.team === 'RU'
+          ? isBuddyLased ? 'KH-29L LASER ATGM' : 'KH-29T TV-GUIDED ATGM'
+          : isBuddyLased ? 'AGM-65E LASER MAVERICK' : 'AGM-65G MAVERICK ATGM';
+        const hasMavLock = Boolean(maverickTarget || mavLaserDesig);
         this.world.projectiles.push({
           type: 'air_rocket',
           weaponName: mavLabel,
           weaponLabel: mavLabel,
           mesh: mavMesh,
-          vel: mavDir.multiplyScalar(215),
-          gravity: maverickTarget ? 0 : 0.35,
-          life: 14.0,
-          turnRate: maverickTarget ? 3.8 : 0,
+          vel: mavDir.multiplyScalar(225),
+          gravity: hasMavLock ? 0 : 0.35,
+          life: 16.0,
+          turnRate: hasMavLock ? 4.4 : 0,
           targetVehicle: maverickTarget,
-          blastRadius: 8.8,
-          blastDamage: 580,
+          laserDesignation: mavLaserDesig,
+          blastRadius: 9.2,
+          blastDamage: isBuddyLased ? 660 : 580,
           owner: this
         });
         if (this.onAwardXp) {
-          const lockNote = maverickTarget
+          const lockNote = isBuddyLased
+            ? `🔶 BUDDY LASER 1688 LOCK ON ${maverickTarget ? maverickTarget.name.split(' (')[0] : mavLaserDesig?.label || 'SPOT'}`
+            : maverickTarget
             ? `LOCKED ON ${maverickTarget.name.split(' (')[0]}`
             : 'OPTICAL BORESIGHT TRACK';
           this.onAwardXp(0, `🎯 RIFLE! ${mavLabel} LAUNCHED (${lockNote})!`);
@@ -7151,8 +7278,8 @@ export const VehicleControlMethods = {
           }
         }
       } else if ((v.aircraftRole === 'fighter' && activeSlot === 2) || v.aircraftRole === 'bomber') {
-        // Combined Strike Fighter/Bomber [3]: 500lb JDAM Precision Bomb Drop onto CCIP Reticle
-        if (!this.consumeVehicleOrdnance(v, 'slot2', 1, '500LB JDAM')) {
+        // Combined Strike Fighter/Bomber [3]: GBU-54 Laser JDAM (homes onto moving ◆1688 Laser Spot!) or 500lb CCIP JDAM
+        if (!this.consumeVehicleOrdnance(v, 'slot2', 1, 'GBU-54 LASER JDAM')) {
           return;
         }
         v.maxFireCooldown = 0.85;
@@ -7160,24 +7287,63 @@ export const VehicleControlMethods = {
         this.addShake(0.18);
         sound.playRocketLaunch?.(0);
 
+        let lJdamVeh = null;
+        let lJdamDesig = null;
+        const teamDesig = this.world?.activeLaserDesignations?.[this.team || 'US'];
+        if (teamDesig && teamDesig.timer > 0) {
+          const dPos = teamDesig.targetUnit && !teamDesig.targetUnit.dead ? teamDesig.targetUnit.pos : teamDesig.pos;
+          const toD = dPos.clone().sub(v.pos);
+          const distD = toD.length();
+          if (distD <= 2500 && toD.divideScalar(Math.max(1, distD)).dot(flightDir) >= 0.35) {
+            lJdamDesig = teamDesig;
+            lJdamVeh = teamDesig.targetVehicle && !teamDesig.targetVehicle.dead ? teamDesig.targetVehicle : null;
+          }
+        }
+        if (!lJdamVeh && !lJdamDesig && Array.isArray(this.vehicleManager?.vehicles)) {
+          for (const cand of this.vehicleManager.vehicles) {
+            if (!cand || cand.dead || cand.team === v.team || (cand.jtacLaserTimer || 0) <= 0) continue;
+            const toC = cand.pos.clone().sub(v.pos);
+            const dC = toC.length();
+            if (dC <= 2500 && toC.divideScalar(Math.max(1, dC)).dot(flightDir) >= 0.35) {
+              lJdamVeh = cand;
+              break;
+            }
+          }
+        }
+
+        const hasLaserGuide = Boolean(lJdamVeh || lJdamDesig);
+        const bombLbl = hasLaserGuide
+          ? v.team === 'RU'
+            ? 'KAB-500S/L LASER JDAM'
+            : 'GBU-54 500LB LASER JDAM'
+          : '500LB JDAM BOMB';
         const bombMesh = new THREE.Mesh(_jdam500Geo, _jdam500Mat);
         bombMesh.position.set(v.pos.x, v.pos.y - 1.2, v.pos.z);
-        bombMesh.lookAt(ccipPos);
+        bombMesh.lookAt(lJdamVeh ? lJdamVeh.pos : lJdamDesig ? lJdamDesig.pos : ccipPos);
         this.scene.add(bombMesh);
 
         this.world.projectiles.push({
           type: 'jdam_bomb',
-          weaponLabel: '500LB JDAM BOMB',
+          weaponName: bombLbl,
+          weaponLabel: bombLbl,
           mesh: bombMesh,
           vel: bombInitVel.clone(),
-          gravity: bombGrav,
+          gravity: hasLaserGuide ? bombGrav * 0.55 : bombGrav,
           life: PROJECTILES.JDAM_BOMB?.life || 26.0,
-          blastRadius: 12.0,
-          blastDamage: 420,
+          turnRate: hasLaserGuide ? 3.8 : 0,
+          targetVehicle: lJdamVeh,
+          laserDesignation: lJdamDesig,
+          blastRadius: hasLaserGuide ? 13.5 : 12.0,
+          blastDamage: hasLaserGuide ? 540 : 420,
           owner: this
         });
         if (this.onAwardXp) {
-          this.onAwardXp(0, '💣 500LB JDAM RELEASED ON CCIP TARGET!');
+          this.onAwardXp(
+            0,
+            hasLaserGuide
+              ? `🔶💣 ${bombLbl} RELEASED — TRACKING ◆1688 LASER TARGET!`
+              : '💣 500LB JDAM RELEASED ON CCIP TARGET!'
+          );
         }
       } else if (v.aircraftRole === 'fighter' && activeSlot === 1) {
         // Combined Strike Fighter [2] LMB: Fire AIM-120D FOX-3 / R-77M Homing A2A Missile (actual reload gated by coaxCooldown below)
@@ -7224,6 +7390,9 @@ export const VehicleControlMethods = {
           1,
           noseMuzzle
         );
+      }
+      if (isAutoAirCannon && v.fireCooldown > 0 && prevAirDebt < 0) {
+        v.fireCooldown = Math.max(v.maxFireCooldown * 0.12, v.fireCooldown + prevAirDebt);
       }
     }
 

@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SQUAD_DEFS } from '../bots.js?v=136';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=136';
+import { SQUAD_DEFS } from '../bots.js?v=139';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=139';
 
 export const CommandPanel = {
   setCommandScope(scope, opts = {}) {
@@ -1107,6 +1107,7 @@ export const CommandPanel = {
       const modal = this.el('command-modal');
       if (this.mapClickMode !== 'RIDE') {
         this.mapClickMode = 'RIDE';
+        this._initSmartRideMapZoom?.();
         if (modal) this.renderCommandModalContent(modal);
       } else {
         this._destroyCommandModal(modal, true);
@@ -1114,13 +1115,53 @@ export const CommandPanel = {
       return;
     }
 
-    const res = this.player.handleAltRRideAction?.(this);
-    this.updateRideStatusHud?.();
-    return res;
+    // 1-Step Tactical Ping Dispatch: if player has a fresh [Q]/[Z] ping, send helicopter/APC directly there!
+    const ping = this.player.activePing;
+    if (
+      ping &&
+      ping.timer > 0 &&
+      ping.pos &&
+      this.player.activeRideVehicle?.rideTask?._consumedPingRef !== ping
+    ) {
+      const mode = this.player.preferredRideMode || 'heli';
+      const veh = this.vehicleManager?.requestPlayerRide?.(this.player, {
+        transportMode: mode,
+        destX: ping.pos.x,
+        destZ: ping.pos.z,
+        preferRoof: mode === 'heli'
+      });
+      if (veh?.rideTask) {
+        veh.rideTask._consumedPingRef = ping;
+      }
+      this.updateRideStatusHud?.();
+      return 'PING_DISPATCHED';
+    }
+
+    // Otherwise, 1 press of [Alt+R] immediately opens the Zoomable Rooftop & FOB Tactical Ride Map!
+    this.openRideMapModal();
+    return 'OPENED_RIDE_MAP';
+  },
+
+  _initSmartRideMapZoom() {
+    const px = this.player?.pos?.x || 0;
+    const pz = this.player?.pos?.z || 0;
+    const distToObjC = Math.hypot(px, pz);
+    // If player is >165m from Downtown C (e.g. at HQ Base), auto-zoom 4.6x into Downtown C skyscrapers
+    // so every individual rooftop is large and 1-click selectable! If already at C, show 1.2x valley overview.
+    if (distToObjC > 165) {
+      this._cmdMapZoom = 4.6;
+      this._cmdMapPanX = 0;
+      this._cmdMapPanZ = 0;
+    } else {
+      this._cmdMapZoom = 1.2;
+      this._cmdMapPanX = 0;
+      this._cmdMapPanZ = 0;
+    }
   },
 
   openRideMapModal() {
     this.mapClickMode = 'RIDE';
+    this._initSmartRideMapZoom();
     const existing = this.el('command-modal');
     if (existing && !existing.classList.contains('hidden')) {
       this.renderCommandModalContent(existing);
@@ -1344,7 +1385,28 @@ export const CommandPanel = {
             };border:none;border-radius:3px;padding:2px 8px;font-size:10.5px;font-weight:900;cursor:pointer;">SCOPE: ${playerSquadId}</button>
           </div>
         </div>
-        <canvas id="cmd-tactical-map-canvas" width="760" height="205" style="width:100%;height:205px;display:block;border-radius:4px;cursor:crosshair;"></canvas>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:4px;flex-wrap:wrap;background:rgba(0,0,0,0.35);padding:3px 6px;border-radius:4px;">
+          <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;">
+            <span style="font-size:10px;color:#81ecec;font-weight:900;">🔍 ZOOM SECTOR (WHEEL / DRAG):</span>
+            <button type="button" class="cmd-map-zoom-btn" data-zoom="4.8" data-px="0" data-pz="0" style="background:#0097a7;color:#fff;border:1px solid #81ecec;border-radius:3px;padding:2px 6px;font-size:9.5px;font-weight:900;cursor:pointer;">🏙️ C ROOFS 5×</button>
+            <button type="button" class="cmd-map-zoom-btn" data-zoom="3.8" data-px="-660" data-pz="-280" style="background:rgba(255,255,255,0.12);color:#ecf0f1;border:1px solid rgba(255,255,255,0.25);border-radius:3px;padding:2px 6px;font-size:9.5px;font-weight:800;cursor:pointer;">🔍 OBJ A</button>
+            <button type="button" class="cmd-map-zoom-btn" data-zoom="3.8" data-px="-320" data-pz="320" style="background:rgba(255,255,255,0.12);color:#ecf0f1;border:1px solid rgba(255,255,255,0.25);border-radius:3px;padding:2px 6px;font-size:9.5px;font-weight:800;cursor:pointer;">🔍 OBJ B</button>
+            <button type="button" class="cmd-map-zoom-btn" data-zoom="3.8" data-px="330" data-pz="-320" style="background:rgba(255,255,255,0.12);color:#ecf0f1;border:1px solid rgba(255,255,255,0.25);border-radius:3px;padding:2px 6px;font-size:9.5px;font-weight:800;cursor:pointer;">🔍 OBJ D</button>
+            <button type="button" class="cmd-map-zoom-btn" data-zoom="3.8" data-px="660" data-pz="280" style="background:rgba(255,255,255,0.12);color:#ecf0f1;border:1px solid rgba(255,255,255,0.25);border-radius:3px;padding:2px 6px;font-size:9.5px;font-weight:800;cursor:pointer;">🔍 OBJ E</button>
+            <button type="button" class="cmd-map-zoom-btn" data-zoom="2.8" data-px="${
+              team === 'RU' ? 1520 : -1520
+            }" data-pz="0" style="background:rgba(52,152,219,0.22);color:#74b9ff;border:1px solid #3498db;border-radius:3px;padding:2px 6px;font-size:9.5px;font-weight:800;cursor:pointer;">🏠 MY HQ</button>
+            <button type="button" class="cmd-map-zoom-btn" data-zoom="1.0" data-px="0" data-pz="0" style="background:rgba(241,196,15,0.2);color:#ffeaa7;border:1px solid #f1c40f;border-radius:3px;padding:2px 6px;font-size:9.5px;font-weight:900;cursor:pointer;">🗺️ FULL MAP 1×</button>
+          </div>
+          <span id="cmd-map-hover-readout" style="font-size:10px;color:#ffeaa7;font-weight:800;">${
+            isRideClickMode ? 'CLICK ANY CYAN/GOLD ROOFTOP TO LAND THERE!' : 'SCROLL TO ZOOM • DRAG TO PAN'
+          }</span>
+        </div>
+        <canvas id="cmd-tactical-map-canvas" width="760" height="${
+          isRideClickMode ? 275 : 215
+        }" style="width:100%;height:${
+          isRideClickMode ? '275px' : '215px'
+        };display:block;border-radius:4px;cursor:crosshair;"></canvas>
       </div>
 
       <!-- PERSONAL RIDE, SNIPER ROOFTOP AIRLIFT & ARMORED TAXI DISPATCH (ALL RANKS & CLASSES!) -->
@@ -1353,7 +1415,7 @@ export const CommandPanel = {
       };background:rgba(8,30,38,0.92);border:1.5px solid rgba(0,210,211,0.6);border-left:4px solid #00d2d3;border-radius:5px;padding:8px 10px;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px;">
           <div>
-            <span style="font-size:12.5px;font-weight:900;color:#7ef9ff;">🚁 TACTICAL RIDE &amp; SNIPER ROOFTOP AIRLIFT [${getShortOrderModifierLabel()}+R] (1ST [${getShortOrderModifierLabel()}+R] = PICK UP HERE • 2ND [${getShortOrderModifierLabel()}+R] = DROP-OFF):</span>
+            <span style="font-size:12.5px;font-weight:900;color:#7ef9ff;">🚁 1-STEP TACTICAL RIDE &amp; ROOFTOP AIRLIFT [${getShortOrderModifierLabel()}+R] (CLICK ANY BUILDING ROOF ABOVE OR PING + [${getShortOrderModifierLabel()}+R]):</span>
             <span style="font-size:10.5px;color:#ffeaa7;margin-left:6px;font-weight:800;">STATUS: ${activeRideDesc}</span>
           </div>
           <div style="display:flex;gap:4px;flex-wrap:wrap;">
@@ -1651,9 +1713,53 @@ export const CommandPanel = {
       });
     });
 
+    modal.querySelectorAll('.cmd-map-zoom-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this._cmdMapZoom = Math.max(1.0, Math.min(6.5, Number(btn.dataset.zoom) || 1.0));
+        this._cmdMapPanX = Number(btn.dataset.px) || 0;
+        this._cmdMapPanZ = Number(btn.dataset.pz) || 0;
+        const c = modal.querySelector('#cmd-tactical-map-canvas');
+        if (c) this.drawCommandTacticalMap(c);
+      });
+    });
+
     const mapCanvas = modal.querySelector('#cmd-tactical-map-canvas');
     if (mapCanvas) {
       if (this._domCache) this._domCache.set('cmd-tactical-map-canvas', mapCanvas);
+      const canvasToWorld = (e) => {
+        const rect = mapCanvas.getBoundingClientRect();
+        const cx = ((e.clientX - rect.left) / Math.max(1, rect.width)) * mapCanvas.width;
+        const cy = ((e.clientY - rect.top) / Math.max(1, rect.height)) * mapCanvas.height;
+        const tf = this._cmdMapTransform || {
+          zoom: this._cmdMapZoom || 1,
+          panX: this._cmdMapPanX || 0,
+          panZ: this._cmdMapPanZ || 0,
+          spanX: 3480 / (this._cmdMapZoom || 1),
+          spanZ: 2120 / (this._cmdMapZoom || 1)
+        };
+        const wx = tf.panX + (cx / mapCanvas.width - 0.5) * tf.spanX;
+        const wz = tf.panZ + (cy / mapCanvas.height - 0.5) * tf.spanZ;
+        return { wx, wz };
+      };
+      const findBuildingAtMapCoords = (wx, wz) => {
+        const blds = this.world?.buildings;
+        if (!Array.isArray(blds)) return null;
+        const pad = (this._cmdMapZoom || 1) >= 2.8 ? 2.4 : 4.5;
+        let best = null;
+        let bestDist = Infinity;
+        for (let i = 0; i < blds.length; i++) {
+          const b = blds[i];
+          if (!b || b.collapsed) continue;
+          if (wx >= b.minWx - pad && wx <= b.maxWx + pad && wz >= b.minWz - pad && wz <= b.maxWz + pad) {
+            const d = Math.hypot(wx - b.centerWx, wz - b.centerWz);
+            if (d < bestDist) {
+              bestDist = d;
+              best = b;
+            }
+          }
+        }
+        return best;
+      };
       if (
         modal.isConnected &&
         !modal.classList.contains('hidden') &&
@@ -1662,12 +1768,88 @@ export const CommandPanel = {
       ) {
         this.drawCommandTacticalMap(mapCanvas);
       }
+
+      let dragMoved = false;
+      let isDraggingMap = false;
+      let dragStartX = 0;
+      let dragStartY = 0;
+      let dragStartPanX = 0;
+      let dragStartPanZ = 0;
+
+      mapCanvas.addEventListener(
+        'wheel',
+        (e) => {
+          e.preventDefault();
+          const before = canvasToWorld(e);
+          const curZ = this._cmdMapZoom || 1.0;
+          const nextZ = Math.max(1.0, Math.min(6.5, curZ * (e.deltaY < 0 ? 1.24 : 0.8)));
+          this._cmdMapZoom = nextZ;
+          if (nextZ <= 1.02) {
+            this._cmdMapPanX = 0;
+            this._cmdMapPanZ = 0;
+          } else {
+            const rect = mapCanvas.getBoundingClientRect();
+            const nx = (e.clientX - rect.left) / Math.max(1, rect.width) - 0.5;
+            const ny = (e.clientY - rect.top) / Math.max(1, rect.height) - 0.5;
+            this._cmdMapPanX = Math.max(-1650, Math.min(1650, before.wx - nx * (3480 / nextZ)));
+            this._cmdMapPanZ = Math.max(-980, Math.min(980, before.wz - ny * (2120 / nextZ)));
+          }
+          this.drawCommandTacticalMap(mapCanvas);
+        },
+        { passive: false }
+      );
+
+      mapCanvas.addEventListener('mousedown', (e) => {
+        if (e.button !== 0 && e.button !== 1) return;
+        isDraggingMap = true;
+        dragMoved = false;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        dragStartPanX = this._cmdMapPanX || 0;
+        dragStartPanZ = this._cmdMapPanZ || 0;
+      });
+      mapCanvas.addEventListener('mousemove', (e) => {
+        if (isDraggingMap && (this._cmdMapZoom || 1) > 1.02) {
+          const dxPx = e.clientX - dragStartX;
+          const dyPx = e.clientY - dragStartY;
+          if (Math.hypot(dxPx, dyPx) > 5) {
+            dragMoved = true;
+            const rect = mapCanvas.getBoundingClientRect();
+            const spanX = 3480 / (this._cmdMapZoom || 1);
+            const spanZ = 2120 / (this._cmdMapZoom || 1);
+            this._cmdMapPanX = Math.max(-1650, Math.min(1650, dragStartPanX - (dxPx / Math.max(1, rect.width)) * spanX));
+            this._cmdMapPanZ = Math.max(-980, Math.min(980, dragStartPanZ - (dyPx / Math.max(1, rect.height)) * spanZ));
+            this.drawCommandTacticalMap(mapCanvas);
+            return;
+          }
+        }
+        const { wx, wz } = canvasToWorld(e);
+        const hovBld = findBuildingAtMapCoords(wx, wz);
+        const prevHovId = this._cmdHoveredBuildingId ?? null;
+        const nextHovId = hovBld ? hovBld.id : null;
+        this._cmdHoveredBuildingId = nextHovId;
+        const readoutEl = modal.querySelector('#cmd-map-hover-readout');
+        if (readoutEl) {
+          if (hovBld) {
+            readoutEl.textContent = `🏢 BLDG #${hovBld.id + 1} ROOF (${hovBld.floors}F • +${hovBld.floors * 5}M) — CLICK TO AIRLIFT!`;
+          } else {
+            readoutEl.textContent = `📍 (${Math.round(wx)}m, ${Math.round(wz)}m) • ZOOM ${(this._cmdMapZoom || 1).toFixed(1)}×`;
+          }
+        }
+        if (prevHovId !== nextHovId) {
+          this.drawCommandTacticalMap(mapCanvas);
+        }
+      });
+      window.addEventListener(
+        'mouseup',
+        () => {
+          isDraggingMap = false;
+        },
+        { once: false }
+      );
+
       const triggerMapAirstrikeAt = (e) => {
-        const rect = mapCanvas.getBoundingClientRect();
-        const cx = ((e.clientX - rect.left) / rect.width) * mapCanvas.width;
-        const cy = ((e.clientY - rect.top) / rect.height) * mapCanvas.height;
-        const wx = (cx / mapCanvas.width - 0.5) * 3480;
-        const wz = (cy / mapCanvas.height - 0.5) * 2120;
+        const { wx, wz } = canvasToWorld(e);
         this.player.callAirstrike(new THREE.Vector3(wx, 0, wz));
         this.updateCommandOrderHud();
         this.renderCommandModalContent(modal);
@@ -1677,23 +1859,27 @@ export const CommandPanel = {
         triggerMapAirstrikeAt(e);
       });
       mapCanvas.addEventListener('click', (e) => {
+        if (dragMoved) {
+          dragMoved = false;
+          return;
+        }
         if (this.mapClickMode === 'AIRSTRIKE') {
           triggerMapAirstrikeAt(e);
           return;
         }
-        const rect = mapCanvas.getBoundingClientRect();
-        const cx = ((e.clientX - rect.left) / rect.width) * mapCanvas.width;
-        const cy = ((e.clientY - rect.top) / rect.height) * mapCanvas.height;
-        const wx = (cx / mapCanvas.width - 0.5) * 3480;
-        const wz = (cy / mapCanvas.height - 0.5) * 2120;
+        const { wx, wz } = canvasToWorld(e);
 
         if (this.mapClickMode === 'RIDE') {
           const mode = this.player.preferredRideMode || 'heli';
+          const hitBld = mode === 'heli' ? findBuildingAtMapCoords(wx, wz) : null;
           this.vehicleManager?.requestPlayerRide?.(this.player, {
             transportMode: mode,
-            destX: wx,
-            destZ: wz,
-            preferRoof: mode === 'heli'
+            destX: hitBld ? hitBld.centerWx : wx,
+            destZ: hitBld ? hitBld.centerWz : wz,
+            preferRoof: mode === 'heli',
+            customLabel: hitBld
+              ? `🏢 BLDG #${hitBld.id + 1} ROOF (${hitBld.floors}F • +${hitBld.floors * 5}M)`
+              : undefined
           });
           this.updateRideStatusHud?.();
           this._destroyCommandModal(modal, true);

@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=136';
+import { sound } from '../audio.js?v=139';
 import {
   PLAYER,
   COMBAT,
@@ -8,10 +8,17 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=136';
-import { events } from '../events.js?v=136';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=136';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=136';
+} from '../config.js?v=139';
+import { events } from '../events.js?v=139';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=139';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=139';
+import {
+  evaluateMarksmanShot,
+  computeBallisticSolution,
+  syncActiveMarksmanTitle,
+  saveMarksmanProfile,
+  loadMarksmanProfile
+} from './MarksmanSystem.js?v=139';
 
 function markShared(asset) {
   if (asset) {
@@ -954,9 +961,33 @@ export const CombatMethods = {
       return;
     }
 
-    // 5. CS2 Weapon / Knife Inspect ([F] or [V]) when holding a firearm or Karambit/Butterfly Knife!
-    //    (Building fortifications remains on [T] or when holding the Standard Sledgehammer in Slot 4)
+    // 5. In-Scope Laser Rangefinder & Auto-Zero ([F] while ADS in a Sniper / DMR / Binocular Optic!)
     const curWep = this.currentWeapon ? this.currentWeapon() : null;
+    const activeOpticNow = this.getActiveOpticType ? this.getActiveOpticType() : curWep?.def?.opticType;
+    if (
+      this.isAds &&
+      curWep &&
+      !this.useCantedSight &&
+      (activeOpticNow === 'sniper8x' ||
+        activeOpticNow === 'sniper12x' ||
+        activeOpticNow === 'raptor13x' ||
+        activeOpticNow === 'sniper16x' ||
+        activeOpticNow === 'sniper27x' ||
+        activeOpticNow === 'sniper40x' ||
+        activeOpticNow === 'sniperFlir' ||
+        activeOpticNow === 'valday6x' ||
+        activeOpticNow === 'lpvo36' ||
+        activeOpticNow === 'acog' ||
+        activeOpticNow === 'binos' ||
+        curWep.def?.hasRaptarLrf ||
+        curWep.def?.type === 'binoculars')
+    ) {
+      this.fireLaserRangefinder(true);
+      return;
+    }
+
+    // 5b. CS2 Weapon / Knife Inspect ([F] or [V]) when holding a firearm or Karambit/Butterfly Knife!
+    //    (Building fortifications remains on [T] or when holding the Standard Sledgehammer in Slot 4)
     if (
       curWep &&
       (curWep.def.type === 'gun' || curWep.def.skinFinish === 'karambit' || curWep.def.skinFinish === 'butterfly') &&
@@ -1235,17 +1266,42 @@ export const CombatMethods = {
    * Tarkov Slow Reload (Pressing Loose Bullets one-by-one into Existing Magazines):
    * Triggered by pressing [P], holding [R], or pressing [R] when all Chest Rig mags are empty.
    */
-  startSlowReload() {
+  startSlowReload(fromExplicitKey = false) {
     const cur = this.currentWeapon();
-    if (!cur || !cur.mags || cur.def.clipSize <= 1 || this.reloading) return false;
+    if (!cur || !cur.mags || cur.def.clipSize <= 1) return false;
 
+    // Allow explicit [P] or Hold-[R] to cancel an in-progress mag-swap reload (e.g. auto-reload after last sniper shot)
+    if (this.reloading) {
+      if (!fromExplicitKey) return false;
+      this.reloading = false;
+      this.fastReload = false;
+    }
+
+    const clipSize = cur.def.clipSize;
     const hasDepletedMag =
-      cur.clip < cur.def.clipSize || cur.mags.some((m) => m < cur.def.clipSize);
+      cur.clip < clipSize || cur.mags.some((m) => m < clipSize);
+    const partialRigMags = cur.mags.filter((m) => m > 0 && m < clipSize).length;
     const canConsolidateMags =
-      cur.mags.filter((m) => m > 0 && m < cur.def.clipSize).length >= 2;
+      partialRigMags >= 2 || (cur.clip < clipSize && cur.mags.some((m) => m > 0));
     const hasLooseBullets = (cur.looseAmmo || 0) > 0;
 
-    if (!hasDepletedMag || (!hasLooseBullets && !canConsolidateMags)) {
+    if (!hasDepletedMag) {
+      if (fromExplicitKey && this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          `🎒 ALL MAGAZINES FULL (${cur.clip}/${clipSize} IN RIFLE • ${cur.looseAmmo || 0} LOOSE RDS IN PACK)`
+        );
+      }
+      return false;
+    }
+
+    if (!hasLooseBullets && !canConsolidateMags) {
+      if (fromExplicitKey && this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          '⚠️ 0 LOOSE ROUNDS IN PACK — RESUPPLY NEAR FRIENDLY FOB / AMMO STASH [7] OR LOOT ENEMY [F]!'
+        );
+      }
       return false;
     }
 
@@ -1253,8 +1309,13 @@ export const CombatMethods = {
     this.reloading = false;
     this.fastReload = false;
     this.isAds = false;
+    this._rightMouseHeld = false;
     const cohesionReloadMult = this.inSquadCohesion ? 0.82 : 1.0;
-    const bulletTime = (PLAYER.MAG_PACK_BULLET_TIME || 0.22) * cohesionReloadMult;
+    const isSniperCal = Boolean(cur.def.soundType === 'sniper' || clipSize <= 10);
+    const basePackTime = isSniperCal
+      ? Math.max(0.18, (PLAYER.MAG_PACK_BULLET_TIME || 0.22) * 0.95)
+      : PLAYER.MAG_PACK_BULLET_TIME || 0.22;
+    const bulletTime = basePackTime * cohesionReloadMult;
     this.magPackBulletTimer = bulletTime;
     this.magPackBulletDuration = bulletTime;
     this.magPackProgress = 0.02;
@@ -1263,7 +1324,9 @@ export const CombatMethods = {
     if (this.onAwardXp) {
       this.onAwardXp(
         0,
-        `🎒 SLOW RELOAD: PRESSING BULLETS INTO MAG (${cur.looseAmmo || 0} LOOSE RDS IN PACK)`
+        hasLooseBullets
+          ? `🎒 SLOW RELOAD: STUFFING BULLETS INTO MAG (${cur.looseAmmo || 0} LOOSE RDS IN PACK)`
+          : '🎒 CONSOLIDATING ROUNDS INTO ACTIVE MAGAZINE'
       );
     }
     return true;
@@ -1386,7 +1449,8 @@ export const CombatMethods = {
   executeFire(cur) {
     const def = cur.def;
     const interval = 60 / def.rpm;
-    this.fireTimer = interval;
+    const prevDebt = this.isFiring && def.auto && this.fireTimer < 0 ? Math.max(-interval * 3.0, this.fireTimer) : 0;
+    this.fireTimer = Math.max(interval * 0.12, interval + prevDebt);
 
     // Ensure camera world matrix matches the exact current aim before firing raycast
     this.syncCameraTransform();
@@ -1494,6 +1558,12 @@ export const CombatMethods = {
       return;
     }
 
+    if (def.type === 'binoculars') {
+      cur.clip = cur.def.clipSize || 99;
+      this.fireLaserRangefinder(true);
+      return;
+    }
+
     if (def.type === 'c4') {
       this.throwC4();
       events.emit('player:fired', {
@@ -1524,11 +1594,22 @@ export const CombatMethods = {
     });
 
     const suppressionSpreadMult = 1 + this.suppressionLevel * PLAYER.SUPPRESSION_SPREAD_MULT; // Suppression degrades accuracy
-    const spread = (this.isAds ? def.spreadAds : def.spreadHip) * suppressionSpreadMult;
+    const ledgeRested = typeof this.isRestingOnCoverLedge === 'function' ? this.isRestingOnCoverLedge() : false;
+    const bipodActive = Boolean(def.hasBipod && (this.prone || this.crouching || ledgeRested));
+    const stanceSpreadMult = bipodActive
+      ? 0.35
+      : this.prone
+      ? 0.52
+      : this.crouching
+      ? 0.72
+      : ledgeRested
+      ? 0.78
+      : 1.0;
+    const spread = (this.isAds ? def.spreadAds : def.spreadHip) * suppressionSpreadMult * stanceSpreadMult;
     const muzzleVel = def.muzzleVelocity || 780;
     const bulletGrav = def.bulletGravity ?? 9.81;
     // Authentic ballistic zeroing elevation angle: theta = (g * D_zero) / (2 * v0^2)
-    // In ADS, zeroes to `this.zeroDistance` (100m/200m/300m/400m via [X]); in hipfire, uses a 50m point-blank battle zero.
+    // In ADS, zeroes to `this.zeroDistance` (100m..800m via [X] or LRF [F]); in hipfire, uses a 50m point-blank battle zero.
     const activeZeroDist = this.isAds ? this.zeroDistance || PLAYER.ZERO_DISTANCE_DEFAULT || 100 : 50;
     const zeroElevation = (bulletGrav * activeZeroDist) / (2 * muzzleVel * muzzleVel);
     this.camera.getWorldQuaternion(_fireCamQuat);
@@ -1574,15 +1655,16 @@ export const CombatMethods = {
       );
     }
 
-    // Apply recoil kick after the round leaves the barrel (Prone reduces recoil by 45%, Crouch by 22%,
-    // and resting rifle on prepared sandbags/parapets inside a Friendly Forward Base reduces recoil by 30%!)
+    // Apply recoil kick after the round leaves the barrel (Prone reduces recoil by 55%, One-Knee Kneel by 32%,
+    // Atlas Bipod / rooftop parapet ledge rest cuts another 45%, and Friendly FOB entrenchment cuts 30%!)
     const stanceScale = this.prone
       ? PLAYER.RECOIL_SCALE_PRONE
       : this.crouching
       ? PLAYER.RECOIL_SCALE_CROUCH
       : 1.0;
+    const bipodRecoilMult = bipodActive ? 0.45 : ledgeRested ? 0.78 : 1.0;
     const baseDefenseRecoilMult = this.inFriendlyForwardBase ? 0.70 : 1.0;
-    const recoilScale = stanceScale * baseDefenseRecoilMult;
+    const recoilScale = stanceScale * bipodRecoilMult * baseDefenseRecoilMult;
     this.recoilKickZ = PLAYER.RECOIL_KICK_Z * recoilScale;
     this.recoilOffsetPitch += (def.recoilPitch || 0.014) * recoilScale;
     this.yaw += (Math.random() - 0.5) * (def.recoilYaw || 0.006) * recoilScale;
@@ -1834,6 +1916,7 @@ export const CombatMethods = {
       weaponLabel,
       armorPenMult,
       wepDef,
+      explosiveSplash: wepDef?.explosiveSplash || null,
       pelletCount,
       isBuckshot,
       isMountedMg,
@@ -1850,7 +1933,12 @@ export const CombatMethods = {
       isBrightTracer,
       tracerLine,
       arrowMesh,
-      explosiveSplash: wepDef && wepDef.explosiveSplash ? wepDef.explosiveSplash : null
+      explosiveSplash: wepDef && wepDef.explosiveSplash ? wepDef.explosiveSplash : null,
+      shooterWasAds: Boolean(this.isAds),
+      shooterUsedCanted: Boolean(this.useCantedSight),
+      shooterOpticType: this.getActiveOpticType ? this.getActiveOpticType() : wepDef?.opticType || null,
+      shooterStance: this.prone ? 'PRONE' : this.crouching ? 'CROUCH' : 'STANDING',
+      shooterHeldBreath: Boolean(this.isHoldingBreath)
     };
 
     this.activeBullets.push(bullet);
@@ -1969,10 +2057,11 @@ export const CombatMethods = {
       if (voxelHit.voxel && !bullet.penetratedCover) {
         const vType = voxelHit.voxel.type;
         const isWoodOrProp = Boolean(voxelHit.voxel.isProp || vType === 'wood');
+        const isAmrRound = Boolean(bullet.wepDef?.isAntiMateriel);
         const isSandbagOrBrick =
           vType === 'sandbag' ||
           (bullet.isHeavyPenCaliber && vType === 'brick') ||
-          (bullet.isMountedMg && (vType === 'brick' || vType === 'concrete'));
+          ((bullet.isMountedMg || isAmrRound) && (vType === 'brick' || vType === 'concrete'));
 
         if (isWoodOrProp && bullet.damage >= 22) {
           bullet.penetratedCover = true;
@@ -2106,6 +2195,10 @@ export const CombatMethods = {
       }
     }
 
+    const allowFriendlyBotHit = Boolean(
+      this.friendlyFireEnabled && !this.activeVehicle && !bullet.isMountedMg
+    );
+
     const considerBotTarget = (b) => {
       if (
         !b ||
@@ -2114,7 +2207,7 @@ export const CombatMethods = {
         (typeof b.hp === 'number' && b.hp <= 0) ||
         (typeof b.bleedOutTimer === 'number' && b.bleedOutTimer > 0) ||
         b.drivingVehicle ||
-        (b.team === this.team && !this.friendlyFireEnabled) ||
+        (b.team === this.team && !allowFriendlyBotHit) ||
         !b.hitMeshes ||
         bullet.hitBots.has(b)
       ) {
@@ -2173,7 +2266,7 @@ export const CombatMethods = {
         if (hit.object.userData.bot) {
           const bot = hit.object.userData.bot;
           if (
-            (bot.team === this.team && !this.friendlyFireEnabled) ||
+            (bot.team === this.team && !allowFriendlyBotHit) ||
             bot.dead ||
             bot.downed ||
             (typeof bot.hp === 'number' && bot.hp <= 0) ||
@@ -2230,6 +2323,18 @@ export const CombatMethods = {
           const hitZone =
             bestBotHit.object?.userData?.hitZone ||
             (isHeadshot ? 'head' : isUpperChest ? 'thorax' : 'leftLeg');
+          const hpBeforeHit = typeof bot.hp === 'number' ? bot.hp : 100;
+          const targetSpeedMps =
+            bot.drivingVehicle?.forwardSpeed ||
+            bot.ridingVehicle?.forwardSpeed ||
+            bot.lastHorizSpeed ||
+            0;
+          const botRightX = Math.cos(bot.yaw || 0);
+          const botRightZ = -Math.sin(bot.yaw || 0);
+          const relLateral =
+            (bestBotHit.point.x - bot.pos.x) * botRightX +
+            (bestBotHit.point.z - bot.pos.z) * botRightZ;
+
           const res = this.botManager.damageBot(
             bot,
             dmg,
@@ -2253,6 +2358,144 @@ export const CombatMethods = {
           bullet.hitBots.add(bot);
           bullet.collateralHits++;
           _stepImpactPt.copy(bestBotHit.point);
+
+          // Evaluate Sniper Marksman Shot Difficulty, Badges, Feat Ribbons & Earned Titles!
+          // Includes Smoke-Screen Ray Check (`throughSmoke` / `targetInSmoke`), Rapid Double-Shot (`<= 4.2s`),
+          // Enemy Medic Triage-Denied, Cranial Headshot, and Friendly-Fire (`⚠️ BLUE-ON-BLUE`) Warning Cards!
+          if (!this.activeVehicle) {
+            if (!this.marksmanProfile) {
+              this.marksmanProfile = loadMarksmanProfile();
+            }
+            const nowHitMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            const oneShotKill = Boolean(
+              !isFriendlyBot && res.killed && hpBeforeHit >= 92 && penIndex === 0
+            );
+            const rapidDoubleShot = Boolean(
+              !isFriendlyBot &&
+                res.killed &&
+                this._lastMarksmanKillAtMs &&
+                nowHitMs - this._lastMarksmanKillAtMs <= 4200
+            );
+            const flightTimeAtHit =
+              bullet.flightTime +
+              bestBotHit.distance / Math.max(60, bullet.vel.length() || bullet.muzzleVelocity || 780);
+
+            // Ray-segment check against active Tactical Smoke Screens (`this.botManager.smokeClouds`)
+            let throughSmoke = false;
+            let targetInSmoke = false;
+            let smokeNormPos = 0.65;
+            const smokeList = this.botManager?.smokeClouds;
+            if (Array.isArray(smokeList) && smokeList.length > 0 && bullet.startOrigin) {
+              const ox = bullet.startOrigin.x;
+              const oy = bullet.startOrigin.y;
+              const oz = bullet.startOrigin.z;
+              const segDx = bestBotHit.point.x - ox;
+              const segDy = bestBotHit.point.y - oy;
+              const segDz = bestBotHit.point.z - oz;
+              const segLenSq = Math.max(1, segDx * segDx + segDy * segDy + segDz * segDz);
+              for (let si = 0; si < smokeList.length; si++) {
+                const sc = smokeList[si];
+                const sp = sc?.group?.position || sc?.pos;
+                if (!sp) continue;
+                const scY = sp.y + 0.9;
+                const dTgtSq =
+                  (bestBotHit.point.x - sp.x) * (bestBotHit.point.x - sp.x) +
+                  (bestBotHit.point.y - scY) * (bestBotHit.point.y - scY) +
+                  (bestBotHit.point.z - sp.z) * (bestBotHit.point.z - sp.z);
+                if (dTgtSq <= 4.9 * 4.9) {
+                  targetInSmoke = true;
+                  smokeNormPos = 0.88;
+                }
+                const projU =
+                  ((sp.x - ox) * segDx + (scY - oy) * segDy + (sp.z - oz) * segDz) / segLenSq;
+                if (projU > 0.04 && projU < 0.96) {
+                  const cx = ox + segDx * projU - sp.x;
+                  const cy = oy + segDy * projU - scY;
+                  const cz = oz + segDz * projU - sp.z;
+                  if (cx * cx + cy * cy + cz * cz <= 4.5 * 4.5) {
+                    throughSmoke = true;
+                    smokeNormPos = Math.max(0.14, Math.min(0.9, projU));
+                  }
+                }
+              }
+            }
+
+            const marksmanEval = evaluateMarksmanShot(
+              {
+                wepDef: bullet.wepDef,
+                weaponLabel: bullet.weaponLabel,
+                distanceM: totalFlightDist,
+                flightTimeS: flightTimeAtHit,
+                gravityMps2: bullet.gravity,
+                shooterPos: bullet.startOrigin,
+                impactPos: bestBotHit.point,
+                damageDealt: dmg,
+                isKill: Boolean(res.killed),
+                isHeadshot,
+                oneShotKill,
+                hitZone,
+                relHitY,
+                relLateral,
+                fracturedLimb: res.fracturedLimb || null,
+                targetSpeedMps,
+                targetRole: bot.role || '',
+                penetratedCover: hitThroughCover,
+                collateralCount: res.killed ? bullet.collateralKills + 1 : bullet.collateralHits,
+                isAds: Boolean(bullet.shooterWasAds),
+                useCantedSight: Boolean(bullet.shooterUsedCanted),
+                opticType: bullet.shooterOpticType,
+                stance: bullet.shooterStance || 'STANDING',
+                isHoldingBreath: Boolean(bullet.shooterHeldBreath),
+                currentDeadeyeStreak: this.deadeyeStreak || 0,
+                isFriendly: Boolean(isFriendlyBot),
+                throughSmoke,
+                targetInSmoke,
+                smokeNormPos,
+                rapidDoubleShot,
+                wasRescuing: Boolean(res.wasRescuing || bot.rescueTarget)
+              },
+              this.marksmanProfile
+            );
+            if (marksmanEval.triggered) {
+              if (isFriendlyBot) {
+                if (res.killed) this.deadeyeStreak = 0;
+              } else if (res.killed) {
+                this.deadeyeStreak = marksmanEval.deadeyeStreak;
+                this._lastMarksmanKillAtMs = nowHitMs;
+                const elevDeltaHere = (bullet.startOrigin?.y || 0) - (bestBotHit.point?.y || 0);
+                if (
+                  (this.prone || this.crouching || elevDeltaHere >= 8.0) &&
+                  totalFlightDist >= 75
+                ) {
+                  this.camperKills = (this.camperKills || 0) + 1;
+                }
+              }
+              marksmanEval.timestamp = nowHitMs;
+              marksmanEval.victimName = bot.name || (isFriendlyBot ? 'FRIENDLY' : 'ENEMY');
+              this.lastMarksmanShot = marksmanEval;
+              if (!isFriendlyBot && marksmanEval.bonusXp > 0) {
+                this.score = (this.score || 0) + marksmanEval.bonusXp;
+                this.onAwardXp?.(
+                  marksmanEval.bonusXp,
+                  `${marksmanEval.badge.icon} MARKSMAN [${marksmanEval.grade}] ${marksmanEval.badge.badgeName}: ${marksmanEval.distanceM}m • ${marksmanEval.anatomy.shortPart} (${dmg} DMG)`
+                );
+              }
+              if (!isFriendlyBot && marksmanEval.bonusCash > 0 && typeof this.addCash === 'function') {
+                this.addCash(
+                  marksmanEval.bonusCash,
+                  `MARKSMAN ${marksmanEval.distanceM}M BONUS`,
+                  false
+                );
+              }
+              sound.playMarksmanBadgeStinger?.(marksmanEval.grade);
+              if (marksmanEval.newlyUnlockedTitle && this.onKillStreakAnnouncement) {
+                this.onKillStreakAnnouncement(
+                  `🏅 TITLE EARNED: 「${marksmanEval.newlyUnlockedTitle.icon} ${marksmanEval.newlyUnlockedTitle.title}」!`
+                );
+              }
+              events.emit('marksman:shot', marksmanEval);
+            }
+          }
 
           const impactColor = bullet.wepDef?.isIncendiaryAmmo
             ? _hitVehColor
@@ -2367,6 +2610,15 @@ export const CombatMethods = {
               hit.point
             );
             const actualDmg = typeof veh.lastAppliedDamage === 'number' ? veh.lastAppliedDamage : apDmg;
+            if (this.activeVehicle && this.activeVehicle.isAircraft && actualDmg > 0) {
+              this.vehicleManager.notifyPlayerOrdnanceImpact?.({
+                pos: hit.point,
+                radius: 4,
+                damage: actualDmg,
+                pType: 'aircraft_gun',
+                owner: this
+              });
+            }
             if (this.onHitmarker) {
               if (veh.lastSubsystemCrit === 'OPTICS') {
                 this.onHitmarker('armor', '🔭 OPTICS CRACKED! (0 HULL DMG)');
@@ -2513,11 +2765,11 @@ export const CombatMethods = {
             this.onBroadcast
           );
         } else if (
-          bullet.isMountedMg &&
+          (bullet.isMountedMg || bullet.wepDef?.isAntiMateriel) &&
           (stoppedByVoxel.voxel.type === 'brick' ||
             stoppedByVoxel.voxel.type === 'concrete')
         ) {
-          const wallChip = Math.max(18, Math.round(bullet.voxelDamage * 0.48));
+          const wallChip = Math.max(24, Math.round(bullet.voxelDamage * 0.58));
           this.world.damageVoxel(
             stoppedByVoxel.voxel.gx,
             stoppedByVoxel.voxel.gy,
@@ -2963,6 +3215,296 @@ export const CombatMethods = {
       );
     }
     return true;
+  },
+
+  /**
+   * Recon Sniper Specialist Slot [3] Toggle (`AN/PVS-21 LRF Binoculars` ⇄ `C4 Breach Charge`)
+   * plus `[\]` Quick-Binoculars toggle!
+   */
+  toggleReconGadgetMode() {
+    if (!this.slots || !this.slots[2]) return false;
+    const slot3 = this.slots[2];
+    const curId = slot3.def?.id;
+    if (curId !== 'rangefinder_binos' && curId !== 'c4') return false;
+
+    if (curId === 'c4') {
+      this._savedReconC4Clip = slot3.clip;
+      this._savedReconC4Reserve = slot3.reserve;
+    }
+
+    const targetId = curId === 'rangefinder_binos' ? 'c4' : 'rangefinder_binos';
+    const newDef = WEAPON_DEFS[targetId];
+    if (!newDef) return false;
+
+    if (slot3.mesh && this.viewModelGroup) {
+      this.viewModelGroup.remove(slot3.mesh);
+    }
+    const newMesh = createWeaponViewModel(newDef, this.team, {});
+    if (this.currentSlotIndex === 2 && !this.activeVehicle && this.viewModelGroup) {
+      newMesh.position.set(0.22, -0.34, -0.26);
+      this.viewModelGroup.add(newMesh);
+    }
+
+    slot3.def = { ...newDef };
+    slot3.mesh = newMesh;
+    if (targetId === 'c4') {
+      slot3.clip = typeof this._savedReconC4Clip === 'number' ? this._savedReconC4Clip : newDef.clipSize;
+      slot3.reserve = typeof this._savedReconC4Reserve === 'number' ? this._savedReconC4Reserve : newDef.reserveAmmo;
+      this.isAds = false;
+    } else {
+      slot3.clip = 99;
+      slot3.reserve = 99;
+      this.opticZoomIndex = 0;
+    }
+    if (Array.isArray(this.loadoutIds)) {
+      this.loadoutIds[2] = targetId;
+    }
+    sound.playWeaponSwitch?.();
+    this.onAwardXp?.(
+      0,
+      targetId === 'rangefinder_binos'
+        ? '🔭 SLOT [3] SWAPPED: AN/PVS-21 LRF BINOCULARS (HOLD RMB / [O] ZOOM • LMB LASER RANGE & AUTO-ZERO RIFLE!)'
+        : '🧨 SLOT [3] SWAPPED: C4 BREACH CHARGE (PRESS [3] AGAIN FOR LRF BINOCULARS)'
+    );
+    return true;
+  },
+
+  toggleQuickBinoculars() {
+    if (this.dead || this.downed || this.activeVehicle || !this.slots || !this.slots[2]) return false;
+    const cur = this.currentWeapon?.();
+    if (cur && cur.def?.id === 'rangefinder_binos') {
+      this.isAds = false;
+      this.switchSlot(0);
+      return false;
+    }
+    if (this.role === 'recon') {
+      if (this.slots[2].def?.id === 'c4') {
+        this.toggleReconGadgetMode();
+      }
+      if (this.slots[2].def?.id === 'rangefinder_binos') {
+        this.switchSlot(2);
+        this.isAds = true;
+        return true;
+      }
+    }
+    return false;
+  },
+
+  /**
+   * Samples instantaneous Laser Rangefinder telemetry along the camera sightline (up to 1,800m)
+   * and computes exact drop/holdover/lead for the player's primary rifle (`slots[0]`).
+   */
+  sampleLaserRangefinder(maxRange = 2500) {
+    if (!this.world || !this.camera) return null;
+    this.camera.updateMatrixWorld(true);
+    const origin = this.camera.getWorldPosition(new THREE.Vector3());
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).normalize();
+
+    let bestDist = maxRange;
+    let hitPoint = null;
+    let targetUnit = null;
+    let targetLabel = 'TERRAIN';
+    let targetSpeedMps = 0;
+    let isEnemy = false;
+
+    // 1. Check voxel buildings / rooftops first to bound entity scan
+    if (typeof this.world.raycastVoxel === 'function') {
+      const vHit = this.world.raycastVoxel(origin, dir, maxRange);
+      if (vHit && vHit.distance < bestDist && vHit.distance > 1.5) {
+        bestDist = vHit.distance;
+        hitPoint = vHit.point.clone();
+        targetLabel = 'STRUCTURE / ROOF';
+      }
+    }
+
+    // 2. Check terrain heightmap intersection if closer than voxel hit
+    for (let d = 6; d < bestDist; d += d < 250 ? 4 : 12) {
+      const px = origin.x + dir.x * d;
+      const py = origin.y + dir.y * d;
+      const pz = origin.z + dir.z * d;
+      if (Math.abs(px) > 2500 || Math.abs(pz) > 1700) break;
+      const ty = this.world.getGroundHeightAt(px, pz);
+      if (py <= ty + 0.35) {
+        bestDist = d;
+        hitPoint = new THREE.Vector3(px, ty, pz);
+        targetLabel = 'TERRAIN';
+        break;
+      }
+    }
+
+    // 3. Check enemy soldiers within sight cone (`perp <= 1.25m`) before `bestDist`
+    if (this.botManager && Array.isArray(this.botManager.bots)) {
+      for (let i = 0; i < this.botManager.bots.length; i++) {
+        const b = this.botManager.bots[i];
+        if (!b || b.dead || b.downed || b.team === this.team) continue;
+        const vx = b.pos.x - origin.x;
+        const vy = b.pos.y + 1.05 - origin.y;
+        const vz = b.pos.z - origin.z;
+        const proj = vx * dir.x + vy * dir.y + vz * dir.z;
+        if (proj < 3 || proj > bestDist) continue;
+        const perpSq = vx * vx + vy * vy + vz * vz - proj * proj;
+        if (perpSq <= 1.35 * 1.35) {
+          bestDist = proj;
+          hitPoint = new THREE.Vector3(b.pos.x, b.pos.y + 1.1, b.pos.z);
+          targetUnit = b;
+          targetLabel = `ENEMY ${b.role || 'SOLDIER'}`;
+          targetSpeedMps = b.drivingVehicle?.forwardSpeed || b.ridingVehicle?.forwardSpeed || b.lastHorizSpeed || 0;
+          isEnemy = true;
+        }
+      }
+    }
+
+    // 4. Check enemy vehicles / helicopters
+    if (this.vehicleManager && Array.isArray(this.vehicleManager.vehicles)) {
+      for (let i = 0; i < this.vehicleManager.vehicles.length; i++) {
+        const v = this.vehicleManager.vehicles[i];
+        if (!v || v.dead || v === this.activeVehicle || v.team === this.team) continue;
+        const vx = v.pos.x - origin.x;
+        const vy = v.pos.y + 1.4 - origin.y;
+        const vz = v.pos.z - origin.z;
+        const proj = vx * dir.x + vy * dir.y + vz * dir.z;
+        const hitR = v.isAircraft ? 5.5 : 3.4;
+        if (proj < 5 || proj > bestDist) continue;
+        const perpSq = vx * vx + vy * vy + vz * vz - proj * proj;
+        if (perpSq <= hitR * hitR) {
+          bestDist = proj;
+          hitPoint = v.pos.clone().add(new THREE.Vector3(0, 1.4, 0));
+          targetUnit = v;
+          targetLabel = v.name ? v.name.split(' (')[0] : 'ENEMY VEHICLE';
+          targetSpeedMps = Math.abs(v.forwardSpeed || 0);
+          isEnemy = true;
+        }
+      }
+    }
+
+    if (!hitPoint) {
+      hitPoint = origin.clone().addScaledVector(dir, bestDist);
+    }
+
+    const elevDeltaM = origin.y - hitPoint.y;
+    const primaryWepDef = this.slots?.[0]?.def || this.currentWeapon?.()?.def || null;
+    const solution = computeBallisticSolution(
+      bestDist,
+      elevDeltaM,
+      targetSpeedMps,
+      primaryWepDef,
+      this.zeroDistance || 100
+    );
+
+    const readout = {
+      hitPoint,
+      distM: solution.distanceM,
+      elevDeltaM: Math.round(elevDeltaM),
+      targetUnit,
+      targetLabel,
+      targetSpeedMps: Number(targetSpeedMps.toFixed(1)),
+      isEnemy,
+      rifleName: primaryWepDef?.shortName || 'RIFLE',
+      solution
+    };
+    this.liveLrfReadout = readout;
+    return readout;
+  },
+
+  /**
+   * Fires an active Laser Rangefinder & ◆1688 JTAC Laser Designator pulse (`LMB` in Binoculars or `[F]` while Scoped in ADS):
+   * - Auto-zeros the player's rifle to the exact ballistic distance (`this.zeroDistance = recommendedZeroM`)
+   * - Registers a 25-second `◆ LASER 1688` Moving-Target Designation (`world.activeLaserDesignations[team]`)
+   *   so `[J]` calls a Moving-Target Laser-Guided GBU/Maverick Strike AND friendly Aircraft lock on from 2,500m!
+   */
+  fireLaserRangefinder(autoZeroRifle = true) {
+    const lrf = this.sampleLaserRangefinder(2500);
+    if (!lrf) return null;
+
+    if (autoZeroRifle) {
+      this.zeroDistance = lrf.solution.recommendedZeroM;
+      this.isExactLrfZero = true;
+    }
+
+    const curWep = this.currentWeapon?.();
+    const canLaserDesignate = Boolean(
+      this.role === 'recon' ||
+        curWep?.def?.type === 'binoculars' ||
+        curWep?.def?.hasRaptarLrf ||
+        curWep?.def?.opticType === 'raptor13x'
+    );
+
+    let laserPainted = false;
+    if (canLaserDesignate && this.world) {
+      if (!this.world.activeLaserDesignations) {
+        this.world.activeLaserDesignations = {};
+      }
+      const isVehTarget = Boolean(lrf.targetUnit && lrf.targetUnit.maxHp && !lrf.targetUnit.role);
+      const isBotTarget = Boolean(lrf.targetUnit && lrf.targetUnit.role);
+      if (isVehTarget) {
+        lrf.targetUnit.jtacLaserTimer = 25.0;
+        lrf.targetUnit.jtacLaserOwner = this;
+        lrf.targetUnit.uavRevealed = true;
+      } else if (isBotTarget) {
+        lrf.targetUnit.spottedTimer = Math.max(lrf.targetUnit.spottedTimer || 0, 25.0);
+        lrf.targetUnit.jtacLaserPainted = true;
+      }
+      this.world.activeLaserDesignations[this.team || 'US'] = {
+        pos: lrf.hitPoint.clone(),
+        targetUnit: lrf.isEnemy ? lrf.targetUnit : null,
+        targetVehicle: isVehTarget ? lrf.targetUnit : null,
+        targetBot: isBotTarget ? lrf.targetUnit : null,
+        label: lrf.targetLabel,
+        distM: Math.round(lrf.distM),
+        isEnemy: Boolean(lrf.isEnemy),
+        code: 1688,
+        timer: 25.0,
+        maxTimer: 25.0,
+        owner: this,
+        ownerName: this.name || 'SNIPER JTAC'
+      };
+      laserPainted = true;
+    }
+
+    this.activePing = {
+      pos: lrf.hitPoint.clone().add(new THREE.Vector3(0, 0.8, 0)),
+      timer: laserPainted ? 25.0 : 14.0,
+      isEnemy: lrf.isEnemy,
+      isJtac: laserPainted,
+      targetUnit: lrf.isEnemy ? lrf.targetUnit : null,
+      label: laserPainted
+        ? `◆ LASER 1688: ${lrf.targetLabel} (${Math.round(lrf.distM)}M)`
+        : lrf.isEnemy
+        ? `🎯 ${lrf.targetLabel} (${Math.round(lrf.distM)}M)`
+        : `📡 LRF ${Math.round(lrf.distM)}M`
+    };
+
+    if (!this.marksmanProfile) {
+      this.marksmanProfile = loadMarksmanProfile();
+    }
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    let spotXp = 0;
+    if (lrf.isEnemy && lrf.targetUnit && nowMs > (lrf.targetUnit._lrfSpottedUntil || 0)) {
+      lrf.targetUnit._lrfSpottedUntil = nowMs + 15000;
+      this.marksmanProfile.lrfSpots = (this.marksmanProfile.lrfSpots || 0) + 1;
+      spotXp = laserPainted ? 35 : 15;
+      this.score = (this.score || 0) + spotXp;
+    } else if (!lrf.isEnemy && lrf.distM >= 80) {
+      this.marksmanProfile.lrfSpots = (this.marksmanProfile.lrfSpots || 0) + 1;
+    }
+    const unlockedTitle = syncActiveMarksmanTitle(this.marksmanProfile);
+    saveMarksmanProfile(this.marksmanProfile);
+
+    sound.playLaserRangefinderLock?.();
+    const leadNote =
+      lrf.targetSpeedMps >= 1.6 ? ` • LEAD ${lrf.solution.leadMeters.toFixed(1)}M` : '';
+    const zeroNote = autoZeroRifle ? ` • ${lrf.rifleName} ZEROED TO ${this.zeroDistance}M` : '';
+    const laserStrikeHint = laserPainted ? ' • [J] LASER GBU STRIKE / BUDDY-LASE ACTIVE (25S)!' : '!';
+    this.onAwardXp?.(
+      spotXp,
+      `${laserPainted ? '◆ LASER 1688 PAINTED' : '📡 LRF LOCKED'}: ${Math.round(lrf.distM)}M (${lrf.targetLabel} • DROP ${lrf.solution.rawGravityDropM.toFixed(2)}M${leadNote})${zeroNote}${laserStrikeHint}`
+    );
+    if (unlockedTitle && this.onKillStreakAnnouncement) {
+      this.onKillStreakAnnouncement(
+        `🏅 TITLE EARNED: 「${unlockedTitle.icon} ${unlockedTitle.title}」!`
+      );
+    }
+    return lrf;
   },
 
   throwFragGrenade() {
@@ -3511,6 +4053,8 @@ export const CombatMethods = {
     }
 
     if (this.hp <= 0) {
+      const overkillAmt = Math.max(0, -this.hp);
+      const isFatalHs = Boolean(isHeadshot || hitZone === 'head');
       this.hp = 0;
       this.isFiring = false;
       this.isAds = false;
@@ -3523,7 +4067,7 @@ export const CombatMethods = {
       }
 
       if (onKillFn) {
-        onKillFn(attackerName, attackerTeam, this.name, this.team, weaponName, false);
+        onKillFn(attackerName, attackerTeam, this.name, this.team, weaponName, isFatalHs);
       } else {
         events.emit('kill:event', {
           killer: attackerName,
@@ -3531,7 +4075,7 @@ export const CombatMethods = {
           victim: this.name,
           vTeam: this.team,
           weapon: weaponName,
-          isHs: false
+          isHs: isFatalHs
         });
       }
 
@@ -3542,8 +4086,7 @@ export const CombatMethods = {
         pos: this.pos.clone()
       });
 
-      // Evaluate Squad-style Catastrophic "Dead-Dead" / Vital Anatomical Break (Beyond Medic Rescue):
-      const overkillAmt = Math.max(0, -this.hp);
+      // Evaluate Catastrophic "Dead-Dead" / Fatal Headshot / Explosive Overpressure (Beyond Medic Rescue):
       const cat = evaluateCatastrophicKill(
         weaponName,
         blastMeta?.dist ?? 0,
@@ -3551,7 +4094,8 @@ export const CombatMethods = {
         blastMeta?.rng || Math.random,
         {
           hitZone,
-          isHeadshot,
+          isHeadshot: isFatalHs,
+          rawDamage: amount,
           finalDamage: amount,
           overkill: overkillAmt
         }
@@ -4088,6 +4632,7 @@ export const CombatMethods = {
     }
     this.deaths++;
     this.killStreak = 0;
+    this.deadeyeStreak = 0;
     this.multiKillCount = 0;
     this.multiKillTimer = 0;
     this.suppressionLevel = 0;

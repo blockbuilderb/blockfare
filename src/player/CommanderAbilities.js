@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=136';
-import { COMBAT, DEPLOYABLES } from '../config.js?v=136';
-import { events } from '../events.js?v=136';
+import { sound } from '../audio.js?v=139';
+import { COMBAT, DEPLOYABLES } from '../config.js?v=139';
+import { events } from '../events.js?v=139';
 import {
   COMMANDER_UAV_EVENTS,
   COMMANDER_AIRSTRIKE_EVENTS,
   COMMANDER_AIRSTRIKE_STATES,
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM
-} from '../core/StateMachines.js?v=136';
+} from '../core/StateMachines.js?v=139';
 
 function markShared(asset) {
   if (asset) {
@@ -229,17 +229,39 @@ export const CommanderMethods = {
       }
       if (bestVeh) {
         bestVeh.uavRevealed = true;
-        bestVeh.jtacLaserTimer = 20.0;
+        bestVeh.jtacLaserTimer = 25.0;
+        bestVeh.jtacLaserOwner = this;
         const distM = Math.round(bestVeh.pos.distanceTo(this.pos));
+        if (this.world) {
+          if (!this.world.activeLaserDesignations) this.world.activeLaserDesignations = {};
+          this.world.activeLaserDesignations[this.team || 'US'] = {
+            pos: bestVeh.pos.clone(),
+            targetUnit: bestVeh,
+            targetVehicle: bestVeh,
+            targetBot: null,
+            label: bestVeh.name.split(' (')[0],
+            distM,
+            isEnemy: true,
+            code: 1688,
+            timer: 25.0,
+            maxTimer: 25.0,
+            owner: this,
+            ownerName: this.name || 'SNIPER JTAC'
+          };
+        }
         this.activePing = {
           pos: new THREE.Vector3(bestVeh.pos.x, bestVeh.pos.y + 3.2, bestVeh.pos.z),
-          timer: 20.0,
+          timer: 25.0,
           isEnemy: true,
           isJtac: true,
-          label: `🎯 JTAC LASER: ${bestVeh.name.split(' (')[0]}`
+          targetUnit: bestVeh,
+          label: `◆ LASER 1688: ${bestVeh.name.split(' (')[0]}`
         };
         if (this.onAwardXp) {
-          this.onAwardXp(45, `🎯 JTAC LASER PAINTED ARMOR FOR 20S (${bestVeh.name.split(' (')[0]} • ${distM}M)!`);
+          this.onAwardXp(
+            45,
+            `◆ LASER 1688 PAINTED ARMOR FOR 25S (${bestVeh.name.split(' (')[0]} • ${distM}M — [J] LASER GBU STRIKE READY)!`
+          );
         }
         sound.playRadioBeep(false);
         return;
@@ -647,9 +669,23 @@ export const CommanderMethods = {
       }
     }
 
-    // Active airstrike target countdown & pulsing target ring
+    // Active airstrike target countdown & pulsing target ring (tracks moving ◆ LASER 1688 target live!)
     if (this.airstrikeTarget) {
       this.airstrikeTarget.timer -= dt;
+      const ld = this.airstrikeTarget.laserDesignation;
+      if (ld && ld.targetUnit && !ld.targetUnit.dead && ld.targetUnit.pos) {
+        this.airstrikeTarget.pos.set(
+          ld.targetUnit.pos.x,
+          this.world.getGroundHeightAt(ld.targetUnit.pos.x, ld.targetUnit.pos.z),
+          ld.targetUnit.pos.z
+        );
+        if (this.airstrikeTarget.markers) {
+          for (const ch of this.airstrikeTarget.markers.children) {
+            ch.position.x = this.airstrikeTarget.pos.x;
+            ch.position.z = this.airstrikeTarget.pos.z;
+          }
+        }
+      }
       if (this.airstrikeTarget.markers) {
         const pulse = 1 + Math.sin(performance.now() * 0.014) * 0.12;
         const outerRing = this.airstrikeTarget.outerRing;
@@ -1032,8 +1068,25 @@ export const CommanderMethods = {
       this.airstrikeTarget = null;
     }
 
-    const targetPos = this.resolveAirstrikeTargetPos(customWorldPos);
-    const pattern = this.airstrikePattern || 'A10_CAS';
+    const activeLaser =
+      !customWorldPos &&
+      this.world?.activeLaserDesignations?.[this.team || 'US'] &&
+      this.world.activeLaserDesignations[this.team || 'US'].timer > 0
+        ? this.world.activeLaserDesignations[this.team || 'US']
+        : null;
+    if (activeLaser && activeLaser.targetUnit && !activeLaser.targetUnit.dead && activeLaser.targetUnit.pos) {
+      activeLaser.pos.copy(activeLaser.targetUnit.pos);
+    }
+    const targetPos = activeLaser
+      ? new THREE.Vector3(
+          activeLaser.pos.x,
+          this.world.getGroundHeightAt(activeLaser.pos.x, activeLaser.pos.z),
+          activeLaser.pos.z
+        )
+      : this.resolveAirstrikeTargetPos(customWorldPos);
+    const pattern = activeLaser && (!customPattern && this.airstrikePattern !== 'ARTILLERY')
+      ? 'LASER_GBU'
+      : this.airstrikePattern || 'A10_CAS';
 
     // Paint & highlight all enemy infantry and enemy armor within 46m of the marked CAS zone (Video/3D Target Designation!)
     let paintedHostiles = 0;
@@ -1120,12 +1173,13 @@ export const CommanderMethods = {
     _cmdScratch.set(targetPos.x, targetPos.y + 1.2, targetPos.z);
     this.world.spawnDebris(_cmdScratch, _strikeFlareColor, 10);
 
-    const leadTime = pattern === 'A10_CAS' ? 2.1 : 2.4;
+    const leadTime = pattern === 'LASER_GBU' ? 1.85 : pattern === 'A10_CAS' ? 2.1 : 2.4;
     this.airstrikeTarget = {
       pos: targetPos,
       timer: leadTime,
       maxTimer: leadTime,
       pattern,
+      laserDesignation: activeLaser || null,
       strikeDir,
       paintedHostiles,
       paintedArmor,
@@ -1171,7 +1225,11 @@ export const CommanderMethods = {
 
     const distM = Math.round(this.pos.distanceTo(targetPos));
     const patLabel =
-      pattern === 'A10_CAS'
+      pattern === 'LASER_GBU'
+        ? this.team === 'RU'
+          ? '◆ KAB-500L + KH-29L LASER PRECISION STRIKE'
+          : '◆ GBU-12 PAVEWAY II + AGM-65E LASER STRIKE'
+        : pattern === 'A10_CAS'
         ? this.team === 'RU'
           ? 'SU-25 30MM CAS GUN RUN'
           : 'A-10C 30MM BRRRT CAS RUN'
@@ -1256,15 +1314,19 @@ export const CommanderMethods = {
     this.scene.add(bombGroup);
 
     this.world.projectiles.push({
-      type: 'airstrike_bomb',
+      type: bItem.projType || 'airstrike_bomb',
       mesh: bombGroup,
       vel: bItem.vel.clone(),
-      gravity: 32.0,
-      life: 3.5,
+      gravity: bItem.gravity ?? 32.0,
+      life: bItem.life ?? 4.5,
+      turnRate: bItem.turnRate || 0,
+      targetVehicle: bItem.targetVehicle || null,
+      laserDesignation: bItem.laserDesignation || null,
       owner: this,
       blastRadius: bItem.blastRadius,
       blastDamage: bItem.blastDamage,
-      weaponLabel: bItem.weaponLabel
+      weaponLabel: bItem.weaponLabel,
+      weaponName: bItem.weaponLabel
     });
   },
 
@@ -1281,7 +1343,46 @@ export const CommanderMethods = {
     const rx = -dir.z;
     const rz = dir.x;
 
-    if (pattern === 'A10_CAS') {
+    if (pattern === 'LASER_GBU') {
+      // Moving-Target Laser-Guided Strike (2x GBU-12 Paveway II + 2x AGM-65E Laser Maverick homing onto ◆1688 spot!)
+      const ld = target.laserDesignation || null;
+      const liveUnit = ld?.targetUnit && !ld.targetUnit.dead ? ld.targetUnit : null;
+      const livePos = liveUnit?.pos ? liveUnit.pos : target.pos;
+      const liveVeh = ld?.targetVehicle && !ld.targetVehicle.dead ? ld.targetVehicle : null;
+      sound.playRocketLaunch?.(Math.min(180, this.pos.distanceTo(livePos) * 0.4));
+      for (let m = 0; m < 3; m++) {
+        const isPaveway = m === 1;
+        const lateral = (m - 1) * 4.5;
+        const sx = livePos.x - dir.x * 58 + rx * lateral;
+        const sz = livePos.z - dir.z * 58 + rz * lateral;
+        const sy = Math.max(livePos.y, this.world.getGroundHeightAt(sx, sz)) + (isPaveway ? 72 : 56);
+        const toTgt = new THREE.Vector3(livePos.x - sx, livePos.y + 1.2 - sy, livePos.z - sz)
+          .normalize()
+          .multiplyScalar(isPaveway ? 145 : 185);
+        this.pendingAirstrikeBombs.push({
+          delay: m * 0.14,
+          projType: isPaveway ? 'airstrike_bomb' : 'air_rocket',
+          spawnPos: new THREE.Vector3(sx, sy, sz),
+          vel: toTgt,
+          gravity: isPaveway ? 6.5 : 0,
+          life: 6.0,
+          turnRate: 5.2,
+          targetVehicle: liveVeh,
+          laserDesignation: ld,
+          blastRadius: isPaveway ? 16.5 : 11.5,
+          blastDamage: isPaveway ? 780 : 620,
+          weaponLabel:
+            this.team === 'RU'
+              ? isPaveway
+                ? 'KAB-500L LASER BOMB'
+                : 'KH-29L LASER AGM'
+              : isPaveway
+              ? 'GBU-12 PAVEWAY II LASER BOMB'
+              : 'AGM-65E LASER MAVERICK',
+          isHeavyGbu: isPaveway
+        });
+      }
+    } else if (pattern === 'A10_CAS') {
       // A-10C / Su-25 Close Air Support Run: Roaring 30mm GAU-8 "BRRRRRRT!" 14-round AP-HEI strafing line + 4 Hydra-70 Rockets!
       const distForAudio = Math.min(180, this.pos.distanceTo(target.pos) * 0.45);
       for (let b = 0; b < 8; b++) {

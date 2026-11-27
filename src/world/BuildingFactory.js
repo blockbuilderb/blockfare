@@ -2,9 +2,10 @@ import * as THREE from '../../vendor/three.module.js';
 import {
   createRadarTowerMesh,
   createPowerTowerMesh,
+  createSkyscraper3DMesh,
   RADAR_TOWER_SPEC,
   POWER_TOWER_SPEC
-} from '../models/prop-models.js?v=136';
+} from '../models/prop-models.js?v=139';
 
 const VOXEL_SIZE = 1.25;
 const SPATIAL_MIN_X = -2048;
@@ -392,6 +393,40 @@ export const BuildingFactory = {
     });
   },
 
+  /**
+   * O(1) collision test against the solid 3D middle structural core of tall hybrid skyscrapers,
+   * carving out the interior walkable U-Turn Stairwell & Express Ladder shaft (`stairMinX..stairMaxX, stairMinZ..stairMaxZ`)
+   * so soldiers can climb seamlessly from 1F Lobby to the Top Floor & Roof while the rest of the 3D shaft is solid!
+   */
+  hasSolidSkyscraperHullAt(wx, wy, wz, r = 0.35, h = 1.7) {
+    const hulls = this.skyscraperHullBoxes;
+    if (!Array.isArray(hulls) || hulls.length === 0) return false;
+    for (let i = 0; i < hulls.length; i++) {
+      const hb = hulls[i];
+      if (!hb || !hb.active) continue;
+      if (
+        wx + r > hb.minX &&
+        wx - r < hb.maxX &&
+        wy + h > hb.minY &&
+        wy + 0.2 < hb.maxY &&
+        wz + r > hb.minZ &&
+        wz - r < hb.maxZ
+      ) {
+        // Allow free movement inside the interior stairwell & express ladder shaft!
+        if (
+          wx - r >= hb.stairMinX &&
+          wx + r <= hb.stairMaxX &&
+          wz - r >= hb.stairMinZ &&
+          wz + r <= hb.stairMaxZ
+        ) {
+          continue;
+        }
+        return true;
+      }
+    }
+    return false;
+  },
+
   isInsideStaticStructure(wx, wz, pad = 1.0) {
     const list = this.staticStructureBoxes;
     if (!Array.isArray(list) || list.length === 0) return false;
@@ -616,15 +651,16 @@ export const BuildingFactory = {
       }
     }
 
-    const stairEndZ = Math.min(depth - 2, 5);
+    const hasSwitchbackStairs = width >= 9 && depth >= 8;
     const isModernSkyscraper = floors >= 8 && width >= 14 && depth >= 12;
-    const hasExpressLadder = floors >= 4 && width >= 7 && depth >= 6;
-    const hasEastWing = !isModernSkyscraper && width >= 8;
-    const partX = hasEastWing ? Math.max(4, Math.floor(width * 0.52)) : -1;
-    const hasSuiteSplit = !isModernSkyscraper && depth >= 9 && width >= 8;
-    const partZ = hasSuiteSplit ? Math.floor(depth * 0.5) : -1;
+    const hasExpressLadder = floors >= 4 && width >= 10 && depth >= 8;
+    const hasEastWing = !isModernSkyscraper && width >= 11;
+    const partX = hasEastWing ? Math.max(hasSwitchbackStairs ? 6 : 4, Math.floor(width * 0.54)) : -1;
+    const hasSuiteSplit = !isModernSkyscraper && depth >= 10 && width >= 11;
+    const partZ = hasSuiteSplit ? Math.max(4, Math.floor(depth * 0.52)) : -1;
     const midX = Math.floor(width / 2);
     const midZ = Math.floor(depth / 2);
+    const useSteelFrame = floors >= 2 && (this.era || 'modern') === 'modern';
 
     // 3. Terrain-Adaptive Exterior Entry Porches & Steps at all 4 Cardinal Entrances
     const buildTerrainEntryRamp = (doorGx, doorGz, dirX, dirZ) => {
@@ -663,23 +699,58 @@ export const BuildingFactory = {
 
     for (let f = 0; f < floors; f++) {
       const baseGy = groundGy + f * floorHeight;
+      // Hybrid Skyscraper Optimization:
+      // On tall modern skyscrapers (`isModernSkyscraper`: `floors >= 8`), 1F Lobby (`f = 0`), 2F Overwatch (`f = 1`),
+      // and Top Sniper Floor + Roof Deck (`f = floors - 1`) are real destructible voxel blocks, while intermediate
+      // floors (`f = 2 .. floors - 2`) use the fast 3D Blocky Structural Core (`bld.archMesh` + `bld.solidHullBox`)
+      // with ONLY the compact walkable U-Turn Stairwell & Express Ladder Shaft (`x = 0..6, z = 0..7`) built in voxels!
+      const isHybridCoreFloor = isModernSkyscraper && f >= 2 && f < floors - 1;
 
       for (let x = 0; x < width; x++) {
         for (let z = 0; z < depth; z++) {
+          if (isHybridCoreFloor && (x > 6 || z > 7)) {
+            continue;
+          }
           const gx = startGx + x;
           const gz = startGz + z;
           const isEdgeX = x === 0 || x === width - 1;
           const isEdgeZ = z === 0 || z === depth - 1;
           const isExteriorWall = isEdgeX || isEdgeZ;
 
-          // Wide 2x5 stairwell shaft cutout + Express Service-Ladder shaft (x=3, z=1..2 on tall buildings)
-          const isStairCutout = x >= 1 && x <= 2 && z >= 1 && z <= stairEndZ;
-          const isExpressShaftCutout = hasExpressLadder && x === 3 && z >= 1 && z <= 2;
+          // U-Turn Switchback Stairwell Cutout (`x = 1..4, z = 3..6`) leaves `x = 1..4, z = 1..2` as a solid
+          // floor-to-floor landing on EVERY story (including the Roof!) with 3 full voxels of headroom!
+          const isStairCutout = hasSwitchbackStairs
+            ? x >= 1 && x <= 4 && z >= 3 && z <= 6
+            : z === 1 && x >= 1 && x <= 3;
+          const isExpressShaftCutout = hasExpressLadder && x === 5 && z >= 5 && z <= 6;
           if (!isStairCutout && !isExpressShaftCutout) {
-            addBuildingVoxel(gx, baseGy + floorHeight - 1, gz, 'concrete');
+            if (!isHybridCoreFloor || (x <= 6 && z <= 7)) {
+              // Note: on `f = floors - 2` of a hybrid skyscraper, we need the full ceiling slab (`baseGy + 3`)
+              // across the whole footprint so the Top Sniper Floor (`f = floors - 1`) has a solid walkable floor!
+              addBuildingVoxel(gx, baseGy + floorHeight - 1, gz, 'concrete');
+            }
+          }
+
+          if (isHybridCoreFloor) {
+            // Enclose the compact 6x7 stairwell & express shaft (`x = 0, x = 6, z = 0, z = 7`) cleanly on core floors
+            const isShaftWall = x === 0 || x === 6 || z === 0 || z === 7;
+            if (isShaftWall) {
+              const isCoreGirder = (x === 0 && z === 0) || (x === 6 && z === 7);
+              for (let y = 0; y < floorHeight - 1; y++) {
+                addBuildingVoxel(gx, baseGy + y, gz, isCoreGirder && useSteelFrame ? 'steelBeam' : 'darkConcrete');
+              }
+            }
+            continue;
           }
 
           if (isExteriorWall) {
+            const isCornerGirder = isEdgeX && isEdgeZ;
+            const isPerimeterSteelPier =
+              useSteelFrame &&
+              (isCornerGirder ||
+                (floors >= 4 &&
+                  ((isEdgeZ && x > 2 && x < width - 3 && x % 6 === 0) ||
+                    (isEdgeX && z > 2 && z < depth - 3 && z % 6 === 0))));
             for (let y = 0; y < floorHeight - 1; y++) {
               const gy = baseGy + y;
 
@@ -691,56 +762,58 @@ export const BuildingFactory = {
 
               const isBalconyDoor =
                 f > 0 &&
-                (!isModernSkyscraper || f <= 2) &&
-                width >= 7 &&
+                (!isModernSkyscraper || f <= 1) &&
+                width >= 9 &&
                 z === 0 &&
                 y < 2 &&
                 Math.abs(x - midX) <= 1 &&
                 x !== partX;
 
               // Modern high-rise curtain-wall panoramic windows vs standard town apartment windows
-              const isWindow = isModernSkyscraper
-                ? (y === 1 || y === 2) &&
-                  !isGroundDoor &&
-                  !isBalconyDoor &&
-                  ((isEdgeZ && x > 1 && x < width - 2 && x % 3 !== 0) ||
-                    (isEdgeX && z > 1 && z < depth - 2 && z % 3 !== 0))
-                : (y === 1 || (y === 2 && (x + z) % 4 === 0)) &&
-                  !isGroundDoor &&
-                  !isBalconyDoor &&
-                  ((isEdgeZ && x > 1 && x < width - 2 && x !== partX && x % 2 === 0) ||
-                    (isEdgeX && z > 1 && z < depth - 2 && z !== partZ && z % 2 === 0));
+              const isWindow =
+                !isPerimeterSteelPier &&
+                (isModernSkyscraper
+                  ? (y === 1 || y === 2) &&
+                    !isGroundDoor &&
+                    !isBalconyDoor &&
+                    ((isEdgeZ && x > 1 && x < width - 2 && x % 3 !== 0) ||
+                      (isEdgeX && z > 1 && z < depth - 2 && z % 3 !== 0))
+                  : (y === 1 || (y === 2 && (x + z) % 4 === 0)) &&
+                    !isGroundDoor &&
+                    !isBalconyDoor &&
+                    ((isEdgeZ && x > 1 && x < width - 2 && x !== partX && x % 2 === 0) ||
+                      (isEdgeX && z > 1 && z < depth - 2 && z !== partZ && z % 2 === 0)));
 
               if (!isGroundDoor && !isBalconyDoor && !isWindow) {
-                const mat =
-                  y === 0 && f === 0
-                    ? 'darkConcrete'
-                    : (x === 0 || x === width - 1) && (z === 0 || z === depth - 1)
-                    ? 'darkConcrete'
-                    : wallMat;
+                const mat = isPerimeterSteelPier
+                  ? 'steelBeam'
+                  : y === 0 && f === 0
+                  ? 'darkConcrete'
+                  : isCornerGirder
+                  ? 'darkConcrete'
+                  : wallMat;
                 addBuildingVoxel(gx, gy, gz, mat);
               }
             }
             continue;
           }
 
-          if (f > 0 && !hasExpressLadder && x === 3 && z >= 1 && z <= 2 && partX !== 3) {
-            addBuildingVoxel(gx, baseGy, gz, 'wood');
-          }
-
-          // Skyscraper interior structural columns (4 central pillars framing open sniper overwatch floorplates)
-          if (
+          // Interior Steel I-Beam Structural Core Columns (4 central columns on skyscrapers + stairwell girder)
+          const isSkyscraperCorePillar =
             isModernSkyscraper &&
-            (x === Math.floor(width * 0.35) || x === Math.ceil(width * 0.65)) &&
-            (z === Math.floor(depth * 0.35) || z === Math.ceil(depth * 0.65))
-          ) {
+            (x === Math.max(7, Math.floor(width * 0.36)) || x === Math.ceil(width * 0.68)) &&
+            (z === Math.max(7, Math.floor(depth * 0.36)) || z === Math.ceil(depth * 0.68));
+          const isStairCoreGirder =
+            useSteelFrame && hasSwitchbackStairs && width >= 11 && depth >= 9 && x === 5 && z === 4;
+          if (isSkyscraperCorePillar || isStairCoreGirder) {
             for (let y = 0; y < floorHeight - 1; y++) {
-              addBuildingVoxel(gx, baseGy + y, gz, 'darkConcrete');
+              addBuildingVoxel(gx, baseGy + y, gz, useSteelFrame ? 'steelBeam' : 'darkConcrete');
             }
             continue;
           }
 
-          const isVerticalPartition = hasEastWing && x === partX && z > 0 && z < depth - 1;
+          const isVerticalPartition =
+            hasEastWing && x === partX && z > 0 && z < depth - 1 && !(hasSwitchbackStairs && z <= 6 && x <= 5);
           const isHorizontalSuiteWall =
             hasSuiteSplit && z === partZ && x > partX && x < width - 1;
 
@@ -752,37 +825,82 @@ export const BuildingFactory = {
               !isInteriorDoor &&
               ((isVerticalPartition && z === Math.max(2, midZ - 2)) ||
                 (isHorizontalSuiteWall && x === width - 2));
+            const isInteriorSteelPost =
+              useSteelFrame &&
+              floors >= 3 &&
+              !isInteriorDoor &&
+              isVerticalPartition &&
+              (z === 1 || z === depth - 2);
 
             for (let y = 0; y < floorHeight - 1; y++) {
               if (isInteriorDoor && y < 3) continue;
               if (isInteriorPeekWindow && y === 1) continue;
-              addBuildingVoxel(gx, baseGy + y, gz, y === 0 ? 'darkConcrete' : 'concrete');
+              addBuildingVoxel(
+                gx,
+                baseGy + y,
+                gz,
+                isInteriorSteelPost ? 'steelBeam' : y === 0 ? 'darkConcrete' : 'concrete'
+              );
             }
           }
         }
       }
 
-      if (width >= 6 && depth >= 6) {
-        for (let step = 0; step < floorHeight - 1; step++) {
-          const sz = startGz + 1 + Math.min(step, depth - 3);
-          addBuildingVoxel(startGx + 1, baseGy + step, sz, 'wood');
-          if (width >= 7) {
-            addBuildingVoxel(startGx + 2, baseGy + step, sz, 'wood');
+      // Ensure the Top Sniper Floor (`f = floors - 1`) on hybrid skyscrapers has a complete walkable floor slab beneath it (`f = floors - 2`)
+      if (isModernSkyscraper && f === floors - 2) {
+        const topSuiteSlabGy = baseGy + floorHeight - 1;
+        for (let x = 0; x < width; x++) {
+          for (let z = 0; z < depth; z++) {
+            const isStairCut = x >= 1 && x <= 4 && z >= 3 && z <= 6;
+            const isExpCut = hasExpressLadder && x === 5 && z >= 5 && z <= 6;
+            if (!isStairCut && !isExpCut) {
+              addBuildingVoxel(startGx + x, topSuiteSlabGy, startGz + z, 'concrete');
+            }
           }
+        }
+      }
+
+      // Continuous Walkable Floor-to-Floor Staircase System (1F -> Every Story -> Roof Deck!):
+      if (hasSwitchbackStairs) {
+        // Flight A (Southbound `x = 1..2`): Step 1 (`z = 3, gy = baseGy`), Step 2 (`z = 4, gy = baseGy + 1`)
+        for (let sx = 1; sx <= 2; sx++) {
+          addBuildingVoxel(startGx + sx, baseGy, startGz + 3, 'wood');
+          addBuildingVoxel(startGx + sx, baseGy + 1, startGz + 4, 'wood');
+        }
+        // Wide 4×2 Mid-Story U-Turn Landing (`x = 1..4, z = 5..6, gy = baseGy + 1`)
+        for (let sx = 1; sx <= 4; sx++) {
+          for (let sz = 5; sz <= 6; sz++) {
+            addBuildingVoxel(startGx + sx, baseGy + 1, startGz + sz, 'wood');
+          }
+        }
+        // Flight B (Northbound `x = 3..4`): Step 3 (`z = 4, gy = baseGy + 2`), Step 4 (`z = 3, gy = baseGy + 3`)
+        // stepping flush onto the `z = 1..2, x = 1..4` upper landing slab (`gy = baseGy + 3`)!
+        for (let sx = 3; sx <= 4; sx++) {
+          addBuildingVoxel(startGx + sx, baseGy + 2, startGz + 4, 'wood');
+          addBuildingVoxel(startGx + sx, baseGy + 3, startGz + 3, 'wood');
+        }
+        const deskX = startGx + width - 2;
+        const deskZ = startGz + depth - 2;
+        addBuildingVoxel(deskX, baseGy, deskZ, 'wood', true);
+      } else if (width >= 6 && depth >= 6) {
+        // Compact 4-step straight staircase along `z = 1, x = 1..4` reaching `baseGy + 3` cleanly
+        for (let step = 0; step < floorHeight; step++) {
+          const sx = startGx + 1 + Math.min(step, width - 3);
+          addBuildingVoxel(sx, baseGy + step, startGz + 1, 'wood');
         }
         const deskX = startGx + width - 2;
         const deskZ = startGz + depth - 2;
         addBuildingVoxel(deskX, baseGy, deskZ, 'wood', true);
       }
 
-      if (f > 0 && (!isModernSkyscraper || f <= 2) && width >= 7) {
+      if (f > 0 && (!isModernSkyscraper || f <= 2) && width >= 9) {
         for (let bx = 2; bx < width - 2; bx++) {
           addBuildingVoxel(startGx + bx, baseGy - 1, startGz - 1, 'concrete');
           if (bx === 2 || bx === width - 3 || bx % 2 === 0) {
             addBuildingVoxel(startGx + bx, baseGy, startGz - 1, 'sandbag');
           }
         }
-        if (f === 1 && width >= 8) {
+        if (f === 1 && width >= 10) {
           for (let s = 0; s < floorHeight; s++) {
             addBuildingVoxel(startGx + 1 + s, groundGy + s - 1, startGz - 2, 'darkConcrete');
           }
@@ -792,41 +910,96 @@ export const BuildingFactory = {
     }
 
     const topGy = groundGy + floors * floorHeight;
+
+    // Protective Roof Stairwell Penthouse / Headhouse around `x = 0..4, z = 3..7` with wide North Doorway (`x = 3..4, z = 3`)!
+    if (hasSwitchbackStairs && floors >= 2) {
+      const pentMaxZ = Math.min(depth - 1, 7);
+      for (let px = 0; px <= 4; px++) {
+        for (let pz = 3; pz <= pentMaxZ; pz++) {
+          const isPentWall = px === 0 || px === 4 || pz === 3 || pz === pentMaxZ;
+          const isRoofExitDoor = pz === 3 && (px === 3 || px === 2 || px === 4) && px >= 3;
+          if (isPentWall && !isRoofExitDoor) {
+            // Keep `x = 4, z = 4..6` open on inside? Wait: Flight B uses `x = 3..4`, so put East Penthouse wall at `x = 5`!
+          }
+        }
+      }
+      const pentEastX = Math.min(width - 1, 5);
+      for (let px = 0; px <= pentEastX; px++) {
+        for (let pz = 3; pz <= pentMaxZ; pz++) {
+          // Leave Express Ladder Shaft (`x = 5, z = 5..6`) clear to exit East onto roof!
+          if (hasExpressLadder && px === 5 && (pz === 5 || pz === 6)) continue;
+          const isPentPerim = px === 0 || px === pentEastX || pz === 3 || pz === pentMaxZ;
+          const isNorthDoor = pz === 3 && (px === 3 || px === 4);
+          if (isPentPerim && !isNorthDoor) {
+            for (let py = 0; py < 3; py++) {
+              addBuildingVoxel(
+                startGx + px,
+                topGy + py,
+                startGz + pz,
+                (px === 0 || px === pentEastX) && (pz === 3 || pz === pentMaxZ) && useSteelFrame
+                  ? 'steelBeam'
+                  : 'darkConcrete'
+              );
+            }
+          }
+          if (!(hasExpressLadder && px === 5 && (pz === 5 || pz === 6))) {
+            addBuildingVoxel(startGx + px, topGy + 3, startGz + pz, 'concrete');
+          }
+        }
+      }
+    }
+
     const isDowntownHighRise = floors >= 5 && width >= 9 && depth >= 8;
     const cornerBastionSpan = width >= 16 && depth >= 14 ? 4 : 2;
     for (let x = 0; x < width; x++) {
       for (let z = 0; z < depth; z++) {
+        if (hasSwitchbackStairs && x <= 5 && z >= 3 && z <= 7) continue;
         if (x === 0 || x === width - 1 || z === 0 || z === depth - 1) {
-          // 4-Corner Sniper Bastions: 5m × 5m (4×4 voxel) fortified corner nests on wide skyscrapers!
-          // Extreme corner piers rise 2 voxels high (`topGy + 1`) for anti-sniper cover, flanked by 1-voxel rifle rests!
           const inCornerBastion =
             (x < cornerBastionSpan || x >= width - cornerBastionSpan) &&
             (z < cornerBastionSpan || z >= depth - cornerBastionSpan);
           const isExtremeCorner =
             (x === 0 || x === width - 1) && (z === 0 || z === depth - 1);
-          if (inCornerBastion || (x + z) % 2 === 0) {
+          if (isDowntownHighRise || inCornerBastion || (x + z) % 2 === 0) {
             addBuildingVoxel(
               startGx + x,
               topGy,
               startGz + z,
-              inCornerBastion && !isExtremeCorner ? 'sandbag' : 'darkConcrete'
+              isExtremeCorner && useSteelFrame
+                ? 'steelBeam'
+                : inCornerBastion && !isExtremeCorner
+                ? 'sandbag'
+                : 'darkConcrete'
             );
             if (isExtremeCorner && isModernSkyscraper) {
-              addBuildingVoxel(startGx + x, topGy + 1, startGz + z, 'darkConcrete');
+              addBuildingVoxel(
+                startGx + x,
+                topGy + 1,
+                startGz + z,
+                useSteelFrame ? 'steelBeam' : 'darkConcrete'
+              );
             }
           }
+        } else if (
+          isDowntownHighRise &&
+          ((x === 1 && z % 4 === 2 && z < depth - 2) ||
+            (x === width - 2 && z % 4 === 2 && z < depth - 2) ||
+            (z === 1 && x % 4 === 2 && x > 6 && x < width - 2) ||
+            (z === depth - 2 && x % 4 === 2 && x > 2 && x < width - 2))
+        ) {
+          // Inset sandbag sniper firing steps along the solid parapet so snipers can peek over or drop prone behind solid cover
+          addBuildingVoxel(startGx + x, topGy, startGz + z, 'sandbag');
         }
       }
     }
     if (isDowntownHighRise) {
-      // Spacious Inlaid Physical Voxel Helipad ("H" Pad) centered on the skyscraper roof (`topGy - 1`):
-      // Scales up to a bold 9×9 voxel (11.25m × 11.25m) "H" on wide skyscrapers, leaving all 4 corners (5m × 5m each) free for 4 snipers!
       const hRadius = width >= 18 && depth >= 16 ? 4 : 2;
-      const hMinX = Math.max(4, midX - hRadius);
-      const hMaxX = Math.min(width - 4, midX + hRadius);
+      const hMinX = Math.max(hasSwitchbackStairs ? 7 : 4, midX - hRadius);
+      const hMaxX = Math.min(width - 3, Math.max(hMinX + 2, midX + hRadius));
       const hMinZ = Math.max(3, midZ - hRadius);
-      const hMaxZ = Math.min(depth - 4, midZ + hRadius);
+      const hMaxZ = Math.min(depth - 3, Math.max(hMinZ + 2, midZ + hRadius));
       const inlayRoofVoxel = (rx, rz, mat) => {
+        if (hasSwitchbackStairs && rx <= 5 && rz <= 7) return null;
         const gx = startGx + rx;
         const gz = startGz + rz;
         const gy = topGy - 1;
@@ -849,7 +1022,7 @@ export const BuildingFactory = {
       for (let z = hMinZ; z <= hMaxZ; z++) {
         inlayRoofVoxel(hMinX, z, 'concrete');
         inlayRoofVoxel(hMaxX, z, 'concrete');
-        if (hRadius >= 4) {
+        if (hRadius >= 4 && hMaxX - hMinX >= 5) {
           inlayRoofVoxel(hMinX + 1, z, 'concrete');
           inlayRoofVoxel(hMaxX - 1, z, 'concrete');
         }
@@ -860,31 +1033,24 @@ export const BuildingFactory = {
           inlayRoofVoxel(x, midZ - 1, 'concrete');
         }
       }
-      // 4 Corner Sniper Nest Tactical Flooring & Helipad Perimeter Markers
       for (const [cx, cz] of [
-        [2, width >= 16 ? 4 : 1],
         [width - 2, 1],
         [1, depth - 2],
         [width - 2, depth - 2]
       ]) {
         inlayRoofVoxel(cx, cz, 'sandbag');
       }
-    } else if (width >= 7 && depth >= 6) {
-      addBuildingVoxel(startGx + midX, topGy, startGz + midZ, 'darkConcrete');
-      addBuildingVoxel(startGx + midX + 1, topGy, startGz + midZ, 'wood', true);
+    } else if (width >= 9 && depth >= 8) {
+      addBuildingVoxel(startGx + Math.max(6, midX), topGy, startGz + midZ, 'darkConcrete');
+      addBuildingVoxel(startGx + Math.max(6, midX) + 1, topGy, startGz + midZ, 'wood', true);
     }
 
-    // Express Interior Service Ladder Shaft (`x = 3, z = 1..2`) on all 4+ story buildings:
-    // Allows snipers & assault squads to climb rapidly from 1F Lobby straight onto 50m–80m Skyscraper Rooftops!
+    // Express Interior Service Ladder Shaft (`x = 5, z = 5..6`) alongside the U-Turn Stairwell on 4+ story towers!
     if (hasExpressLadder) {
-      const ladWx = (startGx + 3) * VOXEL_SIZE;
-      const ladWz = (startGz + 1.35) * VOXEL_SIZE;
+      const ladWx = (startGx + 5) * VOXEL_SIZE;
+      const ladWz = (startGz + 5.35) * VOXEL_SIZE;
       const lobbyFloorY = (groundGy - 0.5) * VOXEL_SIZE + VOXEL_SIZE * 0.5;
       const roofSurfaceY = topGy * VOXEL_SIZE;
-      // Visual steel ladder backing column along `x = 4, z = 1`
-      for (let gy = groundGy; gy < topGy; gy += 2) {
-        addBuildingVoxel(startGx + 4, gy, startGz + 1, 'darkConcrete', true);
-      }
       this.registerClimbableLadder({
         x: ladWx,
         z: ladWz,
@@ -892,8 +1058,8 @@ export const BuildingFactory = {
         minY: lobbyFloorY,
         maxY: roofSurfaceY,
         topExitY: roofSurfaceY,
-        exitDirX: 0,
-        exitDirZ: 1,
+        exitDirX: 1,
+        exitDirZ: 0,
         buildingId: this.buildings.length,
         label: 'skyscraper_express_ladder'
       });
@@ -902,22 +1068,82 @@ export const BuildingFactory = {
     // Pre-sort blueprintBlocks bottom-up once at creation so repairBuilding never clones/sorts at runtime
     blueprintBlocks.sort((a, b) => a.gy - b.gy);
 
-    // Register building foundation keys for structural collapse tracking
-    const foundationKeys = [];
-    for (let x = 0; x < width; x++) {
-      for (let z = 0; z < depth; z++) {
-        for (let y = 0; y <= 1; y++) {
-          if (this.hasVoxel(startGx + x, groundGy + y, startGz + z)) {
-            foundationKeys.push(this.key(startGx + x, groundGy + y, startGz + z));
+    // Register weighted per-story load-bearing keys (`steelBeam` columns = 3x structural load capacity vs masonry infill = 1x)
+    const floorSupportKeys = [];
+    for (let f = 0; f < floors; f++) {
+      if (isModernSkyscraper && f >= 2 && f < floors - 1) {
+        // Intermediate 3D structural core floors are solid static 3D architecture (`bld.solidHullBox`)
+        floorSupportKeys.push([]);
+        continue;
+      }
+      const fBaseGy = groundGy + f * floorHeight;
+      const sKeys = [];
+      for (let x = 0; x < width; x++) {
+        for (let z = 0; z < depth; z++) {
+          for (let y = 0; y <= 1; y++) {
+            const vox = this.getVoxel(startGx + x, fBaseGy + y, startGz + z);
+            if (!vox || vox.isProp || vox.type === 'wood' || vox.type === 'sandbag') continue;
+            const k = vox.key;
+            if (vox.type === 'steelBeam') {
+              sKeys.push(k, k, k);
+            } else {
+              sKeys.push(k);
+            }
           }
         }
       }
+      floorSupportKeys.push(sKeys);
     }
+    const foundationKeys = floorSupportKeys[0] || [];
     const minWx = (startGx - 0.5) * VOXEL_SIZE;
     const maxWx = (startGx + width - 0.5) * VOXEL_SIZE;
     const minWz = (startGz - 0.5) * VOXEL_SIZE;
     const maxWz = (startGz + depth - 0.5) * VOXEL_SIZE;
     const bldId = this.buildings.length;
+
+    let archMesh = null;
+    let solidHullBox = null;
+    if (isModernSkyscraper) {
+      const lobbyBaseY = (groundGy - 0.5) * VOXEL_SIZE;
+      const curtainMinY = (groundGy + 2 * floorHeight) * VOXEL_SIZE;
+      const curtainMaxY = (groundGy + (floors - 1) * floorHeight - 1) * VOXEL_SIZE;
+      const roofTopY = topGy * VOXEL_SIZE;
+      archMesh = createSkyscraper3DMesh({
+        spanX: width * VOXEL_SIZE,
+        spanZ: depth * VOXEL_SIZE,
+        lobbyBaseY,
+        curtainMinY,
+        curtainMaxY,
+        roofTopY,
+        wallMat,
+        variant: bldId
+      });
+      archMesh.position.set((minWx + maxWx) * 0.5, 0, (minWz + maxWz) * 0.5);
+      if (this.scene) {
+        this.scene.add(archMesh);
+      }
+      if (!Array.isArray(this.skyscraperHullBoxes)) {
+        this.skyscraperHullBoxes = [];
+      }
+      solidHullBox = {
+        active: true,
+        buildingId: bldId,
+        minX: minWx,
+        maxX: maxWx,
+        minY: curtainMinY,
+        maxY: curtainMaxY,
+        origMaxY: curtainMaxY,
+        minZ: minWz,
+        maxZ: maxWz,
+        // Interior walkable stairwell + express ladder shaft (`x = 1..5, z = 1..6`) stays passable!
+        stairMinX: (startGx + 0.55) * VOXEL_SIZE,
+        stairMaxX: (startGx + 5.65) * VOXEL_SIZE,
+        stairMinZ: (startGz + 0.55) * VOXEL_SIZE,
+        stairMaxZ: (startGz + 6.65) * VOXEL_SIZE
+      };
+      this.skyscraperHullBoxes.push(solidHullBox);
+    }
+
     const bldRecord = {
       id: bldId,
       startGx,
@@ -926,7 +1152,11 @@ export const BuildingFactory = {
       depth,
       floors,
       wallMat,
+      isHybridSkyscraper: Boolean(isModernSkyscraper),
+      archMesh,
+      solidHullBox,
       groundGy,
+      topGy,
       minWx,
       maxWx,
       minWz,
@@ -934,8 +1164,10 @@ export const BuildingFactory = {
       centerWx: (minWx + maxWx) * 0.5,
       centerWz: (minWz + maxWz) * 0.5,
       foundationKeys,
+      floorSupportKeys,
       blueprintBlocks,
-      collapsed: false
+      collapsed: false,
+      collapsedFromFloor: null
     };
     this.buildings.push(bldRecord);
     this._registerSpatialFootprint(bldRecord);
@@ -945,12 +1177,15 @@ export const BuildingFactory = {
       this.buildingKeys = [];
     }
     if (width >= 6 && depth >= 6 && bldId % 2 === 0) {
-      const keyFloor =
-        floors >= 5
-          ? Math.min(floors - 1, 2 + (bldId % 3))
-          : bldId % 4 === 0 && floors >= 2
-          ? 1
-          : 0;
+      const keyFloor = isModernSkyscraper
+        ? bldId % 4 === 0
+          ? floors - 1
+          : 1
+        : floors >= 5
+        ? Math.min(floors - 1, 2 + (bldId % 3))
+        : bldId % 4 === 0 && floors >= 2
+        ? 1
+        : 0;
       const keyGx = startGx + Math.max(3, width - 3);
       const keyGz = startGz + Math.max(2, depth - 3);
       const keyFloorGy = groundGy + keyFloor * floorHeight;
@@ -1223,6 +1458,31 @@ export const BuildingFactory = {
       }
     } else {
       bld.collapsed = false;
+    }
+
+    if (!bld.collapsed) {
+      bld.collapsedFromFloor = null;
+      if (bld.archMesh) {
+        bld.archMesh.visible = true;
+        bld.archMesh.scale.y = 1;
+        bld.archMesh.position.y = 0;
+      }
+      if (bld.solidHullBox) {
+        bld.solidHullBox.active = true;
+        if (typeof bld.solidHullBox.origMaxY === 'number') {
+          bld.solidHullBox.maxY = bld.solidHullBox.origMaxY;
+        }
+      }
+      if (Array.isArray(this.climbableLadders) && typeof bld.topGy === 'number') {
+        const roofY = bld.topGy * VOXEL_SIZE;
+        for (let li = 0; li < this.climbableLadders.length; li++) {
+          const lad = this.climbableLadders[li];
+          if (lad && lad.buildingId === bld.id) {
+            lad.maxY = roofY;
+            lad.topExitY = roofY;
+          }
+        }
+      }
     }
 
     const afterInfo = this.getBuildingHealthInfo(bld);

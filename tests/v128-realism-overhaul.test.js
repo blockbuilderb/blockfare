@@ -2,24 +2,29 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
 
-import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=136';
-import { VEHICLE_STATS } from '../src/config.js?v=136';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=136';
-import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=136';
-import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=136';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=136';
-import { createWeaponViewModel } from '../src/models/weapon-model.js?v=136';
-import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=136';
-import { BotManager } from '../src/bots/BotManager.js?v=136';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=136';
-import { CombatMethods } from '../src/player/PlayerCombat.js?v=136';
-import { PlayerController } from '../src/player/PlayerController.js?v=136';
-import { SoundManager } from '../src/audio/SoundManager.js?v=136';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=136';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=136';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=136';
-import { BotAIMethods } from '../src/bots/BotAI.js?v=136';
-import { updateMedicRescue } from '../src/bots/MedicAI.js?v=136';
+import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=139';
+import { VEHICLE_STATS } from '../src/config.js?v=139';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=139';
+import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=139';
+import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=139';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=139';
+import { createWeaponViewModel } from '../src/models/weapon-model.js?v=139';
+import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=139';
+import { BotManager } from '../src/bots/BotManager.js?v=139';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=139';
+import { CombatMethods } from '../src/player/PlayerCombat.js?v=139';
+import { PlayerController } from '../src/player/PlayerController.js?v=139';
+import { SoundManager } from '../src/audio/SoundManager.js?v=139';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=139';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=139';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=139';
+import { BotAIMethods } from '../src/bots/BotAI.js?v=139';
+import { updateMedicRescue } from '../src/bots/MedicAI.js?v=139';
+import {
+  createDefaultMarksmanProfile,
+  evaluateMarksmanShot,
+  computeBallisticSolution
+} from '../src/player/MarksmanSystem.js?v=139';
 
 function buildPilotHarness(role = 'fighter', team = 'US') {
   const scene = new THREE.Scene();
@@ -439,6 +444,7 @@ test('v128 Item 4: Support HMG (M249 / PKP) Unobstructed Sightline & Full Infant
       d.type !== 'medkit' &&
       d.type !== 'ammocrate' &&
       d.type !== 'c4' &&
+      d.type !== 'binoculars' &&
       d.type !== 'rpg' &&
       d.type !== 'stinger'
     );
@@ -1506,6 +1512,478 @@ test('v135: Rooftop Helicopter Persistence (No Disappearing Through Skyscrapers)
     assert.equal(apcRideRes.vehicle.rideTask.phase, 'HOLDING_FOR_PICKUP', 'Armored APC pulls up and holds for pickup');
   } finally {
     world.dispose();
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('v137: Sniper Marksman Shot-Difficulty Badges, 2D Trajectory/Anatomy Replay, Earned Titles & Laser Rangefinder Binoculars', () => {
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  globalThis.document = {
+    pointerLockElement: null,
+    activeElement: null,
+    body: { requestPointerLock: () => Promise.resolve() },
+    addEventListener: () => {},
+    getElementById: () => null,
+    querySelectorAll: () => [],
+    exitPointerLock: () => {},
+    createElement: () => ({
+      id: '',
+      style: {},
+      classList: {
+        _set: new Set(),
+        add(c) { this._set.add(c); },
+        remove(c) { this._set.delete(c); },
+        contains(c) { return this._set.has(c); },
+        toggle(c, f) {
+          if (f === undefined) {
+            if (this._set.has(c)) this._set.delete(c);
+            else this._set.add(c);
+          } else if (f) this._set.add(c);
+          else this._set.delete(c);
+        }
+      },
+      querySelector: () => ({
+        width: 246,
+        height: 74,
+        getContext: () => ({
+          clearRect() {},
+          beginPath() {},
+          moveTo() {},
+          lineTo() {},
+          stroke() {},
+          fillRect() {},
+          save() {},
+          restore() {},
+          setLineDash() {},
+          arc() {},
+          fill() {},
+          fillText() {}
+        })
+      })
+    })
+  };
+  globalThis.window = {
+    addEventListener: () => {},
+    focus: () => {},
+    game: { matchEnded: false, ui: {} }
+  };
+
+  try {
+    // 1. Physics-Driven Shot Difficulty, Anatomical Diagram Coordinates, Trajectory Curve & Earned Titles
+    const profile = createDefaultMarksmanProfile();
+    const sv98 = WEAPON_DEFS.sv98;
+    const awm = WEAPON_DEFS.awm;
+    const m4a1 = WEAPON_DEFS.m4a1;
+
+    // Close-range AR kill (<100m) must NOT spam Marksman Badges
+    const closeAr = evaluateMarksmanShot(
+      { wepDef: m4a1, distanceM: 32, damageDealt: 58, isKill: true, isHeadshot: true, hitZone: 'head' },
+      profile
+    );
+    assert.equal(closeAr.triggered, false, 'Close-range AR kill should not trigger sniper badge card');
+
+    // 138m Crippling Leg Hit (non-lethal, A2 high-skill hit rule) -> triggers compact Marksman Hit readout!
+    const cripplingHit = evaluateMarksmanShot(
+      {
+        wepDef: sv98,
+        distanceM: 138,
+        flightTimeS: 0.12,
+        gravityMps2: sv98.bulletGravity,
+        damageDealt: 108,
+        isKill: false,
+        isHeadshot: false,
+        hitZone: 'leftLeg',
+        relHitY: 0.35,
+        fracturedLimb: 'leg'
+      },
+      profile
+    );
+    assert.equal(cripplingHit.triggered, true, '138m crippling leg shot triggers Marksman readout');
+    assert.equal(cripplingHit.anatomy.zoneKey, 'leftLeg', 'Highlights left leg on anatomy diagram');
+    assert.equal(profile.activeTitle, 'SCOUT SPOTTER', 'Earns initial SCOUT SPOTTER title');
+
+    // 365m Rooftop Overwatch Moving Headshot on Enemy Recon -> Gold/Platinum Grade + EAGLE EYE Title + 2D Trajectory Arc!
+    const mythicRoofShot = evaluateMarksmanShot(
+      {
+        wepDef: awm,
+        distanceM: 365,
+        flightTimeS: 0.29,
+        gravityMps2: awm.bulletGravity,
+        shooterPos: new THREE.Vector3(0, 80, 0),
+        impactPos: new THREE.Vector3(356, 2, 0),
+        damageDealt: 354,
+        isKill: true,
+        isHeadshot: true,
+        oneShotKill: true,
+        hitZone: 'head',
+        relHitY: 1.62,
+        targetSpeedMps: 5.6,
+        targetRole: 'RECON',
+        penetratedCover: true,
+        currentDeadeyeStreak: 2
+      },
+      profile
+    );
+    assert.equal(mythicRoofShot.triggered, true);
+    assert.ok(
+      mythicRoofShot.difficultyScore >= 650,
+      `High-skill 365m moving rooftop headshot earns >=650 difficulty (got ${mythicRoofShot.difficultyScore})`
+    );
+    assert.ok(['S+', '★'].includes(mythicRoofShot.grade), `Expected S+ or ★ grade, got ${mythicRoofShot.grade}`);
+    assert.equal(mythicRoofShot.anatomy.zoneKey, 'head');
+    assert.equal(mythicRoofShot.trajectory.samples.length, 17, 'Includes 17-point parabolic arc for 2D replay');
+    assert.ok(mythicRoofShot.bonusXp >= 350, 'Grants Battlefield-style Marksman distance XP');
+    assert.ok(
+      ['GHOST RECON', 'MYTHIC LONGSHOT'].includes(profile.activeTitle),
+      `Upgrades Earned Marksman Title to top tier (got ${profile.activeTitle})`
+    );
+    assert.ok(profile.unlockedRank >= 6, 'Unlocks Rank 6+ Marksman Title along the ladder');
+
+    // 2. Recon Laser Rangefinder Binoculars (`rangefinder_binos`) + `[3]` Swap with C4 + Exact Rifle Auto-Zero!
+    assert.ok(WEAPON_DEFS.rangefinder_binos, 'AN/PVS-21 LRF Binoculars exist in WEAPON_DEFS');
+    const binoVm = createWeaponViewModel(WEAPON_DEFS.rangefinder_binos, 'US');
+    assert.ok(binoVm.children.length >= 2, 'Dual-tube LRF Binoculars 3D viewmodel builds cleanly');
+
+    const scene = new THREE.Scene();
+    const cam = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 5000);
+    scene.add(cam);
+    const mockWorld = {
+      era: 'modern',
+      voxels: new Map(),
+      flags: [],
+      ammoCrates: [],
+      lootPacks: [],
+      projectiles: [],
+      getGroundHeightAt: () => 0,
+      findSafeSpawnPoint: (x, z) => new THREE.Vector3(x, 0, z),
+      raycastVoxel: () => null
+    };
+    const enemySniper = {
+      id: 'ru_recon_1',
+      name: 'Sokol_7',
+      team: 'RU',
+      role: 'RECON',
+      pos: new THREE.Vector3(0, 0, -324),
+      yaw: 0,
+      hp: 100,
+      maxHp: 100,
+      lastHorizSpeed: 5.4,
+      dead: false,
+      downed: false
+    };
+    const mockBm = {
+      bots: [enemySniper],
+      findNearestDownedFriendly: () => null
+    };
+    const mockVm = { vehicles: [] };
+
+    const reconPlayer = new PlayerController(cam, scene, mockWorld, mockBm, mockVm);
+    reconPlayer.deploy('US', 'recon', new THREE.Vector3(0, 0, 0));
+    reconPlayer.yaw = 0; // Facing -Z directly toward `enemySniper` at z = -324m!
+    reconPlayer.pitch = 0;
+    reconPlayer.syncCameraTransform();
+
+    assert.equal(reconPlayer.slots[2].def.id, 'rangefinder_binos', 'Recon spawns with LRF Binoculars in Slot [3]');
+    assert.equal(reconPlayer.toggleQuickBinoculars(), true, 'Quick-Binoculars switches to Slot [3] and raises 8x/16x ADS');
+    assert.equal(reconPlayer.currentSlotIndex, 2);
+    assert.equal(reconPlayer.isAds, true);
+
+    // Fire LRF pulse at enemy Recon 324m away -> spots target AND auto-zeros primary SV-98 to ~324m!
+    const lrfLock = reconPlayer.fireLaserRangefinder(true);
+    assert.ok(lrfLock && lrfLock.isEnemy, 'LRF locks onto enemy sniper at 324m');
+    assert.ok(Math.abs(lrfLock.distM - 324) <= 2.5, `Expected ~324m range, got ${lrfLock.distM}m`);
+    assert.equal(reconPlayer.isExactLrfZero, true, 'Marks rifle turret as exact LRF-zeroed');
+    assert.ok(
+      Math.abs(reconPlayer.zeroDistance - 324) <= 10,
+      `SV-98 auto-zeroed to exact LRF ballistic range (~324m, got ${reconPlayer.zeroDistance}m)`
+    );
+    assert.ok(lrfLock.solution.leadMeters >= 1.2, 'LRF computes lateral lead in meters for moving target');
+
+    // Swap Slot [3] via `toggleReconGadgetMode()` -> switches cleanly to C4 and back to LRF Binoculars without losing C4 count!
+    assert.equal(reconPlayer.toggleReconGadgetMode(), true);
+    assert.equal(reconPlayer.slots[2].def.id, 'c4', 'Pressing [3] swaps Recon Slot 3 to C4 Breach Charge');
+    reconPlayer.slots[2].clip = 3;
+    assert.equal(reconPlayer.toggleReconGadgetMode(), true);
+    assert.equal(reconPlayer.slots[2].def.id, 'rangefinder_binos', 'Pressing [3] again returns to LRF Binoculars');
+    assert.equal(reconPlayer.toggleReconGadgetMode(), true);
+    assert.equal(reconPlayer.slots[2].clip, 3, 'Preserves exact C4 count across gadget swaps');
+
+    // 3. Verify HUD 2D Trajectory + Anatomy Replay Card renders cleanly without throwing!
+    reconPlayer.lastMarksmanShot = {
+      ...mythicRoofShot,
+      timestamp: typeof performance !== 'undefined' ? performance.now() : Date.now()
+    };
+    const hudHarness = Object.assign(Object.create(HudRenderer), {
+      player: reconPlayer,
+      hudEl: { appendChild() {} },
+      _domCache: new Map(),
+      el(id) {
+        return this._domCache.get(id) || null;
+      }
+    });
+    hudHarness.updateMarksmanHud();
+    assert.ok(hudHarness._domCache.has('marksman-shot-card'), 'HUD Marksman Replay Card mounted & rendered cleanly');
+
+    // Verify ballistic solution helper accuracy
+    const sol500 = computeBallisticSolution(500, 45, 5.0, awm, 100);
+    assert.ok(sol500.rawGravityDropM > 0.3 && sol500.holdoverM > 0.2, '500m AWM shot requires positive holdover when zeroed at 100m');
+  } finally {
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+  }
+});
+
+test('v137b: Tank cannon passes past walking teammates, Coax MG hits close-in enemies in CHASE_3P, and Headshots/Explosions have high instant-KIA chance', async () => {
+  const { PlayerController } = await import('../src/player.js?v=139');
+  const { BotManager, evaluateCatastrophicKill } = await import('../src/bots.js?v=139');
+  const { VehicleManager, initVehicleOrdnance } = await import('../src/vehicles.js?v=139');
+  const { ProjectileManager } = await import('../src/world/ProjectileManager.js?v=139');
+
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  globalThis.document = {
+    pointerLockElement: null,
+    addEventListener: () => {},
+    exitPointerLock: () => {},
+    body: { addEventListener: () => {}, requestPointerLock: () => {} },
+    getElementById: () => null,
+    createElement: () => ({
+      style: {},
+      classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+      querySelector: () => null,
+      querySelectorAll: () => []
+    })
+  };
+  globalThis.window = {
+    addEventListener: () => {},
+    focus: () => {},
+    game: { matchEnded: false, ui: {} }
+  };
+
+  try {
+
+  // 1. Tank 120mm Main Cannon (`tank_shell`) NEVER detonates prematurely on friendly infantry walking in front of the barrel
+  const scene = new THREE.Scene();
+  const shellMesh = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.6), new THREE.MeshBasicMaterial());
+  shellMesh.position.set(0, 2.25, -2.25);
+  scene.add(shellMesh);
+
+  const projWorld = {
+    scene,
+    projectiles: [
+      {
+        type: 'tank_shell',
+        weaponName: '120MM M829A4 APFSDS-T',
+        mesh: shellMesh,
+        vel: new THREE.Vector3(0, -0.04 * 780, -780),
+        gravity: 0,
+        life: 3.0,
+        owner: { name: 'YOU', team: 'US', friendlyFireEnabled: true }
+      }
+    ],
+    raycastVoxel: () => null,
+    getGroundHeightAt: () => 0,
+    worldToGrid: (x, y, z, out = {}) => {
+      out.gx = Math.floor(x / 1.25);
+      out.gy = Math.floor(y / 1.25);
+      out.gz = Math.floor(z / 1.25);
+      return out;
+    },
+    getVoxel: () => null,
+    _spawnGlowFx: () => {},
+    explodeAt: (pos, rad, dmg, cb) => {
+      if (cb) cb(pos.clone(), rad, dmg, 0);
+    },
+    spawnDebris: () => {},
+    updateProjectiles: ProjectileManager.updateProjectiles
+  };
+
+  const walkingAlly = {
+    id: 'us_ally_front',
+    name: 'SgtOkiDoki',
+    team: 'US',
+    pos: new THREE.Vector3(0, 0, -5.0),
+    dead: false,
+    downed: false
+  };
+  const distantEnemy = {
+    id: 'ru_enemy_target',
+    name: 'Kapkan_RU',
+    team: 'RU',
+    pos: new THREE.Vector3(0, 0, -28.0),
+    dead: false,
+    downed: false
+  };
+
+  let blastCenter = null;
+  projWorld.updateProjectiles(
+    0.05,
+    [walkingAlly, distantEnemy],
+    (pos) => {
+      blastCenter = pos.clone();
+    },
+    null,
+    []
+  );
+  assert.ok(blastCenter, 'Tank shell traveled downrange and detonated on enemy target');
+  assert.ok(
+    Math.abs(blastCenter.z - -28.0) < 1.5,
+    `Expected tank shell to pass friendly at z=-5m and hit enemy at z=-28m, got z=${blastCenter.z.toFixed(2)}m`
+  );
+
+  // 2. Tank `7.62MM COAX MG` in 3rd-person `CHASE_3P` depresses & converges onto an enemy soldier right in front (`z = -3.6m`), ignoring friendly escort!
+  const cam = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 5000);
+  scene.add(cam);
+
+  const makeHitBot = (id, team, z) => {
+    const grp = new THREE.Group();
+    grp.position.set(0, 0, z);
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.65, 1.35, 0.45), new THREE.MeshBasicMaterial());
+    torso.position.set(0, 0.95, 0);
+    grp.add(torso);
+    grp.updateMatrixWorld(true);
+    scene.add(grp);
+    const bot = {
+      id,
+      name: id,
+      team,
+      role: 'ASSAULT',
+      pos: new THREE.Vector3(0, 0, z),
+      yaw: 0,
+      hp: 100,
+      maxHp: 100,
+      armorHp: 0,
+      hasHelmet: false,
+      dead: false,
+      downed: false,
+      deaths: 0,
+      mesh: grp,
+      hitMeshes: [torso],
+      parts: {}
+    };
+    torso.userData = { bot, isTorso: true, hitZone: 'thorax' };
+    return bot;
+  };
+
+  const closeFriendlyEscort = makeHitBot('US_ESCORT_FRONT', 'US', -2.6);
+  const closeEnemyInfantry = makeHitBot('RU_POINTBLANK', 'RU', -3.6);
+
+  const mockWorld = {
+    era: 'modern',
+    voxels: new Map(),
+    flags: [],
+    ammoCrates: [],
+    lootPacks: [],
+    projectiles: [],
+    getGroundHeightAt: () => 0,
+    findSafeSpawnPoint: (x, z) => new THREE.Vector3(x, 0, z),
+    raycastVoxel: () => null,
+    spawnDebris: () => {},
+    spawnEnemyLootPack: () => {}
+  };
+  const mockBm = {
+    bots: [closeFriendlyEscort, closeEnemyInfantry],
+    world: mockWorld,
+    clearBotRescueLinks: () => {},
+    findNearestDownedFriendly: () => null,
+    damageBot: BotManager.prototype.damageBot
+  };
+  const tank = {
+    id: 'us_m1a2_1',
+    name: 'M1A2 SEPv3 ABRAMS',
+    type: 'tank',
+    weaponType: 'tank_cannon',
+    team: 'US',
+    isAircraft: false,
+    dead: false,
+    hp: 1600,
+    maxHp: 1600,
+    speed: 19,
+    pos: new THREE.Vector3(0, 0, 0),
+    yaw: 0,
+    pitch: 0,
+    roll: 0,
+    turretYaw: 0,
+    turretPitch: 0,
+    forwardSpeed: 0,
+    fireCooldown: 0,
+    coaxCooldown: 0,
+    coaxHeat: 0,
+    coaxOverheated: false,
+    activeWeaponSlot: 1,
+    crewSeats: [null, null, null],
+    mesh: new THREE.Group()
+  };
+  initVehicleOrdnance(tank);
+  const mockVm = {
+    vehicles: [tank],
+    getVehiclePitchLimits: VehicleManager.prototype.getVehiclePitchLimits
+  };
+
+  const tanker = new PlayerController(cam, scene, mockWorld, mockBm, mockVm);
+  tanker.deploy('US', 'armor', new THREE.Vector3(0, 0, 0));
+  mockBm.player = tanker;
+  tanker.activeVehicle = tank;
+  tanker.vehicleSeatIndex = 0;
+  tank.driver = tanker;
+  tank.crewSeats[0] = tanker;
+  tanker.vehicleCameraMode = 'CHASE_3P';
+  tanker.thirdPersonVehicle = true;
+  tanker.yaw = 0;
+  // Depress 3rd-person camera down onto the point-blank enemy soldier at z = -3.6m!
+  tanker.pitch = -0.37;
+  tanker.isFiring = true;
+
+  tanker.update(0.016);
+  tanker.isFiring = false;
+  tanker.update(0.02);
+
+  assert.equal(closeFriendlyEscort.hp, 100, 'Friendly escort at 2.6m is NOT shot by friendly tank Coax MG');
+  assert.ok(
+    closeEnemyInfantry.hp < 100,
+    `Point-blank enemy soldier at 3.6m in front of tank WAS hit by Coax MG in CHASE_3P (hp=${closeEnemyInfantry.hp})`
+  );
+
+  // 3. Headshots & Explosions have a large chance (62%–100%) of instant unrevivable KIA for BOTH Bots & Players!
+  const rifleHsFatal = evaluateCatastrophicKill('M4A1 5.56MM', 0, 0, () => 0.5, {
+    hitZone: 'head',
+    isHeadshot: true,
+    rawDamage: 62
+  });
+  assert.equal(rifleHsFatal.beyondRescue, true, 'Standard 5.56mm lethal headshot has 80% instant-KIA chance');
+  assert.equal(rifleHsFatal.chance, 0.8);
+
+  const rifleHsRareSurvive = evaluateCatastrophicKill('M4A1 5.56MM', 0, 0, () => 0.95, {
+    hitZone: 'head',
+    isHeadshot: true,
+    rawDamage: 62
+  });
+  assert.equal(rifleHsRareSurvive.beyondRescue, false, 'Top 20% roll allows rare grazing-headshot survival to downed');
+
+  const hsBot = makeHitBot('RU_HS_BOT', 'RU', -20);
+  hsBot.hp = 40;
+  const botHsRes = mockBm.damageBot(hsBot, 64, 'YOU', 'US', 'M4A1', true, () => {}, null, {
+    hitZone: 'head',
+    rng: () => 0.45
+  });
+  assert.equal(botHsRes.beyondRescue, true, 'Bot killed by rifle headshot skips revivable downed state');
+  assert.equal(hsBot.dead, true);
+  assert.equal(hsBot.downed, false);
+
+  // Verify Player killed by rifle headshot OR frag grenade explosion ALSO triggers `beyondRescue`!
+  const footVictim = new PlayerController(cam, scene, mockWorld, mockBm, mockVm);
+  footVictim.deploy('US', 'assault', new THREE.Vector3(0, 0, 0));
+  footVictim.hp = 50;
+  footVictim.armor = 0;
+  footVictim.takeDamage(68, 'Sokol_7', 'RU', 'AK-15', () => {}, new THREE.Vector3(0, 0, -30), true, {
+    hitZone: 'head',
+    rng: () => 0.45
+  });
+  assert.equal(footVictim.beyondRescue, true, 'Player killed by headshot triggers Beyond Medic Rescue KIA');
+  assert.ok(footVictim.downedTimer <= 3.0, 'Unrevivable KIA skips 120s Medic wait');
+  } finally {
     globalThis.document = prevDoc;
     globalThis.window = prevWin;
   }

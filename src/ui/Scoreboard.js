@@ -1,4 +1,5 @@
-import { SQUAD_DEFS } from '../bots.js?v=136';
+import { SQUAD_DEFS } from '../bots.js?v=139';
+import { resolveUnitPlaystyleTitle } from '../player/MarksmanSystem.js?v=139';
 
 export const Scoreboard = {
   computeBattleStats() {
@@ -8,6 +9,7 @@ export const Scoreboard = {
     const selfPlanes = this.player.planesDestroyed || 0;
     const selfTanks = this.player.tanksDestroyed || 0;
     const selfCars = this.player.carsDestroyed || 0;
+    const selfPlayTitle = resolveUnitPlaystyleTitle(this.player, this.player.marksmanProfile);
     const selfEntry = {
       name: this.player.name,
       team: this.player.team,
@@ -24,6 +26,10 @@ export const Scoreboard = {
       vehiclesDestroyed: this.player.vehiclesDestroyed || selfPlanes + selfTanks + selfCars,
       captures: this.player.captures || 0,
       score: this.player.score || 0,
+      marksmanTitle: selfPlayTitle?.title || this.player.marksmanProfile?.activeTitle || null,
+      marksmanTitleIcon: selfPlayTitle?.icon || this.player.marksmanProfile?.activeTitleIcon || '',
+      marksmanTitleColor: selfPlayTitle?.color || this.player.marksmanProfile?.activeTitleColor || '#ffd32a',
+      longestShotM: this.player.marksmanProfile?.longestShotM || 0,
       isSelf: true
     };
 
@@ -60,6 +66,7 @@ export const Scoreboard = {
       const bPlanes = b.planesDestroyed || 0;
       const bTanks = b.tanksDestroyed || 0;
       const bCars = b.carsDestroyed || 0;
+      const botPlayTitle = resolveUnitPlaystyleTitle(b, null);
       const entry = {
         name: b.name,
         team: b.team,
@@ -75,7 +82,11 @@ export const Scoreboard = {
         carsDestroyed: bCars,
         vehiclesDestroyed: b.vehiclesDestroyed || bPlanes + bTanks + bCars,
         captures: b.captures || 0,
-        score: b.score || 0
+        score: b.score || 0,
+        marksmanTitle: botPlayTitle?.title || null,
+        marksmanTitleIcon: botPlayTitle?.icon || '',
+        marksmanTitleColor: botPlayTitle?.color || '#74b9ff',
+        longestShotM: 0
       };
       if (b.team === 'US') usUnits.push(entry);
       else ruUnits.push(entry);
@@ -312,7 +323,11 @@ export const Scoreboard = {
     const renderUnitRow = (u, idx) =>
       `<tr class="${u.isSelf ? 'self-row' : idx === 0 ? 'mvp-row' : ''}">
         <td>${idx === 0 ? '★1' : idx + 1}</td>
-        <td>${u.name}${u.isSelf ? ' (YOU)' : ''}</td>
+        <td>${u.name}${u.isSelf ? ' (YOU)' : ''}${
+        u.marksmanTitle
+          ? ` <span style="font-size:9.5px;padding:1px 5px;border-radius:3px;background:rgba(255,211,42,0.14);border:1px solid ${u.marksmanTitleColor};color:${u.marksmanTitleColor};font-weight:900;">${u.marksmanTitleIcon} ${u.marksmanTitle}${u.longestShotM >= 50 ? ` • PB ${Math.round(u.longestShotM)}m` : ''}</span>`
+          : ''
+      }</td>
         <td><span class="sq-pill">${u.squadShort}</span></td>
         <td>${u.role.slice(0, 4)}</td>
         <td>${u.kills}</td>

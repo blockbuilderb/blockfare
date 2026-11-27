@@ -7,11 +7,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=136';
-import { sound } from '../audio.js?v=136';
-import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=136';
-import { events } from '../events.js?v=136';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=136';
+} from '../weapons.js?v=139';
+import { sound } from '../audio.js?v=139';
+import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=139';
+import { events } from '../events.js?v=139';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=139';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',
@@ -651,6 +651,10 @@ export const GunsmithMethods = {
       this.ownedUpgrades.add('no_pack');
       this.ownedUpgrades.add('std_helmet');
       this.ownedUpgrades.add('sniper8x');
+      this.ownedUpgrades.add('nightforce_12x');
+      this.ownedUpgrades.add('raptor_fvm40_13x');
+      this.ownedUpgrades.add('leupold_mark5_16x');
+      this.ownedUpgrades.add('hensoldt_elr_27x');
     }
     if (!this.equippedUpgrades || typeof this.equippedUpgrades !== 'object') {
       this.equippedUpgrades = {
@@ -722,11 +726,19 @@ export const GunsmithMethods = {
     }
   },
 
+  getDefaultOpticIdForWeapon(weaponId) {
+    if (weaponId === 'sv98' || weaponId === 'm40a5') return 'sniper8x';
+    if (weaponId === 'awm' || weaponId === 'dvl10') return 'nightforce_12x';
+    if (weaponId === 'barrett_m82') return 'leupold_mark5_16x';
+    if (weaponId === 'gm6_lynx') return 'raptor_fvm40_13x';
+    if (weaponId === 'm200_intervention' || weaponId === 'ntw20') return 'hensoldt_elr_27x';
+    return DEFAULT_WEAPON_ATTACHMENTS.optic;
+  },
+
   getWeaponAttachmentMap(weaponId) {
     this.ensureWarehouseStructures();
     const id = weaponId || this.getSelectedWeaponIdForClass(this.role, 'primary') || 'm4a1';
-    const defaultOpticForWep =
-      id === 'sv98' ? 'sniper8x' : id === 'awm' ? 'nightforce_12x' : DEFAULT_WEAPON_ATTACHMENTS.optic;
+    const defaultOpticForWep = this.getDefaultOpticIdForWeapon(id);
     if (!this.weaponAttachments[id] || typeof this.weaponAttachments[id] !== 'object') {
       this.weaponAttachments[id] = {
         ...DEFAULT_WEAPON_ATTACHMENTS,
@@ -2703,10 +2715,15 @@ export const GunsmithMethods = {
     const totalSpareMags = Math.max(1, baseSpareMags + rigBonusMags + packBonusMags);
     const newReserve = Math.max(newClip, totalSpareMags * newClip);
 
+    const isSniperOrDmr = Boolean(baseDef.soundType === 'sniper' || (baseDef.clipSize <= 10 && baseDef.damage >= 55));
+    const sniperBandolierBonus = isSniperOrDmr && isPrimaryGun ? (this.role === 'recon' ? 1.4 : 1.15) : 1.0;
     const baseLoose = isPrimaryGun
-      ? backpack?.looseAmmoPrimary ?? 60
+      ? Math.max(isSniperOrDmr ? 60 : 30, backpack?.looseAmmoPrimary ?? 60)
       : backpack?.looseAmmoSecondary ?? 36;
-    const maxLooseAmmo = Math.max(newClip, Math.round(baseLoose * capMult * classReserveMult));
+    const maxLooseAmmo = Math.max(
+      newClip * 2,
+      Math.round(baseLoose * capMult * Math.max(1.0, classReserveMult) * sniperBandolierBonus)
+    );
     const vestSwapMult = vest?.magSwapMult || 1.0;
 
     const dmgMult = ammo && ammo.dmgMult ? ammo.dmgMult : 1.0;
@@ -2755,6 +2772,10 @@ export const GunsmithMethods = {
     const finalIsScoped = Boolean(
       finalOpticType === 'sniper8x' ||
         finalOpticType === 'sniper12x' ||
+        finalOpticType === 'raptor13x' ||
+        finalOpticType === 'sniper16x' ||
+        finalOpticType === 'sniper27x' ||
+        finalOpticType === 'sniper40x' ||
         finalOpticType === 'sniperFlir' ||
         finalOpticType === 'lpvo36' ||
         finalOpticType === 'flir'
@@ -2778,6 +2799,26 @@ export const GunsmithMethods = {
       : muzzle && muzzle.flashMult !== undefined
       ? muzzle.flashMult
       : 1.0;
+
+    const gravMult = ammo && typeof ammo.bulletGravityMult === 'number' ? ammo.bulletGravityMult : 1.0;
+    const finalBulletGravity = Number(((baseDef.bulletGravity ?? 9.81) * gravMult).toFixed(2));
+    const finalExplosiveSplash =
+      (ammo && ammo.explosiveSplash) || baseDef.explosiveSplash || null;
+    const finalHasBipod = Boolean(
+      baseDef.hasBipod || (grip && (grip.hasBipod || grip.id === 'bipod_grip'))
+    );
+    const finalHasRaptarLrf = Boolean(
+      baseDef.hasRaptarLrf ||
+        (grip && grip.hasRaptarLrf) ||
+        (!explicitBareIron && ((useCustomOptic && optic.hasBuiltInLrf) || baseDef.hasSmartPipper))
+    );
+    const finalHasSmartPipper = Boolean(
+      !explicitBareIron &&
+        ((useCustomOptic && optic.hasSmartPipper) ||
+          baseDef.hasSmartPipper ||
+          (grip && grip.hasRaptarLrf))
+    );
+    const finalHasStraightPull = Boolean(baseDef.hasStraightPull || (grip && grip.hasStraightPull));
 
     return {
       ...baseDef,
@@ -2809,7 +2850,12 @@ export const GunsmithMethods = {
       damageFalloffEnd: isShotgunSlug ? 110 : baseDef.damageFalloffEnd,
       maxEffectiveRange: isShotgunSlug ? 160 : baseDef.maxEffectiveRange,
       muzzleVelocity: isShotgunSlug ? 510 : finalMuzzleVel,
-      bulletGravity: baseDef.bulletGravity ?? 9.81,
+      bulletGravity: finalBulletGravity,
+      explosiveSplash: finalExplosiveSplash,
+      hasBipod: finalHasBipod,
+      hasRaptarLrf: finalHasRaptarLrf,
+      hasSmartPipper: finalHasSmartPipper,
+      hasStraightPull: finalHasStraightPull,
       voxelDamage: Math.max(1, Math.round((baseDef.voxelDamage || 20) * voxelMult)),
       armorPenMult: Number(armorPenMult.toFixed(2)),
       clipSize: newClip,

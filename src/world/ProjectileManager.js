@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=136';
-import { TERRAIN } from '../config.js?v=136';
-import { events } from '../events.js?v=136';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=136';
+import { sound } from '../audio.js?v=139';
+import { TERRAIN } from '../config.js?v=139';
+import { events } from '../events.js?v=139';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=139';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;
@@ -486,7 +486,7 @@ export const ProjectileManager = {
       for (let gz = minGz; gz <= maxGz; gz++) {
         const groundGy = this.getBaseGy(gx, gz);
         const isBoundary = gx === minGx || gx === maxGx || gz === minGz || gz === maxGz;
-        for (let gy = -1; gy <= 18; gy++) {
+        for (let gy = -1; gy <= 84; gy++) {
           const v = this.getVoxel(gx, gy, gz);
           if (!v) continue;
           _integrityVoxels.push(v);
@@ -550,25 +550,50 @@ export const ProjectileManager = {
   },
 
   /**
-   * BattleBit-style Building Cluster Collapse:
-   * When >55% of a building's ground-floor load-bearing walls are destroyed,
-   * the entire upper structure cascades down into rubble!
+   * Realistic Per-Story Steel-Frame & Load-Bearing Collapse Solver:
+   * Checks every story `f` (`0 .. floors - 1`). Brick/concrete infill walls can be blown open while
+   * `steelBeam` I-beams hold the tower aloft — UNTIL heavy demolition (`C4`, bombs, `105mm/120mm/155mm`)
+   * destroys `>= 60%` (`remainingRatio <= 0.40`) of story `f`'s weighted structural supports, triggering
+   * a progressive collapse of story `f` and ALL stories above `f`!
    */
   checkBuildingClusterCollapse(centerGx, centerGz, broadcastFn = null) {
     let totalCollapsed = 0;
     for (let bIdx = 0; bIdx < this.buildings.length; bIdx++) {
       const bld = this.buildings[bIdx];
       if (bld.collapsed) continue;
-      if (!Array.isArray(bld.foundationKeys) || bld.foundationKeys.length === 0) continue;
       if (
-        centerGx < bld.startGx - 6 ||
-        centerGx > bld.startGx + bld.width + 6 ||
-        centerGz < bld.startGz - 6 ||
-        centerGz > bld.startGz + bld.depth + 6
+        centerGx < bld.startGx - 8 ||
+        centerGx > bld.startGx + bld.width + 8 ||
+        centerGz < bld.startGz - 8 ||
+        centerGz > bld.startGz + bld.depth + 8
       ) {
         continue;
       }
 
+      if (Array.isArray(bld.floorSupportKeys) && bld.floorSupportKeys.length > 0) {
+        const maxActiveFloor =
+          typeof bld.collapsedFromFloor === 'number' ? bld.collapsedFromFloor : bld.floorSupportKeys.length;
+        for (let f = 0; f < maxActiveFloor; f++) {
+          const sKeys = bld.floorSupportKeys[f];
+          if (!Array.isArray(sKeys) || sKeys.length === 0) continue;
+          let intactWeight = 0;
+          for (let i = 0; i < sKeys.length; i++) {
+            if (this.voxels.has(sKeys[i])) intactWeight++;
+          }
+          const ratio = intactWeight / sKeys.length;
+          if (ratio <= TERRAIN.BUILDING_COLLAPSE_THRESHOLD) {
+            if (f === 0) {
+              bld.collapsed = true;
+            }
+            bld.collapsedFromFloor = f;
+            totalCollapsed += this.triggerBuildingCollapse(bld, broadcastFn, f);
+            break;
+          }
+        }
+        continue;
+      }
+
+      if (!Array.isArray(bld.foundationKeys) || bld.foundationKeys.length === 0) continue;
       let remainingFoundation = 0;
       const fKeys = bld.foundationKeys;
       for (let i = 0; i < fKeys.length; i++) {
@@ -578,16 +603,58 @@ export const ProjectileManager = {
       const ratio = remainingFoundation / fKeys.length;
       if (ratio <= TERRAIN.BUILDING_COLLAPSE_THRESHOLD) {
         bld.collapsed = true;
-        totalCollapsed += this.triggerBuildingCollapse(bld, broadcastFn);
+        bld.collapsedFromFloor = 0;
+        totalCollapsed += this.triggerBuildingCollapse(bld, broadcastFn, 0);
       }
     }
     return totalCollapsed;
   },
 
-  triggerBuildingCollapse(bld, broadcastFn = null) {
+  triggerBuildingCollapse(bld, broadcastFn = null, collapseFromFloor = 0) {
     let collapsedCount = 0;
-    const baseGy = bld.groundGy ?? bld.baseGy ?? 0;
-    const topGy = bld.topGy ?? baseGy + (bld.floors || 2) * 4 + 1;
+    const groundGy = bld.groundGy ?? bld.baseGy ?? 0;
+    const floorH = 4;
+    const baseGy = groundGy + Math.max(0, collapseFromFloor) * floorH;
+    const topGy = bld.topGy ?? groundGy + (bld.floors || 2) * floorH + 4;
+
+    // Trim any express ladder on this building so players cannot climb into collapsed air
+    if (Array.isArray(this.climbableLadders)) {
+      for (let li = 0; li < this.climbableLadders.length; li++) {
+        const lad = this.climbableLadders[li];
+        if (lad && lad.buildingId === bld.id) {
+          if (collapseFromFloor <= 0) {
+            lad.maxY = lad.minY;
+          } else {
+            const newTopY = baseGy * VOXEL_SIZE;
+            lad.maxY = Math.min(lad.maxY, newTopY);
+            lad.topExitY = Math.min(lad.topExitY || newTopY, newTopY);
+          }
+        }
+      }
+    }
+
+    // Hide or trim 3D Architectural Skyscraper Facade Shell & Solid Hull Box on collapse!
+    if (bld.solidHullBox) {
+      const newHullMaxY = baseGy * VOXEL_SIZE;
+      if (collapseFromFloor <= 2 || newHullMaxY <= bld.solidHullBox.minY + 1.5) {
+        bld.solidHullBox.active = false;
+      } else {
+        bld.solidHullBox.maxY = Math.min(bld.solidHullBox.maxY, newHullMaxY);
+      }
+    }
+    if (bld.archMesh) {
+      if (collapseFromFloor <= 2 || bld.collapsed) {
+        bld.archMesh.visible = false;
+        collapsedCount += 24;
+      } else {
+        const origTopY = (bld.topGy ?? topGy) * VOXEL_SIZE;
+        const baseWorldY = groundGy * VOXEL_SIZE;
+        const remainFrac = Math.max(0.15, (baseGy * VOXEL_SIZE - baseWorldY) / Math.max(5, origTopY - baseWorldY));
+        bld.archMesh.scale.y = remainFrac;
+        bld.archMesh.position.y = baseWorldY * (1 - remainFrac);
+        collapsedCount += 12;
+      }
+    }
 
     for (let gx = bld.startGx - 1; gx <= bld.startGx + bld.width; gx++) {
       for (let gz = bld.startGz - 1; gz <= bld.startGz + bld.depth; gz++) {
@@ -600,20 +667,19 @@ export const ProjectileManager = {
         const relZ = gz - bld.startGz;
         const isCornerPillar =
           inFootprint &&
-          (relX <= 1 || relX >= bld.width - 2) &&
-          (relZ <= 1 || relZ >= bld.depth - 2);
+          (relX === 0 || relX === bld.width - 1) &&
+          (relZ === 0 || relZ === bld.depth - 1);
         const isPerimeterWall =
           inFootprint &&
           (relX === 0 || relX === bld.width - 1 || relZ === 0 || relZ === bld.depth - 1);
-        // Leave realistic jagged ground-floor ruins (2-voxel corner pillars & broken 1–2 voxel perimeter wall stubs)
-        // instead of wiping collapsed buildings completely flat!
+        // Leave realistic jagged steel-girder & masonry ruins at the collapse plane
         const ruinKeepMaxGy = isCornerPillar
           ? baseGy + 2
           : isPerimeterWall && (gx * 5 + gz * 11) % 3 !== 0
-          ? baseGy + ((gx + gz) % 2 === 0 ? 1 : 2)
-          : baseGy;
+          ? baseGy + ((gx + gz) % 2 === 0 ? 1 : 0)
+          : baseGy - 1;
 
-        for (let gy = ruinKeepMaxGy + 1; gy <= topGy + 1; gy++) {
+        for (let gy = ruinKeepMaxGy + 1; gy <= topGy + 3; gy++) {
           if (this.hasVoxel(gx, gy, gz)) {
             const spawnFall = (gx + gy + gz) % 3 === 0;
             this.destroyVoxel(gx, gy, gz, false, spawnFall);
@@ -623,7 +689,7 @@ export const ProjectileManager = {
             collapsedCount++;
           }
         }
-        // Leave broken concrete & rubble mounds across the collapsed ground floor for infantry cover
+        // Leave broken concrete & rubble mounds across the collapse deck for infantry cover
         if (inFootprint && (gx * 7 + gz * 13) % 4 === 0 && !this.hasVoxel(gx, baseGy, gz)) {
           this.addVoxel(gx, baseGy, gz, 'darkConcrete');
           if ((gx + gz) % 5 === 0 && !this.hasVoxel(gx, baseGy + 1, gz)) {
@@ -732,8 +798,8 @@ export const ProjectileManager = {
     }
   },
 
-  /** Airstrike area damage — damages voxels in radius without visual explosion per-hit */
-  damageAreaVoxels(worldPos, radius = 7, maxDamage = 140) {
+  /** Airstrike area damage — damages voxels in radius (including heavy demolition vs steelBeam) */
+  damageAreaVoxels(worldPos, radius = 7, maxDamage = 240) {
     const gCenter = this.worldToGrid(worldPos.x, worldPos.y, worldPos.z, _tmpGrid);
     const cgx = gCenter.gx;
     const cgy = gCenter.gy;
@@ -1414,32 +1480,58 @@ export const ProjectileManager = {
         }
       }
       if (
-        (proj.type === 'a2a_missile' || (proj.type === 'air_rocket' && (proj.turnRate || 0) > 0)) &&
-        proj.targetVehicle &&
-        !proj.targetVehicle.dead &&
-        !(proj.type === 'a2a_missile' && proj.targetVehicle.flareActiveTimer > 0)
+        (proj.type === 'a2a_missile' ||
+          ((proj.type === 'air_rocket' ||
+            proj.type === 'jdam_bomb' ||
+            proj.type === 'gbu28_bomb' ||
+            proj.type === 'airstrike_bomb') &&
+            (proj.turnRate || 0) > 0)) &&
+        ((proj.targetVehicle && !proj.targetVehicle.dead) ||
+          (proj.laserDesignation && (proj.laserDesignation.timer || 0) > 0)) &&
+        !(proj.type === 'a2a_missile' && proj.targetVehicle?.flareActiveTimer > 0)
       ) {
-        const minHomingSpd = proj.type === 'air_rocket' ? 165 : 220;
+        const isGuidedBomb =
+          proj.type === 'jdam_bomb' ||
+          proj.type === 'gbu28_bomb' ||
+          proj.type === 'airstrike_bomb';
+        const minHomingSpd = isGuidedBomb ? 95 : proj.type === 'air_rocket' ? 165 : 220;
         const curSpeed = Math.max(minHomingSpd, proj.vel.length());
-        const tgt = proj.targetVehicle;
-        const rawDist = proj.mesh.position.distanceTo(tgt.pos);
-        const leadTime = Math.min(1.6, rawDist / Math.max(minHomingSpd, curSpeed * 1.15));
-        const leadVx = tgt.velVector ? tgt.velVector.x : -Math.sin(tgt.yaw || 0) * (tgt.forwardSpeed || 0);
-        const leadVy = tgt.velVector ? tgt.velVector.y : 0;
-        const leadVz = tgt.velVector ? tgt.velVector.z : -Math.cos(tgt.yaw || 0) * (tgt.forwardSpeed || 0);
-        _projToTarget.set(
-          tgt.pos.x + leadVx * leadTime - proj.mesh.position.x,
-          tgt.pos.y + 1.4 + leadVy * leadTime - proj.mesh.position.y,
-          tgt.pos.z + leadVz * leadTime - proj.mesh.position.z
-        );
-        if (_projToTarget.lengthSq() > 1) {
-          _projToTarget.normalize();
-          _projCurDir.copy(proj.vel).normalize();
-          const steerRate = Math.min(1, (proj.turnRate || 5.8) * dt);
-          _projCurDir.lerp(_projToTarget, steerRate).normalize();
-          proj.vel.copy(_projCurDir).multiplyScalar(curSpeed);
-          _projLookAt.copy(proj.mesh.position).add(_projCurDir);
-          proj.mesh.lookAt(_projLookAt);
+        const tgt = proj.targetVehicle && !proj.targetVehicle.dead ? proj.targetVehicle : null;
+        const ldUnit =
+          !tgt &&
+          proj.laserDesignation?.targetUnit &&
+          !proj.laserDesignation.targetUnit.dead
+            ? proj.laserDesignation.targetUnit
+            : null;
+        const trackPos = tgt ? tgt.pos : ldUnit ? ldUnit.pos : proj.laserDesignation?.pos;
+        if (trackPos) {
+          const rawDist = proj.mesh.position.distanceTo(trackPos);
+          const leadTime = Math.min(1.6, rawDist / Math.max(minHomingSpd, curSpeed * 1.15));
+          const leadVx = tgt
+            ? tgt.velVector
+              ? tgt.velVector.x
+              : -Math.sin(tgt.yaw || 0) * (tgt.forwardSpeed || 0)
+            : ldUnit?.velX || 0;
+          const leadVy = tgt && tgt.velVector ? tgt.velVector.y : 0;
+          const leadVz = tgt
+            ? tgt.velVector
+              ? tgt.velVector.z
+              : -Math.cos(tgt.yaw || 0) * (tgt.forwardSpeed || 0)
+            : ldUnit?.velZ || 0;
+          _projToTarget.set(
+            trackPos.x + leadVx * leadTime - proj.mesh.position.x,
+            trackPos.y + 1.2 + leadVy * leadTime - proj.mesh.position.y,
+            trackPos.z + leadVz * leadTime - proj.mesh.position.z
+          );
+          if (_projToTarget.lengthSq() > 1) {
+            _projToTarget.normalize();
+            _projCurDir.copy(proj.vel).normalize();
+            const steerRate = Math.min(1, (proj.turnRate || 4.8) * dt);
+            _projCurDir.lerp(_projToTarget, steerRate).normalize();
+            proj.vel.copy(_projCurDir).multiplyScalar(curSpeed);
+            _projLookAt.copy(proj.mesh.position).add(_projCurDir);
+            proj.mesh.lookAt(_projLookAt);
+          }
         }
       }
 
@@ -1644,11 +1736,18 @@ export const ProjectileManager = {
           pType !== 'airstrike_bomb' &&
           pType !== 'a2a_missile'
         ) {
+          const isVehicleOrdnance =
+            pType === 'tank_shell' ||
+            pType === 'autocannon' ||
+            pType === 'atgm_missile' ||
+            pType === 'air_rocket';
           const hitRadius =
-            pType === 'tank_shell' || pType === 'air_rocket'
-              ? 1.55
+            pType === 'air_rocket'
+              ? 1.45
+              : pType === 'tank_shell'
+              ? 0.95
               : pType === 'autocannon'
-              ? 1.25
+              ? 1.15
               : 1.15;
           const hitRadSq = hitRadius * hitRadius;
           const allowFF = Boolean(proj.owner && proj.owner.friendlyFireEnabled);
@@ -1659,7 +1758,7 @@ export const ProjectileManager = {
               u.dead ||
               u.downed ||
               u === proj.owner ||
-              (ownerTeam && u.team === ownerTeam && !allowFF)
+              (ownerTeam && u.team === ownerTeam && (isVehicleOrdnance || !allowFF))
             ) {
               return false;
             }
@@ -1759,6 +1858,35 @@ export const ProjectileManager = {
             proj.weaponLabel ||
             (pType === 'autocannon' ? '30MM AUTOCANNON' : null);
           sound.playExplosion(aud.dist, aud.pan, soundScale);
+          // Award +100 XP / +$150 JTAC Buddy-Lase Assist to the Sniper who painted this target!
+          const lDesig =
+            proj.laserDesignation ||
+            (proj.targetVehicle?.jtacLaserTimer > 0
+              ? { owner: proj.targetVehicle.jtacLaserOwner, label: proj.targetVehicle.name }
+              : null);
+          if (
+            lDesig &&
+            lDesig.owner &&
+            typeof lDesig.owner.onAwardXp === 'function' &&
+            (!lDesig._assistAwardedAt || performance.now() - lDesig._assistAwardedAt > 2500)
+          ) {
+            lDesig._assistAwardedAt = performance.now();
+            lDesig.owner.score = (lDesig.owner.score || 0) + 100;
+            lDesig.owner.addCash?.(150, 'JTAC ◆1688 LASER DESIGNATION ASSIST', false);
+            lDesig.owner.onAwardXp(
+              100,
+              `🎯◆ JTAC LASER 1688 STRIKE ASSIST (+100 XP • +$150) — ORDNANCE ON TARGET!`
+            );
+          }
+          if (proj.owner) {
+            events.emit('pilot:ordnance-impact', {
+              pos: hitPos,
+              radius: rad,
+              damage: dmg,
+              pType,
+              owner: proj.owner
+            });
+          }
           this.explodeAt(
             hitPos,
             rad,

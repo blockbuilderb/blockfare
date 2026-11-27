@@ -107,8 +107,8 @@ export const WorldMarkers = {
       return out;
     }
     out.behind = false;
-    const sx = Math.round((projVec.x * 0.5 + 0.5) * vw);
-    const sy = Math.round((-projVec.y * 0.5 + 0.5) * vh);
+    const sx = (projVec.x * 0.5 + 0.5) * vw;
+    const sy = (-projVec.y * 0.5 + 0.5) * vh;
     out.x = sx;
     out.y = sy;
     out.centerDist = Math.hypot(sx - vw * 0.5, sy - vh * 0.5);
@@ -116,7 +116,9 @@ export const WorldMarkers = {
   },
 
   _configureMarkerSlot(slot, opts) {
-    const transform = `translate3d(${opts.x}px, ${opts.y}px, 0) translate(-50%, -50%)`;
+    const xStr = typeof opts.x === 'number' ? opts.x.toFixed(2) : opts.x;
+    const yStr = typeof opts.y === 'number' ? opts.y.toFixed(2) : opts.y;
+    const transform = `translate3d(${xStr}px, ${yStr}px, 0) translate(-50%, -50%)`;
     if (slot.transform !== transform) {
       slot.root.style.transform = transform;
       slot.transform = transform;
@@ -926,11 +928,17 @@ export const WorldMarkers = {
                 }
               }
             }
-          } else if (activeAircraft && v.team !== this.player.team && vDist < 1350) {
+          } else if (
+            activeAircraft &&
+            v.team !== this.player.team &&
+            (vDist < 1350 || (v.jtacLaserTimer > 0 && v.jtacLaserTeam === this.player.team && vDist < 2500))
+          ) {
             // Hollow Wireframe Target Diamond (18x18px rotated 45°) for Enemy Ground Vehicles so tanks/APCs/cars are 100% visible!
+            // Buddy-Lased (`◆ LASER 1688`) targets glow gold/cyan up to 2,500m away for Pilot Laser AGM lock!
+            const isBuddyLased = Boolean(v.jtacLaserTimer > 0 && v.jtacLaserTeam === this.player.team);
             const scr = projectToScreen(v.pos, 2.2);
             if (!scr) continue;
-            const isNearAim = scr.centerDist < 155;
+            const isNearAim = scr.centerDist < 155 || isBuddyLased;
             const vLabel =
               v.type === 'tank'
                 ? 'TANK'
@@ -941,26 +949,150 @@ export const WorldMarkers = {
                 : v.isEmplacement
                 ? 'TURRET'
                 : 'CAR';
-            const diaCol =
-              v.type === 'aa' || v.type === 'emplace_aa'
-                ? '#ff4757'
-                : isNearAim
-                ? '#f1c40f'
-                : '#ff9f43';
-            // Progressive disclosure: only show type name when near the aiming reticle; peripheral targets show compact range only
-            const groundTag = isNearAim ? `${vLabel} • ${vDist}m` : scr.centerDist < 380 ? `${vDist}m` : '';
+            const diaCol = isBuddyLased
+              ? '#00ffcc'
+              : v.type === 'aa' || v.type === 'emplace_aa'
+              ? '#ff4757'
+              : isNearAim
+              ? '#f1c40f'
+              : '#ff9f43';
+            const groundTag = isBuddyLased
+              ? `🔶◆ LASER 1688 • ${vLabel} ${vDist}m [AGM LOCK]`
+              : isNearAim
+              ? `${vLabel} • ${vDist}m`
+              : scr.centerDist < 380
+              ? `${vDist}m`
+              : '';
             const slot = this._acquireWorldMarkerSlot('airBox');
             this._configureMarkerSlot(slot, {
               x: scr.x,
               y: scr.y,
-              opacity: isNearAim ? 0.92 : 0.72,
+              opacity: isBuddyLased ? 0.99 : isNearAim ? 0.92 : 0.72,
               iconClass: '',
-              iconStyle: `width:16px;height:16px;background:transparent;border:1.5px solid ${diaCol};transform:rotate(45deg);box-sizing:border-box;`,
+              iconStyle: isBuddyLased
+                ? 'width:20px;height:20px;background:rgba(0,255,204,0.12);border:2px solid #00ffcc;transform:rotate(45deg);box-shadow:0 0 12px rgba(0,255,204,0.85);box-sizing:border-box;'
+                : `width:16px;height:16px;background:transparent;border:1.5px solid ${diaCol};transform:rotate(45deg);box-sizing:border-box;`,
               iconText: '',
               distText: groundTag,
               distColor: diaCol,
               distWeight: isNearAim ? '900' : '800'
             });
+          }
+        }
+
+        // 2c. Role-Matched Pilot Support Request 3D Beacon + Off-Screen Turn Arrow + Ground Laser 1688 Spot!
+        if (activeAircraft && typeof this.vehicleManager.getActivePilotSupportRequestForVehicle === 'function') {
+          const pilotReq = this.vehicleManager.getActivePilotSupportRequestForVehicle(
+            activeAircraft,
+            this.player.team
+          );
+          if (pilotReq && pilotReq.pos) {
+            const reqDist = Math.round(refPos.distanceTo(pilotReq.pos));
+            const reqCol =
+              pilotReq.kind === 'AIRLIFT'
+                ? '#00ffcc'
+                : pilotReq.kind === 'CAP_INTERCEPT'
+                ? '#ff6b81'
+                : pilotReq.kind === 'CARPET_BOMB'
+                ? '#ffd32a'
+                : pilotReq.kind === 'GUNSHIP_ORBIT'
+                ? '#a29bfe'
+                : '#ff9f43';
+            const reqIcon =
+              pilotReq.kind === 'AIRLIFT'
+                ? pilotReq.phase === 'DROP_AT_LZ'
+                  ? '🏢'
+                  : '🚁'
+                : pilotReq.kind === 'CAP_INTERCEPT'
+                ? '✈️'
+                : pilotReq.kind === 'CARPET_BOMB'
+                ? '💣'
+                : pilotReq.kind === 'GUNSHIP_ORBIT'
+                ? '🛰️'
+                : '🎯';
+            const shortReqTag =
+              pilotReq.kind === 'AIRLIFT'
+                ? pilotReq.phase === 'DROP_AT_LZ'
+                  ? `SNIPER DROP LZ • ${reqDist}m`
+                  : `SNIPER PICKUP • ${reqDist}m`
+                : pilotReq.kind === 'CAP_INTERCEPT'
+                ? `CAP REQUEST • ${reqDist}m`
+                : pilotReq.kind === 'CARPET_BOMB'
+                ? `CARPET ZONE • ${reqDist}m`
+                : pilotReq.kind === 'GUNSHIP_ORBIT'
+                ? `ORBIT TARGET • ${reqDist}m`
+                : `CAS 9-LINE • ${reqDist}m`;
+            const rawReqScr = this.projectWorldToScreen(pilotReq.pos, 2.5, cam, w, h);
+            const reqOffScreen =
+              rawReqScr.behind ||
+              rawReqScr.x < 56 ||
+              rawReqScr.x > w - 56 ||
+              rawReqScr.y < 56 ||
+              rawReqScr.y > h - 56;
+            if (!reqOffScreen) {
+              const reqSlot = this._acquireWorldMarkerSlot('airBox');
+              this._configureMarkerSlot(reqSlot, {
+                x: rawReqScr.x,
+                y: rawReqScr.y,
+                opacity: 0.96,
+                iconClass: '',
+                iconStyle: `width:26px;height:26px;display:flex;align-items:center;justify-content:center;background:rgba(10,18,28,0.78);border:2px dashed ${reqCol};border-radius:50%;font-size:13px;box-shadow:0 0 10px ${reqCol}88;box-sizing:border-box;`,
+                iconText: reqIcon,
+                distText: shortReqTag,
+                distColor: reqCol,
+                distWeight: '900'
+              });
+            } else {
+              const invCamQ = (this._invCamQuat || (this._invCamQuat = new THREE.Quaternion()))
+                .copy(cam.quaternion)
+                .invert();
+              const camWorldPos = (this._camWorldPosTmp || (this._camWorldPosTmp = new THREE.Vector3()));
+              cam.getWorldPosition(camWorldPos);
+              const relR = (this._offScreenVec || (this._offScreenVec = new THREE.Vector3()))
+                .copy(pilotReq.pos)
+                .sub(camWorldPos)
+                .applyQuaternion(invCamQ);
+              let dxR = relR.x;
+              let dyR = -relR.y;
+              const lenR = Math.hypot(dxR, dyR) || 1;
+              dxR /= lenR;
+              dyR /= lenR;
+              const ringR = Math.min(220, Math.min(w, h) * 0.28);
+              const reqArrowSlot = this._acquireWorldMarkerSlot('airBox');
+              this._configureMarkerSlot(reqArrowSlot, {
+                x: Math.round(w * 0.5 + dxR * ringR),
+                y: Math.round(h * 0.5 + dyR * ringR),
+                opacity: 0.92,
+                iconClass: '',
+                iconStyle: `width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:rgba(10,18,28,0.82);border:1.8px solid ${reqCol};border-radius:50%;font-size:12px;box-sizing:border-box;`,
+                iconText: reqIcon,
+                distText: `➤ ${shortReqTag}`,
+                distColor: reqCol,
+                distWeight: '900'
+              });
+            }
+          }
+
+          // Ground-coordinate Laser 1688 Spot Marker (when a Sniper paints a bunker/rooftop without a vehicle)
+          const groundDesig = this.world?.activeLaserDesignations?.[this.player.team];
+          if (groundDesig && groundDesig.timer > 0 && !groundDesig.targetVehicle && groundDesig.pos) {
+            const gScr = projectToScreen(groundDesig.pos, 1.2);
+            if (gScr) {
+              const gDist = Math.round(refPos.distanceTo(groundDesig.pos));
+              const dSlot = this._acquireWorldMarkerSlot('airBox');
+              this._configureMarkerSlot(dSlot, {
+                x: gScr.x,
+                y: gScr.y,
+                opacity: 0.98,
+                iconClass: '',
+                iconStyle:
+                  'width:20px;height:20px;background:rgba(0,255,204,0.14);border:2px solid #00ffcc;transform:rotate(45deg);box-shadow:0 0 12px rgba(0,255,204,0.9);box-sizing:border-box;',
+                iconText: '',
+                distText: `🔶◆ LASER 1688 (${groundDesig.label || 'GROUND'}) • ${gDist}m`,
+                distColor: '#00ffcc',
+                distWeight: '900'
+              });
+            }
           }
         }
       }

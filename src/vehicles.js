@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=136';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=136';
+import { sound } from './audio.js?v=139';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=139';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=136';
-import { createVehicleMesh } from './models/vehicle-model.js?v=136';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=136';
-import { getRideShortcutLabel } from './utils/KeyboardShortcuts.js?v=136';
-import { events, makeEventBridge } from './events.js?v=136';
+} from './assets/vehicle-defs.js?v=139';
+import { createVehicleMesh } from './models/vehicle-model.js?v=139';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=139';
+import { getRideShortcutLabel } from './utils/KeyboardShortcuts.js?v=139';
+import { events, makeEventBridge } from './events.js?v=139';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -22,7 +22,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=136';
+} from './core/StateMachines.js?v=139';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -320,12 +320,12 @@ const SHARED_AI_TANK_SHELL_MAT = markShared(new THREE.MeshBasicMaterial({ color:
 const SHARED_AI_AUTO_SHELL_GEO = markShared(new THREE.BoxGeometry(0.16, 0.16, 0.48));
 const SHARED_AI_AUTO_SHELL_MAT = markShared(new THREE.MeshBasicMaterial({ color: 0xffcc00 }));
 
-const PITCH_LIMITS_DEFAULT = Object.freeze({ min: -0.18, max: 0.35 });
-const PITCH_LIMITS_AA = Object.freeze({ min: -0.14, max: 1.48 });
+const PITCH_LIMITS_DEFAULT = Object.freeze({ min: -0.30, max: 0.38 });
+const PITCH_LIMITS_AA = Object.freeze({ min: -0.22, max: 1.48 });
 const PITCH_LIMITS_MORTAR = Object.freeze({ min: -0.35, max: 0.85 });
-const PITCH_LIMITS_APC = Object.freeze({ min: -0.18, max: 0.52 });
-export const PITCH_LIMITS_CAR = Object.freeze({ min: -0.26, max: 1.05 }); // -15° to +60° real-world CROWS / OGPK Roof .50 Cal elevation!
-export const PITCH_LIMITS_COMMANDER_RWS = Object.freeze({ min: -0.31, max: 1.05 }); // -18° to +60° Tank Commander Roof .50 Cal RWS!
+const PITCH_LIMITS_APC = Object.freeze({ min: -0.30, max: 0.55 });
+export const PITCH_LIMITS_CAR = Object.freeze({ min: -0.32, max: 1.05 }); // -18° to +60° real-world CROWS / OGPK Roof .50 Cal elevation!
+export const PITCH_LIMITS_COMMANDER_RWS = Object.freeze({ min: -0.38, max: 1.05 }); // -22° to +60° Tank Commander Roof .50 Cal RWS!
 
 const COLOR_FIRE_ORANGE = new THREE.Color(0xff7f11);
 const COLOR_ERA_SPARK = new THREE.Color(0xff9f1a);
@@ -1716,6 +1716,713 @@ export class VehicleManager {
       }
     }
     this.activeWrecks.length = 0;
+  }
+
+  /**
+   * 100% Complete Round Reset for VehicleManager:
+   * Removes burning wrecks & temporary ride/secret/requisition/emplacement vehicles, clears pilot
+   * taskings, and restores every base-fleet vehicle to its exact `spawnPos` (`THREE.Vector3` or array),
+   * `spawnYaw`, 100% HP, 100% subsystems/airframe parts, and 100% rearmed ordnance!
+   */
+  resetForNewRound() {
+    this.clearAllWrecks();
+    this.pilotSupportRequests = { US: [], RU: [] };
+    this._pilotReqScanAccum = 0;
+    if (!Array.isArray(this.vehicles)) return;
+
+    for (let i = this.vehicles.length - 1; i >= 0; i--) {
+      const v = this.vehicles[i];
+      if (!v) {
+        this.vehicles.splice(i, 1);
+        continue;
+      }
+      if (v.npcDriver) {
+        v.npcDriver.drivingVehicle = null;
+        v.npcDriver = null;
+      }
+      v.driver = null;
+      v.remoteDriverId = null;
+      v.remoteGunnerId = null;
+      if (Array.isArray(v.crewSeats)) v.crewSeats.fill(null);
+      if (Array.isArray(v.aiPassengers)) {
+        for (const pBot of v.aiPassengers) {
+          if (pBot) pBot.ridingVehicle = null;
+        }
+        v.aiPassengers.length = 0;
+      }
+
+      const idStr = String(v.id || '');
+      const isTemporarySpawn = Boolean(
+        v.isTemporaryRide ||
+          v.isSecretOmegaFlyer ||
+          v.isPlayerBuiltEmplacement ||
+          idStr.startsWith('ride_') ||
+          idStr.startsWith('secret_') ||
+          idStr.startsWith('req_') ||
+          idStr.startsWith('personal_') ||
+          idStr.startsWith('emplace_')
+      );
+      if (isTemporarySpawn) {
+        if (v.mesh && this.scene) {
+          this.scene.remove(v.mesh);
+        }
+        this.vehicles.splice(i, 1);
+        continue;
+      }
+
+      this.rearmVehicleOrdnance?.(v);
+      v.paidByPlayer = null;
+      v._paidAsStock = false;
+      v.rideTask = null;
+      v.jtacLaserTimer = 0;
+      v.jtacPaintedBy = null;
+      v.uavRevealed = false;
+      v.hp = v.maxHp || 1200;
+      v.hullIntegrityPct = 100;
+      if (typeof v.maxEraBlocks === 'number') {
+        v.eraBlocksIntact = v.maxEraBlocks;
+      }
+      if (v.subsystems) {
+        for (const k of Object.keys(v.subsystems)) {
+          v.subsystems[k] = 'OK';
+        }
+      }
+      if (v.armorZones) {
+        for (const k of Object.keys(v.armorZones)) {
+          v.armorZones[k] = 100;
+        }
+      }
+      if (v.airframeParts) {
+        for (const k of Object.keys(v.airframeParts)) {
+          v.airframeParts[k] = 100;
+        }
+      }
+      const isRegularB2 = Boolean(
+        v.isAircraft && v.aircraftRole === 'b2_spirit' && !idStr.startsWith('secret_')
+      );
+      v.b2LockedUntilKills = isRegularB2 && !this.isB2UnlockedForTeam(v.team);
+      v.dead = Boolean(v.b2LockedUntilKills);
+      v.respawnTimer = 0;
+      v.isShotDown = false;
+      v.isStalling = false;
+      v.aiPilotActive = false;
+      v.autoFlightMode = null;
+      v.levelAutopilot = false;
+      v.heliHoverHold = false;
+      v.spiTargetPos = null;
+      v.forwardSpeed = 0;
+      v._heliVelX = 0;
+      v._heliVelY = 0;
+      v._heliVelZ = 0;
+      v._knockVelX = 0;
+      v._knockVelZ = 0;
+      v.fireCooldown = 0;
+      v.coaxCooldown = 0;
+      v.coaxHeat = 0;
+      v.coaxOverheated = false;
+      v.flareCooldown = 0;
+      v.flareActiveTimer = 0;
+      v.pitch = 0;
+      v.roll = 0;
+      v.yaw = v.spawnYaw || 0;
+      v.turretYaw = v.spawnYaw || 0;
+      v.turretPitch = 0;
+
+      if (v.spawnPos) {
+        if (v.spawnPos.isVector3 || typeof v.spawnPos.x === 'number') {
+          const sx = v.spawnPos.x;
+          const sz = v.spawnPos.z;
+          const sy = v.isAircraft
+            ? v.spawnPos.y
+            : this.world
+            ? this.world.getGroundHeightAt(sx, sz)
+            : v.spawnPos.y || 1.25;
+          v.pos.set(sx, sy, sz);
+        } else if (Array.isArray(v.spawnPos)) {
+          const sx = v.spawnPos[0];
+          const sz = v.spawnPos[2];
+          const sy = this.world ? this.world.getGroundHeightAt(sx, sz) : v.spawnPos[1] || 1.25;
+          v.pos.set(sx, sy, sz);
+        }
+      }
+      if (v.mesh) {
+        v.mesh.position.copy(v.pos);
+        v.mesh.rotation.set(0, v.yaw, 0, 'YXZ');
+        v.mesh.visible = !v.dead;
+      }
+    }
+  }
+
+  /**
+   * Returns the active role-matched Teammate Air Support / Airlift Request for `v` (or for `preferredRole`).
+   */
+  getActivePilotSupportRequestForVehicle(v, teamArg = null) {
+    const team = teamArg || v?.team || this.lastPlayer?.team || 'US';
+    const list = this.pilotSupportRequests?.[team];
+    if (!Array.isArray(list) || list.length === 0) return null;
+    const role = v ? v.aircraftRole || v.type : null;
+    if (!role) return list[0] || null;
+    const matchKey =
+      role === 'heli_transport'
+        ? 'AIRLIFT'
+        : role === 'fighter'
+        ? 'CAP_INTERCEPT'
+        : role === 'b2_spirit' || role === 'bomber'
+        ? 'CARPET_BOMB'
+        : role === 'gunship'
+        ? 'GUNSHIP_ORBIT'
+        : role === 'cas' || role === 'heli_attack'
+        ? 'CAS_STRIKE'
+        : null;
+    if (!matchKey) return null;
+    return list.find((r) => r && r.active && r.kind === matchKey) || null;
+  }
+
+  _completePilotSupportRequest(req, player) {
+    if (!req || !req.active) return;
+    req.active = false;
+    req.completedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (!player) return;
+    const xp = req.xpReward || 275;
+    const cash = req.cashReward || 400;
+    player.score = (player.score || 0) + xp;
+    player.pilotMissionsCompleted = (player.pilotMissionsCompleted || 0) + 1;
+    player.addCash?.(cash, req.rewardReason || 'PILOT TEAM SUPPORT MISSION', false);
+    sound.playRadioBeep?.(true);
+    player.onAwardXp?.(xp, `${req.completeBanner || '✈️ PILOT SUPPORT COMPLETE!'} (+${xp} XP • +$${cash})`);
+    events.emit('pilot:mission-complete', {
+      kind: req.kind,
+      xp,
+      cash,
+      label: req.title
+    });
+  }
+
+  notifyPilotSupportVehicleDestroyed(vehicle, attackerName, attackerTeam) {
+    if (!vehicle || !this.pilotSupportRequests) return;
+    const player = this.lastPlayer;
+    const team = attackerTeam || player?.team;
+    if (!team || !Array.isArray(this.pilotSupportRequests[team])) return;
+    const byPlayer = Boolean(player && attackerName === player.name);
+    for (const req of this.pilotSupportRequests[team]) {
+      if (!req || !req.active) continue;
+      if (req.kind === 'CAP_INTERCEPT' && req.targetVehicle === vehicle) {
+        if (byPlayer && player?.activeVehicle?.isAircraft) {
+          this._completePilotSupportRequest(req, player);
+        } else {
+          req.active = false;
+        }
+      } else if (req.kind === 'CAS_STRIKE' && req.targetVehicle === vehicle) {
+        if (byPlayer && player?.activeVehicle?.isAircraft) {
+          this._completePilotSupportRequest(req, player);
+        } else {
+          req.active = false;
+        }
+      }
+    }
+  }
+
+  notifyPlayerOrdnanceImpact(ev) {
+    if (!ev || !ev.owner || !ev.pos || !this.pilotSupportRequests) return;
+    const player = ev.owner;
+    const activeVeh = player.activeVehicle;
+    if (!activeVeh || !activeVeh.isAircraft || activeVeh.dead) return;
+    const team = player.team || activeVeh.team || 'US';
+    const list = this.pilotSupportRequests[team];
+    if (!Array.isArray(list)) return;
+    const aRole = activeVeh.aircraftRole || activeVeh.type;
+
+    for (const req of list) {
+      if (!req || !req.active || !req.pos) continue;
+      const dH = Math.hypot(ev.pos.x - req.pos.x, ev.pos.z - req.pos.z);
+      if (
+        req.kind === 'CARPET_BOMB' &&
+        (aRole === 'b2_spirit' || aRole === 'bomber' || ev.pType === 'airstrike_bomb' || ev.pType === 'jdam_bomb' || ev.pType === 'gbu28_bomb') &&
+        dH <= 62
+      ) {
+        const hitWeight = ev.pType === 'jdam_bomb' || ev.pType === 'gbu28_bomb' ? 2 : 1;
+        req.progress = (req.progress || 0) + hitWeight;
+        if (req.progress >= (req.goal || 2)) {
+          this._completePilotSupportRequest(req, player);
+        }
+      } else if (
+        req.kind === 'CAS_STRIKE' &&
+        (aRole === 'cas' || aRole === 'heli_attack' || aRole === 'bomber') &&
+        dH <= 50
+      ) {
+        req.progress = (req.progress || 0) + Math.max(40, ev.damage || 120);
+        if (req.progress >= (req.goal || 220)) {
+          this._completePilotSupportRequest(req, player);
+        }
+      } else if (req.kind === 'GUNSHIP_ORBIT' && aRole === 'gunship' && dH <= 65) {
+        req.progress = (req.progress || 0) + Math.max(45, ev.damage || 140);
+        if (req.progress >= (req.goal || 260)) {
+          this._completePilotSupportRequest(req, player);
+        }
+      }
+    }
+  }
+
+  /**
+   * Maintains live Role-Matched Teammate Radio Requests for Human Pilots + Autonomous AI Recon Sniper
+   * `◆ LASER 1688` Buddy-Lasing on Enemy Armor!
+   *  - `heli_transport`: Recon Sniper & Assault Squad pickup + Rooftop / FOB insertion (`+250 XP / +$350`)
+   *  - `fighter`: Air Superiority CAP intercept against hostile aircraft (`+300 XP / +$450`)
+   *  - `b2_spirit` / `bomber`: Carpet Bombing tasking over fortified enemy FOBs (`+320 XP / +$500`)
+   *  - `cas` / `heli_attack`: Danger-Close CAS 9-Line strike on enemy armor / pinned squads (`+275 XP / +$400`)
+   *  - `gunship`: AC-130 Pylon Orbit fire support over contested objectives (`+275 XP / +$400`)
+   */
+  updatePilotSupportRequests(dt, player, botManager, isDeployFlag = false) {
+    if ((this.world?.era || 'modern') !== 'modern') return;
+    if (!this.pilotSupportRequests) {
+      this.pilotSupportRequests = { US: [], RU: [] };
+    }
+    if (!this._pilotImpactListenerBound) {
+      this._pilotImpactListenerBound = true;
+      events.on('pilot:ordnance-impact', (ev) => this.notifyPlayerOrdnanceImpact(ev));
+    }
+    if (!player || isDeployFlag) return;
+
+    const team = player.team || 'US';
+    const enemyTeam = team === 'US' ? 'RU' : 'US';
+    const list = this.pilotSupportRequests[team] || (this.pilotSupportRequests[team] = []);
+    const activeVeh = player.activeVehicle && !player.activeVehicle.dead ? player.activeVehicle : null;
+    const inAircraft = Boolean(activeVeh && activeVeh.isAircraft && !activeVeh.isSecretOmegaFlyer);
+    const activeAirRole = inAircraft ? activeVeh.aircraftRole || activeVeh.type : null;
+
+    // 1. Autonomous AI Recon Sniper Buddy-Lasing (`◆ LASER 1688`) for Human Aircraft Pilots!
+    this._aiReconLaserAccum = (this._aiReconLaserAccum || 0) + dt;
+    if (this._aiReconLaserAccum >= (inAircraft ? 4.5 : 11.0)) {
+      this._aiReconLaserAccum = 0;
+      if (this.world) {
+        if (!this.world.activeLaserDesignations) {
+          this.world.activeLaserDesignations = { US: null, RU: null };
+        }
+        const curDesig = this.world.activeLaserDesignations[team];
+        const hasValidDesig = Boolean(
+          curDesig &&
+            curDesig.timer > 1.5 &&
+            (!curDesig.targetVehicle || !curDesig.targetVehicle.dead)
+        );
+        if (!hasValidDesig && botManager && Array.isArray(botManager.bots)) {
+          let bestRecon = null;
+          let bestArmor = null;
+          let bestDistSq = 720 * 720;
+          for (let bi = 0; bi < botManager.bots.length; bi++) {
+            const b = botManager.bots[bi];
+            if (!b || b.dead || b.downed || b.team !== team || b.role !== 'RECON' || b.ridingVehicle) {
+              continue;
+            }
+            for (let vi = 0; vi < this.vehicles.length; vi++) {
+              const ev = this.vehicles[vi];
+              if (
+                !ev ||
+                ev.dead ||
+                ev.team !== enemyTeam ||
+                ev.isAircraft ||
+                (ev.type !== 'tank' && ev.type !== 'apc' && ev.type !== 'aa')
+              ) {
+                continue;
+              }
+              const dSq = b.pos.distanceToSquared(ev.pos);
+              if (dSq < bestDistSq) {
+                bestDistSq = dSq;
+                bestRecon = b;
+                bestArmor = ev;
+              }
+            }
+          }
+          if (bestRecon && bestArmor) {
+            bestArmor.jtacLaserTimer = 22.0;
+            bestArmor.jtacLaserTeam = team;
+            bestArmor.jtacLaserOwner = bestRecon;
+            this.world.activeLaserDesignations[team] = {
+              pos: bestArmor.pos.clone(),
+              targetVehicle: bestArmor,
+              owner: bestRecon,
+              team,
+              code: 1688,
+              label: bestArmor.name ? bestArmor.name.split(' ')[0] : 'ENEMY ARMOR',
+              timer: 22.0,
+              maxTimer: 22.0
+            };
+            if (
+              inAircraft &&
+              (activeAirRole === 'cas' ||
+                activeAirRole === 'heli_attack' ||
+                activeAirRole === 'fighter' ||
+                activeAirRole === 'bomber')
+            ) {
+              sound.playRadioBeep?.(true);
+              player.onAwardXp?.(
+                0,
+                `🔶◆ RECON SNIPER (${bestRecon.name}): PAINTING ${
+                  bestArmor.name ? bestArmor.name.split(' ')[0] : 'ENEMY ARMOR'
+                } ON LASER 1688 — AGM CLEARED HOT!`
+              );
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Tick existing requests, live-sync moving targets & handle Transport Helicopter Sniper Boarding / Disembark!
+    for (let i = list.length - 1; i >= 0; i--) {
+      const req = list[i];
+      if (!req || !req.active) {
+        list.splice(i, 1);
+        continue;
+      }
+      req.timer -= dt;
+      if (req.timer <= 0) {
+        list.splice(i, 1);
+        continue;
+      }
+
+      if (req.kind === 'CAP_INTERCEPT') {
+        if (!req.targetVehicle || req.targetVehicle.dead || req.targetVehicle.isShotDown) {
+          list.splice(i, 1);
+          continue;
+        }
+        req.pos.copy(req.targetVehicle.pos);
+      } else if (req.kind === 'CAS_STRIKE' && req.targetVehicle) {
+        if (req.targetVehicle.dead) {
+          list.splice(i, 1);
+          continue;
+        }
+        req.pos.copy(req.targetVehicle.pos);
+      } else if (req.kind === 'AIRLIFT') {
+        // Keep boarded AI snipers / squadmates inside the player's transport helicopter!
+        if (inAircraft && activeAirRole === 'heli_transport') {
+          if (!Array.isArray(activeVeh.aiPassengers)) activeVeh.aiPassengers = [];
+          for (let pi = activeVeh.aiPassengers.length - 1; pi >= 0; pi--) {
+            const pax = activeVeh.aiPassengers[pi];
+            if (!pax || pax.dead || pax.downed || pax.ridingVehicle !== activeVeh) {
+              if (pax && pax.ridingVehicle === activeVeh) pax.ridingVehicle = null;
+              activeVeh.aiPassengers.splice(pi, 1);
+            } else {
+              pax.pos.copy(activeVeh.pos);
+              if (pax.mesh) pax.mesh.visible = false;
+            }
+          }
+
+          const gHere = this.getAircraftSupportHeightAt(
+            activeVeh.pos.x,
+            activeVeh.pos.z,
+            activeVeh.pos.y + 5.0,
+            true
+          );
+          const altAbovePad = Math.max(0, activeVeh.pos.y - gHere);
+          const spd = Math.abs(activeVeh.forwardSpeed || 0);
+
+          if (req.phase === 'AWAIT_PICKUP') {
+            req.pos.copy(req.pickupPos);
+            const dPickup = Math.hypot(activeVeh.pos.x - req.pickupPos.x, activeVeh.pos.z - req.pickupPos.z);
+            if (dPickup <= 24.0 && altAbovePad <= 8.5 && spd <= 8.5) {
+              // Board up to 4 friendly AI soldiers (prioritizing RECON snipers!) into `activeVeh.aiPassengers`
+              let boarded = activeVeh.aiPassengers.length;
+              if (botManager && Array.isArray(botManager.bots) && boarded < 4) {
+                const candidates = botManager.bots
+                  .filter(
+                    (b) =>
+                      b &&
+                      !b.dead &&
+                      !b.downed &&
+                      b.team === team &&
+                      !b.drivingVehicle &&
+                      !b.ridingVehicle &&
+                      !b.rescueTarget &&
+                      b.role !== 'PILOT'
+                  )
+                  .sort((a, b) => {
+                    const aRec = a.role === 'RECON' ? -150 : 0;
+                    const bRec = b.role === 'RECON' ? -150 : 0;
+                    return (
+                      a.pos.distanceTo(req.pickupPos) +
+                      aRec -
+                      (b.pos.distanceTo(req.pickupPos) + bRec)
+                    );
+                  });
+                for (let ci = 0; ci < candidates.length && boarded < 4; ci++) {
+                  const cand = candidates[ci];
+                  if (cand.pos.distanceTo(req.pickupPos) <= 220) {
+                    cand.ridingVehicle = activeVeh;
+                    if (cand.mesh) cand.mesh.visible = false;
+                    activeVeh.aiPassengers.push(cand);
+                    boarded++;
+                  }
+                }
+              }
+              req.boardedCount = Math.max(2, boarded);
+              req.phase = 'DROP_AT_LZ';
+              req.timer = Math.max(req.timer, 120.0);
+              req.pos.copy(req.destPos);
+              req.title = `🚁 INSERT ${req.requesterName} (${req.boardedCount} PAX) → ${req.destLabel}`;
+              req.sub = `FLY TO ${req.destLabel} & HOVER/LAND (<8M) TO DISEMBARK SNIPER TEAM!`;
+              sound.playRadioBeep?.(true);
+              player.onAwardXp?.(
+                25,
+                `🚁🎯 ${req.requesterName} ABOARD (${req.boardedCount} PAX)! FLY TO ${req.destLabel} FOR ROOFTOP INSERTION!`
+              );
+            }
+          } else if (req.phase === 'DROP_AT_LZ') {
+            req.pos.copy(req.destPos);
+            const dDropH = Math.hypot(activeVeh.pos.x - req.destPos.x, activeVeh.pos.z - req.destPos.z);
+            const dDropV = Math.abs(activeVeh.pos.y - req.destPos.y);
+            if (dDropH <= 20.0 && (dDropV <= 7.8 || altAbovePad <= 6.5) && spd <= 8.5) {
+              // Disembark all boarded AI Snipers / Squadmates directly onto the rooftop / FOB pad!
+              const dropRoofY = this.getAircraftSupportHeightAt(
+                req.destPos.x,
+                req.destPos.z,
+                req.destPos.y + 6.0,
+                true
+              );
+              for (let pi = 0; pi < activeVeh.aiPassengers.length; pi++) {
+                const pax = activeVeh.aiPassengers[pi];
+                if (!pax) continue;
+                pax.ridingVehicle = null;
+                const ang = (pi / Math.max(1, activeVeh.aiPassengers.length)) * Math.PI * 2;
+                const px = req.destPos.x + Math.cos(ang) * 2.1;
+                const pz = req.destPos.z + Math.sin(ang) * 2.1;
+                const pSupY = this.getAircraftSupportHeightAt(px, pz, dropRoofY + 4.0, true);
+                pax.pos.set(px, Math.abs(pSupY - dropRoofY) <= 2.2 ? pSupY : dropRoofY, pz);
+                pax.velX = 0;
+                pax.velZ = 0;
+                pax.isGarrisonDefender = true;
+                if (pax.mesh) {
+                  pax.mesh._culledOffFrustum = false;
+                  pax.mesh.position.copy(pax.pos);
+                  pax.mesh.visible = true;
+                }
+              }
+              activeVeh.aiPassengers.length = 0;
+              this._completePilotSupportRequest(req, player);
+              list.splice(i, 1);
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Periodically generate missing role-matched requests so any aircraft the player flies has live missions!
+    this._pilotReqSpawnTimer = (this._pilotReqSpawnTimer || 0) - dt;
+    if (this._pilotReqSpawnTimer > 0) return;
+    this._pilotReqSpawnTimer = 2.0;
+
+    const hasKind = (k) => list.some((r) => r && r.active && r.kind === k);
+    const flags = Array.isArray(this.world?.flags) ? this.world.flags : [];
+    const flagC = flags.find((f) => f.id === 'C') || flags[2] || null;
+    const isRU = team === 'RU';
+
+    // 3A. `AIRLIFT` Request for Transport Helicopters (`heli_transport`)
+    if (!hasKind('AIRLIFT')) {
+      const hqPos = isRU
+        ? this.world?.spawns?.RU_BASE || { x: 1504, z: 44 }
+        : this.world?.spawns?.US_BASE || { x: -1504, z: -44 };
+      // Pick pickup LZ: if player is near a friendly FOB, allow FOB pickup, else HQ Helipad / Recon Staging
+      let pickupX = isRU ? 1504 : -1504;
+      let pickupZ = isRU ? 44 : -44;
+      let pickupLabel = `${team} HQ HELIPAD`;
+      if (inAircraft && activeAirRole === 'heli_transport') {
+        const nearOwnedFlag = flags.find(
+          (fl) =>
+            fl &&
+            fl.owner === team &&
+            fl.id !== 'C' &&
+            Math.hypot(activeVeh.pos.x - fl.pos.x, activeVeh.pos.z - fl.pos.z) < 420
+        );
+        if (nearOwnedFlag && Math.hypot(activeVeh.pos.x - hqPos.x, activeVeh.pos.z - hqPos.z) > 480) {
+          pickupX = nearOwnedFlag.pos.x + 10;
+          pickupZ = nearOwnedFlag.pos.z + 10;
+          pickupLabel = `FOB ${nearOwnedFlag.id} LZ`;
+        }
+      }
+      const pickupY = this.world ? this.world.getGroundHeightAt(pickupX, pickupZ) : 0;
+
+      // Pick high-value rooftop insertion destination (Downtown C Skyscraper Roof or Contested FOB Roof!)
+      const roofC = flagC ? this.findTallestBuildingRoofNear(flagC.pos.x, flagC.pos.z, 175) : null;
+      const destPos = roofC
+        ? new THREE.Vector3(roofC.x, roofC.y, roofC.z)
+        : new THREE.Vector3(flagC ? flagC.pos.x : 0, flagC ? flagC.pos.y + 18 : 24, flagC ? flagC.pos.z : 0);
+      const destLabel = roofC
+        ? `🏢 OBJ C SKYSCRAPER ROOF (+${Math.round(roofC.heightAboveGround)}M)`
+        : '🏢 DOWNTOWN C OVERWATCH ROOF';
+
+      const reconCaller =
+        botManager?.bots?.find((b) => b && !b.dead && b.team === team && b.role === 'RECON') || null;
+      const callerName = reconCaller ? `${reconCaller.name} (RECON SNIPER)` : 'GHOST-2 SNIPER TEAM';
+
+      list.push({
+        id: `req_airlift_${Date.now()}`,
+        kind: 'AIRLIFT',
+        active: true,
+        phase: 'AWAIT_PICKUP',
+        requesterName: callerName,
+        pickupPos: new THREE.Vector3(pickupX, pickupY, pickupZ),
+        pickupLabel,
+        destPos,
+        destLabel,
+        pos: new THREE.Vector3(pickupX, pickupY, pickupZ),
+        boardedCount: 0,
+        timer: 135.0,
+        xpReward: 250,
+        cashReward: 350,
+        rewardReason: 'HELI ROOFTOP SNIPER INSERTION',
+        completeBanner: '🚁🎯 ROOFTOP SNIPER INSERTION COMPLETE!',
+        title: `🚁 SNIPER LIFT REQUEST: ${callerName} AT ${pickupLabel}`,
+        sub: `LAND/HOVER AT ${pickupLabel} (<8M) → INSERT ON ${destLabel}`
+      });
+    }
+
+    // 3B. `CAP_INTERCEPT` Request for Fighter Jets (`fighter`)
+    if (!hasKind('CAP_INTERCEPT')) {
+      const refP = activeVeh ? activeVeh.pos : player.pos;
+      let bestBandit = null;
+      let bestScore = Infinity;
+      for (let vi = 0; vi < this.vehicles.length; vi++) {
+        const ev = this.vehicles[vi];
+        if (!ev || ev.dead || ev.isShotDown || !ev.isAircraft || ev.team !== enemyTeam) continue;
+        const gEv = this.world ? this.world.getGroundHeightAt(ev.pos.x, ev.pos.z) : 0;
+        if (ev.pos.y - gEv < 10 && !ev.driver && !ev.aiPilotActive) continue;
+        const d = refP.distanceTo(ev.pos);
+        if (d < bestScore) {
+          bestScore = d;
+          bestBandit = ev;
+        }
+      }
+      if (bestBandit) {
+        const bModel = bestBandit.name ? bestBandit.name.split(' ')[0] : 'HOSTILE AIR';
+        list.push({
+          id: `req_cap_${Date.now()}`,
+          kind: 'CAP_INTERCEPT',
+          active: true,
+          targetVehicle: bestBandit,
+          pos: bestBandit.pos.clone(),
+          timer: 95.0,
+          xpReward: 300,
+          cashReward: 450,
+          rewardReason: 'FIGHTER CAP AIR CONTROL INTERCEPT',
+          completeBanner: `✈️🎯 AIR CONTROL COMPLETE — ${bModel} SPLASHED!`,
+          title: `✈️ CAP AIR CONTROL: SPLASH HOSTILE ${bModel}`,
+          sub: 'GROUND TROOPS PINNED BY ENEMY AIR — ENGAGE & DESTROY BANDIT!'
+        });
+      }
+    }
+
+    // 3C. `CARPET_BOMB` Request for B-2 Spirit / Strike Bomber (`b2_spirit` / `bomber`)
+    if (!hasKind('CARPET_BOMB')) {
+      const targetFlag =
+        flags.find((fl) => fl && fl.owner === enemyTeam) ||
+        flags.find((fl) => fl && fl.contested) ||
+        flagC;
+      if (targetFlag) {
+        list.push({
+          id: `req_carpet_${Date.now()}`,
+          kind: 'CARPET_BOMB',
+          active: true,
+          flagId: targetFlag.id,
+          pos: targetFlag.pos.clone(),
+          progress: 0,
+          goal: 2,
+          timer: 110.0,
+          xpReward: 320,
+          cashReward: 500,
+          rewardReason: `CARPET BOMBING ON OBJ ${targetFlag.id}`,
+          completeBanner: `💣🎯 CARPET BOMBING RUN COMPLETE OVER OBJ ${targetFlag.id}!`,
+          title: `💣 CARPET BOMB REQUEST: FORTIFIED OBJECTIVE ${targetFlag.id}`,
+          sub: `DROP CARPET BOMBS / JDAMS ACROSS ENEMY STRONGHOLD AT FOB ${targetFlag.id}!`
+        });
+      }
+    }
+
+    // 3D. `CAS_STRIKE` Request for A-10C / Attack Helicopters (`cas` / `heli_attack`)
+    if (!hasKind('CAS_STRIKE')) {
+      const desig = this.world?.activeLaserDesignations?.[team];
+      let targetArmor =
+        desig && desig.timer > 2 && desig.targetVehicle && !desig.targetVehicle.dead
+          ? desig.targetVehicle
+          : null;
+      if (!targetArmor) {
+        for (let vi = 0; vi < this.vehicles.length; vi++) {
+          const ev = this.vehicles[vi];
+          if (
+            ev &&
+            !ev.dead &&
+            ev.team === enemyTeam &&
+            !ev.isAircraft &&
+            (ev.type === 'tank' || ev.type === 'apc' || ev.type === 'aa')
+          ) {
+            targetArmor = ev;
+            break;
+          }
+        }
+      }
+      if (targetArmor) {
+        const vShort = targetArmor.name ? targetArmor.name.split(' ')[0] : 'ENEMY ARMOR';
+        const isLased = Boolean(targetArmor.jtacLaserTimer > 0 && targetArmor.jtacLaserTeam === team);
+        list.push({
+          id: `req_cas_${Date.now()}`,
+          kind: 'CAS_STRIKE',
+          active: true,
+          targetVehicle: targetArmor,
+          pos: targetArmor.pos.clone(),
+          progress: 0,
+          goal: 220,
+          timer: 95.0,
+          xpReward: 275,
+          cashReward: 400,
+          rewardReason: 'CAS 9-LINE ARMOR STRIKE',
+          completeBanner: `🎯🔥 CAS 9-LINE COMPLETE ON ${vShort}!`,
+          title: `🎯🔥 CAS 9-LINE: DESTROY ${vShort}${isLased ? ' [◆1688 LASED]' : ''}`,
+          sub: isLased
+            ? 'RECON SNIPER PAINTING TARGET ON ◆1688 — FIRE LASER AGM [2/SPACE] OR 30MM!'
+            : 'FRIENDLY SQUAD PINNED BY ARMOR — STRAFE WITH 30MM GAU-8 / ROCKETS / AGM!'
+        });
+      } else if (flagC) {
+        list.push({
+          id: `req_cas_fob_${Date.now()}`,
+          kind: 'CAS_STRIKE',
+          active: true,
+          flagId: flagC.id,
+          pos: flagC.pos.clone(),
+          progress: 0,
+          goal: 220,
+          timer: 95.0,
+          xpReward: 275,
+          cashReward: 400,
+          rewardReason: 'CAS CLOSE AIR SUPPORT',
+          completeBanner: `🎯🔥 CAS DANGER-CLOSE SUPPORT COMPLETE AT OBJ ${flagC.id}!`,
+          title: `🎯🔥 CAS FIRE SUPPORT: SUPPRESS OBJECTIVE ${flagC.id}`,
+          sub: `STRAFE OR ROCKET ENEMY GARRISON AT OBJECTIVE ${flagC.id}!`
+        });
+      }
+    }
+
+    // 3E. `GUNSHIP_ORBIT` Request for AC-130J / Tu-95MS Heavy Gunship (`gunship`)
+    if (!hasKind('GUNSHIP_ORBIT')) {
+      const gunFlag =
+        flags.find((fl) => fl && fl.contested) ||
+        flags.find((fl) => fl && fl.owner === enemyTeam) ||
+        flagC;
+      if (gunFlag) {
+        list.push({
+          id: `req_gunship_${Date.now()}`,
+          kind: 'GUNSHIP_ORBIT',
+          active: true,
+          flagId: gunFlag.id,
+          pos: gunFlag.pos.clone(),
+          progress: 0,
+          goal: 260,
+          timer: 115.0,
+          xpReward: 275,
+          cashReward: 400,
+          rewardReason: `AC-130 FIRE MISSION OVER OBJ ${gunFlag.id}`,
+          completeBanner: `🛰️💥 AC-130 PYLON FIRE SUPPORT COMPLETE OVER OBJ ${gunFlag.id}!`,
+          title: `🛰️💥 AC-130 FIRE SUPPORT: ORBIT & SHELL OBJ ${gunFlag.id}`,
+          sub: `SHELL ENEMY POSITIONS AT FOB ${gunFlag.id} WITH 25MM / 40MM BOFORS / 105MM!`
+        });
+      }
+    }
   }
 
   /**
@@ -3626,6 +4333,7 @@ export class VehicleManager {
         attackerTeam,
         weaponName || 'RPG-7 HEAT'
       );
+      this.notifyPilotSupportVehicleDestroyed?.(vehicle, attackerName, attackerTeam);
       const respawnCategory = this.classifyVehicleKillCategory(vehicle);
       const isUncrewedNeutralBike =
         Boolean(vehicle.isWarehouseBike || vehicle.type === 'bike' || vehicle.type === 'atv') &&
@@ -3846,6 +4554,7 @@ export class VehicleManager {
       isDeployFlag && (!player || (player.dead && (player.deaths || 0) === 0))
     );
     this.refreshTeamVehicleLists();
+    this.updatePilotSupportRequests(dt, player, botManager, isDeployFlag);
 
     // Precompute 3D Camera Frustum & Fog-Safe Distance LOD once per frame to cull 600+ off-screen / 2.8km HQ apron draw calls!
     let hasVehFrustum = false;
@@ -4028,8 +4737,20 @@ export class VehicleManager {
         continue;
       }
 
-      if (v.fireCooldown > 0) v.fireCooldown = Math.max(0, v.fireCooldown - dt);
-      if (v.coaxCooldown > 0) v.coaxCooldown = Math.max(0, v.coaxCooldown - dt);
+      const playerTriggerHeld = Boolean(
+        player &&
+          v.driver === player &&
+          (player.isFiring || player.keys?.['Space'] || player.keys?.['KeyF'])
+      );
+      if (playerTriggerHeld) {
+        // Preserve sub-frame negative cooldown debt while trigger is held so Humvee HMG, Coax, AA & Rotary Cannons
+        // fire at 100% exact mathematical RPM regardless of whether FPS is 20, 60, or 240!
+        v.fireCooldown = Math.max(-0.18, (v.fireCooldown || 0) - dt);
+        v.coaxCooldown = Math.max(-0.18, (v.coaxCooldown || 0) - dt);
+      } else {
+        if ((v.fireCooldown || 0) !== 0) v.fireCooldown = Math.max(0, (v.fireCooldown || 0) - dt);
+        if ((v.coaxCooldown || 0) !== 0) v.coaxCooldown = Math.max(0, (v.coaxCooldown || 0) - dt);
+      }
       if (v.flareCooldown > 0) v.flareCooldown = Math.max(0, v.flareCooldown - dt);
       if (v.flareActiveTimer > 0) v.flareActiveTimer = Math.max(0, v.flareActiveTimer - dt);
       if ((v.claimedByPlayerTimer || 0) > 0) {
@@ -5658,18 +6379,11 @@ export class VehicleManager {
           if (longitudinal * moveSign < -halfL * 0.65) return;
           bot._lastTrampleHitMs = nowMs;
 
-          // Knock body forward & aside from bumper/tracks/hooves
+          // Knock body forward & aside using smooth Newtonian velocity impulse (zero 1-frame position teleport!)
           const pushSide = lateral >= 0 ? 1 : -1;
-          const knockX = bot.pos.x + fwdX * moveSign * (isHorse ? 2.2 : 1.9) + rightX * pushSide * 1.45;
-          const knockZ = bot.pos.z + fwdZ * moveSign * (isHorse ? 2.2 : 1.9) + rightZ * pushSide * 1.45;
-          if (!botManager.isPointBlocked(knockX, bot.pos.y, knockZ)) {
-            bot.pos.x = knockX;
-            bot.pos.z = knockZ;
-            bot.pos.y = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
-          }
           if (typeof bot.velX === 'number') {
-            bot.velX = fwdX * moveSign * 7.5 + rightX * pushSide * 4.5;
-            bot.velZ = fwdZ * moveSign * 7.5 + rightZ * pushSide * 4.5;
+            bot.velX = fwdX * moveSign * (isHorse ? 11.5 : 10.5) + rightX * pushSide * 6.2;
+            bot.velZ = fwdZ * moveSign * (isHorse ? 11.5 : 10.5) + rightZ * pushSide * 6.2;
           }
 
           if (bot.downed) {
@@ -5783,9 +6497,11 @@ export class VehicleManager {
       if (dy <= 2.6 && Math.abs(lateral) <= halfW && Math.abs(longitudinal) <= halfL) {
         if (longitudinal * moveSign >= -halfL * 0.65) {
           const pushSide = lateral >= 0 ? 1 : -1;
-          player.pos.x += fwdX * moveSign * 2.2 + rightX * pushSide * 1.6;
-          player.pos.z += fwdZ * moveSign * 2.2 + rightZ * pushSide * 1.6;
-          player.pos.y = this.world.getGroundHeightAt(player.pos.x, player.pos.z);
+          if (player.vel) {
+            player.vel.x += fwdX * moveSign * 10.5 + rightX * pushSide * 6.0;
+            player.vel.y = Math.max(player.vel.y || 0, 3.2);
+            player.vel.z += fwdZ * moveSign * 10.5 + rightZ * pushSide * 6.0;
+          }
           player.takeDamage(150, attackerName, attackerTeam, roadkillWeapon, onKillCb, v.pos);
         }
       }
@@ -7198,20 +7914,42 @@ export class VehicleManager {
           )
         : desiredTouchY;
 
-    // Initial vertical liftoff clearance when departing from a rooftop or enclosed courtyard
+    // Initial vertical liftoff clearance when departing from a rooftop or enclosed courtyard:
+    // Latch `task.initialClimbDone = true` permanently once the helicopter reaches liftoffClearY OR clears 22m
+    // horizontally from pickupPos so descending toward a lower destination (e.g. C Skyscraper Roof -> HQ Base)
+    // NEVER re-triggers the 4.0 m/s liftoff speed clamp mid-flight!
+    const distFromOriginH = task.pickupPos
+      ? Math.hypot(v.pos.x - task.pickupPos.x, v.pos.z - task.pickupPos.z)
+      : 999;
+    if (
+      isGoingToDest &&
+      !task.initialClimbDone &&
+      (v.pos.y >= (task.liftoffClearY || desiredTouchY) - 2.2 || distFromOriginH > 22)
+    ) {
+      task.initialClimbDone = true;
+    }
     const needInitialClimb =
       isGoingToDest &&
+      !task.initialClimbDone &&
       horizDist > 18 &&
-      v.pos.y < (task.liftoffClearY || desiredTouchY) - 2.0;
+      v.pos.y < (task.liftoffClearY || desiredTouchY) - 2.2;
 
     // Smooth Cruise -> Approach Flare -> Vertical Cushion Touchdown Speed Profile
-    const maxCruise = v.speed || 66;
+    // Express long-haul cruise (`horizDist > 240m`, e.g., C Rooftop <-> Main Base ~1,500m) scales smoothly up to 102 m/s!
+    const baseCruise = Math.max(v.speed || 68, 76);
+    const expressCruise = Math.max(v.maxSpeed || 88, 102);
+    const maxCruise =
+      horizDist > 260
+        ? expressCruise
+        : horizDist > 140
+        ? THREE.MathUtils.lerp(baseCruise, expressCruise, (horizDist - 140) / 120)
+        : baseCruise;
     const desiredHorizSpd = needInitialClimb
-      ? 4.0
-      : horizDist > 120
+      ? 4.5
+      : horizDist > 125
       ? maxCruise
       : horizDist > 22
-      ? THREE.MathUtils.lerp(8.5, maxCruise, (horizDist - 22) / 98)
+      ? THREE.MathUtils.lerp(8.5, baseCruise, (horizDist - 22) / 103)
       : horizDist > 0.35
       ? Math.max(0.85, horizDist * 0.55)
       : 0;
@@ -7221,7 +7959,7 @@ export class VehicleManager {
       let yErr = desYaw - (v.yaw || 0);
       while (yErr > Math.PI) yErr -= Math.PI * 2;
       while (yErr < -Math.PI) yErr += Math.PI * 2;
-      v.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(yErr * 1.9, -1.25, 1.25) * dt;
+      v.yaw = (v.yaw || 0) + THREE.MathUtils.clamp(yErr * 2.1, -1.45, 1.45) * dt;
       v.roll = THREE.MathUtils.lerp(
         v.roll || 0,
         THREE.MathUtils.clamp(yErr * 0.55, -0.38, 0.38),
@@ -7234,7 +7972,8 @@ export class VehicleManager {
     const curHorizSpd = Math.hypot(v._heliVelX, v._heliVelZ);
     const desVx = horizDist > 0.4 ? dirX * desiredHorizSpd : 0;
     const desVz = horizDist > 0.4 ? dirZ * desiredHorizSpd : 0;
-    const maxHorizAccel = curHorizSpd > desiredHorizSpd + 3 ? 13.5 : 10.5;
+    const maxHorizAccel =
+      curHorizSpd > desiredHorizSpd + 3 ? 18.5 : horizDist > 180 ? 18.0 : 12.5;
     const dvx = desVx - v._heliVelX;
     const dvz = desVz - v._heliVelZ;
     const dvLen = Math.hypot(dvx, dvz);

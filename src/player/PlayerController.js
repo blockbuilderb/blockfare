@@ -1,21 +1,22 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=136';
-import { sound } from '../audio.js?v=136';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=136';
+import { VOXEL_SIZE } from '../world.js?v=139';
+import { sound } from '../audio.js?v=139';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=139';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=136';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=136';
-import { events, makeEventBridge } from '../events.js?v=136';
-import { GunsmithMethods } from './GunsmithState.js?v=136';
-import { FortificationMethods } from './FortificationBuilder.js?v=136';
-import { CommanderMethods } from './CommanderAbilities.js?v=136';
-import { VehicleControlMethods } from './VehicleControl.js?v=136';
-import { CombatMethods } from './PlayerCombat.js?v=136';
+} from '../utils/KeyboardShortcuts.js?v=139';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=139';
+import { events, makeEventBridge } from '../events.js?v=139';
+import { GunsmithMethods } from './GunsmithState.js?v=139';
+import { FortificationMethods } from './FortificationBuilder.js?v=139';
+import { CommanderMethods } from './CommanderAbilities.js?v=139';
+import { VehicleControlMethods } from './VehicleControl.js?v=139';
+import { CombatMethods } from './PlayerCombat.js?v=139';
+import { loadMarksmanProfile } from './MarksmanSystem.js?v=139';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -23,7 +24,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=136';
+} from '../core/StateMachines.js?v=139';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -197,10 +198,15 @@ export class PlayerController {
     this.armFractured = false;
     this.legFractured = false;
 
-    // Kill Streak / Multi-Kill Tracking
+    // Kill Streak / Multi-Kill & Sniper Marksman Profile Tracking
     this.killStreak = 0;
     this.multiKillTimer = 0;
     this.multiKillCount = 0;
+    this.deadeyeStreak = 0;
+    this.marksmanProfile = loadMarksmanProfile();
+    this.lastMarksmanShot = null;
+    this.liveLrfReadout = null;
+    this.isExactLrfZero = false;
 
     // Respawn Timer
     this.respawnTimer = 0;
@@ -1017,7 +1023,11 @@ export class PlayerController {
       }
       if (e.code === 'AltLeft' || e.code === 'AltRight') {
         this.keys[e.code] = true;
-        if (this.activeVehicle && this.activeVehicle.isAircraft) {
+        if (
+          document.pointerLockElement === document.body ||
+          !this.isModalOpen() ||
+          (this.activeVehicle && this.activeVehicle.isAircraft)
+        ) {
           e.preventDefault();
         }
       }
@@ -1375,6 +1385,15 @@ export class PlayerController {
             typeof this.toggleEngineerLauncherMode === 'function'
           ) {
             this.toggleEngineerLauncherMode();
+          } else if (
+            this.currentSlotIndex === 2 &&
+            this.slots &&
+            this.slots[2] &&
+            (this.slots[2].def?.id === 'rangefinder_binos' ||
+              (this.slots[2].def?.id === 'c4' && this.role === 'recon')) &&
+            typeof this.toggleReconGadgetMode === 'function'
+          ) {
+            this.toggleReconGadgetMode();
           } else {
             this.switchSlot(2);
           }
@@ -1407,7 +1426,7 @@ export class PlayerController {
           this.slowReloading = false;
           this.magPackProgress = 0;
         } else {
-          this.startSlowReload();
+          this.startSlowReload(true);
         }
       }
       if (!hasAnyModifier(e) && e.code === 'KeyV' && !e.repeat) {
@@ -1461,9 +1480,14 @@ export class PlayerController {
           this.toggleSwordSlung?.();
         } else if (!this.activeVehicle) {
           const zeros = PLAYER.ZEROING_OPTIONS;
-          const idx = (zeros.indexOf(this.zeroDistance) + 1) % zeros.length;
+          const curIdx = zeros.indexOf(this.zeroDistance);
+          const idx = curIdx >= 0 ? (curIdx + 1) % zeros.length : 0;
           this.zeroDistance = zeros[idx];
+          this.isExactLrfZero = false;
         }
+      }
+      if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'Backslash' && !e.repeat && !this.activeVehicle) {
+        this.toggleQuickBinoculars?.();
       }
       if (!hasAnyModifier(e) && !e.shiftKey && e.code === 'KeyB' && !this.activeVehicle) {
         this.buildBlueprintIndex = (this.buildBlueprintIndex + 1) % this.buildBlueprints.length;
@@ -1738,11 +1762,18 @@ export class PlayerController {
       }
 
       const baseSens = this.isAds ? PLAYER.SENSITIVITY_ADS : PLAYER.SENSITIVITY_HIP;
-      const vehOpticZoomScale =
-        this.activeVehicle && this.camera && (this.camera.fov || 75) < 64
-          ? THREE.MathUtils.clamp((this.camera.fov || 75) / 70, 0.18, 1.0)
+      const curFov = this.camera?.fov || 75;
+      // Continuous optical focal-plane sensitivity scaling (`tan(curFov/2) / tan(55°/2)`) for BOTH infantry
+      // scopes (`1x–40x`) and vehicle optics so `1` OS mouse count always moves ~1.0px instead of 24–36px jumps!
+      const opticZoomScale =
+        curFov < 65
+          ? THREE.MathUtils.clamp(
+              Math.tan((curFov * Math.PI) / 360) / Math.tan((55 * Math.PI) / 360),
+              0.02,
+              1.0
+            )
           : 1.0;
-      const sens = baseSens * vehOpticZoomScale;
+      const sens = baseSens * opticZoomScale;
       const dx = rawDx * sens;
       const dy = rawDy * sens;
       const av = this.activeVehicle;
@@ -1775,17 +1806,48 @@ export class PlayerController {
         while (this.pitch > Math.PI) this.pitch -= Math.PI * 2;
         while (this.pitch <= -Math.PI) this.pitch += Math.PI * 2;
       } else {
-        this.yaw -= dx;
-        this.pitch -= dy;
         const maxPitch = av && av.isAircraft && av.aircraftRole !== 'gunship'
           ? 1.08
           : Math.PI / 2 - PLAYER.MAX_PITCH_OFFSET;
-        this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch));
+        // Smooth Angular Look Inertia: blend immediate micro-step with continuous frame-interpolated angular
+        // velocity (`_pendingLookYaw` / `_pendingLookPitch`) so discrete integer mouse counts glide across sub-pixels!
+        const inertiaShare = !av && curFov < 16 ? 0.78 : !av && curFov < 42 ? 0.58 : !av ? 0.32 : 0.0;
+        const immDx = dx * (1 - inertiaShare);
+        const immDy = dy * (1 - inertiaShare);
+        this._pendingLookYaw = (this._pendingLookYaw || 0) - dx * inertiaShare;
+        this._pendingLookPitch = (this._pendingLookPitch || 0) - dy * inertiaShare;
+        this.yaw -= immDx;
+        this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch - immDy));
       }
 
-      // Weapon procedural sway + Mount & Blade 4-Directional Melee Guard / Swing Sector tracking from mouse delta
-      this.swayX = THREE.MathUtils.clamp(this.swayX - dx * PLAYER.SWAY_MULT, -PLAYER.SWAY_LIMIT, PLAYER.SWAY_LIMIT);
-      this.swayY = THREE.MathUtils.clamp(this.swayY + dy * PLAYER.SWAY_MULT, -PLAYER.SWAY_LIMIT, PLAYER.SWAY_LIMIT);
+      // Weapon procedural sway (high-mag 16x–40x scopes amplify standing sway; stabilized by One-Knee [C], Prone [Z], Bipod & Ledge Rest!)
+      const swayCur = !av && typeof this.currentWeapon === 'function' ? this.currentWeapon() : null;
+      const swayLedge = !av && typeof this.isRestingOnCoverLedge === 'function' ? this.isRestingOnCoverLedge() : false;
+      const swayBipod = Boolean(swayCur?.def?.hasBipod && (this.prone || this.crouching || swayLedge));
+      const curCamFov = this.camera?.fov || 75;
+      const highMagStandingPenalty =
+        this.isAds && !this.isHoldingBreath && !swayBipod && !this.prone
+          ? curCamFov <= 3.2
+            ? 2.45
+            : curCamFov <= 4.8
+            ? 1.85
+            : curCamFov <= 7.8
+            ? 1.35
+            : 1.0
+          : 1.0;
+      const stanceSwayMult =
+        (swayBipod
+          ? PLAYER.SWAY_SCALE_BIPOD || 0.12
+          : this.prone
+          ? PLAYER.SWAY_SCALE_PRONE || 0.28
+          : this.crouching
+          ? PLAYER.SWAY_SCALE_CROUCH || 0.58
+          : swayLedge
+          ? 0.68
+          : 1.0) * highMagStandingPenalty;
+      const swayLim = PLAYER.SWAY_LIMIT * stanceSwayMult;
+      this.swayX = THREE.MathUtils.clamp(this.swayX - dx * PLAYER.SWAY_MULT * stanceSwayMult, -swayLim, swayLim);
+      this.swayY = THREE.MathUtils.clamp(this.swayY + dy * PLAYER.SWAY_MULT * stanceSwayMult, -swayLim, swayLim);
       if (Math.hypot(rawDx, rawDy) >= 4) {
         if (Math.abs(rawDy) >= Math.abs(rawDx) * 1.15) {
           this.meleeGuardDir = rawDy < 0 ? 'UP' : 'DOWN';
@@ -1972,6 +2034,7 @@ export class PlayerController {
     this.canFlyAircraft = Boolean(classTrait.canFlyAircraft);
     const safeSpawn = this.world.findSafeSpawnPoint(spawnPointVec.x, spawnPointVec.z);
     this.pos.copy(safeSpawn);
+    this._smoothFootY = safeSpawn.y;
     this.vel.set(0, 0, 0);
     const isEastSpawn =
       team === 'RU' || (era === 'jurassic' && team === 'US' && this.subFaction === 'RU' && safeSpawn.x > 400);
@@ -2078,25 +2141,81 @@ export class PlayerController {
     }
   }
 
+  isRestingOnCoverLedge() {
+    if (this.activeVehicle || !this.isGrounded || !this.world || !this.world.voxels) {
+      return false;
+    }
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (this._ledgeCacheAt && now - this._ledgeCacheAt < 120) {
+      return Boolean(this._ledgeCacheVal);
+    }
+    this._ledgeCacheAt = now;
+    const fwdX = -Math.sin(this.yaw || 0);
+    const fwdZ = -Math.cos(this.yaw || 0);
+    const probeX = this.pos.x + fwdX * 0.82;
+    const probeZ = this.pos.z + fwdZ * 0.82;
+    const braceY = this.pos.y + (this.prone ? 0.25 : this.crouching ? 0.68 : 1.02);
+    const clearY = this.pos.y + (this.prone ? 0.62 : this.crouching ? 1.18 : 1.66);
+    const gBrace = this.world.worldToGrid(probeX, braceY, probeZ);
+    const gClear = this.world.worldToGrid(probeX, clearY, probeZ);
+    const hasLowCover = this.world.hasVoxel
+      ? this.world.hasVoxel(gBrace.gx, gBrace.gy, gBrace.gz)
+      : this.world.voxels.has(this.world.key(gBrace.gx, gBrace.gy, gBrace.gz));
+    const headBlocked = this.world.hasVoxel
+      ? this.world.hasVoxel(gClear.gx, gClear.gy, gClear.gz)
+      : this.world.voxels.has(this.world.key(gClear.gx, gClear.gy, gClear.gz));
+    this._ledgeCacheVal = Boolean(hasLowCover && !headBlocked);
+    return this._ledgeCacheVal;
+  }
+
   syncCameraTransform() {
-    const eyeHeight = this.downed
+    const targetEyeHeight = this.downed
       ? PLAYER.EYE_HEIGHT_DOWNED
       : this.prone
       ? PLAYER.EYE_HEIGHT_PRONE
       : this.crouching
       ? PLAYER.EYE_HEIGHT_CROUCH
       : PLAYER.EYE_HEIGHT_STAND;
+    if (typeof this._smoothEyeHeight !== 'number' || !Number.isFinite(this._smoothEyeHeight)) {
+      this._smoothEyeHeight = targetEyeHeight;
+    } else {
+      const dtCam = this._lastFrameDt || 0.016;
+      const alphaEye = 1 - Math.exp(-dtCam * 16);
+      this._smoothEyeHeight += (targetEyeHeight - this._smoothEyeHeight) * alphaEye;
+      if (Math.abs(targetEyeHeight - this._smoothEyeHeight) < 0.0001) {
+        this._smoothEyeHeight = targetEyeHeight;
+      }
+    }
+    const eyeHeight = this._smoothEyeHeight;
+    // Smooth vertical foot-step inertia so climbing 1.25m stairs/curbs glides cleanly instead of 1-frame snapping!
+    if (
+      typeof this._smoothFootY !== 'number' ||
+      !Number.isFinite(this._smoothFootY) ||
+      !this.isGrounded ||
+      this.onLadder ||
+      Math.abs(this.pos.y - this._smoothFootY) > 2.4
+    ) {
+      this._smoothFootY = this.pos.y;
+    } else {
+      const dtCam = this._lastFrameDt || 0.016;
+      const alphaFoot = 1 - Math.exp(-dtCam * 15);
+      this._smoothFootY += (this.pos.y - this._smoothFootY) * alphaFoot;
+      if (Math.abs(this.pos.y - this._smoothFootY) < 0.0001) {
+        this._smoothFootY = this.pos.y;
+      }
+    }
+    const camFootY = this._smoothFootY;
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const leanOffset = right.multiplyScalar(this.leanAmount * PLAYER.LEAN_OFFSET);
 
     const headPivot = new THREE.Vector3(
       this.pos.x,
-      this.pos.y + eyeHeight + (this.lastBobY || 0),
+      camFootY + eyeHeight + (this.lastBobY || 0),
       this.pos.z
     );
     const desiredCamPos = new THREE.Vector3(
       this.pos.x + leanOffset.x,
-      this.pos.y + eyeHeight + (this.lastBobY || 0),
+      camFootY + eyeHeight + (this.lastBobY || 0),
       this.pos.z + leanOffset.z
     );
     if (typeof this.resolveCameraWallCollision === 'function') {
@@ -2161,10 +2280,29 @@ export class PlayerController {
     }
 
     if (this.activeVehicle) {
+      this._pendingLookYaw = 0;
+      this._pendingLookPitch = 0;
       this.updateVehicleControl(dt);
       this.updateRallyPoint(dt);
       this.updateUAV(dt);
       return;
+    }
+
+    this._lastFrameDt = dt;
+    // Smoothly integrate sub-pixel angular look inertia every render frame so high-zoom 9x–40x scopes glide continuously!
+    if (this._pendingLookYaw || this._pendingLookPitch) {
+      const curLookFov = this.camera?.fov || 75;
+      const lookSharpness = curLookFov < 6 ? 28 : curLookFov < 16 ? 34 : curLookFov < 40 ? 44 : 56;
+      const stepFrac = 1 - Math.exp(-Math.min(0.1, Math.max(0.0005, dt)) * lookSharpness);
+      const dYaw = (this._pendingLookYaw || 0) * stepFrac;
+      const dPitch = (this._pendingLookPitch || 0) * stepFrac;
+      this._pendingLookYaw -= dYaw;
+      this._pendingLookPitch -= dPitch;
+      if (Math.abs(this._pendingLookYaw) < 1e-8) this._pendingLookYaw = 0;
+      if (Math.abs(this._pendingLookPitch) < 1e-8) this._pendingLookPitch = 0;
+      const maxPitch = Math.PI / 2 - PLAYER.MAX_PITCH_OFFSET;
+      this.yaw += dYaw;
+      this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch + dPitch));
     }
 
     // Bleeding & Bandaging [Hold H]
@@ -2235,6 +2373,7 @@ export class PlayerController {
     //   3) 1.35x to 1.65x objective hold weight (enforcing the 3:1 attacker-to-defender rule)
     //   4) Passive FOB Medical Triage (+4 HP/s, +3 Armor/s) & Munitions Stockpile top-up (+15 loose rounds every 10s)
     let activeFriendlyFlag = null;
+    let elevatedOverwatchSupplyFlag = null;
     if (this.world && Array.isArray(this.world.flags)) {
       for (const fl of this.world.flags) {
         if (fl.owner === this.team) {
@@ -2243,10 +2382,16 @@ export class PlayerController {
             activeFriendlyFlag = fl;
             break;
           }
+          // Rooftop Sniper Overwatch Logistics: snipers perched on towers/rooftops within 95m of a friendly FOB
+          // receive drone/rope munitions supply (+12 loose rounds every 10s) so rooftop slow-reloading stays supplied!
+          if (!elevatedOverwatchSupplyFlag && dFl <= 95 && this.pos.y - fl.pos.y >= 4.0) {
+            elevatedOverwatchSupplyFlag = fl;
+          }
         }
       }
     }
     this.inFriendlyForwardBase = Boolean(activeFriendlyFlag);
+    this.inRooftopOverwatchSupply = Boolean(!activeFriendlyFlag && elevatedOverwatchSupplyFlag);
     this.defendedFlagId = activeFriendlyFlag ? activeFriendlyFlag.id : null;
     this.defendedFlagStage = activeFriendlyFlag ? activeFriendlyFlag.defenseStage || 0 : 0;
     this.defendedFlagGarrisonSquad =
@@ -2254,12 +2399,14 @@ export class PlayerController {
         ? activeFriendlyFlag.garrisonSquad[this.team]
         : null;
 
-    if (activeFriendlyFlag && !this.downed && !this.dead) {
-      if (!this.bleeding && this.hp < PLAYER.MAX_HP) {
-        this.hp = Math.min(PLAYER.MAX_HP, this.hp + 4.0 * dt);
-      }
-      if (this.armor < (this.maxArmor || 50)) {
-        this.armor = Math.min(this.maxArmor || 50, this.armor + 3.0 * dt);
+    if ((activeFriendlyFlag || elevatedOverwatchSupplyFlag) && !this.downed && !this.dead) {
+      if (activeFriendlyFlag) {
+        if (!this.bleeding && this.hp < PLAYER.MAX_HP) {
+          this.hp = Math.min(PLAYER.MAX_HP, this.hp + 4.0 * dt);
+        }
+        if (this.armor < (this.maxArmor || 50)) {
+          this.armor = Math.min(this.maxArmor || 50, this.armor + 3.0 * dt);
+        }
       }
       this._fobAmmoTimer = (this._fobAmmoTimer || 0) + dt;
       if (this._fobAmmoTimer >= 10.0) {
@@ -2267,8 +2414,9 @@ export class PlayerController {
         const prim = this.slots[0];
         if (prim && prim.def && prim.def.clipSize > 1) {
           const maxLoose = prim.maxLooseAmmo || 120;
+          const grantRds = activeFriendlyFlag ? 15 : 12;
           if ((prim.looseAmmo || 0) < maxLoose) {
-            prim.looseAmmo = Math.min(maxLoose, (prim.looseAmmo || 0) + 15);
+            prim.looseAmmo = Math.min(maxLoose, (prim.looseAmmo || 0) + grantRds);
           }
         }
       }
@@ -2514,7 +2662,7 @@ export class PlayerController {
           this.reloading = false;
           this.fastReload = false;
         }
-        this.startSlowReload();
+        this.startSlowReload(true);
       }
     }
 
@@ -2536,16 +2684,22 @@ export class PlayerController {
             cur.looseAmmo--;
             gotBullet = true;
           } else {
-            // Consolidate from the lowest partial mag into a fuller mag
+            // Consolidate from the lowest non-empty mag into active rifle clip (or into a fuller rig mag)
             let donorIdx = -1;
             let donorMin = Infinity;
             for (let i = 0; i < cur.mags.length; i++) {
-              if (cur.mags[i] > 0 && cur.mags[i] < cur.def.clipSize && cur.mags[i] < donorMin) {
+              const canDonateToActiveClip = cur.clip < cur.def.clipSize && cur.mags[i] > 0;
+              const canDonateToRigMag = cur.mags[i] > 0 && cur.mags[i] < cur.def.clipSize;
+              if ((canDonateToActiveClip || canDonateToRigMag) && cur.mags[i] < donorMin) {
                 donorMin = cur.mags[i];
                 donorIdx = i;
               }
             }
-            if (donorIdx !== -1 && cur.mags.filter((m) => m > 0 && m < cur.def.clipSize).length >= 2) {
+            const canPullDonor =
+              donorIdx !== -1 &&
+              (cur.clip < cur.def.clipSize ||
+                cur.mags.filter((m) => m > 0 && m < cur.def.clipSize).length >= 2);
+            if (canPullDonor) {
               cur.mags[donorIdx]--;
               gotBullet = true;
             }
@@ -2584,6 +2738,7 @@ export class PlayerController {
             cur.clip < cur.def.clipSize || cur.mags.some((m) => m < cur.def.clipSize);
           const hasMoreSource =
             (cur.looseAmmo || 0) > 0 ||
+            (cur.clip < cur.def.clipSize && cur.mags.some((m) => m > 0)) ||
             cur.mags.filter((m) => m > 0 && m < cur.def.clipSize).length >= 2;
 
           if (pressedIntoMag && stillNeedsBullets && hasMoreSource) {
@@ -2610,14 +2765,16 @@ export class PlayerController {
       this.reloadTimer -= dt;
       if (this.reloadTimer <= 0) {
         if (cur.mags && cur.def.clipSize > 1) {
-          // Tarkov Fast Mag-Swap keeps old magazine (even if 0 rounds empty!) in Chest Rig pouches
-          // so you can Slow-Reload loose bullets into it later; Double-Tap [R] Speed Drop discards it!
+          // Tarkov Fast Mag-Swap: pull fresh magazine FIRST, then tuck old magazine (even 0-round empty!)
+          // into the freed Chest Rig slot so empty sniper mags are NEVER deleted and can be slow-reloaded!
           const maxRigMagSlots = cur.def.spareMagSlots || Math.max(4, cur.mags.length + 1);
-          if (!this.fastReload && (cur.clip > 0 || cur.mags.length < maxRigMagSlots)) {
-            cur.mags.push(cur.clip);
-          }
+          const oldClip = cur.clip || 0;
           cur.mags.sort((a, b) => b - a);
-          cur.clip = cur.mags.length > 0 ? cur.mags.shift() : 0;
+          cur.clip = cur.mags.length > 0 ? cur.mags.shift() : oldClip;
+          if (!this.fastReload && (oldClip > 0 || cur.mags.length < maxRigMagSlots)) {
+            cur.mags.push(oldClip);
+            cur.mags.sort((a, b) => b - a);
+          }
           this.syncReserveFromMags(cur);
         } else {
           const needed = cur.def.clipSize - cur.clip;
@@ -2954,11 +3111,14 @@ export class PlayerController {
         this.isGrounded = true;
 
         if (wantUp && this.pos.y >= activeLadder.topExitY - 0.06) {
-          this.pos.y = activeLadder.topExitY + 0.04;
-          this.pos.x = activeLadder.x + (activeLadder.exitDirX || 0) * 1.15;
-          this.pos.z = activeLadder.z + (activeLadder.exitDirZ || -1) * 1.15;
+          // Smooth inertia step-off at ladder top instead of 1-frame horizontal position snap!
+          const exX = activeLadder.exitDirX || 0;
+          const exZ = activeLadder.exitDirZ || -1;
+          this.pos.y = activeLadder.topExitY + 0.06;
+          this.vel.set(exX * 4.6, 2.4, exZ * 4.6);
           this.onLadder = false;
-          this._ladderDetachTimer = 0.22;
+          this.isGrounded = false;
+          this._ladderDetachTimer = 0.28;
         } else if (wantDown && this.pos.y <= activeLadder.minY + 0.04) {
           this.pos.y = activeLadder.minY;
           this.onLadder = false;
@@ -3130,8 +3290,20 @@ export class PlayerController {
     this.syncCameraTransform();
 
     // Execute full-auto fire AFTER camera position & rotation are updated for this frame
-    if (this.isFiring && cur && cur.def.auto && !this.reloading && this.fireTimer <= 0) {
+    // (Sub-frame accumulator catch-up ensures identical RPM at 20 FPS, 60 FPS, and 240 FPS!)
+    let autoCatchUp = 0;
+    while (
+      this.isFiring &&
+      cur &&
+      cur.def.auto &&
+      !this.reloading &&
+      this.fireTimer <= 0 &&
+      (cur.clip > 0 || autoCatchUp === 0) &&
+      autoCatchUp < 4
+    ) {
       this.executeFire(cur);
+      autoCatchUp++;
+      if (this.reloading || (cur.clip || 0) <= 0) break;
     }
 
     // Update rally point beacon
@@ -3154,7 +3326,7 @@ export class PlayerController {
     }
 
     // ADS FOV & First-Person ViewModel Animation (Call of Duty snappy ADS + 45° Canted Sight + Hold-Breath!)
-    const targetAds = this.isAds && !this.reloading ? 1 : 0;
+    const targetAds = this.isAds && !this.reloading && !this.slowReloading ? 1 : 0;
     const adsSpeed = cur?.def?.adsSpeed || 18.5;
     this.adsAmount += (targetAds - this.adsAmount) * Math.min(1, dt * adsSpeed);
 
@@ -3170,13 +3342,33 @@ export class PlayerController {
       }
     }
     const targetFov = cur ? THREE.MathUtils.lerp(75, activeAdsFov, this.adsAmount) : 75;
-    if (Math.abs(this.camera.fov - targetFov) > 0.05) {
+    if (Math.abs(this.camera.fov - targetFov) > 0.0002) {
+      this.camera.fov = targetFov;
+      this.camera.updateProjectionMatrix();
+    } else if (this.camera.fov !== targetFov) {
       this.camera.fov = targetFov;
       this.camera.updateProjectionMatrix();
     }
 
     if (cur && cur.mesh) {
-      const breathScale = this.isHoldingBreath ? 0 : Math.max(0, 1 - this.adsAmount * 0.92);
+      const ledgeRestNow = typeof this.isRestingOnCoverLedge === 'function' ? this.isRestingOnCoverLedge() : false;
+      const bipodDeployedNow = Boolean(cur.def.hasBipod && (this.prone || this.crouching || ledgeRestNow));
+      const highMagIdleMult =
+        this.isAds && !this.isHoldingBreath && !bipodDeployedNow && !this.prone
+          ? activeAdsFov <= 3.2
+            ? 2.5
+            : activeAdsFov <= 4.8
+            ? 1.85
+            : activeAdsFov <= 7.8
+            ? 1.35
+            : 1.0
+          : 1.0;
+      const stanceBreathMult =
+        (bipodDeployedNow ? 0.14 : this.prone ? 0.30 : this.crouching ? 0.58 : ledgeRestNow ? 0.65 : 1.0) *
+        highMagIdleMult;
+      const breathScale = this.isHoldingBreath
+        ? 0
+        : Math.max(highMagIdleMult > 1.0 ? 0.28 * highMagIdleMult : 0, 1 - this.adsAmount * 0.92) * stanceBreathMult;
       const idleBreathY = Math.sin(this.idleBreathPhase || 0) * 0.0032 * breathScale;
       const idleBreathX = Math.cos((this.idleBreathPhase || 0) * 0.5) * 0.0018 * breathScale;
       const vertInertiaY = ((this.landingDip || 0) + (this.airborneArmLift || 0)) * (1 - this.adsAmount * 0.72);
@@ -3218,6 +3410,10 @@ export class PlayerController {
         !isCantedActive &&
         (activeOptic === 'sniper8x' ||
           activeOptic === 'sniper12x' ||
+          activeOptic === 'raptor13x' ||
+          activeOptic === 'sniper16x' ||
+          activeOptic === 'sniper27x' ||
+          activeOptic === 'sniper40x' ||
           activeOptic === 'sniperFlir' ||
           activeOptic === 'valday6x' ||
           activeOptic === 'lpvo36' ||
@@ -4536,6 +4732,9 @@ export class PlayerController {
 
   checkBodyOverlap(x, y, z, r, h) {
     const world = this.world;
+    if (world.hasSolidSkyscraperHullAt && world.hasSolidSkyscraperHullAt(x, y, z, r, h)) {
+      return true;
+    }
     const hasGetVoxel = typeof world.getVoxel === 'function';
     const hasHasVoxel = typeof world.hasVoxel === 'function';
     const minCoord = world.worldToGrid(x - r, y + 0.25, z - r);

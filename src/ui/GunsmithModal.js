@@ -6,18 +6,18 @@ import {
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from '../weapons.js?v=136';
-import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=136';
-import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=136';
-import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=136';
-import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=136';
-import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=136';
-import { sound } from '../audio.js?v=136';
+} from '../weapons.js?v=139';
+import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=139';
+import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=139';
+import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=139';
+import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=139';
+import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=139';
+import { sound } from '../audio.js?v=139';
 import {
   ARMORY_CASE_STATES,
   ARMORY_CASE_EVENTS,
   createArmoryCaseRouletteFSM
-} from '../core/StateMachines.js?v=136';
+} from '../core/StateMachines.js?v=139';
 
 export const GunsmithModal = {
   formatCashAmount(val) {
@@ -3616,6 +3616,26 @@ export const GunsmithModal = {
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
           <button id="gs-header-roll-case-btn" type="button" style="background:linear-gradient(135deg, #f39c12, #d35400);color:#fff;border:1.5px solid #ffd700;border-radius:4px;padding:6px 10px;font-size:10px;font-weight:900;cursor:pointer;box-shadow:0 0 10px rgba(243,156,18,0.45);opacity:${workbenchAccess.allowed ? '1' : '0.45'};" title="Open CS2 Cases &amp; Roll a $50,000 Armory Case!">🎲 ROLL CASE ($50,000)</button>
           <button id="gs-inspect-weapon-btn" type="button" style="background:rgba(241,196,15,0.22);color:#ffd700;border:1.5px solid #ffd700;border-radius:4px;padding:6px 9px;font-size:10px;font-weight:900;cursor:pointer;" title="Close menu and play Counter-Strike 2 Weapon / Knife Inspect Animation [F / V]">🔍 INSPECT [F/V]</button>
+          <select id="gs-playstyle-title-select" title="Choose Scoreboard &amp; HUD Playstyle Title (AUTO adapts to your live battle style, or pin a specific Title!)" style="background:rgba(16,26,38,0.95);color:#ffd32a;border:1.5px solid #ffd32a;border-radius:4px;padding:5px 7px;font-size:10px;font-weight:900;cursor:pointer;">
+            ${[
+              ['auto', '🏅 TITLE: AUTO (LIVE PLAYSTYLE)'],
+              ['sharpshooter', '🎯 SHARPSHOOTER'],
+              ['ace_pilot', '✈️ ACE PILOT'],
+              ['tank_buster', '💥 TANK BUSTER'],
+              ['lifesaver', '⚕️ LIFESAVER'],
+              ['attacker', '⚔️ ATTACKER'],
+              ['defender', '🛡️ DEFENDER'],
+              ['braveheart', '🦁 BRAVEHEART'],
+              ['camper', '🏕️ ROOFTOP CAMPER']
+            ]
+              .map(
+                ([tid, tlbl]) =>
+                  `<option value="${tid}" ${
+                    (this.player?.marksmanProfile?.pinnedTitleId || 'auto') === tid ? 'selected' : ''
+                  }>${tlbl}</option>`
+              )
+              .join('')}
+          </select>
           <button id="gs-toggle-bhop-btn" type="button" style="background:${
             this.player?.bhopEnabled !== false ? 'rgba(46,204,113,0.24)' : 'rgba(255,255,255,0.08)'
           };color:${
@@ -3985,6 +4005,20 @@ export const GunsmithModal = {
     }
 
     const gsToggleFfBtn = modal.querySelector('#gs-toggle-ff-btn');
+    const titleSelEl = modal.querySelector('#gs-playstyle-title-select');
+    if (titleSelEl && this.player) {
+      titleSelEl.addEventListener('change', () => {
+        if (!this.player.marksmanProfile) this.player.marksmanProfile = {};
+        this.player.marksmanProfile.pinnedTitleId = titleSelEl.value || 'auto';
+        try {
+          localStorage.setItem('bb_marksman_profile_v1', JSON.stringify(this.player.marksmanProfile));
+        } catch (_) {}
+        this.addXpNotification?.(
+          0,
+          `🏅 SCOREBOARD PLAYSTYLE TITLE SET TO: ${titleSelEl.options[titleSelEl.selectedIndex]?.text || 'AUTO'}`
+        );
+      });
+    }
     if (gsToggleFfBtn && this.player && typeof this.player.toggleFriendlyFire === 'function') {
       gsToggleFfBtn.addEventListener('click', () => {
         const nextVal = this.player.toggleFriendlyFire();

@@ -194,11 +194,44 @@ body, html {
 }
 
 #optic-frame.optic-sniper8x .optic-lens,
-#optic-frame.optic-sniper12x .optic-lens {
-  width: 56vh;
-  height: 56vh;
+#optic-frame.optic-sniper12x .optic-lens,
+#optic-frame.optic-raptor13x .optic-lens,
+#optic-frame.optic-sniper16x .optic-lens,
+#optic-frame.optic-sniper27x .optic-lens,
+#optic-frame.optic-sniper40x .optic-lens {
+  width: 58vh;
+  height: 58vh;
   border: 6px solid #0e1013;
   border-radius: 50%;
+}
+
+#optic-frame.optic-raptor13x .optic-lens {
+  border-color: #13222a;
+  box-shadow: 0 0 0 160vmax rgba(3, 6, 9, 0.95), inset 0 0 28px rgba(0, 210, 211, 0.22);
+}
+
+#scope-ballistic-pipper {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1.8px solid #ff3838;
+  background: rgba(255, 56, 56, 0.45);
+  box-shadow: 0 0 10px rgba(255, 56, 56, 0.95), 0 0 3px #fff;
+  pointer-events: none;
+  z-index: 5;
+}
+
+#optic-frame.optic-binos .optic-lens {
+  width: 72vh;
+  height: 48vh;
+  border: 7px solid #0d1316;
+  border-radius: 25vh;
+  background: radial-gradient(ellipse at center, rgba(0, 255, 204, 0.04) 45%, rgba(6, 18, 20, 0.42) 100%);
+  box-shadow: 0 0 0 160vmax rgba(3, 6, 9, 0.94), inset 0 0 36px rgba(0, 0, 0, 0.85);
 }
 
 #optic-frame.optic-rpgSight .optic-lens {
@@ -256,8 +289,13 @@ body, html {
 #optic-frame.optic-sniperFlir .ret-sniperFlir,
 #optic-frame.optic-sniper8x .ret-sniper8x,
 #optic-frame.optic-sniper12x .ret-sniper12x,
+#optic-frame.optic-raptor13x .ret-raptor13x,
+#optic-frame.optic-sniper16x .ret-sniper16x,
+#optic-frame.optic-sniper27x .ret-sniper27x,
+#optic-frame.optic-sniper40x .ret-sniper40x,
 #optic-frame.optic-rpgSight .ret-rpgSight,
-#optic-frame.optic-iron .ret-iron {
+#optic-frame.optic-iron .ret-iron,
+#optic-frame.optic-binos .ret-binos {
   display: flex;
   z-index: 2;
 }

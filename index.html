@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MODERN BLOCKFARE — Multi-Era Voxel Combined Arms FPS</title>
-  <link rel="stylesheet" href="./style.css?v=136" />
+  <link rel="stylesheet" href="./style.css?v=139" />
   <script type="importmap">
     {
       "imports": {
@@ -196,15 +196,17 @@
           <div class="sniper-stadia st3" style="color:#00ffcc;">600m</div>
           <div id="sniper-flir-readout" class="flir-readout" style="top:14%;left:50%;transform:translateX(-50%);white-space:nowrap;">AN/PAS-13G • WHOT IR [N]</div>
         </div>
-        <!-- 8x Mil-Dot & Nightforce ATACR 6x-12x Horus Tremor3 Sniper Scope -->
-        <div class="reticle ret-sniper8x ret-sniper12x">
+        <!-- 8x–40x Mil-Dot, Raptor 13x Smart-LRF, Mark 5HD 16x, Hensoldt 27x & Genesis 40x ELR Scopes -->
+        <div class="reticle ret-sniper8x ret-sniper12x ret-raptor13x ret-sniper16x ret-sniper27x ret-sniper40x">
           <div class="scope-line-h"></div>
           <div class="scope-line-v"></div>
           <div class="scope-mil-dots"></div>
           <div class="sniper-stadia st1">200m</div>
           <div class="sniper-stadia st2">400m</div>
-          <div class="sniper-stadia st3">600m</div>
+          <div class="sniper-stadia st3">800m</div>
         </div>
+        <!-- Dynamic Ballistic Computer Bullet-Drop Pipper Dot (Raptor-FVM40 13x & Wilcox RAPTAR LRF) -->
+        <div id="scope-ballistic-pipper" class="hidden" title="Ballistic Computer Impact Point"></div>
         <!-- RPG-7 PGO-7 Optical Range Ladder -->
         <div class="reticle ret-rpgSight">
           <div class="rpg-grid-v"></div>
@@ -220,6 +222,17 @@
             <span class="trit-dot rear"></span>
           </div>
         </div>
+        <!-- AN/PVS-21 Recon 8x-16x Laser Rangefinder Binoculars Reticle -->
+        <div class="reticle ret-binos">
+          <div class="bino-cross-h"></div>
+          <div class="bino-cross-v"></div>
+          <div class="bino-lrf-box"></div>
+          <div class="bino-mil-ruler">
+            <span>20</span><span>10</span><span class="center">◆</span><span>10</span><span>20</span>
+          </div>
+        </div>
+        <!-- Live Laser Rangefinder (LRF) & Ballistic Drop Readout inside Scopes & Binoculars -->
+        <div id="scope-lrf-readout" class="hidden">LRF ---M • [F] AUTO-ZERO</div>
       </div>
       <div id="optic-label">EOTECH EXPS3 • 1.0X HOLO</div>
     </div>
@@ -1694,6 +1707,6 @@
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=136"></script>
+  <script type="module" src="./src/main.js?v=139"></script>
 </body>
 </html>

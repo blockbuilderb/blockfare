@@ -4,8 +4,8 @@
 // attachment overlay graphics, and gear/grid size metadata.
 // ============================================================================
 
-import { WEAPON_DEFS } from './weapon-defs.js?v=136';
-import { ATTACHMENT_CATALOG } from './attachment-defs.js?v=136';
+import { WEAPON_DEFS } from './weapon-defs.js?v=139';
+import { ATTACHMENT_CATALOG } from './attachment-defs.js?v=139';
 
 export const CLASS_META = [
   { id: 'engineer', label: 'ENGINEER', short: 'ENG', icon: '🛠️', gadgetId: 'rpg7', gadget: 'RPG-7 HEAT + HAMMER' },
@@ -43,6 +43,12 @@ export const WEAPON_GRID_SIZES = {
   pkp: { cols: 5, rows: 2, label: '5×2', cat: 'HEAVY LMG', weight: '8.2 kg' },
   sv98: { cols: 5, rows: 2, label: '5×2', cat: 'BOLT SNIPER', weight: '5.8 kg' },
   awm: { cols: 5, rows: 2, label: '5×2', cat: '.338 MAGNUM SNIPER', weight: '6.5 kg' },
+  m40a5: { cols: 5, rows: 2, label: '5×2', cat: 'USMC SCOUT SNIPER', weight: '6.2 kg' },
+  dvl10: { cols: 5, rows: 2, label: '5×2', cat: 'SILENT .308 SNIPER', weight: '5.6 kg' },
+  m200_intervention: { cols: 6, rows: 2, label: '6×2', cat: '.408 ELR SNIPER', weight: '12.3 kg' },
+  barrett_m82: { cols: 6, rows: 2, label: '6×2', cat: '.50 BMG SEMI AMR', weight: '14.0 kg' },
+  gm6_lynx: { cols: 5, rows: 2, label: '5×2', cat: '12.7MM BULLPUP AMR', weight: '11.5 kg' },
+  ntw20: { cols: 6, rows: 2, label: '6×2', cat: '20MM HEAVY AMR', weight: '26.0 kg' },
   mk14: { cols: 5, rows: 2, label: '5×2', cat: 'MARKSMAN DMR', weight: '5.1 kg' },
   sr25: { cols: 5, rows: 2, label: '5×2', cat: 'PRECISION DMR', weight: '4.8 kg' },
   mp443: { cols: 2, rows: 1, label: '2×1', cat: 'SIDEARM PISTOL', weight: '0.95 kg' },

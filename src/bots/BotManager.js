@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT, FORMATION, SQUAD_KIT_CAPS } from '../config.js?v=136';
-import { sound } from '../audio.js?v=136';
-import { tmpVec3 } from '../utils/VectorPool.js?v=136';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=136';
-import { events, makeEventBridge } from '../events.js?v=136';
+import { BOT, FORMATION, SQUAD_KIT_CAPS } from '../config.js?v=139';
+import { sound } from '../audio.js?v=139';
+import { tmpVec3 } from '../utils/VectorPool.js?v=139';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=139';
+import { events, makeEventBridge } from '../events.js?v=139';
 import {
   createSoldierMesh,
   updateSoldierEquippedWeapon,
   getDefaultWeaponIdForRole
-} from './SoldierMeshFactory.js?v=136';
-import { SightlineMethods } from './SightlineSystem.js?v=136';
-import { MedicAIMethods } from './MedicAI.js?v=136';
-import { BotAIMethods } from './BotAI.js?v=136';
+} from './SoldierMeshFactory.js?v=139';
+import { SightlineMethods } from './SightlineSystem.js?v=139';
+import { MedicAIMethods } from './MedicAI.js?v=139';
+import { BotAIMethods } from './BotAI.js?v=139';
 import {
   createBaseProtectionFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=136';
+} from '../core/StateMachines.js?v=139';
 
 const BOT_NAMES_US = [
   'SgtOkiDoki', 'WakistanVet', 'VoxelMedic', 'EagleOne', 'BlockBuster',
@@ -98,6 +98,7 @@ export class BotManager {
     this.tracers = [];
     this._tracerPool = [];
     this.smokeClouds = [];
+    this.squadSections = new Map();
     this._contestedTimer = 0;
     this.baseState = {
       US: { contested: false, defenders: 0, attackers: 0, playerPresent: false },
@@ -1981,24 +1982,29 @@ export class BotManager {
 
     if (spawnAtMainBase) {
       // At opening round start (0 flags owned by either side), deploy vanguard foot-infantry squads
-      // (ALPHA, CHARLIE, DELTA, ECHO) along their faction's ±820m Forward Staging Line so both 125-soldier
-      // armies engage over Objectives A-E within 20-30s instead of jogging 1.5km across empty prairie,
-      // while BRAVO Armor Crew & FALCON Air Crew spawn right inside the ±1,520m Main Base Motor Pool / Airfield!
+      // along their faction's ±820m Forward Staging Line in cohesive squad assembly zones so each squad
+      // marches and fights together as a tactical unit, while Armor & Air crews spawn at HQ Motor Pool / Airfield!
       const anyFlagCaptured = this.world.flags.some((fl) => fl.owner && fl.owner !== 'NEUTRAL');
-      const isVanguardInfantry =
-        !anyFlagCaptured && squad !== 'BRAVO' && squad !== 'FALCON';
+      const isHqVehicleSquad = squad === 'BRAVO' || squad === 'FALCON';
+      const isVanguardInfantry = !anyFlagCaptured && !isHqVehicleSquad;
       if (isVanguardInfantry) {
         const stagingX = baseKey === 'US' ? -820 : 820;
+        const squadLaneMap = {
+          ALPHA: 0,
+          CHARLIE: -210,
+          DELTA: 210,
+          ECHO: -135,
+          FOXTROT: 72,
+          GOLF: -72,
+          HOTEL: 142,
+          KILO: -155
+        };
         const laneZ =
-          squad === 'ALPHA'
-            ? 0
-            : squad === 'CHARLIE'
-            ? -210
-            : squad === 'DELTA'
-            ? 210
-            : (Math.random() - 0.5) * 320;
-        sx = stagingX + (Math.random() - 0.5) * 36;
-        sz = laneZ + (Math.random() - 0.5) * 44;
+          Object.prototype.hasOwnProperty.call(squadLaneMap, squad)
+            ? squadLaneMap[squad]
+            : 0;
+        sx = stagingX + (Math.random() - 0.5) * 24;
+        sz = laneZ + (Math.random() - 0.5) * 24;
         source = 'FORWARD_STAGING_LINE';
       } else {
         // Spawn inside the Main Base Motor Pool apron (US_BASE + 28m / RU_BASE - 28m)
@@ -2008,12 +2014,46 @@ export class BotManager {
         source = useRussianEastBase ? 'RU_COALITION_EAST_BASE' : 'MAIN_BASE';
       }
     } else {
-      const f = uncontestedFlags[Math.floor(Math.random() * uncontestedFlags.length)];
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 6 + Math.random() * 12;
-      sx = f.pos.x + Math.cos(angle) * dist;
-      sz = f.pos.z + Math.sin(angle) * dist;
-      source = `FORWARD_FLAG_${f.id}`;
+      // Cohesive Squad Forward Spawn: always pick the uncontested Forward Base closest to this squad's
+      // active Squad Leader (or squad objective) so respawning squadmates rally together instead of scattering!
+      let chosenFlag = uncontestedFlags[0];
+      const sl = this.squadLeaders?.[team]?.[squad];
+      let refX = null;
+      let refZ = null;
+      if (sl && !sl.dead && !sl.drivingVehicle) {
+        refX = sl.pos.x;
+        refZ = sl.pos.z;
+      } else if (sl && typeof sl.targetFlagIndex === 'number' && this.world.flags[sl.targetFlagIndex]) {
+        refX = this.world.flags[sl.targetFlagIndex].pos.x;
+        refZ = this.world.flags[sl.targetFlagIndex].pos.z;
+      } else if (uncontestedFlags.length > 1) {
+        const defFlagIdx = this.getInitialSquadFlagIndex(team, squad, this.world.flags.length);
+        const defFl = this.world.flags[defFlagIdx];
+        if (defFl) {
+          refX = defFl.pos.x;
+          refZ = defFl.pos.z;
+        }
+      }
+      if (refX !== null && uncontestedFlags.length > 1) {
+        let bestDistSq = Infinity;
+        for (let fi = 0; fi < uncontestedFlags.length; fi++) {
+          const cand = uncontestedFlags[fi];
+          const dxF = cand.pos.x - refX;
+          const dzF = cand.pos.z - refZ;
+          const dSqF = dxF * dxF + dzF * dzF;
+          if (dSqF < bestDistSq) {
+            bestDistSq = dSqF;
+            chosenFlag = cand;
+          }
+        }
+      }
+      const sqIdx = Math.max(0, SQUAD_DEFS.findIndex((s) => s.id === squad));
+      const sqBaseAngle = (sqIdx * (Math.PI * 2)) / SQUAD_DEFS.length;
+      const angle = sqBaseAngle + (Math.random() - 0.5) * 0.55;
+      const dist = 6 + Math.random() * 8;
+      sx = chosenFlag.pos.x + Math.cos(angle) * dist;
+      sz = chosenFlag.pos.z + Math.sin(angle) * dist;
+      source = `FORWARD_FLAG_${chosenFlag.id}`;
     }
 
     const pos = this.world.findSafeSpawnPoint(sx, sz);
@@ -2029,6 +2069,180 @@ export class BotManager {
       });
     }
     return returnMeta ? { pos, source } : pos;
+  }
+
+  getBotSectionKey(bot) {
+    if (!bot) return 'US_ALPHA_0';
+    const secIdx = Math.floor((bot.squadMemberIndex || 0) / 9);
+    return `${bot.team}_${bot.squad || 'ALPHA'}_${secIdx}`;
+  }
+
+  /**
+   * Group Tactical Alert when ANY soldier in a 9-man Squad Section takes enemy fire or is sniped:
+   * - Broadcasts the threat bearing across nearby squadmates so the entire group reacts in unison!
+   * - Against long-range snipers (>75m) or elevated rooftop fire (dy > 11m), triggers `COVER_SCRAMBLE`:
+   *   1) Computes a shared leeward hard-cover rally point behind the nearest building (or lateral break).
+   *   2) Pops a 3D M18 Smoke Screen to mask the casualty & squad movement.
+   *   3) Alerts Riflemen/Medics to sprint to cover together while Support/Recon drop prone to counter-suppress!
+   */
+  alertSquadUnderFire(victimBot, shooterPos = null, rawDamage = 25, isFatalOrHeadshot = false) {
+    if (!victimBot || !Array.isArray(this.bots)) return;
+    const secKey = this.getBotSectionKey(victimBot);
+    if (!this.squadSections) this.squadSections = new Map();
+    let sec = this.squadSections.get(secKey);
+    if (!sec) {
+      sec = {
+        key: secKey,
+        team: victimBot.team,
+        squad: victimBot.squad || 'ALPHA',
+        sectionIdx: Math.floor((victimBot.squadMemberIndex || 0) / 9),
+        leader: null,
+        members: [],
+        centroidX: victimBot.pos.x,
+        centroidZ: victimBot.pos.z,
+        stragglerCount: 0,
+        contactTimer: 0,
+        underSniperAlertTimer: 0,
+        smokeCooldown: 0,
+        boundTimer: 2.4,
+        activeBoundFireteam: 0,
+        flankSign: ((victimBot.squad || 'A').charCodeAt(0) % 2 === 0 ? 1 : -1),
+        tacticalMode: 'TACTICAL_WEDGE',
+        threatPos: new THREE.Vector3(),
+        hasThreatPos: false,
+        coverAnchor: null,
+        sharedEnemyUnit: null
+      };
+      this.squadSections.set(secKey, sec);
+    }
+
+    sec.contactTimer = Math.max(sec.contactTimer || 0, 7.0);
+    let dist3D = 0;
+    let dyShooter = 0;
+    if (shooterPos && Number.isFinite(shooterPos.x)) {
+      sec.threatPos.copy(shooterPos);
+      sec.hasThreatPos = true;
+      const dx = shooterPos.x - victimBot.pos.x;
+      dyShooter = shooterPos.y - victimBot.pos.y;
+      const dz = shooterPos.z - victimBot.pos.z;
+      dist3D = Math.hypot(dx, dyShooter, dz);
+    }
+
+    const isSniperOrElevatedThreat =
+      (shooterPos && (dist3D >= 75 || dyShooter >= 11.5)) ||
+      rawDamage >= 65 ||
+      Boolean(isFatalOrHeadshot);
+
+    if (isSniperOrElevatedThreat) {
+      sec.underSniperAlertTimer = Math.max(sec.underSniperAlertTimer || 0, 8.0);
+      // Compute shared hard-cover rally point behind nearest building leeward face (or lateral dodge vector)
+      const cx = sec.centroidX || victimBot.pos.x;
+      const cz = sec.centroidZ || victimBot.pos.z;
+      const tx = sec.hasThreatPos ? sec.threatPos.x : cx + (victimBot.team === 'US' ? 80 : -80);
+      const tz = sec.hasThreatPos ? sec.threatPos.z : cz;
+      const awayX = cx - tx;
+      const awayZ = cz - tz;
+      const awayLen = Math.hypot(awayX, awayZ) || 1;
+      const ux = awayX / awayLen;
+      const uz = awayZ / awayLen;
+
+      let bestCoverX = cx + (-uz * sec.flankSign) * 13.5 + ux * 5.5;
+      let bestCoverZ = cz + (ux * sec.flankSign) * 13.5 + uz * 5.5;
+      if (this.world && Array.isArray(this.world.buildings) && this.world.buildings.length > 0) {
+        let bestBld = null;
+        let bestBldDist = 42.0;
+        for (let bi = 0; bi < this.world.buildings.length; bi++) {
+          const bld = this.world.buildings[bi];
+          const bCx = (bld.minWx + bld.maxWx) * 0.5;
+          const bCz = (bld.minWz + bld.maxWz) * 0.5;
+          const dB = Math.hypot(bCx - cx, bCz - cz);
+          if (dB < bestBldDist) {
+            bestBldDist = dB;
+            bestBld = bld;
+          }
+        }
+        if (bestBld) {
+          const bCx = (bestBld.minWx + bestBld.maxWx) * 0.5;
+          const bCz = (bestBld.minWz + bestBld.maxWz) * 0.5;
+          const halfW = (bestBld.maxWx - bestBld.minWx) * 0.5 + 3.2;
+          const halfD = (bestBld.maxWz - bestBld.minWz) * 0.5 + 3.2;
+          if (Math.abs(ux) > Math.abs(uz)) {
+            bestCoverX = bCx + Math.sign(ux || 1) * halfW;
+            bestCoverZ = THREE.MathUtils.clamp(cz, bestBld.minWz + 1.0, bestBld.maxWz - 1.0);
+          } else {
+            bestCoverX = THREE.MathUtils.clamp(cx, bestBld.minWx + 1.0, bestBld.maxWx - 1.0);
+            bestCoverZ = bCz + Math.sign(uz || 1) * halfD;
+          }
+        }
+      }
+      if (this.world?.pushOutOfBuildingFootprint) {
+        const safeCov = this.world.pushOutOfBuildingFootprint(bestCoverX, bestCoverZ, 2.3);
+        bestCoverX = safeCov.x;
+        bestCoverZ = safeCov.z;
+      }
+      if (!sec.coverAnchor) sec.coverAnchor = new THREE.Vector3();
+      sec.coverAnchor.set(bestCoverX, victimBot.pos.y, bestCoverZ);
+      sec.tacticalMode = 'COVER_SCRAMBLE';
+    }
+
+    let smokePopper = null;
+    for (let i = 0; i < this.bots.length; i++) {
+      const ally = this.bots[i];
+      if (
+        ally.dead ||
+        ally.downed ||
+        ally.drivingVehicle ||
+        ally.team !== victimBot.team ||
+        ally.squad !== victimBot.squad
+      ) {
+        continue;
+      }
+      const dSq = ally.pos.distanceToSquared(victimBot.pos);
+      if (dSq > 36 * 36) continue;
+      ally.underFireTimer = Math.max(ally.underFireTimer || 0, 3.2);
+      ally.suppressionLevel = Math.min(1.0, (ally.suppressionLevel || 0) + (isSniperOrElevatedThreat ? 0.32 : 0.18));
+      if (isSniperOrElevatedThreat) {
+        ally._squadUnderSniperAlert = true;
+      }
+      if (shooterPos && Number.isFinite(shooterPos.x)) {
+        if (!ally.lastShooterPos) ally.lastShooterPos = new THREE.Vector3();
+        ally.lastShooterPos.copy(shooterPos);
+      }
+      if (
+        !smokePopper &&
+        ally !== victimBot &&
+        (ally.role === 'MEDIC' || ally.isSquadLeader || ally.role === 'ASSAULT')
+      ) {
+        smokePopper = ally;
+      }
+    }
+
+    if (
+      isSniperOrElevatedThreat &&
+      smokePopper &&
+      (this.world?.era || 'modern') === 'modern' &&
+      (sec.smokeCooldown || 0) <= 0 &&
+      typeof this.spawnRescueSmoke === 'function'
+    ) {
+      sec.smokeCooldown = 20.0;
+      const smokePos = tmpVec3(
+        victimBot.pos.x + (sec.hasThreatPos ? Math.sign(sec.threatPos.x - victimBot.pos.x) * 2.2 : 0),
+        victimBot.pos.y,
+        victimBot.pos.z + (sec.hasThreatPos ? Math.sign(sec.threatPos.z - victimBot.pos.z) * 2.2 : 0)
+      );
+      this.spawnRescueSmoke(smokePos);
+      if (this.player) {
+        this.emitBotComms(
+          smokePopper,
+          this.player,
+          dyShooter > 12
+            ? '⚠️ SNIPER HIGH! Popping smoke — whole squad scramble to hard cover!'
+            : '⚠️ SNIPER CONTACT! Smoke out — squad bound to cover & suppress!',
+          'URGENT',
+          false
+        );
+      }
+    }
   }
 
   damageBot(
@@ -2056,6 +2270,28 @@ export class BotManager {
     bot.underFireTimer = 2.4;
     if (bot.rescuer) {
       bot.rescuer.underFireTimer = Math.max(bot.rescuer.underFireTimer || 0, 2.4);
+    }
+    if (attackerTeam && attackerTeam !== bot.team) {
+      let shooterOrigin = blastMeta?.origin || null;
+      if (
+        !shooterOrigin &&
+        this.player &&
+        this.player.team === attackerTeam &&
+        (attackerName === this.player.name ||
+          attackerName === 'YOU (PLAYER)' ||
+          String(attackerName || '').includes('PLAYER'))
+      ) {
+        shooterOrigin = this.player.pos;
+      } else if (!shooterOrigin && bot.lastShooterPos) {
+        shooterOrigin = bot.lastShooterPos;
+      }
+      if (shooterOrigin && Number.isFinite(shooterOrigin.x)) {
+        if (!bot.lastShooterPos) bot.lastShooterPos = new THREE.Vector3();
+        bot.lastShooterPos.copy(shooterOrigin);
+      }
+      if (typeof this.alertSquadUnderFire === 'function') {
+        this.alertSquadUnderFire(bot, shooterOrigin, amount, isHeadshot || amount >= bot.hp);
+      }
     }
 
     // Real-life & Tactical Shooter Entrenched Defender Advantage + Mount & Blade Shield Wall Bracing:
@@ -2393,12 +2629,12 @@ export class BotManager {
 Object.assign(BotManager.prototype, SightlineMethods, MedicAIMethods, BotAIMethods);
 
 /**
- * Squad-style Catastrophic Overpressure / Heavy Caliber "Dead-Dead" Evaluator:
- * - Hand Grenades (`M67` / `GRENADE` / `FRAG`) & Small Arms / Melee / Bleed -> 0% Beyond Rescue (Medics can always rescue!).
- * - AC-130 105mm, Tank 120mm/125mm, 500lb JDAM / GBU / Carpet Bomb / Maverick / Artillery -> 92% inner (100% direct), 55% outer + heavy ragdoll launch!
- * - AC-130 40mm Bofors, 81mm Mortar, C4, 70mm Hydra Rocket -> 72% inner, 30% outer + high ragdoll launch!
- * - RPG-7 HEAT -> 75% within 2.8m core / direct hit (0% on >2.8m outer shrapnel) + high ragdoll launch!
- * - Heavy Autocannon (AC-130 25mm, A-10 30mm, IFV/AA 25-30mm, Fighter 20mm) -> 55% Beyond Rescue + medium knockback!
+ * Tactical Shooter Catastrophic Trauma / "Dead-Dead" (Unrevivable KIA) Evaluator:
+ * - Explosions (Shells, Bombs, Artillery, ATGMs, RPGs, Mortars, C4, Rockets, Mines, M67 Frag Grenades)
+ *   have a LARGE chance (62%–100%) of instant unrevivable death + 3D blast ragdoll launch!
+ * - Lethal Headshots (`isHeadshot` or `hitZone === 'head'`) have a LARGE chance (80%–92%)
+ *   of instant unrevivable death so headshotted targets rarely enter the revivable downed state!
+ * - Standard non-headshot small-arms body/limb wounds & bleedout remain 0% Beyond Rescue so Squad Medics can revive them!
  */
 export function evaluateCatastrophicKill(
   weaponName = '',
@@ -2408,13 +2644,7 @@ export function evaluateCatastrophicKill(
   hitMeta = null
 ) {
   const w = String(weaponName || '').toUpperCase();
-  if (
-    !w ||
-    w.includes('GRENADE') ||
-    w.includes('M67') ||
-    w.includes('FRAG') ||
-    w === 'BLEED'
-  ) {
+  if (!w || w === 'BLEED') {
     return { beyondRescue: false, chance: 0, hSpeed: 0, upSpeed: 0, tier: 'REVIVABLE' };
   }
 
@@ -2425,6 +2655,14 @@ export function evaluateCatastrophicKill(
     w.includes('125MM') ||
     w.includes('APFSDS') ||
     w.includes('APHE') ||
+    w.includes('TOW') ||
+    w.includes('KORNET') ||
+    w.includes('REFLEKS') ||
+    w.includes('LAHAT') ||
+    w.includes('HELLFIRE') ||
+    w.includes('VIKHR') ||
+    w.includes('ATAKA') ||
+    w.includes('ATGM') ||
     w.includes('JDAM') ||
     w.includes('GBU') ||
     w.includes('CARPET BOMB') ||
@@ -2440,12 +2678,13 @@ export function evaluateCatastrophicKill(
     w.includes('155MM') ||
     w.includes('DYNAMITE') ||
     w.includes('TREBUCHET') ||
-    w.includes('BOULDER');
+    w.includes('BOULDER') ||
+    w.includes('COLLAPSE');
 
   if (isCatastrophicShellOrBomb) {
-    const isDirect = blastRadius > 0 && distFromCenter <= 2.2;
-    const isInner = blastRadius <= 0 || distFromCenter <= blastRadius * 0.62;
-    const chance = isDirect ? 1.0 : isInner ? 0.92 : 0.55;
+    const isDirect = blastRadius > 0 && distFromCenter <= 2.5;
+    const isInner = blastRadius <= 0 || distFromCenter <= blastRadius * 0.65;
+    const chance = isDirect ? 1.0 : isInner ? 0.94 : 0.76;
     const roll = rng();
     const jitter = rng();
     return {
@@ -2457,25 +2696,9 @@ export function evaluateCatastrophicKill(
     };
   }
 
-  const isRpg = w.includes('RPG') || w.includes('HEAT');
-  if (isRpg) {
-    const coreCut = blastRadius > 0 ? Math.max(2.8, blastRadius * 0.56) : 2.8;
-    if (distFromCenter > coreCut) {
-      return { beyondRescue: false, chance: 0, hSpeed: 0, upSpeed: 0, tier: 'RPG_OUTER_SHRAPNEL' };
-    }
-    const chance = 0.75;
-    const roll = rng();
-    const jitter = rng();
-    return {
-      beyondRescue: roll < chance,
-      chance,
-      hSpeed: 9.0 + jitter * 4.5,
-      upSpeed: 5.5 + jitter * 3.0,
-      tier: 'RPG_CORE'
-    };
-  }
-
-  const isMediumExplosive =
+  const isMediumOrRpgExplosive =
+    w.includes('RPG') ||
+    w.includes('HEAT') ||
     (w.includes('40MM') && w.includes('BOFORS')) ||
     w.includes('MORTAR') ||
     w.includes('81MM') ||
@@ -2484,19 +2707,49 @@ export function evaluateCatastrophicKill(
     w.includes('70MM') ||
     w.includes('HYDRA') ||
     w.includes('ROCKET') ||
+    w.includes('SAM') ||
+    w.includes('STINGER') ||
+    w.includes('IGLA') ||
+    w.includes('MISSILE') ||
+    w.includes('MINE') ||
+    w.includes('CLAYMORE') ||
+    w.includes('BARREL') ||
     w.includes('T-REX');
 
-  if (isMediumExplosive) {
-    const isInner = blastRadius <= 0 || distFromCenter <= blastRadius * 0.65;
-    const chance = isInner ? 0.72 : 0.30;
+  if (isMediumOrRpgExplosive) {
+    const isInner = blastRadius <= 0 || distFromCenter <= blastRadius * 0.62;
+    const chance = isInner ? 0.88 : 0.68;
     const roll = rng();
     const jitter = rng();
     return {
       beyondRescue: roll < chance,
       chance,
-      hSpeed: isInner ? 8.5 + jitter * 4.0 : 5.0 + jitter * 2.5,
-      upSpeed: isInner ? 5.0 + jitter * 3.0 : 3.2 + jitter * 1.8,
-      tier: 'MEDIUM_BLAST'
+      hSpeed: isInner ? 9.0 + jitter * 4.2 : 5.8 + jitter * 2.6,
+      upSpeed: isInner ? 5.2 + jitter * 3.0 : 3.4 + jitter * 1.8,
+      tier: w.includes('RPG') || w.includes('HEAT') ? 'RPG_BLAST' : 'MEDIUM_BLAST'
+    };
+  }
+
+  const isGrenadeOrGenericBlast =
+    blastRadius > 0 ||
+    w.includes('GRENADE') ||
+    w.includes('M67') ||
+    w.includes('FRAG') ||
+    w.includes('EXPLOSI') ||
+    w.includes('BLAST') ||
+    w.includes('CRASH');
+
+  if (isGrenadeOrGenericBlast) {
+    const isInner = blastRadius <= 0 || distFromCenter <= blastRadius * 0.58;
+    const chance = isInner ? 0.80 : 0.62;
+    const roll = rng();
+    const jitter = rng();
+    return {
+      beyondRescue: roll < chance,
+      chance,
+      hSpeed: isInner ? 7.2 + jitter * 3.4 : 4.8 + jitter * 2.2,
+      upSpeed: isInner ? 4.2 + jitter * 2.2 : 2.8 + jitter * 1.4,
+      tier: 'GRENADE_BLAST'
     };
   }
 
@@ -2514,7 +2767,7 @@ export function evaluateCatastrophicKill(
     w.includes('AUTOCANNON');
 
   if (isAutocannon) {
-    const chance = 0.55;
+    const chance = Boolean(hitMeta?.isHeadshot || hitMeta?.hitZone === 'head') ? 0.94 : 0.65;
     const roll = rng();
     const jitter = rng();
     return {
@@ -2526,20 +2779,21 @@ export function evaluateCatastrophicKill(
     };
   }
 
-  // Anatomical Limb / Vital Break ("Chance to Break -> Unrevivable KIA"):
-  // Triggered when heavy sniper / .50 BMG / slug calibers shatter Head/Thorax, or heavy overkill shatters a blacked (0%) zone!
-  if (hitMeta) {
-    const hz = hitMeta.hitZone || (hitMeta.isHeadshot ? 'head' : 'thorax');
-    const rawDmg = hitMeta.rawDamage || 0;
-    const overkill = hitMeta.overkill || 0;
+  // Lethal Headshots & Heavy Ballistic Vital Breaks ("Large Chance of Instant KIA Without Revive"):
+  const isLethalHeadshot = Boolean(hitMeta && (hitMeta.isHeadshot || hitMeta.hitZone === 'head'));
+  if (hitMeta || isLethalHeadshot) {
+    const hz = hitMeta?.hitZone || (hitMeta?.isHeadshot ? 'head' : 'thorax');
+    const rawDmg = hitMeta?.rawDamage || hitMeta?.finalDamage || 0;
+    const overkill = hitMeta?.overkill || 0;
     const isHeavyBallistic =
       w.includes('.50') ||
-      w.includes('12.7MM') ||
+      w.includes('12.7') ||
       w.includes('HMG') ||
       w.includes('CROWS') ||
       w.includes('KORD') ||
       w.includes('L96') ||
       w.includes('AWP') ||
+      w.includes('AWM') ||
       w.includes('SV-98') ||
       w.includes('BARRETT') ||
       w.includes('M82') ||
@@ -2549,16 +2803,16 @@ export function evaluateCatastrophicKill(
       w.includes('CROSSBOW');
     let breakChance = 0;
     let breakTier = 'LIMB_BREAK';
-    if ((hz === 'head' || hitMeta.isHeadshot) && (isHeavyBallistic || rawDmg >= 78)) {
-      breakChance = 0.85;
-      breakTier = 'HEAD_SHATTER';
+    if (hz === 'head' || hitMeta?.isHeadshot) {
+      breakChance = isHeavyBallistic || rawDmg >= 85 ? 0.92 : 0.80;
+      breakTier = isHeavyBallistic || rawDmg >= 85 ? 'HEAD_SHATTER' : 'HEADSHOT_FATAL';
     } else if (hz === 'thorax' && isHeavyBallistic && (rawDmg >= 82 || overkill >= 24)) {
       breakChance = 0.52;
       breakTier = 'THORAX_SHATTER';
-    } else if ((hz === 'head' || hz === 'thorax') && hitMeta.wasAlreadyBroken && overkill >= 25) {
+    } else if (hz === 'thorax' && hitMeta?.wasAlreadyBroken && overkill >= 25) {
       breakChance = 0.48;
       breakTier = 'VITAL_BREAK';
-    } else if (hitMeta.limbBroken && (isHeavyBallistic || overkill >= 42)) {
+    } else if (hitMeta?.limbBroken && (isHeavyBallistic || overkill >= 42)) {
       breakChance = 0.35;
       breakTier = 'LIMB_SHATTER';
     }

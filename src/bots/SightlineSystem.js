@@ -1,15 +1,21 @@
-import { BOT } from '../config.js?v=136';
-import { tmpVec3 } from '../utils/VectorPool.js?v=136';
+import { BOT } from '../config.js?v=139';
+import { tmpVec3 } from '../utils/VectorPool.js?v=139';
 
 /**
  * Multi-Ray "Vision Tube" Sightline Check:
  * Prevents NPCs from seeing or tracking targets through solid buildings, diagonal block seams,
  * active smoke screens, or tiny thin gaps (< 0.55m wide) between structures.
  */
-export function hasClearSightline(bot, targetPos, checkFov = true) {
-  const eyeY = bot.pos.y + (bot.isCrouching ? 1.12 : 1.52);
+export function hasClearSightline(bot, targetPos, checkFov = true, targetUnit = null) {
+  const eyeY = bot.pos.y + (bot.isProne ? 0.38 : bot.isCrouching ? 1.02 : 1.52);
   const eyePos = tmpVec3(bot.pos.x, eyeY, bot.pos.z);
-  const chestPos = tmpVec3(targetPos.x, targetPos.y + 1.15, targetPos.z);
+  const tgtProne = Boolean(targetUnit && (targetUnit.prone || targetUnit.isProne));
+  const tgtCrouch = Boolean(
+    !tgtProne && targetUnit && (targetUnit.crouching || targetUnit.isCrouching)
+  );
+  const targetSampleY =
+    targetUnit && targetUnit.isVehicle ? 1.35 : tgtProne ? 0.38 : tgtCrouch ? 0.90 : 1.24;
+  const chestPos = tmpVec3(targetPos.x, targetPos.y + targetSampleY, targetPos.z);
 
   const dx = chestPos.x - eyePos.x;
   const dy = chestPos.y - eyePos.y;
@@ -17,19 +23,27 @@ export function hasClearSightline(bot, targetPos, checkFov = true) {
   const dist = Math.hypot(dx, dy, dz);
   if (dist < 1.4) return true;
 
-  // 1. Field-of-View (150° cone) check beyond 14m unless alerted by damage/suppression
-  if (
-    checkFov &&
-    dist > BOT.FOV_CHECK_BEYOND &&
-    (bot.flinchTimer || 0) <= 0 &&
-    (bot.suppressionLevel || 0) < 0.25
-  ) {
+  const isAlerted =
+    (bot.flinchTimer || 0) > 0 ||
+    (bot.suppressionLevel || 0) >= 0.2 ||
+    (bot.underFireTimer || 0) > 0 ||
+    Boolean(bot._squadUnderSniperAlert);
+
+  // 1. Horizontal (150°) + Vertical (±25° unalerted street-patrol gaze) FOV check beyond 14m
+  if (checkFov && dist > BOT.FOV_CHECK_BEYOND && !isAlerted) {
     const horizDist = Math.hypot(dx, dz);
     if (horizDist > 0.1) {
       const fwdX = Math.sin(bot.yaw);
       const fwdZ = Math.cos(bot.yaw);
       const dot = (dx * fwdX + dz * fwdZ) / horizDist;
       if (dot < BOT.FOV_BEHIND_DOT) return false;
+      // Unalerted street infantry scan the horizon rather than staring >25° straight up at skyscraper roofs
+      const maxUpTan = bot.role === 'RECON' ? 0.58 : 0.47;
+      if (dy > 14.0 && dy / horizDist > maxUpTan) {
+        return false;
+      }
+    } else if (dy > 14.0) {
+      return false;
     }
   }
 
@@ -94,28 +108,36 @@ export function hasClearSightline(bot, targetPos, checkFov = true) {
   return true;
 }
 
-export function canBotSeeTarget(bot, targetKey, targetPos, checkFov = true) {
+export function canBotSeeTarget(bot, targetKey, targetPos, checkFov = true, targetUnit = null) {
   if (!bot._losCache) bot._losCache = new Map();
   const now = performance.now();
+  const stanceTag = targetUnit
+    ? targetUnit.prone || targetUnit.isProne
+      ? 2
+      : targetUnit.crouching || targetUnit.isCrouching
+      ? 1
+      : 0
+    : 0;
   const cached = bot._losCache.get(targetKey);
-  if (cached && now < cached.exp) {
+  if (cached && now < cached.exp && cached.stanceTag === stanceTag) {
     return !cached.blocked;
   }
   // Cap uncached raycasts per bot (2) and globally per frame (38) to prevent frame-time spikes across 499 AI bots
   if ((bot._raycastsThisFrame || 0) >= 2 || (this._frameRaycasts || 0) >= 38) {
-    return cached ? !cached.blocked : false;
+    return cached && cached.stanceTag === stanceTag ? !cached.blocked : false;
   }
   bot._raycastsThisFrame = (bot._raycastsThisFrame || 0) + 1;
   this._frameRaycasts = (this._frameRaycasts || 0) + 1;
-  const vis = this.hasClearSightline(bot, targetPos, checkFov);
+  const vis = this.hasClearSightline(bot, targetPos, checkFov, targetUnit);
   const ttl = 320 + Math.random() * 200;
   if (cached) {
     cached.blocked = !vis;
     cached.vis = vis;
+    cached.stanceTag = stanceTag;
     cached.time = now;
     cached.exp = now + ttl;
   } else {
-    bot._losCache.set(targetKey, { blocked: !vis, vis, time: now, exp: now + ttl });
+    bot._losCache.set(targetKey, { blocked: !vis, vis, stanceTag, time: now, exp: now + ttl });
   }
   return vis;
 }
@@ -143,9 +165,10 @@ function isColumnBlocked(world, ox, wy, oz) {
  */
 export function isPointBlocked(wx, wy, wz, padRadius = 0.52) {
   const world = this.world;
+  const bldMargin = padRadius >= 0.45 ? 1.42 : Math.max(1.22, padRadius + 0.95);
   if (
     world.isInsideBuildingOrContainer &&
-    world.isInsideBuildingOrContainer(wx, wz, padRadius + 0.55 > 1.05 ? padRadius + 0.55 : 1.05)
+    world.isInsideBuildingOrContainer(wx, wz, bldMargin)
   ) {
     return true;
   }

@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=136';
-import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=136';
-import { getMapDefinition } from '../maps/index.js?v=136';
-import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=136';
-import { events, makeEventBridge } from '../events.js?v=136';
-import { TerrainGenerator } from './TerrainGenerator.js?v=136';
-import { BuildingFactory } from './BuildingFactory.js?v=136';
-import { ConquestSystem } from './ConquestSystem.js?v=136';
-import { ProjectileManager } from './ProjectileManager.js?v=136';
-import { WeatherSystem } from './WeatherSystem.js?v=136';
+import { TEXTURES } from '../assets/textures.js?v=139';
+import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=139';
+import { getMapDefinition } from '../maps/index.js?v=139';
+import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=139';
+import { events, makeEventBridge } from '../events.js?v=139';
+import { TerrainGenerator } from './TerrainGenerator.js?v=139';
+import { BuildingFactory } from './BuildingFactory.js?v=139';
+import { ConquestSystem } from './ConquestSystem.js?v=139';
+import { ProjectileManager } from './ProjectileManager.js?v=139';
+import { WeatherSystem } from './WeatherSystem.js?v=139';
 
 export { VOXEL_SIZE, MAT_DEFS };
 
@@ -197,7 +197,7 @@ export class VoxelWorld {
         vertexColors: true,
         map: TEXTURES[def.map] || null,
         roughness: def.roughness,
-        metalness: type.startsWith('container') ? 0.35 : 0.05
+        metalness: typeof def.metalness === 'number' ? def.metalness : type.startsWith('container') ? 0.35 : 0.05
       });
 
       this.instancedBatches[type] = {
@@ -276,7 +276,6 @@ export class VoxelWorld {
   }
 
   _rebuildSingleVoxelChunk(chunk) {
-    const h = VOXEL_SIZE * 0.5;
     const types = Object.keys(chunk.voxelsByType);
     for (let tIdx = 0; tIdx < types.length; tIdx++) {
       const type = types[tIdx];
@@ -297,7 +296,8 @@ export class VoxelWorld {
       const emitQuad = (
         x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3,
         nx, ny, nz,
-        rTop, gTop, bTop, rBot, gBot, bBot
+        rTop, gTop, bTop, rBot, gBot, bBot,
+        uSpan = 1, vSpan = 1
       ) => {
         const pOff = quadCount * 12;
         _scratchPos[pOff] = x0; _scratchPos[pOff + 1] = y0; _scratchPos[pOff + 2] = z0;
@@ -317,19 +317,31 @@ export class VoxelWorld {
 
         const uOff = quadCount * 8;
         _scratchUv[uOff] = 0; _scratchUv[uOff + 1] = 0;
-        _scratchUv[uOff + 2] = 1; _scratchUv[uOff + 3] = 0;
-        _scratchUv[uOff + 4] = 1; _scratchUv[uOff + 5] = 1;
-        _scratchUv[uOff + 6] = 0; _scratchUv[uOff + 7] = 1;
+        _scratchUv[uOff + 2] = uSpan; _scratchUv[uOff + 3] = 0;
+        _scratchUv[uOff + 4] = uSpan; _scratchUv[uOff + 5] = vSpan;
+        _scratchUv[uOff + 6] = 0; _scratchUv[uOff + 7] = vSpan;
         quadCount++;
       };
 
+      const chunkCx = chunk.cx;
+      const chunkCz = chunk.cz;
+      const canMergeNeighbor = (nv, dmg) =>
+        Boolean(
+          nv &&
+            nv.type === type &&
+            (nv.gx >> CHUNK_SHIFT) === chunkCx &&
+            (nv.gz >> CHUNK_SHIFT) === chunkCz &&
+            Math.abs((nv._dmgBrightness ?? 1.0) - dmg) < 0.04
+        );
+
+      // Coplanar Greedy Strip Merging: merges contiguous X-runs of `+Y/-Y/+Z/-Z` faces and Z-runs of `+X/-X` faces
+      // into single tiled quads (`RepeatWrapping`), cutting voxel triangle count across buildings & roofs by ~75–85%!
       for (let i = 0; i < list.length; i++) {
         const v = list[i];
         const gx = v.gx;
         const gy = v.gy;
         const gz = v.gz;
         const x0 = v.minX;
-        const x1 = v.maxX;
         const y0 = v.minY;
         const y1 = v.maxY;
         const z0 = v.minZ;
@@ -339,49 +351,122 @@ export class VoxelWorld {
         const bg = v.baseColor.g * dmg;
         const bb = v.baseColor.b * dmg;
 
-        // +Y Top Face (light = 1.05)
+        // +Y Top Face (merge contiguous +X run)
         if (!this.hasVoxel(gx, gy + 1, gz)) {
-          const r = br * 1.05, g = bg * 1.05, b = bb * 1.05;
-          emitQuad(x0, y1, z1, x1, y1, z1, x1, y1, z0, x0, y1, z0, 0, 1, 0, r, g, b, r, g, b);
+          const prevX = this.getVoxel(gx - 1, gy, gz);
+          if (!(canMergeNeighbor(prevX, dmg) && !this.hasVoxel(gx - 1, gy + 1, gz))) {
+            let run = 1;
+            while (run < 32) {
+              const nxt = this.getVoxel(gx + run, gy, gz);
+              if (!canMergeNeighbor(nxt, dmg) || this.hasVoxel(gx + run, gy + 1, gz)) break;
+              run++;
+            }
+            const xEnd = x0 + run * VOXEL_SIZE;
+            const r = br * 1.05, g = bg * 1.05, b = bb * 1.05;
+            emitQuad(x0, y1, z1, xEnd, y1, z1, xEnd, y1, z0, x0, y1, z0, 0, 1, 0, r, g, b, r, g, b, run, 1);
+          }
         }
-        // -Y Bottom Face (light = 0.72; skip underground buried floor bottoms below gy <= -1 unless above river)
-        if ((gy >= 0 || Math.abs(gx) < 32) && !this.hasVoxel(gx, gy - 1, gz)) {
-          const r = br * 0.72, g = bg * 0.72, b = bb * 0.72;
-          emitQuad(x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1, 0, -1, 0, r, g, b, r, g, b);
+        // -Y Bottom Face (skip underground buried floor bottoms below gy <= 0 unless above river)
+        if ((gy >= 1 || Math.abs(gx) < 32) && !this.hasVoxel(gx, gy - 1, gz)) {
+          const prevX = this.getVoxel(gx - 1, gy, gz);
+          if (
+            !(
+              canMergeNeighbor(prevX, dmg) &&
+              (gy >= 1 || Math.abs(gx - 1) < 32) &&
+              !this.hasVoxel(gx - 1, gy - 1, gz)
+            )
+          ) {
+            let run = 1;
+            while (run < 32) {
+              const nxGx = gx + run;
+              if (gy < 1 && Math.abs(nxGx) >= 32) break;
+              const nxt = this.getVoxel(nxGx, gy, gz);
+              if (!canMergeNeighbor(nxt, dmg) || this.hasVoxel(nxGx, gy - 1, gz)) break;
+              run++;
+            }
+            const xEnd = x0 + run * VOXEL_SIZE;
+            const r = br * 0.72, g = bg * 0.72, b = bb * 0.72;
+            emitQuad(x0, y0, z0, xEnd, y0, z0, xEnd, y0, z1, x0, y0, z1, 0, -1, 0, r, g, b, r, g, b, run, 1);
+          }
         }
-        // +Z Front Face (light = 1.00, lower-edge AO * 0.94)
+        // +Z Front Face (merge contiguous +X run)
         if (!this.hasVoxel(gx, gy, gz + 1)) {
-          emitQuad(
-            x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1,
-            0, 0, 1,
-            br, bg, bb, br * 0.94, bg * 0.94, bb * 0.94
-          );
+          const prevX = this.getVoxel(gx - 1, gy, gz);
+          if (!(canMergeNeighbor(prevX, dmg) && !this.hasVoxel(gx - 1, gy, gz + 1))) {
+            let run = 1;
+            while (run < 32) {
+              const nxt = this.getVoxel(gx + run, gy, gz);
+              if (!canMergeNeighbor(nxt, dmg) || this.hasVoxel(gx + run, gy, gz + 1)) break;
+              run++;
+            }
+            const xEnd = x0 + run * VOXEL_SIZE;
+            emitQuad(
+              x0, y0, z1, xEnd, y0, z1, xEnd, y1, z1, x0, y1, z1,
+              0, 0, 1,
+              br, bg, bb, br * 0.94, bg * 0.94, bb * 0.94,
+              run, 1
+            );
+          }
         }
-        // -Z Back Face (light = 0.89, lower-edge AO * 0.94)
+        // -Z Back Face (merge contiguous +X run)
         if (!this.hasVoxel(gx, gy, gz - 1)) {
-          const rt = br * 0.89, gt = bg * 0.89, bt = bb * 0.89;
-          emitQuad(
-            x1, y0, z0, x0, y0, z0, x0, y1, z0, x1, y1, z0,
-            0, 0, -1,
-            rt, gt, bt, rt * 0.94, gt * 0.94, bt * 0.94
-          );
+          const prevX = this.getVoxel(gx - 1, gy, gz);
+          if (!(canMergeNeighbor(prevX, dmg) && !this.hasVoxel(gx - 1, gy, gz - 1))) {
+            let run = 1;
+            while (run < 32) {
+              const nxt = this.getVoxel(gx + run, gy, gz);
+              if (!canMergeNeighbor(nxt, dmg) || this.hasVoxel(gx + run, gy, gz - 1)) break;
+              run++;
+            }
+            const xEnd = x0 + run * VOXEL_SIZE;
+            const rt = br * 0.89, gt = bg * 0.89, bt = bb * 0.89;
+            emitQuad(
+              xEnd, y0, z0, x0, y0, z0, x0, y1, z0, xEnd, y1, z0,
+              0, 0, -1,
+              rt, gt, bt, rt * 0.94, gt * 0.94, bt * 0.94,
+              run, 1
+            );
+          }
         }
-        // +X Right Face (light = 1.00, lower-edge AO * 0.94)
+        // +X Right Face (merge contiguous +Z run)
         if (!this.hasVoxel(gx + 1, gy, gz)) {
-          emitQuad(
-            x1, y0, z1, x1, y0, z0, x1, y1, z0, x1, y1, z1,
-            1, 0, 0,
-            br, bg, bb, br * 0.94, bg * 0.94, bb * 0.94
-          );
+          const prevZ = this.getVoxel(gx, gy, gz - 1);
+          if (!(canMergeNeighbor(prevZ, dmg) && !this.hasVoxel(gx + 1, gy, gz - 1))) {
+            let run = 1;
+            while (run < 32) {
+              const nxt = this.getVoxel(gx, gy, gz + run);
+              if (!canMergeNeighbor(nxt, dmg) || this.hasVoxel(gx + 1, gy, gz + run)) break;
+              run++;
+            }
+            const zEnd = z0 + run * VOXEL_SIZE;
+            const x1 = v.maxX;
+            emitQuad(
+              x1, y0, zEnd, x1, y0, z0, x1, y1, z0, x1, y1, zEnd,
+              1, 0, 0,
+              br, bg, bb, br * 0.94, bg * 0.94, bb * 0.94,
+              run, 1
+            );
+          }
         }
-        // -X Left Face (light = 0.89, lower-edge AO * 0.94)
+        // -X Left Face (merge contiguous +Z run)
         if (!this.hasVoxel(gx - 1, gy, gz)) {
-          const rt = br * 0.89, gt = bg * 0.89, bt = bb * 0.89;
-          emitQuad(
-            x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0,
-            -1, 0, 0,
-            rt, gt, bt, rt * 0.94, gt * 0.94, bt * 0.94
-          );
+          const prevZ = this.getVoxel(gx, gy, gz - 1);
+          if (!(canMergeNeighbor(prevZ, dmg) && !this.hasVoxel(gx - 1, gy, gz - 1))) {
+            let run = 1;
+            while (run < 32) {
+              const nxt = this.getVoxel(gx, gy, gz + run);
+              if (!canMergeNeighbor(nxt, dmg) || this.hasVoxel(gx - 1, gy, gz + run)) break;
+              run++;
+            }
+            const zEnd = z0 + run * VOXEL_SIZE;
+            const rt = br * 0.89, gt = bg * 0.89, bt = bb * 0.89;
+            emitQuad(
+              x0, y0, z0, x0, y0, zEnd, x0, y1, zEnd, x0, y1, z0,
+              -1, 0, 0,
+              rt, gt, bt, rt * 0.94, gt * 0.94, bt * 0.94,
+              run, 1
+            );
+          }
         }
       }
 
@@ -423,15 +508,20 @@ export class VoxelWorld {
       geo.computeBoundingSphere();
 
       const batch = this.instancedBatches[type] || this.instancedBatches.brick;
+      // Skip shadow-map casting on distant peripheral chunks (>950m from valley center) & minor wood/sandbag props to save GPU shadow pass
+      const chunkCenterX = (chunkCx + 0.5) * (1 << CHUNK_SHIFT) * VOXEL_SIZE;
+      const shouldCastShadow =
+        Math.abs(chunkCenterX) <= 950 && type !== 'wood' && type !== 'sandbag';
       if (existingMesh) {
         existingMesh.geometry?.dispose();
         existingMesh.geometry = geo;
+        existingMesh.castShadow = shouldCastShadow;
       } else if (batch && batch.material) {
         const mesh = new THREE.Mesh(geo, batch.material);
         mesh.name = 'VoxelSectorChunk';
         mesh.frustumCulled = true;
         mesh.matrixAutoUpdate = false;
-        mesh.castShadow = true;
+        mesh.castShadow = shouldCastShadow;
         mesh.receiveShadow = true;
         if (this.scene) this.scene.add(mesh);
         chunk.meshesByType[type] = mesh;
@@ -592,6 +682,12 @@ export class VoxelWorld {
       return false;
     }
 
+    // Structural Steel I-Beam Girders (`steelBeam`) are immune to small arms, AMR bullets, hand grenades,
+    // and light <=30mm autocannons (`amount < 160`); only heavy demolition (C4, aerial bombs, 105mm/120mm tank/AC-130 shells, 155mm arty) severs them!
+    if (voxel.type === 'steelBeam' && amount < 160) {
+      return false;
+    }
+
     voxel.hp -= amount;
     if (voxel.hp <= 0) {
       this.destroyVoxel(gx, gy, gz, true);
@@ -704,6 +800,66 @@ export class VoxelWorld {
               distance: dist,
               point: new THREE.Vector3(px, py, pz),
               normal: new THREE.Vector3(0, dir.y < 0 ? 1 : -1, 0)
+            };
+          }
+        }
+      }
+
+      // Fast O(1) Downtown 3D Hybrid Skyscraper Solid Core hit check (only tested inside Downtown C above 8.5m!)
+      if (
+        py > 8.5 &&
+        py < 96.0 &&
+        Math.abs(px) < 165.0 &&
+        Math.abs(pz) < 135.0 &&
+        Array.isArray(this.skyscraperHullBoxes)
+      ) {
+        const hulls = this.skyscraperHullBoxes;
+        for (let hIdx = 0; hIdx < hulls.length; hIdx++) {
+          const hb = hulls[hIdx];
+          if (!hb || !hb.active) continue;
+          if (
+            px >= hb.minX &&
+            px <= hb.maxX &&
+            py >= hb.minY &&
+            py <= hb.maxY &&
+            pz >= hb.minZ &&
+            pz <= hb.maxZ
+          ) {
+            if (
+              px >= hb.stairMinX &&
+              px <= hb.stairMaxX &&
+              pz >= hb.stairMinZ &&
+              pz <= hb.stairMaxZ
+            ) {
+              continue;
+            }
+            const dMinX = Math.abs(px - hb.minX);
+            const dMaxX = Math.abs(hb.maxX - px);
+            const dMinZ = Math.abs(pz - hb.minZ);
+            const dMaxZ = Math.abs(hb.maxZ - pz);
+            const dMinY = Math.abs(py - hb.minY);
+            const dMaxY = Math.abs(hb.maxY - py);
+            const m = Math.min(dMinX, dMaxX, dMinZ, dMaxZ, dMinY, dMaxY);
+            const hitNorm =
+              m === dMinX
+                ? new THREE.Vector3(-1, 0, 0)
+                : m === dMaxX
+                ? new THREE.Vector3(1, 0, 0)
+                : m === dMinZ
+                ? new THREE.Vector3(0, 0, -1)
+                : m === dMaxZ
+                ? new THREE.Vector3(0, 0, 1)
+                : m === dMinY
+                ? new THREE.Vector3(0, -1, 0)
+                : new THREE.Vector3(0, 1, 0);
+            return {
+              voxel: null,
+              isGround: false,
+              isSkyscraperCore: true,
+              buildingId: hb.buildingId,
+              distance: dist,
+              point: new THREE.Vector3(px, py, pz),
+              normal: hitNorm
             };
           }
         }
@@ -924,7 +1080,200 @@ export class VoxelWorld {
     }
 
     this._heightmap = null;
+    this.skyscraperHullBoxes = [];
     this.voxels.clear();
+  }
+
+  /**
+   * 100% Complete Round Reset for VoxelWorld:
+   * Clears all destroyed/player-built voxels, collapsed skyscraper states, dropped loot packs,
+   * active projectiles, debris, Armory Keys, and laser designations, then cleanly rebuilds every
+   * building, staircase, steel girder, container, bunker, bridge parapet, and crate fresh for Round N+1!
+   */
+  resetWorldForNewRound() {
+    // 1. Clear live projectiles, debris, particle pools, laser designations & CAS markers
+    if (Array.isArray(this.projectiles)) {
+      for (let i = 0; i < this.projectiles.length; i++) {
+        const pr = this.projectiles[i];
+        if (pr?.mesh && this.scene) {
+          this.scene.remove(pr.mesh);
+        }
+      }
+      this.projectiles.length = 0;
+    }
+    if (Array.isArray(this.debrisParticles)) {
+      for (let i = 0; i < this.debrisParticles.length; i++) {
+        const p = this.debrisParticles[i];
+        if (p?.mesh && this.scene) {
+          this.scene.remove(p.mesh);
+        }
+      }
+      this.debrisParticles.length = 0;
+    }
+    for (const pool of [this._debrisPool, this._fxPool, this._glowPool]) {
+      if (pool) {
+        pool.count = 0;
+        if (pool.mesh) {
+          pool.mesh.count = 0;
+          pool.mesh.instanceMatrix.needsUpdate = true;
+        }
+      }
+    }
+    if (Array.isArray(this._blastLights)) {
+      for (const slot of this._blastLights) {
+        if (slot?.light) {
+          slot.life = 0;
+          slot.light.visible = false;
+        }
+      }
+    }
+    if (Array.isArray(this._shockwaveActive)) {
+      while (this._shockwaveActive.length > 0) {
+        const sw = this._shockwaveActive.pop();
+        if (sw?.mesh) sw.mesh.visible = false;
+        if (Array.isArray(this._shockwaveFree)) this._shockwaveFree.push(sw);
+      }
+    }
+    this.activeLaserDesignations = { US: null, RU: null };
+    this.activeCasRequest = null;
+
+    // 2. Remove dropped enemy loot packs, Armory Keys, ammo crates & 3D skyscraper shells
+    if (Array.isArray(this.lootPacks)) {
+      for (let i = 0; i < this.lootPacks.length; i++) {
+        const lp = this.lootPacks[i];
+        if (lp?.mesh && this.scene) this.scene.remove(lp.mesh);
+      }
+      this.lootPacks.length = 0;
+    }
+    if (Array.isArray(this.buildingKeys)) {
+      for (let i = 0; i < this.buildingKeys.length; i++) {
+        const bk = this.buildingKeys[i];
+        if (bk?.mesh && this.scene) this.scene.remove(bk.mesh);
+      }
+      this.buildingKeys.length = 0;
+    }
+    if (Array.isArray(this.ammoCrates)) {
+      for (let i = 0; i < this.ammoCrates.length; i++) {
+        const ac = this.ammoCrates[i];
+        if (ac?.mesh && this.scene) this.scene.remove(ac.mesh);
+      }
+      this.ammoCrates.length = 0;
+    }
+    if (Array.isArray(this.buildings)) {
+      for (let i = 0; i < this.buildings.length; i++) {
+        const b = this.buildings[i];
+        if (b?.archMesh) {
+          if (this.scene) this.scene.remove(b.archMesh);
+          b.archMesh.traverse?.((ch) => {
+            if (ch.isMesh && ch.geometry && !ch.geometry.userData?.shared) {
+              ch.geometry.dispose();
+            }
+          });
+        }
+      }
+    }
+
+    // 3. Wipe all voxel records & chunk meshes and reset batch counters
+    if (this._voxelChunks) {
+      for (const chunk of this._voxelChunks.values()) {
+        for (const m of Object.values(chunk.meshesByType)) {
+          if (m) {
+            if (this.scene) this.scene.remove(m);
+            m.geometry?.dispose();
+          }
+        }
+      }
+      this._voxelChunks.clear();
+    }
+    if (this._dirtyVoxelChunkKeys) {
+      this._dirtyVoxelChunkKeys.clear();
+    }
+    if (this.instancedBatches) {
+      for (const batch of Object.values(this.instancedBatches)) {
+        if (batch) {
+          batch.count = 0;
+          if (Array.isArray(batch.freeIds)) batch.freeIds.length = 0;
+        }
+      }
+    }
+    this.voxels.clear();
+    this._hasOverflowVoxels = false;
+    this._voxelMutationEpoch = (this._voxelMutationEpoch || 1) + 1;
+    this.buildings = [];
+    this.containers = [];
+    this.skyscraperHullBoxes = [];
+    this._spatialFootprintGrid = null;
+    if (Array.isArray(this.climbableLadders)) {
+      this.climbableLadders = this.climbableLadders.filter(
+        (lad) => lad && (lad.buildingId === null || lad.buildingId === undefined)
+      );
+    }
+
+    // 4. Rebuild clean pristine map structures for the active era
+    this._buildingWorld = true;
+    const isMedieval = this.era === 'medieval';
+    const isJurassic = this.era === 'jurassic';
+    if (!isJurassic) {
+      const bridgeZs = isMedieval ? [-400, 0, 400] : [-400, 0, 400];
+      for (const bz of bridgeZs) {
+        const halfSpanZ = bz === 0 ? 17.4 : 7.4;
+        const gzMin = Math.round((bz - halfSpanZ) / VOXEL_SIZE);
+        const gzMax = Math.round((bz + halfSpanZ) / VOXEL_SIZE);
+        for (let gx = -34; gx <= 34; gx++) {
+          this.addVoxel(gx, 1, gzMin, 'darkConcrete');
+          this.addVoxel(gx, 1, gzMax, 'darkConcrete');
+          if (Math.abs(gx) % 2 === 0) {
+            this.addVoxel(gx, 2, gzMin, isMedieval ? 'concrete' : 'sandbag');
+            this.addVoxel(gx, 2, gzMax, isMedieval ? 'concrete' : 'sandbag');
+          }
+        }
+      }
+    }
+    if (isMedieval && typeof this.buildMedievalCastlesAndFortifications === 'function') {
+      // Rebuild castle walls/keeps without duplicating static 3D terrain props
+      const prevScene = this.scene;
+      this.buildMedievalCastlesAndFortifications();
+      this.scene = prevScene;
+    } else if (!isJurassic && this.mapDef) {
+      const mapDef = this.mapDef;
+      if (mapDef.buildings) {
+        for (const [gx, gz, w, d, floors, mat] of mapDef.buildings) {
+          this.buildApartmentBlock(gx, gz, w, d, floors, mat);
+        }
+      }
+      if (mapDef.watchtowers) {
+        for (const [gx, gz] of mapDef.watchtowers) {
+          this.buildWatchtower(gx, gz);
+        }
+      }
+      if (mapDef.hescoBastions) {
+        for (const [gx, gz, len, alongX] of mapDef.hescoBastions) {
+          this.buildHescoBastion(gx, gz, len, alongX);
+        }
+      }
+      if (mapDef.sandbagBunkers) {
+        for (const [gx, gz] of mapDef.sandbagBunkers) {
+          this.buildSandbagBunker(gx, gz);
+        }
+      }
+      if (mapDef.shippingContainers) {
+        for (const [gx, gz, alongX, mat, offsetGy] of mapDef.shippingContainers) {
+          this.buildShippingContainer(gx, gz, alongX, mat, offsetGy);
+        }
+      }
+      if (mapDef.ammoCrates) {
+        for (const [wx, wz] of mapDef.ammoCrates) {
+          this.addAmmoCrate(wx, wz);
+        }
+      }
+    }
+    this._buildingWorld = false;
+
+    for (const chunkKey of this._voxelChunks.keys()) {
+      this._dirtyVoxelChunkKeys.add(chunkKey);
+    }
+    this.flushDirtyVoxelChunks();
+    this.resetFlagsForNewRound?.();
   }
 
   update(dt, units, onExplosionDamage, broadcastFn, onFlagCaptured = null, vehicles = []) {

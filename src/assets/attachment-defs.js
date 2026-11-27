@@ -84,6 +84,32 @@ export const ATTACHMENT_CATALOG = {
       silenced: true,
       hideTracers: true,
       desc: 'Tier-1 QD heavy suppressor: 100% Zero Flash, hides tracers, suppressed audio & -28% recoil!'
+    },
+    {
+      id: 'heavy_match_barrel',
+      name: '29" FLUTED STAINLESS ELR MATCH BARREL',
+      shortName: '29" ELR BARREL',
+      price: 2250,
+      flashMult: 0.65,
+      recoilMult: 0.88,
+      velocityMult: 1.14,
+      spreadMult: 0.82,
+      silenced: false,
+      hideTracers: false,
+      desc: '+14% Muzzle Velocity (flatter long-range trajectory), -18% Bullet Spread & -12% Recoil.'
+    },
+    {
+      id: 'tbac_338_ultra',
+      name: 'THUNDER BEAST .338 / .50 BMG ULTRA-9 SUPPRESSOR',
+      shortName: 'TBAC .50 ULTRA',
+      price: 3800,
+      flashMult: 0.0,
+      recoilMult: 0.70,
+      velocityMult: 1.06,
+      spreadMult: 0.88,
+      silenced: true,
+      hideTracers: true,
+      desc: 'Titanium ELR/AMR Suppressor: +6% Muzzle Velocity, 100% Zero Flash/Tracer, silent crack & -30% recoil!'
     }
   ],
   magazine: [
@@ -328,6 +354,54 @@ export const ATTACHMENT_CATALOG = {
       isThermal: true,
       grantCanted: true,
       desc: 'High-magnification 6.0x ⇄ 12.0x Infrared Thermal Sniper Scope: lights up distant targets in glowing WHOT/BHOT IR ([N] Polarity • [SHIFT] Steady Breath • [V] Canted)!'
+    },
+    {
+      id: 'raptor_fvm40_13x',
+      name: 'RAPTOR-FVM40 SMART-LRF BALLISTIC SCOPE (13.0X + AUTO-DROP PIPPER)',
+      shortName: 'RAPTOR 13X SMART',
+      price: 3900,
+      opticType: 'raptor13x',
+      adsFov: 8.8,
+      hasSmartPipper: true,
+      hasBuiltInLrf: true,
+      grantCanted: true,
+      desc: 'MWII/MWIII Smart Ballistic Computer Optic (13.0x): projects a live red bullet-drop impact pipper dot & laser range readout (+ [F] ◆1688 Laser Paint & [V] Canted)!'
+    },
+    {
+      id: 'leupold_mark5_16x',
+      name: 'LEUPOLD MARK 5HD TREMOR3 (8.0X ⇄ 16.0X + CANTED)',
+      shortName: 'MARK 5HD 8-16X',
+      price: 3850,
+      opticType: 'sniper16x',
+      adsFov: 14.5,
+      zoomLevels: [8.0, 16.0],
+      zoomFovs: [14.5, 7.2],
+      grantCanted: true,
+      desc: 'USMC/SOCOM 8.0x ⇄ 16.0x long-range AMR/Sniper variable scope (Scroll Wheel) + [V] 45° Canted Red Dot!'
+    },
+    {
+      id: 'hensoldt_elr_27x',
+      name: 'HENSOLDT ZF / NIGHTFORCE ATACR ELR (9.0X ⇄ 18.0X ⇄ 27.0X)',
+      shortName: 'HENSOLDT 9-27X',
+      price: 4600,
+      opticType: 'sniper27x',
+      adsFov: 12.8,
+      zoomLevels: [9.0, 18.0, 27.0],
+      zoomFovs: [12.8, 6.4, 4.1],
+      grantCanted: true,
+      desc: '3-Stage Extreme Long-Range 9x ⇄ 18x ⇄ 27x Horus grid sniper scope — brace on One Knee [C], Prone [Z], or Bipod + [SHIFT] Hold Breath!'
+    },
+    {
+      id: 'ballistic_40x',
+      name: 'MARCH GENESIS ELR EXTREME TELEPHOTO (20.0X ⇄ 40.0X)',
+      shortName: 'GENESIS 20-40X',
+      price: 5400,
+      opticType: 'sniper40x',
+      adsFov: 5.8,
+      zoomLevels: [20.0, 40.0],
+      zoomFovs: [5.8, 2.85],
+      grantCanted: true,
+      desc: 'BF4-style 20.0x ⇄ 40.0x Cross-Valley Telephoto Scope! High standing sway — deploy Bipod / Prone [Z] / Rooftop Ledge Rest + [SHIFT] for cross-map headshots!'
     }
   ],
   grip: [
@@ -400,6 +474,39 @@ export const ATTACHMENT_CATALOG = {
       spreadMult: 0.52,
       rpmMult: 1.11,
       desc: '-48% hipfire spread, -32% recoil & +11% RPM with Geissele 3-Gun trigger!'
+    },
+    {
+      id: 'atlas_bipod',
+      name: 'B&T ATLAS BT10 HEAVY FOLDING SNIPER BIPOD',
+      shortName: 'ATLAS BIPOD',
+      price: 1750,
+      hasBipod: true,
+      recoilMult: 0.58,
+      spreadMult: 0.72,
+      rpmMult: 1.0,
+      desc: 'Locks rifle rock-steady when Prone [Z], One-Knee [C], or braced on a Rooftop Parapet (-88% scope sway & -42% recoil)!'
+    },
+    {
+      id: 'straight_pull_bolt',
+      name: 'STRAIGHT-PULL MATCH BOLT & TIMNEY 2-STAGE TRIGGER',
+      shortName: 'STRAIGHT-PULL',
+      price: 2450,
+      hasStraightPull: true,
+      recoilMult: 0.88,
+      spreadMult: 0.84,
+      rpmMult: 1.22,
+      desc: '+22% faster bolt/semi-auto follow-up cadence while staying continuously in ADS scope!'
+    },
+    {
+      id: 'raptar_lrf',
+      name: 'WILCOX RAPTAR-S RAIL LRF & ◆1688 JTAC LASER DESIGNATOR',
+      shortName: 'RAPTAR LRF+LASER',
+      price: 3250,
+      hasRaptarLrf: true,
+      recoilMult: 0.84,
+      spreadMult: 0.76,
+      rpmMult: 1.04,
+      desc: 'Mounts a Ballistic Computer LRF + ◆1688 Laser Designator on ANY scope: live drop pipper + press [F] to paint moving armor for [J] Laser Airstrikes & friendly Pilots!'
     }
   ],
   ammoType: [
@@ -496,6 +603,39 @@ export const ATTACHMENT_CATALOG = {
       velocityMult: 1.12,
       isIncendiaryAmmo: true,
       desc: '+48% armor pen, +12% damage & velocity + hardened steel penetrator core!'
+    },
+    {
+      id: 'match_boattail',
+      name: 'SIERRA MATCHKING / SOLID-TURNED ELR BOAT-TAIL',
+      shortName: 'ELR BOAT-TAIL',
+      price: 2550,
+      dmgMult: 1.08,
+      armorPenMult: 1.18,
+      recoilMult: 0.96,
+      spreadMult: 0.72,
+      voxelMult: 1.1,
+      velocityMult: 1.16,
+      bulletGravityMult: 0.78,
+      desc: '+16% Muzzle Velocity & -22% Gravity Drop (ultra-flat 1,500m+ ELR arc) with sub-MOA precision!'
+    },
+    {
+      id: 'raufoss_mk211',
+      name: '.50 BMG RAUFOSS MK 211 MOD 0 MULTIPURPOSE API-HE',
+      shortName: 'MK211 API-HE',
+      price: 3600,
+      dmgMult: 1.16,
+      armorPenMult: 1.75,
+      recoilMult: 1.1,
+      spreadMult: 0.92,
+      voxelMult: 1.65,
+      velocityMult: 1.10,
+      isIncendiaryAmmo: true,
+      explosiveSplash: {
+        radius: 2.2,
+        damage: 55,
+        weaponName: 'RAUFOSS MK211 API-HE'
+      },
+      desc: 'Tungsten-penetrator + Zirconium HEI micro-blast (2.2m splash): shreds cover, light vehicles, helicopters & tank optics!'
     }
   ],
   vest: [

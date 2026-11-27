@@ -4,8 +4,8 @@
 // panning, distance air-absorption filtering, and procedural sub-bass layers.
 // ============================================================================
 
-import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=136';
-import { AUDIO } from '../config.js?v=136';
+import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=139';
+import { AUDIO } from '../config.js?v=139';
 
 const AUDIO_STORAGE_KEY = 'bb_audio_settings_v1';
 
@@ -757,6 +757,67 @@ export class SoundManager {
       setTimeout(() => {
         this.playMedievalSoldierVoice(voiceKind, 6 + idx * 4, p, true);
       }, 180 + idx * 115);
+    });
+  }
+
+  /**
+   * Crisp Laser Rangefinder optical pulse + turret click (`[F]` in scope or `LMB` in LRF Binoculars).
+   */
+  playLaserRangefinderLock() {
+    this.init();
+    if (!this.ctx || !this.masterBus) return;
+    const now = this.ctx.currentTime;
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc1.type = 'sine';
+    osc2.type = 'triangle';
+    osc1.frequency.setValueAtTime(1680, now);
+    osc1.frequency.setValueAtTime(2240, now + 0.055);
+    osc2.frequency.setValueAtTime(840, now);
+    osc2.frequency.setValueAtTime(1120, now + 0.055);
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.linearRampToValueAtTime(0.09, now + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0008, now + 0.14);
+    osc1.connect(g);
+    osc2.connect(g);
+    g.connect(this.masterBus);
+    this._bindMultiShotCleanup([osc1, osc2], g, false);
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 0.15);
+    osc2.stop(now + 0.15);
+  }
+
+  /**
+   * Metallic Marksman Shot Badge chime scaled by shot difficulty grade (`B`, `A`, `S`, `S+`, `★`).
+   */
+  playMarksmanBadgeStinger(grade = 'A') {
+    this.init();
+    if (!this.ctx || !this.masterBus) return;
+    const now = this.ctx.currentTime;
+    const notes =
+      grade === '★' || grade === 'S+'
+        ? [659.25, 880, 1174.66, 1760]
+        : grade === 'S'
+        ? [587.33, 880, 1174.66]
+        : grade === 'A'
+        ? [523.25, 783.99]
+        : [440, 659.25];
+    notes.forEach((freq, idx) => {
+      const t0 = now + idx * 0.055;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = idx === notes.length - 1 ? 'triangle' : 'sine';
+      osc.frequency.setValueAtTime(freq, t0);
+      gain.gain.setValueAtTime(0.001, t0);
+      gain.gain.linearRampToValueAtTime(0.085, t0 + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.28);
+      osc.connect(gain);
+      gain.connect(this.masterBus);
+      this._bindOneShotCleanup(osc, gain, false);
+      osc.start(t0);
+      osc.stop(t0 + 0.3);
     });
   }
 

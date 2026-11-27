@@ -6,6 +6,7 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
+import { TEXTURES } from '../assets/textures.js?v=139';
 
 let propShared = null;
 
@@ -102,6 +103,268 @@ export const POWER_TOWER_SPEC = {
   ladderLocalZ: 2.55,
   hatchHalfW: 0.72
 };
+
+let _skyscraperSharedMats = null;
+
+function getSkyscraperSharedMaterials() {
+  if (_skyscraperSharedMats) return _skyscraperSharedMats;
+  const makeBlockyFacadeTex = (wallHex, accentHex, mortarHex) => {
+    if (typeof document === 'undefined') {
+      const dt = markShared(new THREE.DataTexture(new Uint8Array([120, 128, 136, 255]), 1, 1));
+      dt.wrapS = THREE.RepeatWrapping;
+      dt.wrapT = THREE.RepeatWrapping;
+      dt.needsUpdate = true;
+      return dt;
+    }
+    // 1 tile = 1 story tall (4 voxels = 5.0m) x 3 voxels wide (3.75m):
+    // Crispy BattleBit voxel-grid spandrel row + 1-voxel pillar column + 2x2 dark blocky window recess!
+    const canvas = document.createElement('canvas');
+    canvas.width = 192;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = wallHex;
+      ctx.fillRect(0, 0, 192, 256);
+
+      // Subtle 1.25m voxel block mortar grid lines (3 cols x 4 rows) so the 3D core looks 100% blocky!
+      ctx.strokeStyle = mortarHex;
+      ctx.lineWidth = 3;
+      for (let gx = 0; gx <= 3; gx++) {
+        const px = Math.round((gx / 3) * 192);
+        ctx.beginPath();
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, 256);
+        ctx.stroke();
+      }
+      for (let gy = 0; gy <= 4; gy++) {
+        const py = Math.round((gy / 4) * 256);
+        ctx.beginPath();
+        ctx.moveTo(0, py);
+        ctx.lineTo(192, py);
+        ctx.stroke();
+      }
+
+      // Bottom floor-slab spandrel band (row 3: y = 192..256)
+      ctx.fillStyle = accentHex;
+      ctx.fillRect(2, 194, 188, 60);
+
+      // Recessed blocky 2x2 voxel dark armored glass window bay (cols 1..2, rows 1..2: x = 66..188, y = 66..190)
+      ctx.fillStyle = '#142230';
+      ctx.fillRect(66, 66, 122, 124);
+      // Top window lintel shadow & crisp sill highlight (gives deep 3D block recess illusion!)
+      ctx.fillStyle = 'rgba(8, 14, 20, 0.65)';
+      ctx.fillRect(66, 66, 122, 14);
+      ctx.fillRect(66, 66, 12, 124);
+      ctx.fillStyle = 'rgba(155, 205, 240, 0.18)';
+      ctx.fillRect(80, 82, 44, 96);
+      ctx.fillRect(132, 82, 48, 96);
+      // Center window mullion bar
+      ctx.fillStyle = '#22313f';
+      ctx.fillRect(125, 66, 6, 124);
+      ctx.fillRect(66, 126, 122, 5);
+      // Bright blocky concrete windowsill ledge
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+      ctx.fillRect(64, 190, 126, 5);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.anisotropy = 4;
+    tex.needsUpdate = true;
+    return markShared(tex);
+  };
+
+  _skyscraperSharedMats = {
+    facadeByWall: {
+      concrete: markShared(
+        new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          map: makeBlockyFacadeTex('#c4ccd4', '#8e99a4', 'rgba(55,64,74,0.28)'),
+          roughness: 0.78,
+          metalness: 0.14
+        })
+      ),
+      darkConcrete: markShared(
+        new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          map: makeBlockyFacadeTex('#7d8791', '#5a636c', 'rgba(28,34,40,0.34)'),
+          roughness: 0.78,
+          metalness: 0.18
+        })
+      ),
+      brick: markShared(
+        new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          map: makeBlockyFacadeTex('#b86b5b', '#75483f', 'rgba(48,26,20,0.34)'),
+          roughness: 0.86,
+          metalness: 0.08
+        })
+      )
+    },
+    mullionSteel: markShared(
+      new THREE.MeshStandardMaterial({
+        color: 0x2c3540,
+        map: TEXTURES?.darkConcrete || null,
+        roughness: 0.42,
+        metalness: 0.74
+      })
+    ),
+    trimConcrete: markShared(
+      new THREE.MeshStandardMaterial({
+        color: 0x828c96,
+        map: TEXTURES?.concrete || null,
+        roughness: 0.85,
+        metalness: 0.08
+      })
+    ),
+    beaconRed: markShared(
+      new THREE.MeshBasicMaterial({
+        color: 0xff3b30
+      })
+    )
+  };
+  return _skyscraperSharedMats;
+}
+
+/**
+ * Builds an ultra-fast, BattleBit-blocky 3D Skyscraper Middle Structural Core (`<= 4` draw calls, `< 180` triangles!)
+ * for the indestructible intermediate shaft (`curtainMinY .. curtainMaxY`), while 1F/2F Lobby, Top Sniper Floor,
+ * Walkable Stairs, and Rooftop Helipad Bastions remain real destructible voxel blocks!
+ */
+export function createSkyscraper3DMesh(spec = {}) {
+  const mats = getSkyscraperSharedMaterials();
+  const wallMatKey = mats.facadeByWall[spec.wallMat] ? spec.wallMat : 'concrete';
+  const facadeMat = mats.facadeByWall[wallMatKey];
+  const spanX = Math.max(10, spec.spanX || 26);
+  const spanZ = Math.max(10, spec.spanZ || 22);
+  const lobbyBaseY = spec.lobbyBaseY ?? 0;
+  const curtainMinY = spec.curtainMinY ?? lobbyBaseY + 10;
+  const curtainMaxY = spec.curtainMaxY ?? lobbyBaseY + 60;
+  const roofTopY = spec.roofTopY ?? curtainMaxY + 5;
+  const variant = Math.abs(spec.variant || 0);
+
+  const group = new THREE.Group();
+  group.name = 'Skyscraper3DShell';
+
+  const curtainH = Math.max(4.0, curtainMaxY - curtainMinY);
+  const midCurtainY = (curtainMinY + curtainMaxY) * 0.5;
+
+  // 1. Blocky Voxel-Grid-Aligned Middle Core Box (aligned flush with 1.25m voxel walls, inset 0.03m to prevent Z-fighting with stair wall)
+  const coreGeo = new THREE.BoxGeometry(spanX - 0.06, curtainH, spanZ - 0.06);
+  const uvAttr = coreGeo.attributes.uv;
+  const repX = Math.max(2, Math.round(spanX / 3.75));
+  const repZ = Math.max(2, Math.round(spanZ / 3.75));
+  const repY = Math.max(1, Math.round(curtainH / 5.0));
+  for (let face = 0; face < 6; face++) {
+    const rx = face < 2 ? repZ : repX;
+    const ry = face === 2 || face === 3 ? repZ : repY;
+    for (let v = 0; v < 4; v++) {
+      const idx = face * 4 + v;
+      uvAttr.setXY(idx, uvAttr.getX(idx) * rx, uvAttr.getY(idx) * ry);
+    }
+  }
+  const glassMesh = new THREE.Mesh(coreGeo, facadeMat);
+  glassMesh.position.set(0, midCurtainY, 0);
+  glassMesh.castShadow = true;
+  glassMesh.receiveShadow = true;
+  group.add(glassMesh);
+
+  // 2. Merged Blocky Steel Corner Girders, Voxel-Stepped Spandrel Ledges, Canopy & Rooftop Antenna Mast
+  const steelParts = [];
+  const concreteParts = [];
+  const hx = spanX * 0.5 - 0.625;
+  const hz = spanZ * 0.5 - 0.625;
+
+  // 4 Blocky 1.25m Corner Steel Box-Girders along the 3D shaft so corners match 1F/Top-Floor `steelBeam` voxels!
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      steelParts.push({
+        geo: new THREE.BoxGeometry(1.26, curtainH + 0.08, 1.26),
+        pos: [sx * hx, midCurtainY, sz * hz],
+        rot: [0, 0, 0]
+      });
+    }
+  }
+
+  // Blocky Exterior Structural Ribs every 6 voxels (7.5m) matching 1F/2F `steelBeam` perimeter piers
+  const xRibCount = Math.max(2, Math.floor(spanX / 7.5));
+  for (let i = 1; i < xRibCount; i++) {
+    const px = -spanX * 0.5 + i * 7.5;
+    if (Math.abs(px) < hx - 1.2) {
+      for (const sz of [-1, 1]) {
+        steelParts.push({
+          geo: new THREE.BoxGeometry(1.05, curtainH, 0.22),
+          pos: [px, midCurtainY, sz * (spanZ * 0.5 + 0.04)],
+          rot: [0, 0, 0]
+        });
+      }
+    }
+  }
+  const zRibCount = Math.max(2, Math.floor(spanZ / 7.5));
+  for (let i = 1; i < zRibCount; i++) {
+    const pz = -spanZ * 0.5 + i * 7.5;
+    if (Math.abs(pz) < hz - 1.2) {
+      for (const sx of [-1, 1]) {
+        steelParts.push({
+          geo: new THREE.BoxGeometry(0.22, curtainH, 1.05),
+          pos: [sx * (spanX * 0.5 + 0.04), midCurtainY, pz],
+          rot: [0, 0, 0]
+        });
+      }
+    }
+  }
+
+  // Blocky Precast Concrete Belt Ledges every 2 stories (10m) for chunky silhouette relief
+  for (let by = curtainMinY; by <= curtainMaxY + 0.1; by += 10.0) {
+    concreteParts.push({
+      geo: new THREE.BoxGeometry(spanX + 0.28, 0.62, spanZ + 0.28),
+      pos: [0, by, 0],
+      rot: [0, 0, 0]
+    });
+  }
+
+  // Blocky Rooftop Communications Mast + HVAC Box on NE corner (clear of Helipad & Stairwell!)
+  const spireX = hx - 1.8;
+  const spireZ = -hz + 1.8;
+  const spireH = 7.5 + (variant % 3) * 2.5;
+  steelParts.push({
+    geo: new THREE.BoxGeometry(0.42, spireH, 0.42),
+    pos: [spireX, roofTopY + spireH * 0.5, spireZ],
+    rot: [0, 0, 0]
+  });
+  steelParts.push({
+    geo: new THREE.BoxGeometry(2.2, 1.25, 1.6),
+    pos: [spireX - 1.6, roofTopY + 0.625, spireZ + 0.3],
+    rot: [0, 0, 0]
+  });
+
+  if (steelParts.length > 0) {
+    const steelGeo = mergeStaticParts(steelParts);
+    steelGeo.userData.shared = false;
+    const steelMesh = new THREE.Mesh(steelGeo, mats.mullionSteel);
+    steelMesh.castShadow = true;
+    steelMesh.receiveShadow = true;
+    group.add(steelMesh);
+  }
+
+  if (concreteParts.length > 0) {
+    const concGeo = mergeStaticParts(concreteParts);
+    concGeo.userData.shared = false;
+    const concMesh = new THREE.Mesh(concGeo, mats.trimConcrete);
+    concMesh.receiveShadow = true;
+    group.add(concMesh);
+  }
+
+  const beaconGeo = new THREE.BoxGeometry(0.42, 0.42, 0.42);
+  const beaconMesh = new THREE.Mesh(beaconGeo, mats.beaconRed);
+  beaconMesh.position.set(spireX, roofTopY + spireH + 0.21, spireZ);
+  group.add(beaconMesh);
+
+  group.userData.curtainShell = { glassMesh, spireTopY: roofTopY + spireH };
+  return group;
+}
 
 function buildRadarTowerGeometries() {
   const steelParts = [];

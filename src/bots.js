@@ -3,13 +3,13 @@ export {
   SQUAD_DEFS,
   SQUAD_9MAN_ROSTERS,
   evaluateCatastrophicKill
-} from './bots/BotManager.js?v=136';
+} from './bots/BotManager.js?v=139';
 export {
   createSoldierMesh,
   updateSoldierEquippedWeapon,
   getDefaultWeaponIdForRole
-} from './bots/SoldierMeshFactory.js?v=136';
-export { SightlineMethods, hasClearSightline, canBotSeeTarget, isPointBlocked } from './bots/SightlineSystem.js?v=136';
+} from './bots/SoldierMeshFactory.js?v=139';
+export { SightlineMethods, hasClearSightline, canBotSeeTarget, isPointBlocked } from './bots/SightlineSystem.js?v=139';
 export {
   MedicAIMethods,
   clearBotRescueLinks,
@@ -19,7 +19,7 @@ export {
   computeSafeDragSpot,
   findNearestDownedFriendly,
   updateMedicRescue
-} from './bots/MedicAI.js?v=136';
+} from './bots/MedicAI.js?v=139';
 export {
   BotAIMethods,
   spawnTracer,
@@ -27,4 +27,4 @@ export {
   getBotMuzzleWorldPosition,
   botFireRpgAt,
   botFireAt
-} from './bots/BotAI.js?v=136';
+} from './bots/BotAI.js?v=139';
