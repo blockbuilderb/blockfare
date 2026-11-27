@@ -258,6 +258,55 @@ export const MinimapRenderer = {
       ctx.fill();
     }
 
+    // Squad Leader (★ SL) & Squad Objective (🎯) Pointers on HUD Minimap (clamped to rim if off-screen so you never get lost!)
+    if (typeof this.computeSquadNavigationGuide === 'function') {
+      const nav = this.computeSquadNavigationGuide();
+      const maxRim = w * 0.5 - 11;
+      if (nav?.targetWaypoint) {
+        const wdx = (nav.targetWaypoint.x - px) * scale;
+        const wdz = (nav.targetWaypoint.z - pz) * scale;
+        const wLen = Math.hypot(wdx, wdz);
+        if (wLen > 8) {
+          const clamped = wLen > maxRim;
+          const rx = clamped ? (wdx / wLen) * maxRim : wdx;
+          const rz = clamped ? (wdz / wLen) * maxRim : wdz;
+          ctx.strokeStyle = 'rgba(241, 196, 15, 0.42)';
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(rx, rz);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          if (clamped) {
+            ctx.fillStyle = '#f1c40f';
+            ctx.font = 'bold 8px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(nav.targetWaypoint.shortLabel || 'OBJ', rx, rz + 3);
+          }
+        }
+      }
+      if (nav?.squadLeader && this.player.commandRank !== 'SQUAD_LEADER') {
+        const sdx = (nav.squadLeader.x - px) * scale;
+        const sdz = (nav.squadLeader.z - pz) * scale;
+        const sLen = Math.hypot(sdx, sdz);
+        const clamped = sLen > maxRim;
+        const sx = clamped ? (sdx / Math.max(1, sLen)) * maxRim : sdx;
+        const sz = clamped ? (sdz / Math.max(1, sLen)) * maxRim : sdz;
+        ctx.fillStyle = '#00ff88';
+        ctx.strokeStyle = '#041b10';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(sx, sz, 4.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 7.5px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('SL', sx, sz - 6);
+      }
+    }
+
     // Local Player + View Cone
     ctx.save();
     ctx.rotate(-this.player.yaw);
@@ -396,13 +445,30 @@ export const MinimapRenderer = {
 
     const team = this.player.team || 'US';
     const cmdOrder = this.botManager.commanderOrders && this.botManager.commanderOrders[team];
+    const nav = typeof this.computeSquadNavigationGuide === 'function' ? this.computeSquadNavigationGuide() : null;
+    const flagDistrictTags = {
+      A: 'WEST TOWN',
+      B: 'CONTAINERS',
+      C: 'DOWNTOWN',
+      D: 'RADAR HILL',
+      E: 'INDUSTRIAL'
+    };
 
-    // 5 Capture Flags (Interactive click targets)
+    // Bridge Landmark Labels
+    ctx.fillStyle = 'rgba(189, 195, 199, 0.55)';
+    ctx.font = 'bold 8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('N. BRIDGE', toMapX(0), toMapY(-400) - 6);
+    ctx.fillText('CENTRAL BRIDGE', toMapX(0), toMapY(0) - 7);
+    ctx.fillText('S. BRIDGE', toMapX(0), toMapY(400) - 6);
+
+    // 5 Capture Flags (Interactive click targets + District Names + Active Target Highlight)
     for (const f of this.world.flags) {
       const fx = toMapX(f.pos.x);
       const fy = toMapY(f.pos.z);
       const isOrdered =
-        cmdOrder && cmdOrder.timer > 0 && cmdOrder.action === 'OBJECTIVE' && cmdOrder.flagId === f.id;
+        (cmdOrder && cmdOrder.timer > 0 && cmdOrder.action === 'OBJECTIVE' && cmdOrder.flagId === f.id) ||
+        (nav?.targetWaypoint?.flagId === f.id);
 
       ctx.fillStyle =
         f.owner === 'US'
@@ -419,14 +485,26 @@ export const MinimapRenderer = {
       ctx.stroke();
 
       if (isOrdered) {
+        ctx.strokeStyle = 'rgba(241, 196, 15, 0.55)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(fx, fy, 22, 0, Math.PI * 2);
+        ctx.stroke();
+
         ctx.fillStyle = '#f1c40f';
-        ctx.font = 'bold 9px sans-serif';
-        ctx.fillText('★ ORDER TARGET', fx, fy - 20);
+        ctx.font = 'bold 9.5px sans-serif';
+        ctx.fillText('🎯 GO HERE', fx, fy - 24);
       }
 
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 12px sans-serif';
       ctx.fillText(f.id, fx, fy + 4);
+
+      if (flagDistrictTags[f.id]) {
+        ctx.fillStyle = 'rgba(236, 240, 241, 0.78)';
+        ctx.font = 'bold 8px sans-serif';
+        ctx.fillText(flagDistrictTags[f.id], fx, fy + 26);
+      }
     }
 
     // Active Vehicles on Tactical Map (highlight UAV-revealed enemy armor with orange targeting ring!)
@@ -460,29 +538,140 @@ export const MinimapRenderer = {
       ctx.fillText(`💥 STRIKE (${this.player.airstrikeTarget.timer.toFixed(1)}s)`, ax, ay - 21);
     }
 
-    // Friendly Bots & Spotted Enemies
+    // Friendly Bots, Squadmates & Spotted Enemies
+    const slBotRef = nav?.squadLeader?.bot || null;
     for (const bot of this.botManager.bots) {
       if (bot.dead) continue;
       if (bot.team === team) {
-        ctx.fillStyle = bot.inPlayerSquad ? '#2ecc71' : '#5dade2';
-        ctx.fillRect(toMapX(bot.pos.x) - 2, toMapY(bot.pos.z) - 2, 4, 4);
+        const bx = toMapX(bot.pos.x);
+        const by = toMapY(bot.pos.z);
+        if (bot.inPlayerSquad || bot.squad === (this.player.squad || 'ALPHA')) {
+          ctx.fillStyle = '#2ecc71';
+          ctx.strokeStyle = '#062012';
+          ctx.lineWidth = 1.1;
+          ctx.beginPath();
+          ctx.arc(bx, by, 3.6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = '#5dade2';
+          ctx.fillRect(bx - 2, by - 2, 4, 4);
+        }
       } else if (bot.uavRevealed || (bot.spottedTimer && bot.spottedTimer > 0)) {
         ctx.fillStyle = '#ff3838';
-        ctx.fillRect(toMapX(bot.pos.x) - 2, toMapY(bot.pos.z) - 2, 4, 4);
+        ctx.fillRect(toMapX(bot.pos.x) - 2.2, toMapY(bot.pos.z) - 2.2, 4.4, 4.4);
       }
     }
 
-    // Local Player Marker
-    if (!this.player.dead) {
-      const px = toMapX(this.player.pos.x);
-      const py = toMapY(this.player.pos.z);
-      ctx.fillStyle = '#f1c40f';
+    // Squad Group Halo Ring around Player's Squad Centroid
+    if (nav?.squadCentroid && nav.squadCentroid.aliveCount >= 2) {
+      const scx = toMapX(nav.squadCentroid.x);
+      const scy = toMapY(nav.squadCentroid.z);
+      ctx.strokeStyle = 'rgba(46, 204, 113, 0.65)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
       ctx.beginPath();
-      ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+      ctx.arc(scx, scy, 14, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#7bed9f';
+      ctx.font = 'bold 8.5px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`👥 ${nav.squadId} (${nav.squadCentroid.aliveCount})`, scx, scy + 23);
+    }
+
+    // Dashed GPS Route Vectors: YOU ➔ ★ SQUAD LEADER ➔ 🎯 TARGET WAYPOINT
+    const pMapX = toMapX(nav?.playerPos?.x ?? this.player.pos.x);
+    const pMapY = toMapY(nav?.playerPos?.z ?? this.player.pos.z);
+    let routeFromX = pMapX;
+    let routeFromY = pMapY;
+
+    if (nav?.squadLeader && slBotRef && this.player.commandRank !== 'SQUAD_LEADER') {
+      const slX = toMapX(nav.squadLeader.x);
+      const slY = toMapY(nav.squadLeader.z);
+      if (!this.player.dead && Math.hypot(slX - pMapX, slY - pMapY) > 10) {
+        ctx.strokeStyle = '#00ff88';
+        ctx.lineWidth = 2.0;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(pMapX, pMapY);
+        ctx.lineTo(slX, slY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      routeFromX = slX;
+      routeFromY = slY;
+
+      // Prominent ★ SQUAD LEADER Star Badge
+      ctx.fillStyle = '#00ff88';
+      ctx.strokeStyle = '#f1c40f';
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.arc(slX, slY, 6.8, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#f1c40f';
+      ctx.stroke();
+      ctx.fillStyle = '#04180c';
       ctx.font = 'bold 9px sans-serif';
-      ctx.fillText('YOU', px, py + 14);
+      ctx.textAlign = 'center';
+      ctx.fillText('★', slX, slY + 3);
+      ctx.fillStyle = '#a3f7bf';
+      ctx.font = 'bold 9.5px sans-serif';
+      ctx.fillText(`★ SL (${nav.squadLeader.distM}m)`, slX, slY - 10);
+    }
+
+    if (nav?.targetWaypoint) {
+      const wpX = toMapX(nav.targetWaypoint.x);
+      const wpY = toMapY(nav.targetWaypoint.z);
+      if (Math.hypot(wpX - routeFromX, wpY - routeFromY) > 14) {
+        ctx.strokeStyle = '#f1c40f';
+        ctx.lineWidth = 2.2;
+        ctx.setLineDash([7, 4]);
+        ctx.beginPath();
+        ctx.moveTo(routeFromX, routeFromY);
+        ctx.lineTo(wpX, wpY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    // Local Player Directional Marker + View Cone ("📍 YOU")
+    if (!this.player.dead) {
+      const px = pMapX;
+      const py = pMapY;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(-(this.player.yaw || 0));
+      ctx.fillStyle = 'rgba(241, 196, 15, 0.24)';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-12, -26);
+      ctx.lineTo(12, -26);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#f1c40f';
+      ctx.strokeStyle = '#111111';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(0, -7.5);
+      ctx.lineTo(-5.5, 5.5);
+      ctx.lineTo(0, 2.5);
+      ctx.lineTo(5.5, 5.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.strokeStyle = 'rgba(241, 196, 15, 0.78)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(px, py, 10.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffeaa7';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('📍 YOU', px, py + 20);
     }
   }
 };

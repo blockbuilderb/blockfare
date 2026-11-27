@@ -1,4 +1,4 @@
-import { sound } from '../audio.js?v=139';
+import { sound } from '../audio.js?v=141';
 
 export const SettingsModal = {
   bindSettingsEvents() {
@@ -174,7 +174,11 @@ export const SettingsModal = {
     const masterVol = sound.getVolume('master');
     const weaponsVol = sound.getVolume('weapons');
     const explosionsVol = sound.getVolume('explosions');
+    const vehiclesVol = sound.getVolume('vehicles');
     const radioVol = sound.getVolume('radio');
+    const musicVol = sound.getVolume('music');
+    const reverbOn = sound.getVolume('reverbEnabled');
+    const envLabel = (sound.currentEnvironment || 'open_valley').replace(/_/g, ' ').toUpperCase();
     const isMuted = sound.getVolume('muted');
     const bldDestructEnabled = this.world ? this.world.buildingDestructionEnabled !== false : true;
     const bhopEnabled = this.player ? this.player.bhopEnabled !== false : true;
@@ -250,6 +254,7 @@ export const SettingsModal = {
               ${weaponsVol} / 100
             </span>
             <button type="button" id="test-shot-btn" style="background:rgba(241,196,15,0.18);border:1px solid #f1c40f;color:#f1c40f;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:900;cursor:pointer;">🔫 Test Shot</button>
+            <button type="button" id="test-amr-btn" style="background:rgba(231,76,60,0.2);border:1px solid #e74c3c;color:#ff7675;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:900;cursor:pointer;">🎯 .50 AMR</button>
           </div>
         </div>
         <input
@@ -289,7 +294,7 @@ export const SettingsModal = {
       </div>
 
       <!-- CATEGORY 3: RADIO COMMS & UI -->
-      <div style="background:rgba(16,26,36,0.88);border:1px solid rgba(0,206,201,0.3);border-radius:6px;padding:10px 14px;margin-bottom:14px;">
+      <div style="background:rgba(16,26,36,0.88);border:1px solid rgba(0,206,201,0.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <div>
             <span style="font-size:13px;font-weight:900;color:#81ecec;">3. RADIO COMMS &amp; UI (0 - 100)</span>
@@ -310,6 +315,60 @@ export const SettingsModal = {
           step="1"
           value="${radioVol}"
           style="width:100%;accent-color:#00cec9;cursor:pointer;height:6px;"
+        />
+      </div>
+
+      <!-- CATEGORY 3B: VEHICLES, TURBINES & ROTORS -->
+      <div style="background:rgba(16,26,36,0.88);border:1px solid rgba(0,206,201,0.3);border-radius:6px;padding:10px 14px;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <div>
+            <span style="font-size:13px;font-weight:900;color:#81ecec;">VEHICLES, ENGINES &amp; ROTORS (0 - 100)</span>
+            <div style="font-size:10px;color:#95a5a6;">Humvee V8 Diesel, M1A2 Gas-Turbine, T-90M V12, Dirt Bikes, Helicopters &amp; Jet Afterburners</div>
+          </div>
+          <span id="vol-badge-vehicles" style="background:rgba(0,206,201,0.15);border:1px solid #00cec9;color:#81ecec;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:900;min-width:60px;text-align:center;">
+            ${vehiclesVol} / 100
+          </span>
+        </div>
+        <input
+          id="vol-slider-vehicles"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value="${vehiclesVol}"
+          style="width:100%;accent-color:#00cec9;cursor:pointer;height:6px;"
+        />
+      </div>
+
+      <!-- CATEGORY 3C: ADAPTIVE GENERAL MIDI WAR SOUNDTRACK & 3D CONVOLUTION REVERB -->
+      <div style="background:rgba(16,26,36,0.92);border:1px solid rgba(155,89,182,0.5);border-left:4px solid #9b59b6;border-radius:6px;padding:10px 14px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px;flex-wrap:wrap;">
+          <div>
+            <span style="font-size:13px;font-weight:900;color:#d2b4de;">🎵 ADAPTIVE MIDI SCORE &amp; 3D CONVOLUTION REVERB (0 - 100)</span>
+            <div style="font-size:10px;color:#95a5a6;">Dynamic General MIDI Combat Score (Deploy, Contested, Low-Ticket Finale &amp; Medieval) + Live Acoustic Echo (<b>${envLabel}</b>)</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span id="vol-badge-music" style="background:rgba(155,89,182,0.2);border:1px solid #9b59b6;color:#e8daef;border-radius:4px;padding:2px 8px;font-size:12px;font-weight:900;min-width:60px;text-align:center;">
+              ${musicVol} / 100
+            </span>
+            <button type="button" id="test-music-btn" style="background:rgba(155,89,182,0.24);border:1px solid #9b59b6;color:#e8daef;border-radius:4px;padding:3px 9px;font-size:11px;font-weight:900;cursor:pointer;">🎺 Fanfare</button>
+            <button type="button" id="settings-reverb-btn" style="background:${
+              reverbOn ? 'rgba(46,204,113,0.22)' : 'rgba(255,255,255,0.08)'
+            };border:1px solid ${reverbOn ? '#2ecc71' : 'rgba(255,255,255,0.28)'};color:${
+              reverbOn ? '#7bed9f' : '#94a3b8'
+            };border-radius:4px;padding:3px 9px;font-size:11px;font-weight:900;cursor:pointer;">${
+              reverbOn ? '🏔️ REVERB: ON' : '🏔️ REVERB: OFF'
+            }</button>
+          </div>
+        </div>
+        <input
+          id="vol-slider-music"
+          type="range"
+          min="0"
+          max="100"
+          step="1"
+          value="${musicVol}"
+          style="width:100%;accent-color:#9b59b6;cursor:pointer;height:6px;"
         />
       </div>
 
@@ -518,6 +577,10 @@ export const SettingsModal = {
     const explosionsBadge = modal.querySelector('#vol-badge-explosions');
     const radioSlider = modal.querySelector('#vol-slider-radio');
     const radioBadge = modal.querySelector('#vol-badge-radio');
+    const vehiclesSlider = modal.querySelector('#vol-slider-vehicles');
+    const vehiclesBadge = modal.querySelector('#vol-badge-vehicles');
+    const musicSlider = modal.querySelector('#vol-slider-music');
+    const musicBadge = modal.querySelector('#vol-badge-music');
 
     const syncMuteUi = () => {
       const muted = sound.getVolume('muted');
@@ -583,6 +646,46 @@ export const SettingsModal = {
         const val = sound.setVolume('radio', radioSlider.value);
         if (radioBadge) radioBadge.textContent = `${val} / 100`;
         this.updateAudioSettingsHud();
+      });
+    }
+
+    if (vehiclesSlider) {
+      vehiclesSlider.addEventListener('input', () => {
+        const val = sound.setVolume('vehicles', vehiclesSlider.value);
+        if (vehiclesBadge) vehiclesBadge.textContent = `${val} / 100`;
+        this.updateAudioSettingsHud();
+      });
+    }
+
+    if (musicSlider) {
+      musicSlider.addEventListener('input', () => {
+        const val = sound.setVolume('music', musicSlider.value);
+        if (musicBadge) musicBadge.textContent = `${val} / 100`;
+        this.updateAudioSettingsHud();
+      });
+    }
+
+    const testAmrBtn = modal.querySelector('#test-amr-btn');
+    if (testAmrBtn) {
+      testAmrBtn.addEventListener('click', () => {
+        sound.playGunshot('amr', 0, 0, false);
+      });
+    }
+
+    const testMusicBtn = modal.querySelector('#test-music-btn');
+    if (testMusicBtn) {
+      testMusicBtn.addEventListener('click', () => {
+        sound.playMusicStinger?.('victory');
+      });
+    }
+
+    const reverbBtn = modal.querySelector('#settings-reverb-btn');
+    if (reverbBtn) {
+      reverbBtn.addEventListener('click', () => {
+        const nextRev = !sound.getVolume('reverbEnabled');
+        sound.setReverbEnabled?.(nextRev);
+        this.renderSettingsModalContent(modal);
+        sound.playRadioBeep(true);
       });
     }
 

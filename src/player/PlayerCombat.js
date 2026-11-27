@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=139';
+import { sound } from '../audio.js?v=141';
 import {
   PLAYER,
   COMBAT,
@@ -8,17 +8,17 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=139';
-import { events } from '../events.js?v=139';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=139';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=139';
+} from '../config.js?v=141';
+import { events } from '../events.js?v=141';
+import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=141';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=141';
 import {
   evaluateMarksmanShot,
   computeBallisticSolution,
   syncActiveMarksmanTitle,
   saveMarksmanProfile,
   loadMarksmanProfile
-} from './MarksmanSystem.js?v=139';
+} from './MarksmanSystem.js?v=141';
 
 function markShared(asset) {
   if (asset) {
@@ -1422,7 +1422,7 @@ export const CombatMethods = {
     this.reloadTotalTime = cur.def.reloadTime * cohesionReloadMult;
     this.reloadTimer = this.reloadTotalTime;
     this.isAds = false;
-    sound.playReload();
+    sound.playReload(cur.def);
     events.emit('player:reloaded', {
       weapon: cur.def,
       clip: cur.clip,
@@ -1582,7 +1582,7 @@ export const CombatMethods = {
       sound.playMeleeSwing?.(0, 0, false);
       this.muzzleFlashTimer = 0;
     } else {
-      sound.playGunshot(def.soundType, 0, 0, Boolean(def.silenced));
+      sound.playGunshot(def.audioProfile || def.soundType, 0, 0, Boolean(def.silenced), def);
       this.muzzleFlashTimer = def.flashMult === 0 ? 0 : 0.032;
       this.ejectBrassCasing();
     }
@@ -3510,6 +3510,7 @@ export const CombatMethods = {
   throwFragGrenade() {
     if (this.grenades <= 0) return;
     this.grenades--;
+    sound.playGrenadeThrow?.(0, 0);
 
     const origin = this.camera.getWorldPosition(new THREE.Vector3());
     const dir = new THREE.Vector3(0, 0.22, -1)

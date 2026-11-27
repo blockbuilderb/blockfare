@@ -4,8 +4,8 @@
 // attachment overlay graphics, and gear/grid size metadata.
 // ============================================================================
 
-import { WEAPON_DEFS } from './weapon-defs.js?v=139';
-import { ATTACHMENT_CATALOG } from './attachment-defs.js?v=139';
+import { WEAPON_DEFS } from './weapon-defs.js?v=141';
+import { ATTACHMENT_CATALOG } from './attachment-defs.js?v=141';
 
 export const CLASS_META = [
   { id: 'engineer', label: 'ENGINEER', short: 'ENG', icon: '🛠️', gadgetId: 'rpg7', gadget: 'RPG-7 HEAT + HAMMER' },

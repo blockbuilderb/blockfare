@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=139';
-import { VehicleManager } from './vehicles.js?v=139';
-import { BotManager } from './bots.js?v=139';
-import { PlayerController } from './player.js?v=139';
-import { NetworkManager } from './network.js?v=139';
-import { UIManager } from './ui.js?v=139';
-import { TelemetryLogger } from './telemetry.js?v=139';
-import { sound } from './audio.js?v=139';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=139';
-import { events, makeEventBridge } from './events.js?v=139';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=139';
+import { VoxelWorld } from './world.js?v=141';
+import { VehicleManager } from './vehicles.js?v=141';
+import { BotManager } from './bots.js?v=141';
+import { PlayerController } from './player.js?v=141';
+import { NetworkManager } from './network.js?v=141';
+import { UIManager } from './ui.js?v=141';
+import { TelemetryLogger } from './telemetry.js?v=141';
+import { sound } from './audio.js?v=141';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=141';
+import { events, makeEventBridge } from './events.js?v=141';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=141';
 
 class BattleBitGame {
   constructor() {
@@ -107,6 +107,7 @@ class BattleBitGame {
     this.activeEra = this.world.era || 'modern';
     this.vehicleManager = new VehicleManager(this.scene, this.world);
     this.botManager = new BotManager(this.scene, this.world);
+    this.vehicleManager.botManager = this.botManager;
     // Default Singleplayer 500-Player Scale: 1 Human Player + 499 AI Soldiers (249 US AI + 1 Player vs 250 RU AI)
     this.botManager.initBots(initialBotsPerSide, isInitialMp ? null : 'US');
 
@@ -237,6 +238,7 @@ class BattleBitGame {
         : null;
 
     if (this.player) {
+      this.player._hasDeployedInRound = false;
       if (typeof this.player.clearActiveVehicleOnReset === 'function') {
         this.player.clearActiveVehicleOnReset('era-switch');
       } else {
@@ -308,6 +310,7 @@ class BattleBitGame {
     this.activeEra = this.world.era || targetEra;
     this.vehicleManager = new VehicleManager(this.scene, this.world);
     this.botManager = new BotManager(this.scene, this.world);
+    this.vehicleManager.botManager = this.botManager;
     this.botManager.initBots(prevBotsPerTeam, prevPlayerSlotTeam);
 
     if (this.player) {
@@ -1207,6 +1210,7 @@ class BattleBitGame {
     events.on(
       'round:ended',
       ({ winnerTeam, ticketsUS, ticketsRU, matchTimeRemaining, extraction }) => {
+        sound.playMusicStinger?.(winnerTeam === this.player?.team ? 'victory' : 'defeat');
         this.ui.showVictoryScreen(
           winnerTeam,
           ticketsUS,
@@ -1739,8 +1743,10 @@ class BattleBitGame {
         this.camera.lookAt(0, 4, 0);
         this.camera.updateMatrixWorld();
       }
-    } else {
+    } else if (!onDeployMenu) {
       this.player.update(dt);
+      this.camera.updateMatrixWorld();
+    } else {
       this.camera.updateMatrixWorld();
     }
 
@@ -1811,6 +1817,21 @@ class BattleBitGame {
 
     this.network.update(dt);
     if (this.stateMachines) this.stateMachines.update(dt);
+    sound.updateAdaptiveAudio?.({
+      listenerPos: this.player?.pos,
+      world: this.world,
+      inAircraft: Boolean(this.player?.activeVehicle?.isAircraft),
+      onDeployMenu,
+      matchEnded: this.matchEnded,
+      era: this.world?.era || 'modern',
+      minTickets: Math.min(this.ticketsUS, this.ticketsRU),
+      matchTimeRemaining: this.matchTimeRemaining,
+      inCombat: Boolean(
+        (this.player?.suppressionLevel || 0) > 0.12 ||
+          this.currentBleedInfo?.bleedUSPerMin > 0 ||
+          this.currentBleedInfo?.bleedRUPerMin > 0
+      )
+    });
     try {
       this.ui.update(dt, this.ticketsUS, this.ticketsRU, this.matchTimeRemaining, rawDt);
     } catch (uiErr) {
@@ -2122,6 +2143,7 @@ class BattleBitGame {
 
     // Reset AC-130 / Aircraft Infrared (WHOT / BHOT) & Night Vision back to normal daylight view for the new round!
     if (this.player) {
+      this.player._hasDeployedInRound = false;
       if (typeof this.player.clearActiveVehicleOnReset === 'function') {
         this.player.clearActiveVehicleOnReset('new-round');
       } else {
@@ -2220,6 +2242,7 @@ class BattleBitGame {
     if (typeof this.player.syncTotalCash === 'function') {
       this.player.syncTotalCash();
     }
+    this.player._hasDeployedInRound = false;
     if (typeof this.player.saveGunsmithState === 'function') {
       this.player.saveGunsmithState();
     }
@@ -2311,6 +2334,13 @@ class BattleBitGame {
 function bootBattleBitGame() {
   if (!window.game) {
     window.game = new BattleBitGame();
+    const unlockAudioOnce = () => {
+      sound.init?.();
+      window.removeEventListener('pointerdown', unlockAudioOnce);
+      window.removeEventListener('keydown', unlockAudioOnce);
+    };
+    window.addEventListener('pointerdown', unlockAudioOnce, { passive: true });
+    window.addEventListener('keydown', unlockAudioOnce, { passive: true });
   }
   return window.game;
 }

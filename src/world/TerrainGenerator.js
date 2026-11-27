@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../textures.js?v=139';
-import { TERRAIN } from '../config.js?v=139';
-import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=139';
+import { TEXTURES } from '../textures.js?v=141';
+import { TERRAIN } from '../config.js?v=141';
+import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=141';
 
 const VOXEL_SIZE = 1.25;
 

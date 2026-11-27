@@ -1,13 +1,21 @@
 // ============================================================================
-// SOUND MANAGER & SPATIAL WEBAUDIO MIXER (src/audio/SoundManager.js)
-// Handles 0-100 Master + Category volume mixing, sample playback, 3D stereo
-// panning, distance air-absorption filtering, and procedural sub-bass layers.
+// SOUND MANAGER, SPATIAL CONVOLUTION REVERB & GENERAL MIDI MIXER
+// (src/audio/SoundManager.js)
+// - 0-100 Master + Category volume mixing (weapons, explosions, vehicles, radio, music)
+// - Multi-layer CC0 firearm & anti-materiel cannon playback ("Crack + Thump + Tail")
+// - Dynamic 3-Space WebAudio ConvolverNode Reverb ('open_valley', 'urban_canyon', 'indoor_room')
+// - Speed-of-Sound (343 m/s) delayed distant explosions, tank cannons & sniper thunder
+// - Supersonic N-Wave ballistic bullet crack + Doppler pass-by whip
+// - Continuous procedural Aircraft & Ground Vehicle (Humvee, Tank, IFV, Moto) engines
+// - Adaptive General MIDI Combat Soundtrack & Orchestral Stingers (MidiSynthEngine)
 // ============================================================================
 
-import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=139';
-import { AUDIO } from '../config.js?v=139';
+import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=141';
+import { AUDIO } from '../config.js?v=141';
+import { MidiSynthEngine } from './MidiSynthEngine.js?v=141';
 
 const AUDIO_STORAGE_KEY = 'bb_audio_settings_v1';
+const SPEED_OF_SOUND = AUDIO.SPEED_OF_SOUND_MPS || 343;
 
 export class SoundManager {
   constructor() {
@@ -26,14 +34,35 @@ export class SoundManager {
     this._sharedNoiseBuffer = null;
     this._sharedNoiseCtx = null;
 
+    // Spatial Environment & Convolution Reverb State
+    this._reverbNodes = null;
+    this._reverbCtx = null;
+    this.currentEnvironment = 'open_valley'; // 'open_valley' | 'urban_canyon' | 'indoor_room'
+    this._lastEnvCheckMs = 0;
+    this._combatPulseUntilMs = 0;
+
     this.volumes = {
       master: AUDIO.DEFAULT_MASTER_VOLUME ?? 80,
       weapons: AUDIO.DEFAULT_WEAPONS_VOLUME ?? 85,
       explosions: AUDIO.DEFAULT_EXPLOSIONS_VOLUME ?? 85,
+      vehicles: AUDIO.DEFAULT_VEHICLES_VOLUME ?? 80,
       radio: AUDIO.DEFAULT_RADIO_VOLUME ?? 80,
-      muted: false,
+      music: AUDIO.DEFAULT_MUSIC_VOLUME ?? 65,
+      reverbEnabled: true,
+      muted: false
     };
     this.loadAudioSettings();
+
+    // Adaptive General MIDI Combat Soundtrack & Stinger Engine
+    this.midiEngine = new MidiSynthEngine(this);
+  }
+
+  get enabled() {
+    return !this.volumes.muted;
+  }
+
+  get muted() {
+    return Boolean(this.volumes.muted);
   }
 
   loadAudioSettings() {
@@ -49,7 +78,12 @@ export class SoundManager {
       this.volumes.master = clampVol(parsed.master, AUDIO.DEFAULT_MASTER_VOLUME ?? 80);
       this.volumes.weapons = clampVol(parsed.weapons, AUDIO.DEFAULT_WEAPONS_VOLUME ?? 85);
       this.volumes.explosions = clampVol(parsed.explosions, AUDIO.DEFAULT_EXPLOSIONS_VOLUME ?? 85);
+      this.volumes.vehicles = clampVol(parsed.vehicles, AUDIO.DEFAULT_VEHICLES_VOLUME ?? 80);
       this.volumes.radio = clampVol(parsed.radio, AUDIO.DEFAULT_RADIO_VOLUME ?? 80);
+      this.volumes.music = clampVol(parsed.music, AUDIO.DEFAULT_MUSIC_VOLUME ?? 65);
+      if (typeof parsed.reverbEnabled === 'boolean') {
+        this.volumes.reverbEnabled = parsed.reverbEnabled;
+      }
       this.volumes.muted = Boolean(parsed.muted);
     } catch (_) {}
   }
@@ -66,10 +100,18 @@ export class SoundManager {
         ? 0
         : AUDIO.MASTER_GAIN * (this.volumes.master / 100);
     }
+    this.midiEngine?.syncVolume();
   }
 
   getCategoryMult(category) {
-    return (this.volumes[category] ?? 85) / 100;
+    if (category === 'vehicles' && this.volumes.vehicles === undefined) {
+      return (this.volumes.weapons ?? 85) / 100;
+    }
+    return (this.volumes[category] ?? 80) / 100;
+  }
+
+  getCategoryGain(category) {
+    return this.getCategoryMult(category);
   }
 
   setVolume(category, val0to100) {
@@ -78,7 +120,9 @@ export class SoundManager {
       category === 'master' ||
       category === 'weapons' ||
       category === 'explosions' ||
-      category === 'radio'
+      category === 'vehicles' ||
+      category === 'radio' ||
+      category === 'music'
     ) {
       this.volumes[category] = clamped;
     }
@@ -89,7 +133,15 @@ export class SoundManager {
 
   getVolume(category = 'master') {
     if (category === 'muted') return Boolean(this.volumes.muted);
+    if (category === 'reverbEnabled') return this.volumes.reverbEnabled !== false;
     return this.volumes[category] ?? 80;
+  }
+
+  setReverbEnabled(enabled) {
+    this.volumes.reverbEnabled = Boolean(enabled);
+    this._syncReverbBusWeights();
+    this.saveAudioSettings();
+    return this.volumes.reverbEnabled;
   }
 
   setMuted(muted) {
@@ -108,10 +160,14 @@ export class SoundManager {
       master: AUDIO.DEFAULT_MASTER_VOLUME ?? 80,
       weapons: AUDIO.DEFAULT_WEAPONS_VOLUME ?? 85,
       explosions: AUDIO.DEFAULT_EXPLOSIONS_VOLUME ?? 85,
+      vehicles: AUDIO.DEFAULT_VEHICLES_VOLUME ?? 80,
       radio: AUDIO.DEFAULT_RADIO_VOLUME ?? 80,
-      muted: false,
+      music: AUDIO.DEFAULT_MUSIC_VOLUME ?? 65,
+      reverbEnabled: true,
+      muted: false
     };
     this.updateMasterGain();
+    this._syncReverbBusWeights();
     this.saveAudioSettings();
     return { ...this.volumes };
   }
@@ -123,6 +179,7 @@ export class SoundManager {
       if (AudioCtx) {
         this.ctx = new AudioCtx();
         this.setupCleanMasterBus();
+        this.setupReverbSystem();
         this.preloadAudioPackage();
       }
     }
@@ -150,6 +207,239 @@ export class SoundManager {
     limiter.connect(masterGain);
     masterGain.connect(this.ctx.destination);
     this.masterBus = limiter;
+    this.masterGain = masterGain;
+  }
+
+  // ==========================================================================
+  // 3-SPACE CONVOLUTION REVERB ENGINE (Open Valley / Urban Canyon / Indoor)
+  // Generates realistic stereo acoustic Impulse Responses (IRs) on a shared
+  // ConvolverNode send bus — zero per-shot CPU cost!
+  // ==========================================================================
+  _buildImpulseResponseBuffer(kind = 'open_valley') {
+    const sr = this.ctx.sampleRate || 44100;
+    const dur = kind === 'indoor_room' ? 0.46 : kind === 'urban_canyon' ? 1.08 : 1.35;
+    const len = Math.floor(sr * dur);
+    const buf = this.ctx.createBuffer(2, len, sr);
+    const chL = buf.getChannelData(0);
+    const chR = buf.getChannelData(1);
+
+    // Deterministic LCG so IRs are smooth and repeatable
+    let s = kind === 'urban_canyon' ? 0x13579bdf : kind === 'indoor_room' ? 0x2468ace1 : 0x9e3779b9;
+    const nextRand = () => {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return (s / 4294967296) * 2 - 1;
+    };
+
+    let lpL = 0;
+    let lpR = 0;
+    const decayRate = kind === 'indoor_room' ? 8.2 : kind === 'urban_canyon' ? 3.5 : 2.55;
+    const lpAlpha = kind === 'indoor_room' ? 0.34 : kind === 'urban_canyon' ? 0.24 : 0.14;
+
+    for (let i = 0; i < len; i++) {
+      const t = i / sr;
+      // Leave 8ms pre-delay so direct transient stays razor-sharp
+      if (t < 0.008) continue;
+      const nL = nextRand();
+      const nR = nextRand();
+      lpL += lpAlpha * (nL - lpL);
+      lpR += lpAlpha * (nR - lpR);
+      const env = Math.exp(-(t - 0.008) * decayRate) * 0.26;
+      chL[i] = lpL * env;
+      chR[i] = lpR * env;
+    }
+
+    // Stamp discrete physical early reflections / skyscraper slapback taps!
+    const taps =
+      kind === 'urban_canyon'
+        ? [
+            [0.031, 0.46, 0.18],
+            [0.054, 0.16, 0.44],
+            [0.089, 0.36, 0.22],
+            [0.136, 0.2, 0.34],
+            [0.195, 0.25, 0.25],
+            [0.275, 0.16, 0.18]
+          ]
+        : kind === 'indoor_room'
+        ? [
+            [0.009, 0.48, 0.32],
+            [0.016, 0.3, 0.46],
+            [0.025, 0.34, 0.28],
+            [0.038, 0.22, 0.24]
+          ]
+        : [
+            // Open Valley: subtle ground bounce + wide stereo hillside slapback
+            [0.019, 0.28, 0.26],
+            [0.118, 0.26, 0.14],
+            [0.172, 0.14, 0.25],
+            [0.268, 0.16, 0.17]
+          ];
+
+    for (const [tapSec, gainL, gainR] of taps) {
+      const center = Math.floor(tapSec * sr);
+      const spread = Math.floor(0.0045 * sr);
+      for (let k = -spread; k <= spread; k++) {
+        const idx = center + k;
+        if (idx <= 0 || idx >= len) continue;
+        const win = 0.5 * (1 + Math.cos((Math.PI * k) / spread));
+        chL[idx] += nextRand() * gainL * win;
+        chR[idx] += nextRand() * gainR * win;
+      }
+    }
+    return buf;
+  }
+
+  setupReverbSystem() {
+    if (!this.ctx || !this.masterBus || typeof this.ctx.createConvolver !== 'function') return;
+    if (this._reverbNodes && this._reverbCtx === this.ctx) return;
+    this._reverbCtx = this.ctx;
+
+    try {
+      const sendInput = this.ctx.createGain();
+      sendInput.gain.value = 1.0;
+
+      // High-pass at 120 Hz so reverb never muddies sub-bass explosions
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 120;
+      sendInput.connect(hp);
+
+      const makeSpaceBranch = (kind, initialGain) => {
+        const conv = this.ctx.createConvolver();
+        conv.buffer = this._buildImpulseResponseBuffer(kind);
+        const wetGain = this.ctx.createGain();
+        wetGain.gain.value = initialGain;
+        hp.connect(conv);
+        conv.connect(wetGain);
+        wetGain.connect(this.masterBus);
+        return { conv, wetGain };
+      };
+
+      const valley = makeSpaceBranch('open_valley', 0.42);
+      const urban = makeSpaceBranch('urban_canyon', 0.0001);
+      const indoor = makeSpaceBranch('indoor_room', 0.0001);
+
+      this._reverbNodes = { sendInput, valley, urban, indoor };
+      this._syncReverbBusWeights();
+    } catch (_) {
+      this._reverbNodes = null;
+    }
+  }
+
+  _syncReverbBusWeights() {
+    if (!this._reverbNodes || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const on = this.volumes.reverbEnabled !== false && !this.volumes.muted;
+    const env = this.currentEnvironment || 'open_valley';
+
+    const wValley = !on ? 0.0001 : env === 'open_valley' ? 0.44 : env === 'urban_canyon' ? 0.14 : 0.04;
+    const wUrban = !on ? 0.0001 : env === 'urban_canyon' ? 0.52 : 0.0001;
+    const wIndoor = !on ? 0.0001 : env === 'indoor_room' ? 0.48 : 0.0001;
+
+    try {
+      this._reverbNodes.valley.wetGain.gain.setTargetAtTime(wValley, now, 0.18);
+      this._reverbNodes.urban.wetGain.gain.setTargetAtTime(wUrban, now, 0.18);
+      this._reverbNodes.indoor.wetGain.gain.setTargetAtTime(wIndoor, now, 0.14);
+    } catch (_) {
+      this._reverbNodes.valley.wetGain.gain.value = wValley;
+      this._reverbNodes.urban.wetGain.gain.value = wUrban;
+      this._reverbNodes.indoor.wetGain.gain.value = wIndoor;
+    }
+  }
+
+  connectToReverbSend(sourceNode, sendAmount = 0.28, startTime = null) {
+    if (!this.ctx || !sourceNode || sendAmount <= 0.01 || this.volumes.reverbEnabled === false) {
+      return null;
+    }
+    if (!this._reverbNodes || this._reverbCtx !== this.ctx) {
+      this.setupReverbSystem();
+    }
+    if (!this._reverbNodes) return null;
+
+    const sendGain = this.ctx.createGain();
+    const t = startTime ?? this.ctx.currentTime;
+    sendGain.gain.setValueAtTime(Math.min(0.95, sendAmount), t);
+    sourceNode.connect(sendGain);
+    sendGain.connect(this._reverbNodes.sendInput);
+    return sendGain;
+  }
+
+  /**
+   * Samples surrounding VoxelWorld building geometry at 4 Hz to smoothly blend between:
+   * - 'indoor_room': Listener is inside a building footprint below roof height
+   * - 'urban_canyon': Listener is surrounded by 2+ buildings within 48m (Downtown / Village street)
+   * - 'open_valley': Open terrain, bridge, river valley, or aircraft cockpit
+   */
+  updateListenerEnvironment(listenerPos, world, inAircraft = false) {
+    const wallMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (wallMs - this._lastEnvCheckMs < 240) return this.currentEnvironment;
+    this._lastEnvCheckMs = wallMs;
+
+    let nextEnv = 'open_valley';
+    if (!inAircraft && listenerPos && world && Array.isArray(world.buildings)) {
+      const px = listenerPos.x;
+      const py = listenerPos.y || 0;
+      const pz = listenerPos.z;
+      let nearBuildings = 0;
+      let insideFootprint = false;
+
+      for (let i = 0; i < world.buildings.length; i++) {
+        const b = world.buildings[i];
+        if (!b || b.collapsed) continue;
+        if (px >= b.minWx && px <= b.maxWx && pz >= b.minWz && pz <= b.maxWz) {
+          const roofY = b.maxWy ?? b.roofY ?? 13.5;
+          if (py + 0.8 < roofY) {
+            insideFootprint = true;
+            break;
+          }
+        }
+        const cx = (b.minWx + b.maxWx) * 0.5;
+        const cz = (b.minWz + b.maxWz) * 0.5;
+        const dx = cx - px;
+        const dz = cz - pz;
+        if (dx * dx + dz * dz <= 48 * 48) {
+          nearBuildings++;
+        }
+      }
+
+      if (insideFootprint) {
+        nextEnv = 'indoor_room';
+      } else if (nearBuildings >= 2) {
+        nextEnv = 'urban_canyon';
+      }
+    }
+
+    if (nextEnv !== this.currentEnvironment) {
+      this.currentEnvironment = nextEnv;
+      this._syncReverbBusWeights();
+    }
+    return this.currentEnvironment;
+  }
+
+  /**
+   * Main per-frame hook called from BattleBitGame.loop():
+   * Updates both the 3D Acoustic Reverb Environment AND the Adaptive General MIDI Combat Soundtrack!
+   */
+  updateAdaptiveAudio(gameState = {}) {
+    if (gameState.listenerPos && gameState.world) {
+      this.updateListenerEnvironment(
+        gameState.listenerPos,
+        gameState.world,
+        Boolean(gameState.inAircraft)
+      );
+    }
+    if (this.midiEngine) {
+      const wallMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const inCombat = Boolean(gameState.inCombat || wallMs < this._combatPulseUntilMs);
+      this.midiEngine.updateAdaptiveMusic({
+        ...gameState,
+        inCombat
+      });
+    }
+  }
+
+  playMusicStinger(kind = 'victory') {
+    this.init();
+    this.midiEngine?.playStinger(kind);
   }
 
   preloadAudioPackage() {
@@ -195,7 +485,26 @@ export class SoundManager {
     return buf;
   }
 
-  _bindOneShotCleanup(src, terminalNode, trackVoice = false) {
+  _createNoiseBuffer(durationSec = 2.0) {
+    if (!this.ctx) return null;
+    const sampleRate = this.ctx.sampleRate || 44100;
+    const frameCount = Math.max(1024, Math.floor(sampleRate * durationSec));
+    const buf = this.ctx.createBuffer(1, frameCount, sampleRate);
+    const ch = buf.getChannelData(0);
+    let b0 = 0;
+    let b1 = 0;
+    let b2 = 0;
+    for (let i = 0; i < frameCount; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99765 * b0 + white * 0.099046;
+      b1 = 0.963 * b1 + white * 0.2965164;
+      b2 = 0.57 * b2 + white * 1.0526913;
+      ch[i] = (b0 + b1 + b2 + white * 0.22) * 0.16;
+    }
+    return buf;
+  }
+
+  _bindOneShotCleanup(src, terminalNode, trackVoice = false, extraNode = null) {
     if (!src) return;
     if (trackVoice) {
       this._activeVoices++;
@@ -206,6 +515,11 @@ export class SoundManager {
       cleaned = true;
       if (trackVoice) {
         this._activeVoices = Math.max(0, this._activeVoices - 1);
+      }
+      if (extraNode) {
+        try {
+          extraNode.disconnect();
+        } catch (_) {}
       }
       if (terminalNode) {
         try {
@@ -257,19 +571,22 @@ export class SoundManager {
     startTimeOffset = 0,
     volumeMult = 1.0,
     pitchMult = 1.0,
-    trackVoice = false
+    trackVoice = false,
+    occluded = false
   ) {
     if (!this.ctx || !this.masterBus) return false;
     const prof = this.profiles[profileKey] || this.profiles.rifle;
     if (!prof) return false;
 
-    const maxRange = prof.maxRange || 190;
+    const maxRange = prof.maxRange || 280;
     if (distance >= maxRange) return false;
 
     const distRatio = Math.min(1, Math.max(0, distance / maxRange));
-    const distAtten = Math.pow(1 - distRatio, 1.55);
-    const finalVol = Math.min(1.0, (prof.volume || 0.6) * distAtten * volumeMult);
-    if (finalVol <= 0.015) return false;
+    // Realistic inverse-power falloff that stays audible across open valleys while keeping close shots crisp
+    const distAtten = Math.pow(1 - distRatio, 1.45);
+    const occlusionVolMult = occluded ? 0.62 : 1.0;
+    const finalVol = Math.min(1.0, (prof.volume || 0.6) * distAtten * volumeMult * occlusionVolMult);
+    if (finalVol <= 0.012) return false;
 
     let bufKey = profileKey;
     if (prof.altUrl && distance > 8 && Math.random() < 0.5 && this.buffers.has(`${profileKey}_alt`)) {
@@ -278,13 +595,13 @@ export class SoundManager {
     const buf = this.buffers.get(bufKey);
     if (!buf) return false;
 
-    const now = this.ctx.currentTime + startTimeOffset;
+    const now = this.ctx.currentTime + Math.max(0, startTimeOffset);
     const jitter = prof.pitchJitter ? 1 + (Math.random() * 2 - 1) * prof.pitchJitter : 1.0;
     const rate = Math.max(0.4, (prof.pitch || 1.0) * jitter * pitchMult);
 
-    const dur = Math.min(buf.duration / rate, prof.maxDuration || 0.25);
-    const fade = Math.min(dur * 0.65, prof.fadeOut || 0.06);
-    const fadeStart = Math.max(0.008, dur - fade);
+    const dur = Math.min(buf.duration / rate, prof.maxDuration || 0.65);
+    const fade = Math.min(dur * 0.55, prof.fadeOut || 0.12);
+    const fadeStart = Math.max(0.01, dur - fade);
 
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
@@ -292,12 +609,15 @@ export class SoundManager {
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    const cutoff =
-      distance <= 4
-        ? 18000
-        : Math.max(950, 15500 * Math.pow(1 - distRatio, 1.5));
+    let cutoff =
+      distance <= 5
+        ? 19000
+        : Math.max(720, 16500 * Math.pow(1 - distRatio, 1.45));
+    if (occluded) {
+      cutoff = Math.max(380, cutoff * 0.32); // Concrete wall / ridge acoustic low-pass occlusion!
+    }
     filter.frequency.setValueAtTime(cutoff, now);
-    filter.Q.setValueAtTime(0.6, now);
+    filter.Q.setValueAtTime(0.65, now);
 
     const gain = this.ctx.createGain();
     gain.gain.setValueAtTime(finalVol, now);
@@ -310,7 +630,7 @@ export class SoundManager {
     let terminalNode = gain;
     if (typeof this.ctx.createStereoPanner === 'function' && Math.abs(pan) > 0.01) {
       const panner = this.ctx.createStereoPanner();
-      panner.pan.setValueAtTime(Math.max(-0.9, Math.min(0.9, pan)), now);
+      panner.pan.setValueAtTime(Math.max(-0.92, Math.min(0.92, pan)), now);
       gain.connect(panner);
       panner.connect(this.masterBus);
       terminalNode = panner;
@@ -318,10 +638,149 @@ export class SoundManager {
       gain.connect(this.masterBus);
     }
 
-    this._bindOneShotCleanup(src, terminalNode, trackVoice);
+    // Spatial Wet Reverb Send: increases proportionally with distance & occlusion so distant gunfire blooms across the valley/city!
+    const baseReverb = prof.reverbSend ?? 0.22;
+    let reverbNode = null;
+    if (baseReverb > 0.01) {
+      const distWetBoost = 1.0 + distRatio * 0.85 + (occluded ? 0.35 : 0);
+      reverbNode = this.connectToReverbSend(terminalNode, baseReverb * distWetBoost, now);
+    }
+
+    this._bindOneShotCleanup(src, terminalNode, trackVoice, reverbNode);
     src.start(now, 0, dur + 0.01);
     src.stop(now + dur + 0.015);
     return true;
+  }
+
+  // ==========================================================================
+  // TACTICAL FOLEY & MICRO-SFX (Previously Missing Call Sites Restored!)
+  // ==========================================================================
+  playEmptyClick() {
+    this.init();
+    if (!this.ctx || !this.masterBus) return;
+    const catMult = Math.max(0.25, this.getCategoryMult('weapons'));
+    if (this.playProfile('weapon_click', 0, 0, 0, 0.72 * catMult, 1.32)) return;
+
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(1480, now);
+    osc.frequency.exponentialRampToValueAtTime(340, now + 0.028);
+    g.gain.setValueAtTime(0.12 * catMult, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.032);
+    osc.connect(g);
+    g.connect(this.masterBus);
+    this._bindOneShotCleanup(osc, g, false);
+    osc.start(now);
+    osc.stop(now + 0.035);
+  }
+
+  playWeaponSwitch() {
+    this.init();
+    if (!this.ctx || !this.masterBus) return;
+    const catMult = this.getCategoryMult('weapons');
+    if (catMult <= 0.001) return;
+
+    const now = this.ctx.currentTime;
+    const noiseBuf = this._getSharedNoiseBuffer();
+    if (noiseBuf) {
+      // Tactical Cordura sling/holster cloth rustle + receiver safety click
+      const src = this.ctx.createBufferSource();
+      src.buffer = noiseBuf;
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(920, now);
+      bp.frequency.exponentialRampToValueAtTime(1650, now + 0.095);
+      bp.Q.value = 1.8;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.001, now);
+      g.gain.linearRampToValueAtTime(0.095 * catMult, now + 0.025);
+      g.gain.exponentialRampToValueAtTime(0.0008, now + 0.11);
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(this.masterBus);
+      this._bindOneShotCleanup(src, g, false);
+      src.start(now, Math.random() * 0.5, 0.115);
+      src.stop(now + 0.12);
+    }
+
+    const clack = this.ctx.createOscillator();
+    const cg = this.ctx.createGain();
+    clack.type = 'triangle';
+    clack.frequency.setValueAtTime(1120, now + 0.055);
+    clack.frequency.exponentialRampToValueAtTime(480, now + 0.085);
+    cg.gain.setValueAtTime(0.065 * catMult, now + 0.055);
+    cg.gain.exponentialRampToValueAtTime(0.0008, now + 0.09);
+    clack.connect(cg);
+    cg.connect(this.masterBus);
+    this._bindOneShotCleanup(clack, cg, false);
+    clack.start(now + 0.055);
+    clack.stop(now + 0.095);
+  }
+
+  /**
+   * Subtle metallic brass shell-casing bounce (`220ms` after firing on hard urban/indoor ground).
+   */
+  playShellCasingBounce(isShell12G = false, delaySec = 0.24) {
+    if (!this.ctx || !this.masterBus) return;
+    const catMult = this.getCategoryMult('weapons');
+    if (catMult <= 0.01) return;
+
+    const t0 = this.ctx.currentTime + delaySec + Math.random() * 0.05;
+    if (isShell12G) {
+      // Plastic/brass 12-gauge hull hollow bounce
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(840 + Math.random() * 90, t0);
+      osc.frequency.exponentialRampToValueAtTime(410, t0 + 0.045);
+      g.gain.setValueAtTime(0.055 * catMult, t0);
+      g.gain.exponentialRampToValueAtTime(0.0008, t0 + 0.05);
+      osc.connect(g);
+      g.connect(this.masterBus);
+      this._bindOneShotCleanup(osc, g, false);
+      osc.start(t0);
+      osc.stop(t0 + 0.055);
+      return;
+    }
+
+    // Two crisp high-pitched brass casing clinks (primary impact + secondary bounce)
+    [0, 0.085].forEach((offset, idx) => {
+      const start = t0 + offset;
+      const osc = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      osc.type = 'sine';
+      const base = 3650 + Math.random() * 620;
+      osc.frequency.setValueAtTime(base, start);
+      osc.frequency.exponentialRampToValueAtTime(base * 0.88, start + 0.04);
+      const amp = (idx === 0 ? 0.045 : 0.026) * catMult;
+      g.gain.setValueAtTime(amp, start);
+      g.gain.exponentialRampToValueAtTime(0.0006, start + 0.045);
+      osc.connect(g);
+      g.connect(this.masterBus);
+      this._bindOneShotCleanup(osc, g, false);
+      osc.start(start);
+      osc.stop(start + 0.05);
+    });
+  }
+
+  playGrenadeThrow(distance = 0, pan = 0) {
+    this.init();
+    if (!this.ctx || !this.masterBus) return;
+    const catMult = this.getCategoryMult('weapons');
+    if (catMult <= 0.001) return;
+    if (!this.playProfile('grenade_throw', distance, pan, 0, catMult)) {
+      this.playMeleeSwing(distance, pan, false);
+    }
+  }
+
+  playSmokeHiss(distance = 0, pan = 0) {
+    this.init();
+    if (!this.ctx || !this.masterBus) return;
+    const catMult = this.getCategoryMult('explosions');
+    if (catMult <= 0.001) return;
+    this.playProfile('smoke_hiss', distance, pan, 0, catMult);
   }
 
   playBowTwang(distance = 0, pan = 0, isCrossbow = false) {
@@ -341,7 +800,6 @@ export class SoundManager {
 
     const now = this.ctx.currentTime;
 
-    // 1. Warm wooden bowstring pluck / crossbow steel prod release (NO firearm click!)
     const stringOsc = this.ctx.createOscillator();
     const stringGain = this.ctx.createGain();
     stringOsc.type = isCrossbow ? 'sawtooth' : 'sine';
@@ -359,7 +817,6 @@ export class SoundManager {
     stringOsc.connect(lp);
     lp.connect(stringGain);
 
-    // 2. Feathered arrow / quarrel air-"whoosh" using shared pre-allocated noise buffer
     const whooshDur = 0.09;
     const noiseBuf = this._getSharedNoiseBuffer();
     const noiseSrc = this.ctx.createBufferSource();
@@ -449,10 +906,6 @@ export class SoundManager {
     noiseSrc.stop(now + dur + 0.01);
   }
 
-  /**
-   * Mount & Blade Shield Block Thud (oak-and-iron shield impact) or
-   * Zweihänder / Greatsword Steel Crossguard Parry Clash.
-   */
   playShieldBlock(isSwordParry = false, distance = 0, pan = 0) {
     this.init();
     if (!this.ctx || !this.masterBus) return;
@@ -476,7 +929,6 @@ export class SoundManager {
     const sources = [];
 
     if (isSwordParry) {
-      // High-carbon steel Zweihänder blade-on-blade parry ring (dual harmonic chime + metallic transient)
       [1580, 2360, 620].forEach((freq, idx) => {
         const osc = this.ctx.createOscillator();
         const g = this.ctx.createGain();
@@ -494,7 +946,6 @@ export class SoundManager {
         osc.stop(now + dur + 0.01);
       });
     } else {
-      // Heavy oak-and-iron Heater / Pavise Shield block thud + brass rim clink
       const thudOsc = this.ctx.createOscillator();
       const thudGain = this.ctx.createGain();
       thudOsc.type = 'triangle';
@@ -529,15 +980,6 @@ export class SoundManager {
     }
   }
 
-  /**
-   * Mount & Blade-style spatial 3D Medieval Soldier vocal synthesizer & shield/armor clatter:
-   * - 'battle_cry' / 'charge': Gutsy war roar ("HAAARGH!" / "CHAAARGE!") + metallic sword/shield clash
-   * - 'shield_wall': Low rhythmic brace grunt ("HUP! HOLD!") + heavy iron-on-oak shield lock thud
-   * - 'retreat': Urgent two-syllable warning shout ("FALL BACK!")
-   * - 'pain': Short visceral hit grunt when struck by arrow or blade
-   * - 'death': Falling vocal groan when struck down
-   * - 'cheer': Rising victorious battle cheer
-   */
   playMedievalSoldierVoice(kind = 'battle_cry', distance = 0, pan = 0, force = false) {
     this.init();
     if (!this.ctx || !this.masterBus) return;
@@ -564,7 +1006,6 @@ export class SoundManager {
     if (vol <= 0.008) return;
 
     const now = this.ctx.currentTime;
-    // Randomized baritone/tenor male soldier fundamental pitch (105 Hz - 155 Hz)
     const voicePitch = 108 + Math.random() * 44;
     const dur =
       kind === 'pain'
@@ -577,7 +1018,6 @@ export class SoundManager {
         ? 0.38
         : 0.44;
 
-    // Glottal vocal cord source (sawtooth) + vibrato modulation
     const glottal = this.ctx.createOscillator();
     glottal.type = 'sawtooth';
     if (kind === 'battle_cry' || kind === 'charge' || kind === 'cheer') {
@@ -595,12 +1035,10 @@ export class SoundManager {
       glottal.frequency.setValueAtTime(voicePitch * 1.28, now);
       glottal.frequency.exponentialRampToValueAtTime(voicePitch * 0.78, now + dur);
     } else {
-      // 'death'
       glottal.frequency.setValueAtTime(voicePitch * 1.15, now);
       glottal.frequency.exponentialRampToValueAtTime(voicePitch * 0.54, now + dur);
     }
 
-    // Dual Vowel Formant Filters (F1 ~ 720 Hz open 'AH'/'OR' roar, F2 ~ 1250 Hz chest/throat projection)
     const f1 = this.ctx.createBiquadFilter();
     f1.type = 'bandpass';
     f1.frequency.setValueAtTime(kind === 'shield_wall' ? 580 : 740, now);
@@ -611,7 +1049,6 @@ export class SoundManager {
     f2.frequency.setValueAtTime(kind === 'shield_wall' ? 1080 : 1320, now);
     f2.Q.setValueAtTime(3.5, now);
 
-    // Vocal breath/grit noise layer using shared pre-allocated noise buffer
     const noiseBuf = this._getSharedNoiseBuffer();
     const breathSrc = this.ctx.createBufferSource();
     breathSrc.buffer = noiseBuf;
@@ -622,7 +1059,6 @@ export class SoundManager {
     voiceGain.gain.setValueAtTime(0.001, now);
     voiceGain.gain.linearRampToValueAtTime(vol, now + 0.025);
     if (kind === 'retreat') {
-      // Two-syllable envelope ("FALL - BACK!")
       voiceGain.gain.setValueAtTime(vol * 0.25, now + dur * 0.42);
       voiceGain.gain.linearRampToValueAtTime(vol * 0.95, now + dur * 0.52);
     }
@@ -657,7 +1093,6 @@ export class SoundManager {
     breathSrc.start(now, noiseOffset, dur);
     breathSrc.stop(now + dur + 0.015);
 
-    // Add physical oak-and-iron shield slam on 'shield_wall' or sword-on-shield clash on 'battle_cry'/'charge'
     if (kind === 'shield_wall') {
       const thudOsc = this.ctx.createOscillator();
       const thudGain = this.ctx.createGain();
@@ -693,10 +1128,6 @@ export class SoundManager {
     }
   }
 
-  /**
-   * Mount & Blade Commander War Horn & Troop Chorus Response when issuing
-   * CHARGE / ATTACK ('charge'), DEFEND / SHIELD WALL ('defend'), or RETREAT ('retreat') orders.
-   */
   playMedievalWarHorn(mode = 'charge') {
     this.init();
     if (!this.ctx || !this.masterBus) return;
@@ -710,17 +1141,14 @@ export class SoundManager {
     hornOsc2.type = 'triangle';
 
     if (mode === 'charge') {
-      // Heroic rising fifth war horn blast (A3 -> E4)
       hornOsc1.frequency.setValueAtTime(220, now);
       hornOsc1.frequency.exponentialRampToValueAtTime(330, now + 0.28);
       hornOsc2.frequency.setValueAtTime(440, now);
       hornOsc2.frequency.exponentialRampToValueAtTime(660, now + 0.28);
     } else if (mode === 'defend') {
-      // Deep resolute low G3 double-pulse shield-wall horn
       hornOsc1.frequency.setValueAtTime(196, now);
       hornOsc2.frequency.setValueAtTime(392, now);
     } else {
-      // Urgent descending retreat horn (D4 -> F#3)
       hornOsc1.frequency.setValueAtTime(293.66, now);
       hornOsc1.frequency.exponentialRampToValueAtTime(185, now + dur * 0.8);
       hornOsc2.frequency.setValueAtTime(587.33, now);
@@ -743,14 +1171,21 @@ export class SoundManager {
     hornOsc2.connect(hornFilter);
     hornFilter.connect(hornGain);
     hornGain.connect(this.masterBus);
+    const revNode = this.connectToReverbSend(hornGain, 0.45, now);
     this._bindMultiShotCleanup([hornOsc1, hornOsc2], hornGain, false);
+    if (revNode) {
+      setTimeout(() => {
+        try {
+          revNode.disconnect();
+        } catch (_) {}
+      }, Math.ceil((dur + 0.2) * 1000));
+    }
 
     hornOsc1.start(now);
     hornOsc2.start(now);
     hornOsc1.stop(now + dur + 0.02);
     hornOsc2.stop(now + dur + 0.02);
 
-    // Staggered chorus of nearby soldiers answering the horn!
     const voiceKind =
       mode === 'charge' ? 'battle_cry' : mode === 'defend' ? 'shield_wall' : 'retreat';
     [-0.45, 0.38, -0.15].forEach((p, idx) => {
@@ -760,9 +1195,6 @@ export class SoundManager {
     });
   }
 
-  /**
-   * Crisp Laser Rangefinder optical pulse + turret click (`[F]` in scope or `LMB` in LRF Binoculars).
-   */
   playLaserRangefinderLock() {
     this.init();
     if (!this.ctx || !this.masterBus) return;
@@ -789,9 +1221,6 @@ export class SoundManager {
     osc2.stop(now + 0.15);
   }
 
-  /**
-   * Metallic Marksman Shot Badge chime scaled by shot difficulty grade (`B`, `A`, `S`, `S+`, `★`).
-   */
   playMarksmanBadgeStinger(grade = 'A') {
     this.init();
     if (!this.ctx || !this.masterBus) return;
@@ -821,12 +1250,15 @@ export class SoundManager {
     });
   }
 
-  playGunshot(type = 'rifle', distance = 0, pan = 0, isSilenced = false) {
+  // ==========================================================================
+  // 3-LAYER TACTICAL GUNFIRE ("CRACK + MUZZLE THUMP + CONVOLUTION TAIL")
+  // ==========================================================================
+  playGunshot(type = 'rifle', distance = 0, pan = 0, isSilenced = false, wepDef = null, occluded = false) {
     this.init();
     if (!this.ctx || !this.masterBus) return;
 
     // Strict Era Guard: In Medieval or Jurassic Era, NEVER play modern firearm gunshot sounds!
-    const activeEra = window.game?.world?.era || window.game?.activeEra || 'modern';
+    const activeEra = (typeof window !== 'undefined' && (window.game?.world?.era || window.game?.activeEra)) || 'modern';
     if (activeEra === 'medieval' || activeEra === 'jurassic' || type === 'bow' || type === 'crossbow') {
       this.playBowTwang(distance, pan, type === 'crossbow');
       return;
@@ -837,34 +1269,100 @@ export class SoundManager {
     const catMult = this.getCategoryMult('weapons');
     if (catMult <= 0.001) return;
 
+    if (distance <= 35) {
+      const wallMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      this._combatPulseUntilMs = Math.max(this._combatPulseUntilMs, wallMs + 6500);
+    }
+
+    // 1. Suppressed Firearms: Real CC0 suppressed rifle/pistol recording + subsonic baffle thump
     if (isSilenced) {
-      const maxSilencedDist = 75;
+      const silKey = type === 'smg' || type === 'pistol' ? 'silenced_pistol' : 'silenced_rifle';
+      const maxSilencedDist = 85;
       if (distance >= maxSilencedDist) return;
       const distRatio = Math.min(1, Math.max(0, distance / maxSilencedDist));
-      const atten = Math.pow(1 - distRatio, 1.8);
-      this.playProfile('weapon_click', distance, pan, 0, 0.45 * atten * catMult, 1.35);
+      const atten = Math.pow(1 - distRatio, 1.75);
+      const playedSil = this.playProfile(silKey, distance, pan, 0, catMult, 1.0, true, occluded);
+      if (!playedSil) {
+        this.playProfile('weapon_click', distance, pan, 0, 0.55 * atten * catMult, 1.35);
+      }
       const now = this.ctx.currentTime;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'triangle';
-      osc.frequency.setValueAtTime(340, now);
-      osc.frequency.exponentialRampToValueAtTime(75, now + 0.055);
-      gain.gain.setValueAtTime(0.22 * atten * catMult, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+      osc.frequency.setValueAtTime(320, now);
+      osc.frequency.exponentialRampToValueAtTime(68, now + 0.065);
+      gain.gain.setValueAtTime(0.24 * atten * catMult, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.072);
       osc.connect(gain);
       gain.connect(this.masterBus);
-      this._bindOneShotCleanup(osc, gain, true);
+      this._bindOneShotCleanup(osc, gain, !playedSil);
       osc.start(now);
-      osc.stop(now + 0.065);
+      osc.stop(now + 0.075);
       return;
     }
 
-    const profileKey = this.profiles[type] ? type : 'rifle';
-    const played = this.playProfile(profileKey, distance, pan, 0, catMult, 1.0, true);
+    // 2. Resolve Specific Caliber Audio Profile (AMR .50 BMG / 20mm, 12G Shotgun, .50 AE Magnum, .338 Heavy Sniper, 7.62 Heavy Rifle)
+    let resolvedKey = wepDef?.audioProfile || type || 'rifle';
+    if (!this.profiles[resolvedKey]) {
+      resolvedKey = this.profiles[type] ? type : 'rifle';
+    }
+
+    // Speed-of-Sound acoustic propagation delay on distant heavy shots (>45m)
+    const speedDelay =
+      distance > 45 && (resolvedKey === 'amr' || resolvedKey === 'sniper' || resolvedKey === 'sniper_heavy')
+        ? Math.min(2.6, distance / SPEED_OF_SOUND)
+        : 0;
+
+    const played = this.playProfile(resolvedKey, distance, pan, speedDelay, catMult, 1.0, true, occluded);
+    const prof = this.profiles[resolvedKey] || this.profiles.rifle;
+
+    // 3. Muzzle Overpressure Sub-Bass Chest Thump Layer (gives shots visceral physical weight!)
+    if (distance < 55 && (prof.subPunchVol || 0) > 0.04) {
+      const now = this.ctx.currentTime + speedDelay;
+      const closeAtten = Math.pow(Math.max(0, 1 - distance / 55), 1.6);
+      const subVol = prof.subPunchVol * closeAtten * catMult;
+      if (subVol > 0.015) {
+        const subOsc = this.ctx.createOscillator();
+        const subGain = this.ctx.createGain();
+        subOsc.type = 'sine';
+        const startHz = prof.subPunchHz || 90;
+        const subDur = resolvedKey === 'amr' ? 0.28 : resolvedKey === 'shotgun' || resolvedKey === 'sniper_heavy' ? 0.2 : 0.12;
+        subOsc.frequency.setValueAtTime(startHz, now);
+        subOsc.frequency.exponentialRampToValueAtTime(Math.max(26, startHz * 0.36), now + subDur);
+        subGain.gain.setValueAtTime(subVol, now);
+        subGain.gain.exponentialRampToValueAtTime(0.0008, now + subDur + 0.02);
+        subOsc.connect(subGain);
+        if (typeof this.ctx.createStereoPanner === 'function' && Math.abs(pan) > 0.02) {
+          const panner = this.ctx.createStereoPanner();
+          panner.pan.setValueAtTime(Math.max(-0.9, Math.min(0.9, pan)), now);
+          subGain.connect(panner);
+          panner.connect(this.masterBus);
+          this._bindOneShotCleanup(subOsc, panner, false);
+        } else {
+          subGain.connect(this.masterBus);
+          this._bindOneShotCleanup(subOsc, subGain, false);
+        }
+        subOsc.start(now);
+        subOsc.stop(now + subDur + 0.03);
+      }
+    }
+
+    // 4. Distant Valley Thunder Tail for Anti-Materiel & Heavy Sniper Shots!
+    if (resolvedKey === 'amr' || (distance > 90 && (resolvedKey === 'sniper' || resolvedKey === 'sniper_heavy'))) {
+      const tailDelay = speedDelay + 0.08;
+      const tailVol = (resolvedKey === 'amr' ? 0.52 : 0.32) * catMult;
+      this.playProfile('distant_boom', Math.min(distance, 900), pan * 0.65, tailDelay, tailVol, 1.18, false, true);
+    }
 
     if (played) {
-      if (type === 'sniper' && distance === 0) {
-        this.playProfile('reload_sniper', 0, 0, 0.28, catMult);
+      if (distance === 0) {
+        // Bolt cycling on bolt-action snipers + subtle brass/hull casing bounce on semi/bolt/shotgun!
+        if ((type === 'sniper' || resolvedKey === 'sniper_heavy' || resolvedKey === 'amr') && (!wepDef || wepDef.isBoltSniper)) {
+          this.playProfile('reload_sniper', 0, 0, 0.32, catMult * 0.85);
+        }
+        if (!wepDef?.auto || resolvedKey === 'shotgun' || resolvedKey === 'amr') {
+          this.playShellCasingBounce(resolvedKey === 'shotgun', resolvedKey === 'amr' ? 0.34 : 0.24);
+        }
       }
     } else {
       this.playFallbackDryShot(0.35, distance);
@@ -880,19 +1378,23 @@ export class SoundManager {
     if (catMult <= 0.001) return;
 
     const distRatio = Math.min(1, Math.max(0, distance / AUDIO.TANK_CANNON_MAX_DIST));
-    const atten = Math.pow(1 - distRatio, 1.55);
-    if (atten <= 0.02) return;
+    const atten = Math.pow(1 - distRatio, 1.35);
+    if (atten <= 0.015) return;
 
-    const played = this.playProfile('tank_cannon', distance, pan, 0, catMult);
+    const speedDelay = distance > 35 ? Math.min(2.8, distance / SPEED_OF_SOUND) : 0;
+    const played = this.playProfile('tank_cannon', distance, pan, speedDelay, catMult);
+    if (distance > 45) {
+      this.playProfile('distant_boom', distance, pan * 0.7, speedDelay + 0.09, 0.75 * catMult, 0.92);
+    }
 
-    const now = this.ctx.currentTime;
+    const now = this.ctx.currentTime + speedDelay;
     const subOsc = this.ctx.createOscillator();
     const subGain = this.ctx.createGain();
     subOsc.type = 'sine';
-    subOsc.frequency.setValueAtTime(115, now);
-    subOsc.frequency.exponentialRampToValueAtTime(34, now + 0.24);
-    subGain.gain.setValueAtTime(0.36 * atten * catMult, now);
-    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+    subOsc.frequency.setValueAtTime(118, now);
+    subOsc.frequency.exponentialRampToValueAtTime(28, now + 0.38);
+    subGain.gain.setValueAtTime(0.42 * atten * catMult, now);
+    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.44);
     subOsc.connect(subGain);
 
     let subTerm = subGain;
@@ -907,7 +1409,7 @@ export class SoundManager {
     }
     this._bindOneShotCleanup(subOsc, subTerm, false);
     subOsc.start(now);
-    subOsc.stop(now + 0.29);
+    subOsc.stop(now + 0.45);
 
     if (!played) {
       this.playFallbackDryShot(0.45 * catMult, distance);
@@ -946,7 +1448,7 @@ export class SoundManager {
     const catMult = this.getCategoryMult('explosions');
     if (catMult <= 0.001) return;
 
-    const distRatio = Math.min(1, Math.max(0, distance / 300));
+    const distRatio = Math.min(1, Math.max(0, distance / 420));
     const atten = Math.pow(1 - distRatio, 1.35);
     if (atten <= 0.02) return;
 
@@ -954,17 +1456,21 @@ export class SoundManager {
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(185, now);
-    osc.frequency.exponentialRampToValueAtTime(62, now + 0.55);
-    gain.gain.setValueAtTime(0.18 * atten * catMult, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.58);
+    osc.frequency.setValueAtTime(210, now);
+    osc.frequency.exponentialRampToValueAtTime(58, now + 0.72);
+    gain.gain.setValueAtTime(0.22 * atten * catMult, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.76);
     osc.connect(gain);
     gain.connect(this.masterBus);
     this._bindOneShotCleanup(osc, gain, false);
     osc.start(now);
-    osc.stop(now + 0.6);
+    osc.stop(now + 0.78);
   }
 
+  /**
+   * True Supersonic N-Wave Ballistic Crack + Doppler Whip (`playBulletWhiz`):
+   * Incoming enemy supersonic rounds snap sharply across stereo space and trigger combat music tension!
+   */
   playBulletWhiz(distance = 8, pan = 0) {
     this.init();
     if (!this.ctx || !this.masterBus) return;
@@ -974,9 +1480,39 @@ export class SoundManager {
     const nowPerf = performance.now();
     if (nowPerf - this._lastWhizTime < AUDIO.WHIZ_COOLDOWN_MS) return;
     this._lastWhizTime = nowPerf;
+    this._combatPulseUntilMs = Math.max(this._combatPulseUntilMs, nowPerf + 8500);
 
-    const volScale = Math.max(0.15, Math.min(0.75, 1 - distance / 28)) * catMult;
-    this.playProfile('weapon_click', distance, pan, 0, volScale, 1.45);
+    const proximity = Math.max(0, Math.min(1, 1 - distance / 28));
+    const volScale = (0.24 + proximity * 0.68) * catMult;
+    const pitchShift = 0.92 + proximity * 0.22;
+    const played = this.playProfile('bullet_crack', Math.min(distance, 34), pan, 0, volScale, pitchShift);
+
+    // Layer live procedural supersonic whip-snap + Doppler pass-by sweep so close misses (<6m) crackle!
+    const now = this.ctx.currentTime;
+    const whipOsc = this.ctx.createOscillator();
+    const whipGain = this.ctx.createGain();
+    whipOsc.type = proximity > 0.55 ? 'sawtooth' : 'triangle';
+    whipOsc.frequency.setValueAtTime(2800 + proximity * 1100, now);
+    whipOsc.frequency.exponentialRampToValueAtTime(480, now + 0.095);
+    const whipAmp = (played ? 0.14 : 0.28) * volScale;
+    whipGain.gain.setValueAtTime(whipAmp, now);
+    whipGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.1);
+    whipOsc.connect(whipGain);
+
+    if (typeof this.ctx.createStereoPanner === 'function' && Math.abs(pan) > 0.01) {
+      const panner = this.ctx.createStereoPanner();
+      const clampedPan = Math.max(-0.95, Math.min(0.95, pan));
+      panner.pan.setValueAtTime(clampedPan, now);
+      panner.pan.linearRampToValueAtTime(-clampedPan * 0.35, now + 0.1);
+      whipGain.connect(panner);
+      panner.connect(this.masterBus);
+      this._bindOneShotCleanup(whipOsc, panner, false);
+    } else {
+      whipGain.connect(this.masterBus);
+      this._bindOneShotCleanup(whipOsc, whipGain, false);
+    }
+    whipOsc.start(now);
+    whipOsc.stop(now + 0.11);
   }
 
   playRocketLaunch(distance = 0, pan = 0) {
@@ -990,6 +1526,11 @@ export class SoundManager {
     }
   }
 
+  /**
+   * Multi-Layer Speed-of-Sound (`343 m/s`) Explosion Acoustics:
+   * - Close blasts (<35m): Instantaneous concussion crack + sub-bass shockwave + environmental tail
+   * - Distant blasts (35m - 900m): Realistic speed-of-sound delay (`distance / 343` s) + rolling valley thunder!
+   */
   playExplosion(distance = 0, pan = 0, scale = 1.0) {
     this.init();
     if (!this.ctx || !this.masterBus) return;
@@ -1001,32 +1542,63 @@ export class SoundManager {
       return;
     }
 
-    if (distance >= AUDIO.EXPLOSION_MAX_DIST) return;
+    const maxDist = AUDIO.EXPLOSION_MAX_DIST || 900;
+    if (distance >= maxDist) return;
     const nowPerf = performance.now();
     if (nowPerf - this._lastExplosionTime < AUDIO.EXPLOSION_COOLDOWN_MS && distance > 18) return;
     this._lastExplosionTime = nowPerf;
+    if (distance < 140) {
+      this._combatPulseUntilMs = Math.max(this._combatPulseUntilMs, nowPerf + 9000);
+    }
 
-    const distRatio = Math.min(1, Math.max(0, distance / AUDIO.EXPLOSION_MAX_DIST));
-    const atten = Math.pow(1 - distRatio, 1.5);
-    if (atten <= 0.02) return;
+    const distRatio = Math.min(1, Math.max(0, distance / maxDist));
+    const atten = Math.pow(1 - distRatio, 1.32);
+    if (atten <= 0.015) return;
 
-    const volMult = Math.min(1.25, Math.max(0.7, scale)) * catMult;
-    const pitchMult = scale > 1.1 ? 0.88 : 1.0;
-    const played = this.playProfile('explosion', distance, pan, 0, volMult, pitchMult);
+    const speedDelay = distance > 32 ? Math.min(2.75, distance / SPEED_OF_SOUND) : 0;
+    const volMult = Math.min(1.35, Math.max(0.72, scale)) * catMult;
+    const pitchMult = scale > 1.15 ? 0.86 : scale > 1.02 ? 0.93 : 1.0;
 
-    const now = this.ctx.currentTime;
+    let played = false;
+    if (distance < 360) {
+      played = this.playProfile('explosion', distance, pan, speedDelay, volMult, pitchMult);
+      if (scale >= 1.1 && distance < 180) {
+        this.playProfile('concussion_boom', distance, pan, speedDelay + 0.02, volMult * 0.78, pitchMult);
+      }
+    }
+    if (distance >= 38) {
+      const boomPlayed = this.playProfile(
+        'distant_boom',
+        distance,
+        pan * 0.75,
+        speedDelay + (distance < 360 ? 0.08 : 0),
+        volMult * 0.92,
+        pitchMult * 0.95
+      );
+      played = played || boomPlayed;
+    }
+
+    const now = this.ctx.currentTime + speedDelay;
     const subOsc = this.ctx.createOscillator();
     const subGain = this.ctx.createGain();
     subOsc.type = 'sine';
-    subOsc.frequency.setValueAtTime(92, now);
-    subOsc.frequency.exponentialRampToValueAtTime(28, now + 0.32);
-    subGain.gain.setValueAtTime(0.34 * atten * volMult, now);
-    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    subOsc.frequency.setValueAtTime(98, now);
+    subOsc.frequency.exponentialRampToValueAtTime(24, now + 0.46);
+    subGain.gain.setValueAtTime(0.42 * atten * volMult, now);
+    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.52);
     subOsc.connect(subGain);
-    subGain.connect(this.masterBus);
-    this._bindOneShotCleanup(subOsc, subGain, false);
+    if (typeof this.ctx.createStereoPanner === 'function' && Math.abs(pan) > 0.02) {
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.setValueAtTime(Math.max(-0.9, Math.min(0.9, pan)), now);
+      subGain.connect(panner);
+      panner.connect(this.masterBus);
+      this._bindOneShotCleanup(subOsc, panner, false);
+    } else {
+      subGain.connect(this.masterBus);
+      this._bindOneShotCleanup(subOsc, subGain, false);
+    }
     subOsc.start(now);
-    subOsc.stop(now + 0.36);
+    subOsc.stop(now + 0.54);
 
     if (!played) {
       this.playFallbackDryShot(0.45 * catMult, distance);
@@ -1041,34 +1613,61 @@ export class SoundManager {
 
     if (mode === 'armor') {
       if (this.playProfile('armor_ricochet', 0, 0, 0, catMult)) return;
-    } else {
-      const pitchMult = mode === 'headshot' || mode === 'kill' ? 1.28 : 1.0;
-      if (this.playProfile('weapon_click', 0, 0, 0, 0.95 * catMult, pitchMult)) return;
     }
 
+    // Crisp ZzFX-style dual-layer tactile hitmarker (meaty thud + headshot/kill metallic bell)
     const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(mode === 'headshot' ? 1650 : 1180, now);
-    osc.frequency.exponentialRampToValueAtTime(420, now + 0.035);
-    gain.gain.setValueAtTime(0.18 * catMult, now);
-    gain.gain.exponentialRampToValueAtTime(0.002, now + 0.038);
-    osc.connect(gain);
-    gain.connect(this.masterBus);
-    this._bindOneShotCleanup(osc, gain, false);
-    osc.start(now);
-    osc.stop(now + 0.04);
+    const isKillOrHead = mode === 'headshot' || mode === 'kill';
+    const thud = this.ctx.createOscillator();
+    const tg = this.ctx.createGain();
+    thud.type = 'triangle';
+    thud.frequency.setValueAtTime(isKillOrHead ? 1920 : 1320, now);
+    thud.frequency.exponentialRampToValueAtTime(340, now + 0.042);
+    tg.gain.setValueAtTime(0.2 * catMult, now);
+    tg.gain.exponentialRampToValueAtTime(0.001, now + 0.046);
+    thud.connect(tg);
+    tg.connect(this.masterBus);
+    this._bindOneShotCleanup(thud, tg, false);
+    thud.start(now);
+    thud.stop(now + 0.05);
+
+    if (isKillOrHead) {
+      const bell = this.ctx.createOscillator();
+      const bg = this.ctx.createGain();
+      bell.type = 'sine';
+      bell.frequency.setValueAtTime(mode === 'headshot' ? 2640 : 2120, now + 0.012);
+      bell.frequency.exponentialRampToValueAtTime(1760, now + 0.14);
+      bg.gain.setValueAtTime(0.14 * catMult, now + 0.012);
+      bg.gain.exponentialRampToValueAtTime(0.0008, now + 0.15);
+      bell.connect(bg);
+      bg.connect(this.masterBus);
+      this._bindOneShotCleanup(bell, bg, false);
+      bell.start(now + 0.012);
+      bell.stop(now + 0.16);
+    }
   }
 
-  playReload() {
+  playReload(wepDefOrKind = null) {
     this.init();
     if (!this.ctx || !this.masterBus) return;
     const catMult = this.getCategoryMult('weapons');
     if (catMult <= 0.001) return;
 
-    if (!this.playProfile('reload_rifle', 0, 0, 0, catMult)) {
-      this.playProfile('weapon_click', 0, 0, 0, catMult);
+    let reloadKey = 'reload_rifle';
+    if (typeof wepDefOrKind === 'string' && this.profiles[wepDefOrKind]) {
+      reloadKey = wepDefOrKind;
+    } else if (wepDefOrKind && typeof wepDefOrKind === 'object') {
+      const def = wepDefOrKind;
+      if (def.type === 'rpg' || def.type === 'stinger') reloadKey = 'reload_rpg';
+      else if (def.audioProfile === 'shotgun' || def.pellets > 1) reloadKey = 'reload_shotgun';
+      else if (def.soundType === 'pistol' || def.audioProfile === 'magnum') reloadKey = 'reload_pistol';
+      else if (def.soundType === 'sniper' || def.isBoltSniper) reloadKey = 'reload_sniper';
+    }
+
+    if (!this.playProfile(reloadKey, 0, 0, 0, catMult)) {
+      if (!this.playProfile('reload_rifle', 0, 0, 0, catMult)) {
+        this.playProfile('weapon_click', 0, 0, 0, catMult);
+      }
     }
   }
 
@@ -1095,13 +1694,13 @@ export class SoundManager {
     osc.type = 'sine';
     osc.frequency.setValueAtTime(isIncoming ? 1420 : 1680, now);
     osc.frequency.setValueAtTime(isIncoming ? 1850 : 1240, now + 0.035);
-    gain.gain.setValueAtTime(0.06 * catMult, now);
-    gain.gain.exponentialRampToValueAtTime(0.002, now + 0.075);
+    gain.gain.setValueAtTime(0.065 * catMult, now);
+    gain.gain.exponentialRampToValueAtTime(0.002, now + 0.08);
     osc.connect(gain);
     gain.connect(this.masterBus);
     this._bindOneShotCleanup(osc, gain, false);
     osc.start(now);
-    osc.stop(now + 0.08);
+    osc.stop(now + 0.085);
   }
 
   playCaptureTick() {
@@ -1145,11 +1744,6 @@ export class SoundManager {
     osc.stop(now + 0.23);
   }
 
-  /**
-   * Realistic Speed-of-Sound Delayed A-10C GAU-8 Avenger "BRRRT!" Acoustic Roar:
-   * - Bullets impact first; `distance / 343` seconds later, the iconic 65 Hz / 130 Hz rotary sawtooth
-   *   cannon buzz rolls across the battlefield!
-   */
   playDelayedA10Brrrt(distance = 0, pan = 0) {
     this.init();
     if (!this.ctx || !this.masterBus) return;
@@ -1160,7 +1754,7 @@ export class SoundManager {
     if (nowPerf - (this._lastBrrrtQueuedAt || 0) < 380) return;
     this._lastBrrrtQueuedAt = nowPerf;
 
-    const speedOfSoundDelaySec = Math.min(3.2, Math.max(0, distance / 343));
+    const speedOfSoundDelaySec = Math.min(3.2, Math.max(0, distance / SPEED_OF_SOUND));
     const startAt = this.ctx.currentTime + speedOfSoundDelaySec;
     const atten = Math.max(0.08, Math.pow(Math.max(0, 1 - distance / 1850), 1.25));
     const dur = 0.44;
@@ -1171,7 +1765,7 @@ export class SoundManager {
     const gain = this.ctx.createGain();
 
     oscLow.type = 'sawtooth';
-    oscLow.frequency.setValueAtTime(65, startAt); // 3,900 RPM = 65 Hz fundamental "BRRRT!"
+    oscLow.frequency.setValueAtTime(65, startAt);
     oscLow.frequency.linearRampToValueAtTime(61, startAt + dur);
 
     oscHarm.type = 'square';
@@ -1192,27 +1786,25 @@ export class SoundManager {
     oscHarm.connect(filter);
     filter.connect(gain);
 
+    let termNode = gain;
     if (typeof this.ctx.createStereoPanner === 'function' && Math.abs(pan) > 0.02) {
       const panner = this.ctx.createStereoPanner();
       panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), startAt);
       gain.connect(panner);
       panner.connect(this.masterBus);
+      termNode = panner;
     } else {
       gain.connect(this.masterBus);
     }
 
-    this._bindOneShotCleanup(oscLow, gain, false);
+    const revNode = this.connectToReverbSend(termNode, 0.45, startAt);
+    this._bindOneShotCleanup(oscLow, termNode, false, revNode);
     oscLow.start(startAt);
     oscHarm.start(startAt);
     oscLow.stop(startAt + dur + 0.02);
     oscHarm.stop(startAt + dur + 0.02);
   }
 
-  /**
-   * Cockpit Radar Warning Receiver (`RWR`) Audio:
-   * - `'track'`: Steady 880 Hz radar lock-acquisition ping when painted by enemy radar/seeker.
-   * - `'missile_inbound'`: Urgent alternating 1,480 Hz / 1,960 Hz high-tempo missile launch alarm!
-   */
   playRwrTone(mode = 'track') {
     this.init();
     if (!this.ctx || !this.masterBus) return;
@@ -1255,6 +1847,7 @@ export class SoundManager {
     this.init();
     if (!this.ctx || !this.masterBus) return;
     this.playRadioBeep(isFriendly);
+    this.playMusicStinger(isFriendly ? 'objective_captured' : 'objective_lost');
   }
 
   playBuy() {
@@ -1263,17 +1856,12 @@ export class SoundManager {
     this.playRadioBeep(true);
   }
 
-  /**
-   * Satisfying Wheel-of-Fortune / CS2 peg-clack sound when the Red Triangle Flapper
-   * snaps over a physical pin on the horizontal case strip.
-   */
   playCasePinTick(speedNorm = 0.5, isGoldTile = false) {
     this.init();
     if (!this.ctx || !this.masterBus) return;
     const catMult = Math.max(0.25, this.getCategoryMult('radio'));
     const now = this.ctx.currentTime;
 
-    // 1. Crisp wooden/brass peg clack transient
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = isGoldTile ? 'sine' : 'triangle';
@@ -1290,7 +1878,6 @@ export class SoundManager {
     osc.start(now);
     osc.stop(now + 0.038);
 
-    // 2. High metallic pin-snap harmonic
     const snapOsc = this.ctx.createOscillator();
     const snapGain = this.ctx.createGain();
     snapOsc.type = 'square';
@@ -1305,9 +1892,6 @@ export class SoundManager {
     snapOsc.stop(now + 0.018);
   }
 
-  /**
-   * Celebratory multi-note chime when the case spin stops on the winning weapon/skin.
-   */
   playCaseWinFanfare(isGold = false) {
     this.init();
     if (!this.ctx || !this.masterBus) return;
@@ -1338,7 +1922,7 @@ export class SoundManager {
     const noiseBuf = this._getSharedNoiseBuffer();
     if (!noiseBuf) return;
     const now = this.ctx.currentTime;
-    const dur = 0.08;
+    const dur = 0.14;
     const src = this.ctx.createBufferSource();
     src.buffer = noiseBuf;
     const bp = this.ctx.createBiquadFilter();
@@ -1350,43 +1934,23 @@ export class SoundManager {
     src.connect(bp);
     bp.connect(g);
     g.connect(this.masterBus);
+    const rev = this.connectToReverbSend(g, 0.24, now);
     const offset = Math.random() * Math.max(0, 1.0 - dur - 0.02);
-    this._bindOneShotCleanup(src, g, false);
+    this._bindOneShotCleanup(src, g, false, rev);
     src.start(now, offset, dur);
     src.stop(now + dur + 0.01);
   }
 
-  /**
-   * Continuous WebAudio Aircraft Engine Synthesizer (`updateAircraftEngineAudio`):
-   * - Synthesizes realistic, throttle-responsive cockpit & chase-cam engine sounds when piloting any aircraft:
-   *   * Jet Fighter / Stealth Bomber (`fighter`, `b2_spirit`): Low-pressure turbine rumble + high-RPM compressor whine + broadband jet exhaust & afterburner roar (`[W]`).
-   *   * CAS Warthog / Frogfoot (`cas`): High-bypass TF34 twin-turbofan dual-rotor buzzsaw whine + jet thrust roar.
-   *   * Heavy Gunship (`gunship` — AC-130J / Tu-95MS): 4-engine Allison T56 / NK-12 contra-rotating turboprop drone with blade-pass harmonic modulation.
-   *   * 1903 Wright Flyer I (`wright_flyer`): 4-cylinder chugging piston pop + twin chain-driven wooden propeller chop.
-   * - Also synthesizes 3D spatial stereo-panned, Doppler-shifted external flyby engine roar when nearby AI/enemy aircraft fly within 450m!
-   */
+  // ==========================================================================
+  // CONTINUOUS AIRCRAFT ENGINE SYNTHESIZER (Jets, CAS, Gunships, Helicopters)
+  // ==========================================================================
   _ensureAircraftEngineGraph() {
     if (!this.ctx || !this.masterBus) return null;
     if (this._airEngineNodes) return this._airEngineNodes;
 
     const now = this.ctx.currentTime;
-    // Create 2.0-second seamless pink/white jet exhaust turbulence noise loop buffer
-    const sampleRate = this.ctx.sampleRate || 44100;
-    const len = sampleRate * 2;
-    const noiseBuf = this.ctx.createBuffer(1, len, sampleRate);
-    const ch = noiseBuf.getChannelData(0);
-    let b0 = 0;
-    let b1 = 0;
-    let b2 = 0;
-    for (let i = 0; i < len; i++) {
-      const white = Math.random() * 2 - 1;
-      b0 = 0.99765 * b0 + white * 0.099046;
-      b1 = 0.963 * b1 + white * 0.2965164;
-      b2 = 0.57 * b2 + white * 1.0526913;
-      ch[i] = (b0 + b1 + b2 + white * 0.18) * 0.14;
-    }
+    const noiseBuf = this._createNoiseBuffer(2.0);
 
-    // 1. Player Aircraft Engine Bus
     const selfBusGain = this.ctx.createGain();
     selfBusGain.gain.setValueAtTime(0.0001, now);
     selfBusGain.connect(this.masterBus);
@@ -1403,7 +1967,6 @@ export class SoundManager {
     const coreGain = this.ctx.createGain();
     coreGain.gain.setValueAtTime(0.18, now);
 
-    // Blade-pass / piston firing LFO modulator on coreGain
     const bladeLfo = this.ctx.createOscillator();
     bladeLfo.type = 'sine';
     bladeLfo.frequency.setValueAtTime(18, now);
@@ -1416,7 +1979,6 @@ export class SoundManager {
     coreFilter.connect(coreGain);
     coreGain.connect(selfBusGain);
 
-    // High-pressure compressor / turbofan whine oscillator
     const whineOsc = this.ctx.createOscillator();
     whineOsc.type = 'triangle';
     whineOsc.frequency.setValueAtTime(520, now);
@@ -1425,7 +1987,6 @@ export class SoundManager {
     whineOsc.connect(whineGain);
     whineGain.connect(selfBusGain);
 
-    // Jet exhaust / afterburner / prop-wash noise source
     const roarSrc = this.ctx.createBufferSource();
     roarSrc.buffer = noiseBuf;
     roarSrc.loop = true;
@@ -1444,7 +2005,6 @@ export class SoundManager {
     whineOsc.start(now);
     roarSrc.start(now);
 
-    // 2. External 3D Flyby Aircraft Engine Bus (for nearby AI / remote planes)
     const extBusGain = this.ctx.createGain();
     extBusGain.gain.setValueAtTime(0.0001, now);
     let extPanner = null;
@@ -1536,7 +2096,6 @@ export class SoundManager {
     this._lastAirAudioWallMs = wallNow;
     this._lastPilotingPlane = isPilotingPlane;
 
-    // Find nearest active external aircraft within 450m
     let nearestExtPlane = null;
     let nearestExtDist = 450;
     if (listenerPos && Array.isArray(allVehicles)) {
@@ -1570,9 +2129,13 @@ export class SoundManager {
     if (!nodes || !this.ctx) return;
 
     const now = this.ctx.currentTime;
-    const catMult = Math.max(0.2, this.getCategoryMult('weapons'));
+    const catMult = this.getCategoryMult('vehicles');
+    if (catMult <= 0.001) {
+      this._setAirParam(nodes.selfBusGain.gain, 'selfBus', 0.0001, now, 0.06);
+      this._setAirParam(nodes.extBusGain.gain, 'extBus', 0.0001, now, 0.06);
+      return;
+    }
 
-    // 1. Update Player-Piloted Aircraft Engine Sound
     if (isPilotingPlane) {
       const v = playerVehicle;
       const role = v.aircraftRole || 'fighter';
@@ -1587,9 +2150,6 @@ export class SoundManager {
         v.isHelicopter || role === 'heli_transport' || role === 'heli_attack'
       );
       if (isHeliAudio) {
-        // UH-60M Black Hawk / Mi-8AMTSh & AH-64E Apache / Ka-52 Dedicated Turboshaft + Main-Rotor Blade-Slap Audio:
-        // Deep 18–22 Hz rhythmic "whop-whop-whop" blade-pass LFO modulation (`bladeDepth = 0.24`),
-        // warm 52–68 Hz rotor downwash thump (`triangle` core), and subtle GE T700 turboshaft whine — ZERO jet afterburner roar!
         if (nodes.coreOsc.type !== 'triangle') nodes.coreOsc.type = 'triangle';
         const heliCollective = wHeld ? 0.22 : 0;
         const heliPower = Math.min(1.15, 0.42 + thr * 0.42 + spdNorm * 0.22 + heliCollective);
@@ -1606,7 +2166,6 @@ export class SoundManager {
       } else {
         if (nodes.coreOsc.type !== 'sawtooth') nodes.coreOsc.type = 'sawtooth';
         if (role === 'wright_flyer') {
-          // 1903 4-cylinder chugging piston engine + twin chain-driven wooden propellers
           this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 34 + power * 28, now, 0.06);
           this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 190 + power * 180, now, 0.06);
           this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.24, now, 0.06);
@@ -1617,7 +2176,6 @@ export class SoundManager {
           this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 260 + power * 220, now, 0.06);
           this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.14 + spdNorm * 0.14, now, 0.06);
         } else if (role === 'gunship') {
-          // AC-130J / Tu-95MS 4-Engine Turboprop Drone + Blade-Pass Hum
           this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 64 + power * 36, now, 0.07);
           this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 240 + power * 210, now, 0.07);
           this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.26, now, 0.07);
@@ -1628,7 +2186,6 @@ export class SoundManager {
           this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 310 + power * 290, now, 0.07);
           this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.2 + power * 0.16, now, 0.07);
         } else if (role === 'cas') {
-          // A-10C / Su-25 High-Bypass Twin-Turbofan Whine + Jet Roar
           this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 78 + power * 58, now, 0.06);
           this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 310 + power * 340, now, 0.06);
           this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.2, now, 0.06);
@@ -1639,7 +2196,6 @@ export class SoundManager {
           this._setAirParam(nodes.roarFilter.frequency, 'roarFilt', 380 + power * 520, now, 0.06);
           this._setAirParam(nodes.roarGain.gain, 'roarGain', 0.24 + power * 0.22, now, 0.06);
         } else {
-          // F-15EX / F-22A / Su-57 / B-2A Spirit Low-Bypass Afterburning Turbofan
           this._setAirParam(nodes.coreOsc.frequency, 'coreFreq', 72 + power * 68, now, 0.06);
           this._setAirParam(nodes.coreFilter.frequency, 'coreFilt', 290 + power * 420, now, 0.06);
           this._setAirParam(nodes.coreGain.gain, 'coreGain', 0.21 + (wHeld ? 0.08 : 0), now, 0.06);
@@ -1658,18 +2214,16 @@ export class SoundManager {
       this._setAirParam(nodes.selfBusGain.gain, 'selfBus', 0.0001, now, 0.08);
     }
 
-    // 2. Update External 3D Spatial Flyby Aircraft Engine Sound
     if (nearestExtPlane && listenerPos) {
       const distRatio = Math.min(1, Math.max(0, nearestExtDist / 450));
       const atten = Math.pow(1 - distRatio, 1.65);
       const spd = Math.max(10, nearestExtPlane.forwardSpeed || 45);
-      // Simple radial velocity Doppler pitch shift
       const dx = nearestExtPlane.pos.x - listenerPos.x;
       const dz = nearestExtPlane.pos.z - listenerPos.z;
       const invD = 1 / Math.max(1, nearestExtDist);
       const vx = -Math.sin(nearestExtPlane.yaw || 0) * spd;
       const vz = -Math.cos(nearestExtPlane.yaw || 0) * spd;
-      const radialVel = (dx * vx + dz * vz) * invD; // negative = approaching, positive = receding
+      const radialVel = (dx * vx + dz * vz) * invD;
       const doppler = Math.max(0.68, Math.min(1.42, 1.0 - radialVel / 220));
 
       const extIsHeli = Boolean(
@@ -1702,6 +2256,9 @@ export class SoundManager {
     }
   }
 
+  // ==========================================================================
+  // CONTINUOUS GROUND VEHICLE ENGINE SYNTHESIZER (Humvee, Tank, IFV, ATV, Moto)
+  // ==========================================================================
   _isMotorizedGroundVehicle(v) {
     if (!v || v.dead || v.isAircraft) return false;
     const t = v.type;
@@ -1717,16 +2274,16 @@ export class SoundManager {
   }
 
   _ensureGroundEngineGraph() {
-    if (!this.ctx) return null;
+    if (!this.ctx || !this.masterBus) return null;
     if (this._groundEngineNodes) return this._groundEngineNodes;
 
     const ctx = this.ctx;
     const noiseBuf = this._createNoiseBuffer(2.0);
+    const outTarget = this.masterBus;
 
-    // 1. Player / Ridden Ground Vehicle Continuous Engine + Exhaust + Track/Turbine Graph
     const selfBusGain = ctx.createGain();
     selfBusGain.gain.value = 0.0001;
-    selfBusGain.connect(this.masterGain || ctx.destination);
+    selfBusGain.connect(outTarget);
 
     const selfCoreOsc = ctx.createOscillator();
     selfCoreOsc.type = 'sawtooth';
@@ -1740,7 +2297,6 @@ export class SoundManager {
     const selfSubGain = ctx.createGain();
     selfSubGain.gain.value = 0.35;
 
-    // High-frequency turbine / EV inverter / turbocharger whine oscillator
     const selfWhineOsc = ctx.createOscillator();
     selfWhineOsc.type = 'sine';
     selfWhineOsc.frequency.value = 420;
@@ -1761,7 +2317,6 @@ export class SoundManager {
     selfWhineOsc.connect(selfWhineGain);
     selfWhineGain.connect(selfBusGain);
 
-    // Mechanical intake / tire / caterpillar track rumble loop
     const selfMechNoise = ctx.createBufferSource();
     selfMechNoise.buffer = noiseBuf;
     selfMechNoise.loop = true;
@@ -1780,16 +2335,15 @@ export class SoundManager {
     selfWhineOsc.start();
     selfMechNoise.start();
 
-    // 2. Nearest AI / Remote Driven Ground Vehicle Spatial Pass-By + Doppler Bus
     const extBusGain = ctx.createGain();
     extBusGain.gain.value = 0.0001;
     let extPanner = null;
     if (typeof ctx.createStereoPanner === 'function') {
       extPanner = ctx.createStereoPanner();
       extBusGain.connect(extPanner);
-      extPanner.connect(this.masterGain || ctx.destination);
+      extPanner.connect(outTarget);
     } else {
-      extBusGain.connect(this.masterGain || ctx.destination);
+      extBusGain.connect(outTarget);
     }
 
     const extOsc = ctx.createOscillator();
@@ -1845,18 +2399,18 @@ export class SoundManager {
     const prev = cache[key];
     if (prev !== undefined && Math.abs(prev - targetVal) < 0.0015) return;
     cache[key] = targetVal;
-    audioParam.setTargetAtTime(targetVal, now, timeConst);
+    if (typeof audioParam.setTargetAtTime === 'function') {
+      audioParam.setTargetAtTime(targetVal, now, timeConst);
+    } else {
+      audioParam.value = targetVal;
+    }
   }
 
-  /**
-   * Continuous real-time procedural engine, exhaust, turbine & track audio for ALL motorized
-   * ground vehicles (Motorcycles — 4-stroke, 2-stroke, Electric e-Moto — Quad ATVs, Humvees,
-   * 8x8 IFVs/SPAAGs, M1A2 Gas-Turbine Tanks & T-90M V-12 Diesel Tanks) + 3D spatial Doppler pass-by!
-   */
   updateGroundVehicleEngineAudio(arg1, arg2, listenerPos, listenerYaw = 0) {
     const vehicles = Array.isArray(arg1) ? arg1 : Array.isArray(arg2) ? arg2 : null;
     const playerVeh = Array.isArray(arg1) ? arg2 : arg1;
-    if (!this.ctx || !this.enabled || this.muted) {
+
+    if (this.volumes.muted) {
       if (this._groundEngineNodes && this.ctx) {
         const t = this.ctx.currentTime;
         this._setGroundParam(this._groundEngineNodes.selfBusGain.gain, 'selfBus', 0.0001, t, 0.06);
@@ -1865,9 +2419,9 @@ export class SoundManager {
       return;
     }
 
-    const catMult = this.getCategoryGain('vehicles');
+    const catMult = this.getCategoryMult('vehicles');
     if (catMult <= 0.001) {
-      if (this._groundEngineNodes) {
+      if (this._groundEngineNodes && this.ctx) {
         const t = this.ctx.currentTime;
         this._setGroundParam(this._groundEngineNodes.selfBusGain.gain, 'selfBus', 0.0001, t, 0.06);
         this._setGroundParam(this._groundEngineNodes.extBusGain.gain, 'extBus', 0.0001, t, 0.06);
@@ -1877,7 +2431,7 @@ export class SoundManager {
 
     const activePlayerGround = this._isMotorizedGroundVehicle(playerVeh) ? playerVeh : null;
     let nearestExtVeh = null;
-    let nearestExtDistSq = 145 * 145;
+    let nearestExtDistSq = 155 * 155;
 
     if (listenerPos && Array.isArray(vehicles)) {
       for (let i = 0; i < vehicles.length; i++) {
@@ -1898,7 +2452,7 @@ export class SoundManager {
     }
 
     if (!activePlayerGround && !nearestExtVeh) {
-      if (this._groundEngineNodes) {
+      if (this._groundEngineNodes && this.ctx) {
         const t = this.ctx.currentTime;
         this._setGroundParam(this._groundEngineNodes.selfBusGain.gain, 'selfBus', 0.0001, t, 0.07);
         this._setGroundParam(this._groundEngineNodes.extBusGain.gain, 'extBus', 0.0001, t, 0.07);
@@ -1906,12 +2460,12 @@ export class SoundManager {
       return;
     }
 
-    if (this.ctx.state === 'suspended') return;
+    this.init();
+    if (!this.ctx || this.ctx.state === 'suspended') return;
     const nodes = this._ensureGroundEngineGraph();
     if (!nodes) return;
     const now = this.ctx.currentTime;
 
-    // A. Ridden Ground Vehicle Engine Synthesis
     if (activePlayerGround) {
       const v = activePlayerGround;
       const spdAbs = Math.abs(v.forwardSpeed || 0);
@@ -1919,7 +2473,13 @@ export class SoundManager {
       const spdRatio = Math.min(1.2, spdAbs / maxSpd);
       const rpmNorm =
         typeof v.engineRpm === 'number' && v.maxRpm > 1000
-          ? Math.max(0, Math.min(1.12, (v.engineRpm - (v.idleRpm || 1200)) / Math.max(800, v.maxRpm - (v.idleRpm || 1200))))
+          ? Math.max(
+              0,
+              Math.min(
+                1.12,
+                (v.engineRpm - (v.idleRpm || 1200)) / Math.max(800, v.maxRpm - (v.idleRpm || 1200))
+              )
+            )
           : Math.min(1.05, spdRatio * 0.92 + (spdAbs > 0.5 ? 0.14 : 0.0));
       const loadBoost = v.boostActive || v.wheelieFactor > 0.15 ? 0.18 : 0;
 
@@ -1930,13 +2490,12 @@ export class SoundManager {
       let whineLvl = 0.01;
       let mechHz = 180;
       let mechLvl = 0.06;
-      let masterVol = 0.16;
+      let masterVol = 0.18;
 
       if (v.type === 'bike') {
         const isEv = Boolean(v.isElectric || v.bikeEngine === 'electric_stealth');
         const isTwoStroke = Boolean(v.bikeEngine === 'two_stroke_race');
         if (isEv) {
-          // Zero FX Electric Recon Bike: quiet stealth idle + futuristic PWM inverter whine + tire hum
           if (nodes.selfCoreOsc.type !== 'sine') nodes.selfCoreOsc.type = 'sine';
           coreHz = 145 + spdRatio * 560;
           subHz = 72 + spdRatio * 240;
@@ -1945,9 +2504,8 @@ export class SoundManager {
           whineLvl = 0.025 + spdRatio * 0.085;
           mechHz = 240 + spdRatio * 420;
           mechLvl = spdRatio * 0.045;
-          masterVol = 0.045 + spdRatio * 0.11;
+          masterVol = 0.055 + spdRatio * 0.12;
         } else if (isTwoStroke) {
-          // 250cc 2-Stroke Dirt Bike: crisp high-revving resonant ring-ding powerband!
           if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
           coreHz = 86 + (rpmNorm + loadBoost) * 235;
           subHz = coreHz * 0.5;
@@ -1956,9 +2514,8 @@ export class SoundManager {
           whineLvl = 0.025 + rpmNorm * 0.05;
           mechHz = 310 + spdRatio * 380;
           mechLvl = 0.035 + spdRatio * 0.065;
-          masterVol = 0.12 + rpmNorm * 0.12;
+          masterVol = 0.13 + rpmNorm * 0.13;
         } else {
-          // 450cc 4-Stroke Single-Cylinder Enduro Thumper ("braaap" exhaust pulse + gear shifts!)
           if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
           coreHz = 52 + (rpmNorm + loadBoost) * 168;
           subHz = coreHz * 0.5;
@@ -1967,10 +2524,9 @@ export class SoundManager {
           whineLvl = 0.015 + rpmNorm * 0.035;
           mechHz = 210 + spdRatio * 340;
           mechLvl = 0.04 + spdRatio * 0.065;
-          masterVol = 0.125 + rpmNorm * 0.12;
+          masterVol = 0.135 + rpmNorm * 0.13;
         }
       } else if (v.type === 'atv') {
-        // 850cc Twin-Cylinder 4x4 Tactical Quad ATV
         if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
         coreHz = 46 + (rpmNorm + loadBoost) * 144;
         subHz = coreHz * 0.5;
@@ -1979,34 +2535,31 @@ export class SoundManager {
         whineLvl = 0.018 + rpmNorm * 0.03;
         mechHz = 185 + spdRatio * 290;
         mechLvl = 0.05 + spdRatio * 0.075;
-        masterVol = 0.13 + rpmNorm * 0.115;
-      } else if (v.type === 'humvee') {
-        // 6.5L V8 Turbo-Diesel Armored Utility Truck
+        masterVol = 0.14 + rpmNorm * 0.125;
+      } else if (v.type === 'humvee' || v.type === 'truck_transport') {
         if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
         coreHz = 36 + rpmNorm * 102;
         subHz = coreHz * 0.5;
         lpHz = 195 + rpmNorm * 680;
-        whineHz = 520 + rpmNorm * 920; // turbocharger whistle
-        whineLvl = 0.012 + rpmNorm * 0.042;
+        whineHz = 520 + rpmNorm * 920;
+        whineLvl = 0.014 + rpmNorm * 0.045;
         mechHz = 150 + spdRatio * 240;
-        mechLvl = 0.055 + spdRatio * 0.075;
-        masterVol = 0.135 + rpmNorm * 0.11;
+        mechLvl = 0.055 + spdRatio * 0.08;
+        masterVol = 0.15 + rpmNorm * 0.125;
       } else if (v.type === 'apc' || v.type === 'aa') {
-        // 8x8 Armored IFV / SPAAG Heavy Inline-6 Turbo-Diesel + Drivetrain Whine
         if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
         coreHz = 39 + rpmNorm * 108;
         subHz = coreHz * 0.5;
         lpHz = 210 + rpmNorm * 720;
         whineHz = 480 + rpmNorm * 880;
-        whineLvl = 0.018 + rpmNorm * 0.048;
+        whineLvl = 0.02 + rpmNorm * 0.05;
         mechHz = 165 + spdRatio * 260;
         mechLvl = 0.065 + spdRatio * 0.085;
-        masterVol = 0.145 + rpmNorm * 0.115;
+        masterVol = 0.16 + rpmNorm * 0.125;
       } else if (v.type === 'tank') {
         const isAbramsTurbine = v.team !== 'RU';
         if (nodes.selfCoreOsc.type !== 'sawtooth') nodes.selfCoreOsc.type = 'sawtooth';
         if (isAbramsTurbine) {
-          // M1A2 SEP v3 Honeywell AGT1500 Gas-Turbine Whine + Steel Track Clatter
           coreHz = 48 + spdRatio * 68;
           subHz = 24 + spdRatio * 34;
           lpHz = 220 + spdRatio * 460;
@@ -2014,9 +2567,8 @@ export class SoundManager {
           whineLvl = 0.055 + spdRatio * 0.095;
           mechHz = 135 + spdRatio * 245;
           mechLvl = 0.05 + spdRatio * 0.13;
-          masterVol = 0.15 + spdRatio * 0.12;
+          masterVol = 0.165 + spdRatio * 0.13;
         } else {
-          // T-90M Proryv V-92S2F V-12 Twin-Turbo Diesel Roar + Steel Track Clatter
           coreHz = 31 + spdRatio * 84;
           subHz = 16 + spdRatio * 42;
           lpHz = 185 + spdRatio * 620;
@@ -2024,7 +2576,7 @@ export class SoundManager {
           whineLvl = 0.024 + spdRatio * 0.062;
           mechHz = 130 + spdRatio * 235;
           mechLvl = 0.065 + spdRatio * 0.135;
-          masterVol = 0.155 + spdRatio * 0.12;
+          masterVol = 0.17 + spdRatio * 0.13;
         }
       }
 
@@ -2038,7 +2590,7 @@ export class SoundManager {
       this._setGroundParam(
         nodes.selfBusGain.gain,
         'selfBus',
-        Math.max(0.0001, Math.min(0.32, masterVol * catMult)),
+        Math.max(0.0001, Math.min(0.36, masterVol * catMult)),
         now,
         0.055
       );
@@ -2046,11 +2598,10 @@ export class SoundManager {
       this._setGroundParam(nodes.selfBusGain.gain, 'selfBus', 0.0001, now, 0.07);
     }
 
-    // B. Nearest External Ground Vehicle 3D Spatial Pass-By + Doppler Shift
     if (nearestExtVeh && listenerPos) {
       const dist = Math.sqrt(nearestExtDistSq);
-      const distRatio = Math.min(1, Math.max(0, dist / 145));
-      const atten = Math.pow(1 - distRatio, 1.75);
+      const distRatio = Math.min(1, Math.max(0, dist / 155));
+      const atten = Math.pow(1 - distRatio, 1.7);
       const spdSigned = nearestExtVeh.forwardSpeed || 0;
       const spdAbs = Math.abs(spdSigned);
       const maxSpd = Math.max(8, nearestExtVeh.maxSpeed || 22);
@@ -2098,7 +2649,7 @@ export class SoundManager {
         this._setGroundParam(nodes.extPanner.pan, 'extPan', pan, now, 0.055);
       }
 
-      const extVol = Math.min(0.24, (0.08 + spdFrac * 0.14) * atten * catMult);
+      const extVol = Math.min(0.26, (0.09 + spdFrac * 0.15) * atten * catMult);
       this._setGroundParam(nodes.extBusGain.gain, 'extBus', Math.max(0.0001, extVol), now, 0.065);
     } else {
       this._setGroundParam(nodes.extBusGain.gain, 'extBus', 0.0001, now, 0.08);

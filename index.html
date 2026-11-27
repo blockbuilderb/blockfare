@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MODERN BLOCKFARE — Multi-Era Voxel Combined Arms FPS</title>
-  <link rel="stylesheet" href="./style.css?v=139" />
+  <link rel="stylesheet" href="./style.css?v=141" />
   <script type="importmap">
     {
       "imports": {
@@ -581,7 +581,9 @@
         <span>&bull;</span>
         <span id="hud-cash-btn" style="color:#f1c40f;font-weight:900;cursor:pointer;pointer-events:auto;" title="Press [L] or click to open Loadout, Gunsmith &amp; Armory Cases">💰 <span id="hud-cash-val">⚡$50 &bull; 🏦$100,000</span> &bull; <b>[L]</b> Armory</span>
         <span>&bull;</span>
-        <span style="color:#74b9ff;font-weight:800;cursor:pointer;pointer-events:auto;" onclick="window.game && window.game.ui && window.game.ui.toggleCommandModal()"><b>[K]</b> Map</span>
+        <span style="color:#74b9ff;font-weight:800;cursor:pointer;pointer-events:auto;" onclick="window.game && window.game.ui && window.game.ui.toggleCommandModal()" title="Press [M] or [K] to open Detailed Squad GPS &amp; Tactical Map">🗺️ <b>[M]</b> Map</span>
+        <span>&bull;</span>
+        <span id="hud-redeploy-btn" style="color:#ffeaa7;font-weight:800;cursor:pointer;pointer-events:auto;" onclick="window.game && window.game.ui && window.game.ui.openDeployScreenNonDestructive && window.game.ui.openDeployScreenNonDestructive()" title="Press [Shift+M] or click to view Classes / Loadout (with Back to Game button!)">🪖 <b>[Shift+M]</b> Classes</span>
         <span>&bull;</span>
         <span id="hud-ride-btn" style="color:#00d2d3;font-weight:900;cursor:pointer;pointer-events:auto;" onclick="window.game && window.game.ui && (window.game.ui.handleRideShortcut ? window.game.ui.handleRideShortcut() : window.game.ui.openRideMapModal())" title="1st [Alt+R / ⌥+R]: Request Pickup at Your Position • 2nd [Alt+R / ⌥+R]: Designate Drop-Off Destination!">🚁 <b>[Alt+R]</b> Ride</span>
         <span>&bull;</span>
@@ -643,10 +645,10 @@
     <!-- Bottom Left: Minimap, Compact Tactical Map Bar & Player Vitals -->
     <div id="bottom-left-hud">
       <div id="minimap-wrapper">
-        <div id="hud-map-cmd-bar" title="Press [K] to open Interactive Tactical Map, Squad Roster &amp; Force Commander Orders">
+        <div id="hud-map-cmd-bar" title="Press [M] or [K] to open Detailed Tactical Map, Squad Leader GPS &amp; Orders">
           <span id="cmd-rank-badge">★ CMD</span>
           <span id="cmd-active-order-text" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">AI AUTO</span>
-          <button id="cmd-open-modal-btn" type="button">[K] MAP &amp; ORDERS</button>
+          <button id="cmd-open-modal-btn" type="button">[M] SQUAD MAP</button>
         </div>
         <canvas id="minimap-canvas" width="180" height="180"></canvas>
         <div class="minimap-footer">SECTOR: FRUGIS RIVER</div>
@@ -1502,6 +1504,7 @@
           <button type="button" id="deploy-gunsmith-btn" class="deploy-tool-btn armory" title="Customize Weapons, 16 Optics, Attachments, Body Armor &amp; Armory Cases [L]">🔧 [L] Armory (<span id="deploy-cash-val">🏦 $100,000</span>)</button>
           <button type="button" id="deploy-backpack-btn" class="deploy-tool-btn backpack" title="Open Backpack &amp; Extracted Loot Warehouse [I]">🎒 [I] Pack</button>
           <button type="button" id="deploy-help-btn" class="deploy-tool-btn help" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp()" style="border:1px solid rgba(0,210,211,0.65);color:#81ecec;background:rgba(0,210,211,0.15);" title="Open Searchable Field &amp; Flight Controls Manual [? / F1]">📖 [?] Help</button>
+          <button type="button" id="deploy-header-resume-btn" class="deploy-tool-btn hidden" style="display:none;border:1.5px solid #2ecc71;color:#061f10;background:linear-gradient(135deg,#2ecc71,#27ae60);font-weight:900;" title="Return immediately to your live soldier in the current round without respawning or restarting [ESC]">↩ BACK TO GAME [ESC]</button>
           <button type="button" id="deploy-settings-btn" class="deploy-tool-btn settings" title="Audio Volume, Building Destruction, Friendly Fire &amp; FPS Settings">⚙️ Settings</button>
           <button id="open-main-menu-btn" type="button" class="deploy-nav-btn" title="Optional: Switch Era / Theater (Medieval &amp; Jurassic Beta)">🌍 Eras</button>
         </div>
@@ -1700,13 +1703,17 @@
 
       <div class="deploy-footer">
         <div class="control-tips">
-          <b>WASD</b> Move &bull; <b>RMB</b> Aim/Block &bull; <b>E</b> Vehicle/Mount &bull; <b>F</b> Revive/Loot &bull; <b>L</b> Armory &bull; <b>I</b> Pack &bull; <b>K</b> Map &bull; <b>TAB</b> Stats &bull; <span id="deploy-footer-help-btn" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp()" style="color:#7bed9f;font-weight:900;cursor:pointer;text-decoration:underline;" title="Click or press [? / F1] to open the full Controls &amp; Operations Manual">📖 <b>[? / F1]</b> Controls Manual</span>
+          <b>WASD</b> Move &bull; <b>RMB</b> Aim/Block &bull; <b>M</b> Squad Map &bull; <b>E</b> Vehicle &bull; <b>F</b> Revive/Loot &bull; <b>L</b> Armory &bull; <b>I</b> Pack &bull; <b>TAB</b> Stats &bull; <span id="deploy-round-status-pill" style="color:#7bed9f;font-weight:900;">🟢 NEW ROUND READY</span> &bull; <span id="deploy-footer-help-btn" onclick="window.game && window.game.ui && window.game.ui.toggleControlsHelp()" style="color:#81ecec;font-weight:900;cursor:pointer;text-decoration:underline;" title="Click or press [? / F1] to open the full Controls &amp; Operations Manual">📖 <b>[? / F1]</b> Manual</span>
         </div>
-        <button id="deploy-btn" type="button" class="deploy-cta-btn" onclick="window.forceEnterGame && window.forceEnterGame()">DEPLOY [ENTER / SPACE]</button>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <button id="deploy-resume-btn" type="button" class="hidden" style="display:none;background:linear-gradient(135deg,#1e8449,#2ecc71);color:#04180c;border:1.5px solid #7bed9f;border-radius:6px;padding:10px 16px;font-size:13px;font-weight:900;letter-spacing:0.6px;cursor:pointer;box-shadow:0 0 16px rgba(46,204,113,0.35);" title="Return to your current live position &amp; loadout without respawning or losing tickets [ESC]">↩ BACK TO GAME [ESC]</button>
+          <button id="deploy-new-round-btn" type="button" class="hidden" style="display:none;background:rgba(243,156,18,0.18);color:#ffd32a;border:1.5px solid #f39c12;border-radius:6px;padding:10px 14px;font-size:12.5px;font-weight:900;letter-spacing:0.5px;cursor:pointer;" title="Reset all flags, buildings, vehicles &amp; tickets and deploy into a brand-new Conquest round">🔄 DEPLOY TO NEW ROUND</button>
+          <button id="deploy-btn" type="button" class="deploy-cta-btn" onclick="window.forceEnterGame && window.forceEnterGame()">▶ DEPLOY TO NEW ROUND [ENTER / SPACE]</button>
+        </div>
       </div>
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=139"></script>
+  <script type="module" src="./src/main.js?v=141"></script>
 </body>
 </html>

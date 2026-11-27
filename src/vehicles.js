@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=139';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=139';
+import { sound } from './audio.js?v=141';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=141';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=139';
-import { createVehicleMesh } from './models/vehicle-model.js?v=139';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=139';
-import { getRideShortcutLabel } from './utils/KeyboardShortcuts.js?v=139';
-import { events, makeEventBridge } from './events.js?v=139';
+} from './assets/vehicle-defs.js?v=141';
+import { createVehicleMesh } from './models/vehicle-model.js?v=141';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=141';
+import { getRideShortcutLabel } from './utils/KeyboardShortcuts.js?v=141';
+import { events, makeEventBridge } from './events.js?v=141';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -22,7 +22,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=139';
+} from './core/StateMachines.js?v=141';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -4391,6 +4391,15 @@ export class VehicleManager {
           tmpVec3(vehicle.pos.x, vehicle.pos.y + 1.6, vehicle.pos.z),
           vehicle.isAircraft ? 9.5 : vehicle.type === 'tank' ? 8.5 : 6.5
         );
+        this.detonateDestroyedVehicleBlast(
+          vehicle,
+          attackerName,
+          attackerTeam,
+          weaponName,
+          onKillFn,
+          onAwardXp,
+          attackerPos
+        );
       }
 
       if (vehicle.driver) {
@@ -4542,8 +4551,169 @@ export class VehicleManager {
     return false;
   }
 
+  /**
+   * Secondary Fuel-Tank & Ammunition Cook-Off Detonation when a motorized vehicle explodes:
+   * Inflicts lethal overpressure + fragmentation shrapnel on nearby infantry & disembarking passengers
+   * (e.g. when an Anti-Materiel Rifle, RPG, or Tank shell blows up an enemy Car/Humvee/Truck/APC/Tank).
+   */
+  detonateDestroyedVehicleBlast(
+    vehicle,
+    attackerName,
+    attackerTeam,
+    weaponName,
+    onKillFn = null,
+    onAwardXp = null,
+    attackerPos = null
+  ) {
+    if (!vehicle || this._inSecondaryVehicleBlast) return 0;
+    if (
+      vehicle.type === 'warhorse' ||
+      vehicle.type === 'raptor_mount' ||
+      vehicle.type === 'trex_mount'
+    ) {
+      return 0;
+    }
+
+    const bm =
+      this.botManager ||
+      this.lastBotManager ||
+      (typeof window !== 'undefined' ? window.game?.botManager : null);
+    const pl =
+      this.lastPlayer ||
+      bm?.player ||
+      (typeof window !== 'undefined' ? window.game?.player : null);
+    if (!bm && !pl) return 0;
+
+    const blastOrigin = new THREE.Vector3(vehicle.pos.x, vehicle.pos.y + 1.1, vehicle.pos.z);
+    const isLightMoto = vehicle.type === 'bike' || vehicle.type === 'atv';
+    const isHeavyTank = vehicle.type === 'tank';
+    const isMediumArmor = vehicle.type === 'apc' || vehicle.type === 'aa';
+    const blastRadius = vehicle.isAircraft
+      ? 14.5
+      : isHeavyTank
+      ? 14.0
+      : isMediumArmor
+      ? 12.0
+      : isLightMoto
+      ? 6.8
+      : 10.5; // Humvee / Tactical Car / 6x6 Truck
+    const coreRadius = blastRadius * 0.44;
+    const maxInfantryDist = blastRadius * 1.35;
+    const maxDamage = vehicle.isAircraft
+      ? 315
+      : isHeavyTank
+      ? 345
+      : isMediumArmor
+      ? 285
+      : isLightMoto
+      ? 155
+      : 245;
+    const blastWeaponLabel = `${weaponName || 'ANTI-MATERIEL'} [🚙 VEHICLE EXPLOSION]`;
+    const isPlayerAttacker = Boolean(
+      pl &&
+        attackerTeam === pl.team &&
+        (attackerName === pl.name ||
+          attackerName === 'YOU (PLAYER)' ||
+          String(attackerName || '').includes('PLAYER'))
+    );
+
+    this._inSecondaryVehicleBlast = true;
+    let infantryKilled = 0;
+    try {
+      if (bm && Array.isArray(bm.bots) && typeof bm.damageBot === 'function') {
+        const allowFriendlyBlast = Boolean(isPlayerAttacker && pl && pl.friendlyFireEnabled);
+        for (let i = 0; i < bm.bots.length; i++) {
+          const bot = bm.bots[i];
+          if (
+            !bot ||
+            bot.dead ||
+            bot.downed ||
+            (typeof bot.hp === 'number' && bot.hp <= 0) ||
+            bot.drivingVehicle ||
+            bot.parachuting
+          ) {
+            continue;
+          }
+          if (attackerTeam && bot.team === attackerTeam && !allowFriendlyBlast) {
+            continue;
+          }
+          const dx = bot.pos.x - blastOrigin.x;
+          const dy = bot.pos.y + 0.9 - blastOrigin.y;
+          const dz = bot.pos.z - blastOrigin.z;
+          const dist = Math.hypot(dx, dy, dz);
+          if (dist > maxInfantryDist) continue;
+
+          const falloff =
+            dist <= coreRadius
+              ? 1.0
+              : Math.max(0.22, 1 - (dist - coreRadius) / (maxInfantryDist - coreRadius + 1.0));
+          const dmg = Math.max(18, Math.round(maxDamage * falloff));
+          const res = bm.damageBot(
+            bot,
+            dmg,
+            attackerName || 'VEHICLE COOK-OFF',
+            attackerTeam || (bot.team === 'US' ? 'RU' : 'US'),
+            blastWeaponLabel,
+            false,
+            onKillFn,
+            null,
+            { origin: blastOrigin, dist, radius: blastRadius }
+          );
+          if (res && res.killed && (!attackerTeam || bot.team !== attackerTeam)) {
+            infantryKilled++;
+            if (isPlayerAttacker && pl) {
+              pl.kills = (pl.kills || 0) + 1;
+              pl.registerKill?.(bot.name);
+              const xpGain = 120;
+              const xpText = `💥 VEHICLE EXPLOSION KILL (${bot.name})`;
+              events.emit('xp:awarded', { amount: xpGain, reason: xpText });
+              if (onAwardXp && !onAwardXp._isEventsBridge) {
+                onAwardXp(xpGain, xpText);
+              }
+            }
+          }
+        }
+      }
+
+      if (
+        pl &&
+        !pl.dead &&
+        !pl.downed &&
+        !pl.activeVehicle &&
+        attackerTeam &&
+        pl.team !== attackerTeam &&
+        typeof pl.takeDamage === 'function'
+      ) {
+        const distP = pl.pos.distanceTo(blastOrigin);
+        if (distP <= blastRadius * 1.25) {
+          const pFalloff =
+            distP <= coreRadius
+              ? 0.85
+              : Math.max(0.18, 1 - (distP - coreRadius) / (blastRadius * 1.25 - coreRadius + 1.0));
+          const pDmg = Math.round(maxDamage * 0.55 * pFalloff);
+          if (pDmg > 0) {
+            pl.takeDamage(
+              pDmg,
+              attackerName || 'VEHICLE COOK-OFF',
+              attackerTeam,
+              blastWeaponLabel,
+              onKillFn,
+              attackerPos || blastOrigin,
+              false,
+              { origin: blastOrigin, dist: distP, radius: blastRadius }
+            );
+          }
+        }
+      }
+    } finally {
+      this._inSecondaryVehicleBlast = false;
+    }
+    return infantryKilled;
+  }
+
   update(dt, player = null, botManager = null, onDeployMenu = false, cameraArg = null) {
     if (player) this.lastPlayer = player;
+    if (botManager) this.lastBotManager = botManager;
     const isDeployFlag = Boolean(onDeployMenu && !onDeployMenu.isCamera);
     const activeCam =
       (cameraArg && cameraArg.isCamera ? cameraArg : null) ||

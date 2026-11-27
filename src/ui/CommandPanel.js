@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SQUAD_DEFS } from '../bots.js?v=139';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=139';
+import { SQUAD_DEFS } from '../bots.js?v=141';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=141';
 
 export const CommandPanel = {
   setCommandScope(scope, opts = {}) {
@@ -28,6 +28,172 @@ export const CommandPanel = {
     const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     const dirStr = dirs[Math.round(brgDeg / 45) % 8];
     return { distM, brgDeg, dirStr };
+  },
+
+  /**
+   * Computes a complete Battlefield GPS & Squad Waypoint snapshot for the [M] Detailed Map and HUD Minimap:
+   * - Where YOU are (coordinates + named sector)
+   * - Where your SQUAD LEADER (or Acting 2IC Leader) is
+   * - Where your SQUAD's main group centroid is
+   * - Where your Squad / Commander wants you to go (`targetWaypoint` with bearing & distance)
+   */
+  computeSquadNavigationGuide() {
+    const player = this.player;
+    const pPos = player?.activeVehicle?.pos || player?.pos || { x: 0, y: 0, z: 0 };
+    const team = player?.team || 'US';
+    const squadId = player?.squad || 'ALPHA';
+    const flags = Array.isArray(this.world?.flags) ? this.world.flags : [];
+    const bots = Array.isArray(this.botManager?.bots) ? this.botManager.bots : [];
+
+    // 1. Named Sector Lookup for Player Position
+    const flagSectorNames = {
+      A: 'WEST TOWN',
+      B: 'CONTAINERS',
+      C: 'DOWNTOWN CITY',
+      D: 'RADAR HILL',
+      E: 'INDUSTRIAL'
+    };
+    let playerSectorLabel = 'OPEN VALLEY';
+    let closestSectorDist = Infinity;
+    for (let i = 0; i < flags.length; i++) {
+      const f = flags[i];
+      if (!f || !f.pos) continue;
+      const d = Math.hypot(f.pos.x - pPos.x, f.pos.z - pPos.z);
+      if (d < closestSectorDist) {
+        closestSectorDist = d;
+        if (d <= 150) {
+          playerSectorLabel = `OBJ ${f.id} (${flagSectorNames[f.id] || f.id})`;
+        } else {
+          playerSectorLabel = `NEAR OBJ ${f.id}`;
+        }
+      }
+    }
+    const usBase = this.world?.spawns?.US_BASE;
+    const ruBase = this.world?.spawns?.RU_BASE;
+    if (usBase && Math.hypot(pPos.x - usBase.x, pPos.z - usBase.z) <= 185) {
+      playerSectorLabel = 'US MAIN BASE HQ';
+    } else if (ruBase && Math.hypot(pPos.x - ruBase.x, pPos.z - ruBase.z) <= 185) {
+      playerSectorLabel = 'RU MAIN BASE HQ';
+    }
+
+    // 2. Locate Squadmates, Squad Leader (or Acting 2IC), and Squad Group Centroid
+    const sqMates = [];
+    for (let i = 0; i < bots.length; i++) {
+      const b = bots[i];
+      if (!b || b.dead || b.team !== team || b.squad !== squadId) continue;
+      sqMates.push(b);
+    }
+    const sec0 = this.botManager?.squadSections?.get?.(`${team}_${squadId}_0`);
+    let slBot =
+      (sec0 && sec0.leader && !sec0.leader.dead ? sec0.leader : null) ||
+      sqMates.find((b) => b.isSquadLeader && !b.downed) ||
+      sqMates.find((b) => !b.downed) ||
+      sqMates[0] ||
+      null;
+
+    let squadLeader = null;
+    if (slBot) {
+      const slBd = this._computeBearingAndDist(pPos, slBot.pos.x, slBot.pos.z);
+      squadLeader = {
+        bot: slBot,
+        name: slBot.name,
+        role: slBot.role || 'ASSAULT',
+        isActing: !slBot.isSquadLeader,
+        x: slBot.pos.x,
+        z: slBot.pos.z,
+        distM: slBd.distM,
+        brgDeg: slBd.brgDeg,
+        dirStr: slBd.dirStr
+      };
+    }
+
+    let squadCentroid = null;
+    if (sqMates.length > 0) {
+      let sx = 0;
+      let sz = 0;
+      for (let i = 0; i < sqMates.length; i++) {
+        sx += sqMates[i].pos.x;
+        sz += sqMates[i].pos.z;
+      }
+      const cx = sx / sqMates.length;
+      const cz = sz / sqMates.length;
+      const cBd = this._computeBearingAndDist(pPos, cx, cz);
+      squadCentroid = {
+        x: cx,
+        z: cz,
+        aliveCount: sqMates.length,
+        distM: cBd.distM,
+        brgDeg: cBd.brgDeg,
+        dirStr: cBd.dirStr
+      };
+    }
+
+    // 3. Resolve Where the Squad / Squad Leader / Commander Wants the Player To Go!
+    const sqOrd = this.botManager?.squadOrders?.[team]?.[squadId];
+    const cmdOrd = this.botManager?.commanderOrders?.[team];
+    let targetWaypoint = null;
+
+    const buildFlagWaypoint = (flagObj, prefix, source) => {
+      if (!flagObj || !flagObj.pos) return null;
+      const bd = this._computeBearingAndDist(pPos, flagObj.pos.x, flagObj.pos.z);
+      const secName = flagSectorNames[flagObj.id] || '';
+      const verb = flagObj.owner === team ? (flagObj.contested ? 'DEFEND CONTESTED' : 'HOLD') : 'CAPTURE';
+      return {
+        label: `${prefix || verb} OBJ ${flagObj.id}${secName ? ` (${secName})` : ''}`,
+        shortLabel: `OBJ ${flagObj.id}`,
+        flagId: flagObj.id,
+        x: flagObj.pos.x,
+        z: flagObj.pos.z,
+        distM: bd.distM,
+        brgDeg: bd.brgDeg,
+        dirStr: bd.dirStr,
+        source
+      };
+    };
+
+    if (sqOrd && sqOrd.timer > 0) {
+      if (sqOrd.flagId) {
+        const fl = flags.find((f) => f.id === sqOrd.flagId);
+        targetWaypoint = buildFlagWaypoint(fl, `${sqOrd.action}`, 'SQUAD_ORDER');
+      } else if (sqOrd.action === 'HOLD' && sqOrd.pos) {
+        const bd = this._computeBearingAndDist(pPos, sqOrd.pos.x, sqOrd.pos.z);
+        targetWaypoint = {
+          label: `DEFEND SQUAD HOLD POINT`,
+          shortLabel: `HOLD PT`,
+          flagId: null,
+          x: sqOrd.pos.x,
+          z: sqOrd.pos.z,
+          distM: bd.distM,
+          brgDeg: bd.brgDeg,
+          dirStr: bd.dirStr,
+          source: 'SQUAD_ORDER'
+        };
+      }
+    }
+    if (!targetWaypoint && cmdOrd && cmdOrd.timer > 0 && cmdOrd.flagId) {
+      const fl = flags.find((f) => f.id === cmdOrd.flagId);
+      targetWaypoint = buildFlagWaypoint(fl, `CMD ${cmdOrd.action}`, 'COMMANDER_ORDER');
+    }
+    if (!targetWaypoint && slBot && typeof slBot.targetFlagIndex === 'number' && flags[slBot.targetFlagIndex]) {
+      targetWaypoint = buildFlagWaypoint(flags[slBot.targetFlagIndex], null, 'SQUAD_LEADER_AI');
+    }
+    if (!targetWaypoint && flags.length > 0) {
+      const bestFl =
+        flags.find((f) => f.contested) ||
+        flags.find((f) => f.owner !== team) ||
+        flags[Math.floor(flags.length / 2)];
+      targetWaypoint = buildFlagWaypoint(bestFl, null, 'FRONTLINE_AUTO');
+    }
+
+    return {
+      team,
+      squadId,
+      playerPos: { x: pPos.x, z: pPos.z },
+      playerSectorLabel,
+      squadLeader,
+      squadCentroid,
+      targetWaypoint
+    };
   },
 
   computeRoleMissions(eraOverride) {
@@ -1329,17 +1495,61 @@ export const CommandPanel = {
       ? `💥 STRIKE COOLDOWN (${Math.ceil(this.player.airstrikeCooldown)}s)`
       : '💥 CALL AIRSTRIKE AT CROSSHAIR [J]';
 
+    const navGuide = this.computeSquadNavigationGuide ? this.computeSquadNavigationGuide() : null;
+    const slSummaryHtml =
+      navGuide && navGuide.squadLeader && this.player.commandRank !== 'SQUAD_LEADER'
+        ? `<strong style="color:#2ecc71;">★ ${navGuide.squadLeader.name}</strong> <span style="color:#ffeaa7;">(${navGuide.squadLeader.distM}m ${navGuide.squadLeader.dirStr} • ${String(navGuide.squadLeader.brgDeg).padStart(3, '0')}°)</span>`
+        : `<strong style="color:#2ecc71;">★ YOU LEAD ${playerSquadId}</strong>`;
+    const sqGroupSummaryHtml =
+      navGuide && navGuide.squadCentroid
+        ? `<strong style="color:#7bed9f;">${navGuide.squadCentroid.aliveCount} ALIVE</strong> <span style="color:#cbd5e1;">(${navGuide.squadCentroid.distM}m ${navGuide.squadCentroid.dirStr})</span>`
+        : `<span style="color:#95a5a6;">REFORMING</span>`;
+    const wpSummaryHtml =
+      navGuide && navGuide.targetWaypoint
+        ? `<strong style="color:#f1c40f;">🎯 ${navGuide.targetWaypoint.label}</strong> <span style="color:#7ef9ff;font-weight:900;">— ${navGuide.targetWaypoint.distM}m ${navGuide.targetWaypoint.dirStr} (${String(navGuide.targetWaypoint.brgDeg).padStart(3, '0')}°)</span>`
+        : `<strong style="color:#f1c40f;">PATROL SECTOR</strong>`;
+
     modal.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.15);padding-bottom:8px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.15);padding-bottom:8px;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
         <div>
-          <div style="font-size:17px;font-weight:900;color:#f1c40f;letter-spacing:1.2px;">🗺️ TACTICAL MAP &amp; FORCE COMMANDER / SQUAD VIEW [K]</div>
-          <div style="font-size:11px;color:#bdc3c7;">Left-click map to ${
-            isStrikeClickMode
-              ? '<strong style="color:#ff6b6b">CALL AIRSTRIKE AT EXACT MAP COORDS</strong>'
-              : 'issue Squad Orders'
-          }, or <strong>Right-Click anywhere on the map</strong> to drop an Airstrike immediately!</div>
+          <div style="font-size:17px;font-weight:900;color:#f1c40f;letter-spacing:1.2px;">🗺️ DETAILED SQUAD GPS &amp; TACTICAL MAP [M / K]</div>
+          <div style="font-size:11px;color:#bdc3c7;">Dashed lines show <strong style="color:#2ecc71;">YOU ➔ ★ SQUAD LEADER</strong> and <strong style="color:#f1c40f;">➔ 🎯 WHERE TO GO</strong> &bull; Scroll to zoom, drag to pan, right-click for CAS!</div>
         </div>
-        <button id="cmd-modal-close" style="background:#c0392b;color:#fff;border:none;border-radius:4px;padding:5px 12px;font-weight:900;cursor:pointer;">CLOSE [K]</button>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button type="button" id="cmd-open-classes-btn" style="background:rgba(241,196,15,0.18);color:#ffeaa7;border:1px solid #f1c40f;border-radius:4px;padding:5px 10px;font-size:11px;font-weight:900;cursor:pointer;" title="View Classes / Loadout without losing your current position [Shift+M]">🪖 CLASSES [Shift+M]</button>
+          <button id="cmd-modal-close" style="background:#27ae60;color:#04180c;border:1px solid #7bed9f;border-radius:4px;padding:5px 12px;font-weight:900;cursor:pointer;">↩ BACK TO GAME [M / ESC]</button>
+        </div>
+      </div>
+
+      <!-- SQUAD GPS & WAYPOINT COMPASS GUIDE (Instant Orientation When Lost!) -->
+      <div id="cmd-squad-gps-banner" style="background:linear-gradient(90deg,rgba(14,38,28,0.95),rgba(12,26,38,0.95));border:1.5px solid #2ecc71;border-radius:6px;padding:7px 10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;font-size:11.5px;">
+          <span>📍 <strong style="color:#f1c40f;">YOU:</strong> <span style="color:#fff;font-weight:800;">${navGuide ? navGuide.playerSectorLabel : 'FIELD'}</span></span>
+          <span>&bull;</span>
+          <span>⭐ <strong style="color:#2ecc71;">SQUAD LEAD:</strong> ${slSummaryHtml}</span>
+          <span>&bull;</span>
+          <span>👥 <strong style="color:#7bed9f;">${playerSquadId} SQUAD:</strong> ${sqGroupSummaryHtml}</span>
+          <span>&bull;</span>
+          <span>🧭 <strong style="color:#00d2d3;">GO HERE:</strong> ${wpSummaryHtml}</span>
+        </div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+          <button type="button" id="cmd-gps-zoom-me" style="background:rgba(241,196,15,0.22);color:#ffeaa7;border:1px solid #f1c40f;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;">📍 FIND ME</button>
+          ${
+            navGuide && navGuide.squadLeader
+              ? `<button type="button" id="cmd-gps-zoom-sl" style="background:rgba(46,204,113,0.25);color:#7bed9f;border:1px solid #2ecc71;border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;">★ FIND SQUAD LEAD</button>`
+              : ''
+          }
+          ${
+            navGuide && navGuide.squadCentroid
+              ? `<button type="button" id="cmd-gps-zoom-sq" style="background:rgba(46,204,113,0.16);color:#a3f7bf;border:1px solid rgba(46,204,113,0.6);border-radius:3px;padding:3px 7px;font-size:10px;font-weight:900;cursor:pointer;">👥 FIND SQUAD</button>`
+              : ''
+          }
+          ${
+            isModernEra && navGuide && (navGuide.squadLeader || navGuide.targetWaypoint)
+              ? `<button type="button" id="cmd-gps-fly-to-squad" style="background:linear-gradient(135deg,#0097a7,#00cec9);color:#041418;border:1px solid #81ecec;border-radius:3px;padding:3px 8px;font-size:10px;font-weight:900;cursor:pointer;" title="Dispatch an AI Helicopter / Humvee to pick you up and take you straight to your Squad / Objective!">🚁 RIDE TO SQUAD / OBJ</button>`
+              : ''
+          }
+        </div>
       </div>
 
       <div style="position:relative;background:#121c14;border:1.5px solid ${
@@ -1572,6 +1782,64 @@ export const CommandPanel = {
 
     const closeBtn = modal.querySelector('#cmd-modal-close');
     if (closeBtn) closeBtn.addEventListener('click', () => this._destroyCommandModal(modal));
+
+    const openClassesBtn = modal.querySelector('#cmd-open-classes-btn');
+    if (openClassesBtn) {
+      openClassesBtn.addEventListener('click', () => {
+        this._destroyCommandModal(modal);
+        this.openDeployScreenNonDestructive?.();
+      });
+    }
+
+    const focusMapAt = (wx, wz, targetZoom = 3.2) => {
+      this._cmdMapZoom = targetZoom;
+      this._cmdMapPanX = Math.max(-1650, Math.min(1650, wx));
+      this._cmdMapPanZ = Math.max(-980, Math.min(980, wz));
+      const c = modal.querySelector('#cmd-tactical-map-canvas');
+      if (c) this.drawCommandTacticalMap(c);
+    };
+    const gpsMeBtn = modal.querySelector('#cmd-gps-zoom-me');
+    if (gpsMeBtn) {
+      gpsMeBtn.addEventListener('click', () => {
+        const p = this.player?.activeVehicle?.pos || this.player?.pos || { x: 0, z: 0 };
+        focusMapAt(p.x, p.z, 3.2);
+      });
+    }
+    const gpsSlBtn = modal.querySelector('#cmd-gps-zoom-sl');
+    if (gpsSlBtn && navGuide?.squadLeader) {
+      gpsSlBtn.addEventListener('click', () => {
+        focusMapAt(navGuide.squadLeader.x, navGuide.squadLeader.z, 3.4);
+      });
+    }
+    const gpsSqBtn = modal.querySelector('#cmd-gps-zoom-sq');
+    if (gpsSqBtn && navGuide?.squadCentroid) {
+      gpsSqBtn.addEventListener('click', () => {
+        focusMapAt(navGuide.squadCentroid.x, navGuide.squadCentroid.z, 3.0);
+      });
+    }
+    const gpsFlyBtn = modal.querySelector('#cmd-gps-fly-to-squad');
+    if (gpsFlyBtn && navGuide) {
+      gpsFlyBtn.addEventListener('click', () => {
+        const dest =
+          navGuide.squadLeader && navGuide.squadLeader.distM > 45
+            ? { x: navGuide.squadLeader.x, z: navGuide.squadLeader.z, lbl: `★ SQUAD LEAD ${navGuide.squadLeader.name}` }
+            : navGuide.targetWaypoint
+            ? { x: navGuide.targetWaypoint.x, z: navGuide.targetWaypoint.z, lbl: navGuide.targetWaypoint.shortLabel }
+            : null;
+        if (dest) {
+          const mode = this.player.preferredRideMode || 'heli';
+          this.vehicleManager?.requestPlayerRide?.(this.player, {
+            transportMode: mode,
+            destX: dest.x,
+            destZ: dest.z,
+            preferRoof: false,
+            customLabel: dest.lbl
+          });
+          this.updateRideStatusHud?.();
+          this._destroyCommandModal(modal, true);
+        }
+      });
+    }
 
     const mapModeOrderBtn = modal.querySelector('#cmd-map-mode-order');
     if (mapModeOrderBtn) {

@@ -4,7 +4,7 @@
 // Positions stored as arrays [x, y, z] — y is computed at runtime via getGroundHeightAt.
 // =========================================================================
 
-import { VEHICLE_STATS } from '../config.js?v=139';
+import { VEHICLE_STATS } from '../config.js?v=141';
 
 export const VEHICLE_DEFS = [
   // ===================== US FLEET (Open Motor Pool Apron aligned with 28m Main Gate at x = -904..-884, z = -10..+10) =====================

@@ -2,29 +2,29 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
 
-import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=139';
-import { VEHICLE_STATS } from '../src/config.js?v=139';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=139';
-import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=139';
-import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=139';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=139';
-import { createWeaponViewModel } from '../src/models/weapon-model.js?v=139';
-import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=139';
-import { BotManager } from '../src/bots/BotManager.js?v=139';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=139';
-import { CombatMethods } from '../src/player/PlayerCombat.js?v=139';
-import { PlayerController } from '../src/player/PlayerController.js?v=139';
-import { SoundManager } from '../src/audio/SoundManager.js?v=139';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=139';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=139';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=139';
-import { BotAIMethods } from '../src/bots/BotAI.js?v=139';
-import { updateMedicRescue } from '../src/bots/MedicAI.js?v=139';
+import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=141';
+import { VEHICLE_STATS } from '../src/config.js?v=141';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=141';
+import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=141';
+import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=141';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=141';
+import { createWeaponViewModel } from '../src/models/weapon-model.js?v=141';
+import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=141';
+import { BotManager } from '../src/bots/BotManager.js?v=141';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=141';
+import { CombatMethods } from '../src/player/PlayerCombat.js?v=141';
+import { PlayerController } from '../src/player/PlayerController.js?v=141';
+import { SoundManager } from '../src/audio/SoundManager.js?v=141';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=141';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=141';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=141';
+import { BotAIMethods } from '../src/bots/BotAI.js?v=141';
+import { updateMedicRescue } from '../src/bots/MedicAI.js?v=141';
 import {
   createDefaultMarksmanProfile,
   evaluateMarksmanShot,
   computeBallisticSolution
-} from '../src/player/MarksmanSystem.js?v=139';
+} from '../src/player/MarksmanSystem.js?v=141';
 
 function buildPilotHarness(role = 'fighter', team = 'US') {
   const scene = new THREE.Scene();
@@ -1736,10 +1736,10 @@ test('v137: Sniper Marksman Shot-Difficulty Badges, 2D Trajectory/Anatomy Replay
 });
 
 test('v137b: Tank cannon passes past walking teammates, Coax MG hits close-in enemies in CHASE_3P, and Headshots/Explosions have high instant-KIA chance', async () => {
-  const { PlayerController } = await import('../src/player.js?v=139');
-  const { BotManager, evaluateCatastrophicKill } = await import('../src/bots.js?v=139');
-  const { VehicleManager, initVehicleOrdnance } = await import('../src/vehicles.js?v=139');
-  const { ProjectileManager } = await import('../src/world/ProjectileManager.js?v=139');
+  const { PlayerController } = await import('../src/player.js?v=141');
+  const { BotManager, evaluateCatastrophicKill } = await import('../src/bots.js?v=141');
+  const { VehicleManager, initVehicleOrdnance } = await import('../src/vehicles.js?v=141');
+  const { ProjectileManager } = await import('../src/world/ProjectileManager.js?v=141');
 
   const prevDoc = globalThis.document;
   const prevWin = globalThis.window;

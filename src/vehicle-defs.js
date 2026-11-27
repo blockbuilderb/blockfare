@@ -3,4 +3,4 @@
 // Re-exports VEHICLE_DEFS from src/assets/vehicle-defs.js
 // ============================================================================
 
-export { VEHICLE_DEFS, AIRCRAFT_SPEED_RESEARCH } from './assets/vehicle-defs.js?v=139';
+export { VEHICLE_DEFS, AIRCRAFT_SPEED_RESEARCH } from './assets/vehicle-defs.js?v=141';

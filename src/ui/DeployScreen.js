@@ -1,16 +1,16 @@
-import { SQUAD_DEFS } from '../bots.js?v=139';
-import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=139';
-import { events } from '../events.js?v=139';
+import { SQUAD_DEFS } from '../bots.js?v=141';
+import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=141';
+import { events } from '../events.js?v=141';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=139';
+} from '../core/StateMachines.js?v=141';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=139';
+} from '../utils/KeyboardShortcuts.js?v=141';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -332,6 +332,25 @@ export const DeployScreen = {
     if (deployTopBtn) {
       deployTopBtn.addEventListener('click', (e) => {
         e.preventDefault();
+        this.triggerDeploy();
+      });
+    }
+    const bindResumeBtn = (btn) => {
+      if (!btn) return;
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.resumeActiveBattle();
+      });
+    };
+    bindResumeBtn(this.el('deploy-resume-btn'));
+    bindResumeBtn(this.el('deploy-header-resume-btn'));
+    const deployNewRoundBtn = this.el('deploy-new-round-btn');
+    if (deployNewRoundBtn) {
+      deployNewRoundBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (this.onPlayNextRound) {
+          this.onPlayNextRound();
+        }
         this.triggerDeploy();
       });
     }
@@ -740,6 +759,19 @@ export const DeployScreen = {
             if (this._domCache) this._domCache.delete('controls-overlay');
             return;
           }
+          const cmdModal = this.el('command-modal') || document.getElementById('command-modal');
+          if (cmdModal && !cmdModal.classList.contains('hidden') && cmdModal.style.display !== 'none') {
+            e.preventDefault();
+            this._destroyCommandModal?.(cmdModal);
+            return;
+          }
+          const deployVisibleEsc =
+            this.deployScreenEl && !this.deployScreenEl.classList.contains('hidden');
+          if (deployVisibleEsc && this.canResumeActiveBattle?.()) {
+            e.preventDefault();
+            this.resumeActiveBattle();
+            return;
+          }
         }
 
         // If [Y] Commander Radial Wheel (#commo-rose) is open, allow pressing bare 1-8 or -/+ to execute order immediately
@@ -919,13 +951,39 @@ export const DeployScreen = {
         }
         if (
           !hasAnyModifier(e) &&
-          (e.code === 'KeyK' || (!isMacPlatform() && e.code === 'CapsLock'))
+          ((e.code === 'KeyM' && !e.shiftKey) ||
+            e.code === 'KeyK' ||
+            (!isMacPlatform() && e.code === 'CapsLock'))
         ) {
-          e.preventDefault();
-          if (!e.repeat) {
-            this.toggleCommandModal();
+          const deployOpenNow =
+            this.deployScreenEl && !this.deployScreenEl.classList.contains('hidden');
+          const victoryOpenNow =
+            this.victoryScreenEl && !this.victoryScreenEl.classList.contains('hidden');
+          if (!deployOpenNow && !victoryOpenNow) {
+            e.preventDefault();
+            if (!e.repeat) {
+              if (e.code === 'KeyM') {
+                this.mapClickMode = 'ORDER';
+              }
+              this.toggleCommandModal();
+            }
+            return;
           }
-          return;
+        }
+
+        if (!hasAnyModifier(e) && e.code === 'KeyM' && e.shiftKey && !e.repeat) {
+          const deployOpenNow =
+            this.deployScreenEl && !this.deployScreenEl.classList.contains('hidden');
+          if (deployOpenNow && this.canResumeActiveBattle?.()) {
+            e.preventDefault();
+            this.resumeActiveBattle();
+            return;
+          }
+          if (this.player && !this.player.dead) {
+            e.preventDefault();
+            this.openDeployScreenNonDestructive();
+            return;
+          }
         }
 
         if (
@@ -946,24 +1004,6 @@ export const DeployScreen = {
             this.triggerDeploy();
             return;
           }
-        }
-        if (!hasAnyModifier(e) && !e.repeat && e.code === 'KeyM' && !this.player.dead) {
-          this.player.dead = true;
-          this.player.downed = false;
-          if (typeof this.player.clearActiveVehicleOnReset === 'function') {
-            this.player.clearActiveVehicleOnReset('redeploy-menu');
-          } else {
-            if (this.player.activeVehicle) {
-              this.player.activeVehicle.driver = null;
-              this.player.activeVehicle = null;
-            }
-            this.player.sensorMode = 'OFF';
-            this.player.nvgActive = false;
-          }
-          if (document.pointerLockElement === document.body) {
-            document.exitPointerLock();
-          }
-          this.showDeployScreen();
         }
         if (!hasAnyModifier(e) && e.code === 'Tab') {
           e.preventDefault();
@@ -1880,7 +1920,19 @@ export const DeployScreen = {
     if (!this.network || !this.network.isMultiplayer()) {
       this.botManager?.syncPlayerTeamSlot?.(this.selectedTeam);
     }
+    // If redeploying mid-life from non-destructive Class Menu ([Shift+M]), cleanly release current vehicle before respawning
+    if (this.player && !this.player.dead && this.player.activeVehicle) {
+      if (typeof this.player.clearActiveVehicleOnReset === 'function') {
+        this.player.clearActiveVehicleOnReset('redeploy-menu');
+      } else {
+        if (this.player.activeVehicle.driver === this.player) {
+          this.player.activeVehicle.driver = null;
+        }
+        this.player.activeVehicle = null;
+      }
+    }
     this.player.deploy(this.selectedTeam, this.selectedClass, spawnVec);
+    this.player._hasDeployedInRound = true;
 
     // Fulfill 1-Click Deploy Vehicle Selection:
     // - If spawning at MAIN BASE and an unclaimed HQ Pool vehicle of that type is parked there -> $0 FREE!
@@ -2001,6 +2053,98 @@ export const DeployScreen = {
     }, 550);
   },
 
+  canResumeActiveBattle() {
+    const victoryOpen =
+      this.victoryScreenEl && !this.victoryScreenEl.classList.contains('hidden');
+    return Boolean(
+      this.player &&
+        !this.player.dead &&
+        !this.player.downed &&
+        this.player._hasDeployedInRound &&
+        !victoryOpen
+    );
+  },
+
+  openDeployScreenNonDestructive() {
+    if (typeof document !== 'undefined' && document.pointerLockElement === document.body) {
+      document.exitPointerLock();
+    }
+    const cmdModal = this.el('command-modal');
+    if (cmdModal) {
+      this._destroyCommandModal?.(cmdModal);
+    }
+    this.showDeployScreen();
+  },
+
+  resumeActiveBattle() {
+    if (!this.canResumeActiveBattle()) return false;
+    this.closeMainMenu();
+    if (this.deployScreenEl) this.deployScreenEl.classList.add('hidden');
+    if (this.victoryScreenEl) this.victoryScreenEl.classList.add('hidden');
+    if (this.scoreboardEl) this.scoreboardEl.classList.add('hidden');
+    if (this.hudEl) this.hudEl.classList.remove('hidden');
+    if (this.player?.activeVehicle && this.vehicleOverlayEl) {
+      this.vehicleOverlayEl.classList.remove('hidden');
+    }
+    this.syncDeployActionButtons();
+    return true;
+  },
+
+  syncDeployActionButtons() {
+    const inExistingRound = Boolean(this.player?._hasDeployedInRound);
+    const canResume = this.canResumeActiveBattle();
+    const ctaText = !inExistingRound
+      ? '▶ DEPLOY TO NEW ROUND [ENTER / SPACE]'
+      : canResume
+      ? '🔁 RESPAWN INTO EXISTING ROUND [ENTER]'
+      : '⚡ RESPAWN INTO EXISTING ROUND [ENTER / SPACE]';
+
+    const topBtn = this.el('deploy-top-btn');
+    const botBtn = this.el('deploy-btn');
+    if (topBtn) {
+      if (this._setText) this._setText(topBtn, ctaText);
+      else topBtn.textContent = ctaText;
+    }
+    if (botBtn) {
+      if (this._setText) this._setText(botBtn, ctaText);
+      else botBtn.textContent = ctaText;
+    }
+
+    for (const rId of ['deploy-resume-btn', 'deploy-header-resume-btn']) {
+      const rBtn = this.el(rId) || (typeof document !== 'undefined' ? document.getElementById(rId) : null);
+      if (rBtn) {
+        rBtn.classList.toggle('hidden', !canResume);
+        rBtn.style.display = canResume ? 'inline-flex' : 'none';
+      }
+    }
+
+    const newRoundBtn =
+      this.el('deploy-new-round-btn') ||
+      (typeof document !== 'undefined' ? document.getElementById('deploy-new-round-btn') : null);
+    if (newRoundBtn) {
+      newRoundBtn.classList.toggle('hidden', !inExistingRound);
+      newRoundBtn.style.display = inExistingRound ? 'inline-flex' : 'none';
+    }
+
+    const statusPill =
+      this.el('deploy-round-status-pill') ||
+      (typeof document !== 'undefined' ? document.getElementById('deploy-round-status-pill') : null);
+    if (statusPill) {
+      if (!inExistingRound) {
+        statusPill.textContent = '🟢 NEW ROUND READY';
+        statusPill.style.color = '#7bed9f';
+      } else {
+        const rem = Math.max(0, Math.floor(this.lastMatchTime ?? 900));
+        const mm = String(Math.floor(rem / 60)).padStart(2, '0');
+        const ss = String(rem % 60).padStart(2, '0');
+        const tUS = Math.ceil(this.lastTicketsUS ?? 800);
+        const tRU = Math.ceil(this.lastTicketsRU ?? 800);
+        statusPill.textContent = `🟢 EXISTING ROUND LIVE (${mm}:${ss} • US ${tUS} : ${tRU} RU)`;
+        statusPill.style.color = '#f1c40f';
+      }
+    }
+  },
+
   showDeployScreen() {
     this.deployScreenEl.classList.remove('hidden');
     this.hudEl.classList.add('hidden');
@@ -2035,16 +2179,7 @@ export const DeployScreen = {
     }
     const flirFs = this.el('flir-fullscreen-canvas');
     if (flirFs) flirFs.classList.add('hidden');
-    const topBtn = this.el('deploy-top-btn');
-    const botBtn = this.el('deploy-btn');
-    if (topBtn) {
-      if (this._setText) this._setText(topBtn, 'DEPLOY [ENTER / SPACE]');
-      else topBtn.textContent = 'DEPLOY [ENTER / SPACE]';
-    }
-    if (botBtn) {
-      if (this._setText) this._setText(botBtn, 'DEPLOY [ENTER / SPACE]');
-      else botBtn.textContent = 'DEPLOY [ENTER / SPACE]';
-    }
+    this.syncDeployActionButtons();
     if (typeof this.renderDeployExtractedLootBar === 'function') {
       this.renderDeployExtractedLootBar();
     }
