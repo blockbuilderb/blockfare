@@ -10,14 +10,14 @@ import {
   buildHumveeModel,
   buildApcModel,
   buildSpaagModel
-} from './armor-models.js?v=142';
+} from './armor-models.js?v=143';
 import {
   buildCasAircraftWingAndTail,
   buildBomberAircraftWingAndTail,
   buildEmplacementModel,
   buildDinoMountModel
-} from './air-emplacement-models.js?v=142';
-import { buildHelicopterModel, buildTroopTruckModel } from './heli-truck-models.js?v=142';
+} from './air-emplacement-models.js?v=143';
+import { buildHelicopterModel, buildTroopTruckModel } from './heli-truck-models.js?v=143';
 
 // ─── SHARED VEHICLE GEOMETRY & WHEEL MERGE CACHES (userData.shared = true) ───
 const _vehGeoCache = new Map();

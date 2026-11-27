@@ -1,22 +1,22 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=142';
-import { sound } from '../audio.js?v=142';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=142';
+import { VOXEL_SIZE } from '../world.js?v=143';
+import { sound } from '../audio.js?v=143';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=143';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=142';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=142';
-import { events, makeEventBridge } from '../events.js?v=142';
-import { GunsmithMethods } from './GunsmithState.js?v=142';
-import { FortificationMethods } from './FortificationBuilder.js?v=142';
-import { CommanderMethods } from './CommanderAbilities.js?v=142';
-import { VehicleControlMethods } from './VehicleControl.js?v=142';
-import { CombatMethods } from './PlayerCombat.js?v=142';
-import { loadMarksmanProfile } from './MarksmanSystem.js?v=142';
+} from '../utils/KeyboardShortcuts.js?v=143';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=143';
+import { events, makeEventBridge } from '../events.js?v=143';
+import { GunsmithMethods } from './GunsmithState.js?v=143';
+import { FortificationMethods } from './FortificationBuilder.js?v=143';
+import { CommanderMethods } from './CommanderAbilities.js?v=143';
+import { VehicleControlMethods } from './VehicleControl.js?v=143';
+import { CombatMethods } from './PlayerCombat.js?v=143';
+import { loadMarksmanProfile } from './MarksmanSystem.js?v=143';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -24,7 +24,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=142';
+} from '../core/StateMachines.js?v=143';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -152,6 +152,12 @@ export class PlayerController {
 
     // Movement & Stance (Standing / Crouched / Prone + Vaulting + Optional Quake Bhop & Air-Strafing)
     this.keys = {};
+    this.touchMoveX = 0;
+    this.touchMoveZ = 0;
+    this.touchMoveMag = 0;
+    this.touchSprintLocked = false;
+    this.touchHoldBreath = false;
+    this._lastTouchEventAt = 0;
     this.isGrounded = false;
     this.crouching = false;
     this.prone = false;
@@ -1705,6 +1711,7 @@ export class PlayerController {
     });
 
     window.addEventListener('mousemove', (e) => {
+      if (performance.now() - (this._lastTouchEventAt || 0) < 650) return;
       if (this.dead) return;
       if (this.isModalOpen(true)) {
         this._lastMouseClientX = e.clientX;
@@ -1741,8 +1748,6 @@ export class PlayerController {
         return;
       }
 
-      // Compute mouse delta: use Pointer Lock movementX/Y when locked, OR smooth clientX/Y delta
-      // during browser pointer-lock cooldown right after closing a modal so mouse look NEVER feels unfocused!
       let rawDx = e.movementX || 0;
       let rawDy = e.movementY || 0;
       if (document.pointerLockElement !== document.body) {
@@ -1752,7 +1757,6 @@ export class PlayerController {
         }
         this._lastMouseClientX = e.clientX;
         this._lastMouseClientY = e.clientY;
-        // Clamp large jumps when re-entering window
         if (Math.abs(rawDx) > 85 || Math.abs(rawDy) > 85) {
           return;
         }
@@ -1761,104 +1765,11 @@ export class PlayerController {
         this._lastMouseClientY = e.clientY;
       }
 
-      const baseSens = this.isAds ? PLAYER.SENSITIVITY_ADS : PLAYER.SENSITIVITY_HIP;
-      const curFov = this.camera?.fov || 75;
-      // Continuous optical focal-plane sensitivity scaling (`tan(curFov/2) / tan(55°/2)`) for BOTH infantry
-      // scopes (`1x–40x`) and vehicle optics so `1` OS mouse count always moves ~1.0px instead of 24–36px jumps!
-      const opticZoomScale =
-        curFov < 65
-          ? THREE.MathUtils.clamp(
-              Math.tan((curFov * Math.PI) / 360) / Math.tan((55 * Math.PI) / 360),
-              0.02,
-              1.0
-            )
-          : 1.0;
-      const sens = baseSens * opticZoomScale;
-      const dx = rawDx * sens;
-      const dy = rawDy * sens;
-      const av = this.activeVehicle;
-      const inDecoupledAirLook = Boolean(
-        av &&
-          av.isAircraft &&
-          av.aircraftRole !== 'gunship' &&
-          (this.keys['AltLeft'] || this.keys['AltRight'] || e.altKey || av.levelAutopilot)
-      );
-      const inAerobaticPlane = Boolean(
-        av &&
-          av.isAircraft &&
-          this.aircraftCollisionAvoidance === false &&
-          av.aircraftRole !== 'gunship' &&
-          av.aircraftRole !== 'b2_spirit'
-      );
-      if (inDecoupledAirLook) {
-        // Decoupled Aircraft Free-Look ([ALT]) & LAAP Level-Hold Autopilot ([R]):
-        // Mouse freely aims camera/TGP (-85° straight down to +77° up, ±135° yaw) while plane flies level!
-        av.freeLookYaw = THREE.MathUtils.clamp((av.freeLookYaw || 0) - dx, -2.35, 2.35);
-        av.freeLookPitch = THREE.MathUtils.clamp((av.freeLookPitch || 0) - dy, -1.48, 1.35);
-      } else if (inAerobaticPlane) {
-        // Advanced Aerobatic Mode (`[G]` OFF): Invert screen-to-world pitch/yaw naturally when flying upside-down via 180° roll or 360° loop!
-        const loopInverted = Math.cos(av.pitch || 0) < -0.05;
-        const rollInverted = Math.cos(av.roll || 0) < -0.2;
-        const yawSign = (loopInverted ? -1 : 1) * (rollInverted ? -1 : 1);
-        const pitchSign = rollInverted ? -1 : 1;
-        this.yaw -= dx * yawSign;
-        this.pitch -= dy * pitchSign;
-        while (this.pitch > Math.PI) this.pitch -= Math.PI * 2;
-        while (this.pitch <= -Math.PI) this.pitch += Math.PI * 2;
-      } else {
-        const maxPitch = av && av.isAircraft && av.aircraftRole !== 'gunship'
-          ? 1.08
-          : Math.PI / 2 - PLAYER.MAX_PITCH_OFFSET;
-        // Smooth Angular Look Inertia: blend immediate micro-step with continuous frame-interpolated angular
-        // velocity (`_pendingLookYaw` / `_pendingLookPitch`) so discrete integer mouse counts glide across sub-pixels!
-        const inertiaShare = !av && curFov < 16 ? 0.78 : !av && curFov < 42 ? 0.58 : !av ? 0.32 : 0.0;
-        const immDx = dx * (1 - inertiaShare);
-        const immDy = dy * (1 - inertiaShare);
-        this._pendingLookYaw = (this._pendingLookYaw || 0) - dx * inertiaShare;
-        this._pendingLookPitch = (this._pendingLookPitch || 0) - dy * inertiaShare;
-        this.yaw -= immDx;
-        this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch - immDy));
-      }
-
-      // Weapon procedural sway (high-mag 16x–40x scopes amplify standing sway; stabilized by One-Knee [C], Prone [Z], Bipod & Ledge Rest!)
-      const swayCur = !av && typeof this.currentWeapon === 'function' ? this.currentWeapon() : null;
-      const swayLedge = !av && typeof this.isRestingOnCoverLedge === 'function' ? this.isRestingOnCoverLedge() : false;
-      const swayBipod = Boolean(swayCur?.def?.hasBipod && (this.prone || this.crouching || swayLedge));
-      const curCamFov = this.camera?.fov || 75;
-      const highMagStandingPenalty =
-        this.isAds && !this.isHoldingBreath && !swayBipod && !this.prone
-          ? curCamFov <= 3.2
-            ? 2.45
-            : curCamFov <= 4.8
-            ? 1.85
-            : curCamFov <= 7.8
-            ? 1.35
-            : 1.0
-          : 1.0;
-      const stanceSwayMult =
-        (swayBipod
-          ? PLAYER.SWAY_SCALE_BIPOD || 0.12
-          : this.prone
-          ? PLAYER.SWAY_SCALE_PRONE || 0.28
-          : this.crouching
-          ? PLAYER.SWAY_SCALE_CROUCH || 0.58
-          : swayLedge
-          ? 0.68
-          : 1.0) * highMagStandingPenalty;
-      const swayLim = PLAYER.SWAY_LIMIT * stanceSwayMult;
-      this.swayX = THREE.MathUtils.clamp(this.swayX - dx * PLAYER.SWAY_MULT * stanceSwayMult, -swayLim, swayLim);
-      this.swayY = THREE.MathUtils.clamp(this.swayY + dy * PLAYER.SWAY_MULT * stanceSwayMult, -swayLim, swayLim);
-      if (Math.hypot(rawDx, rawDy) >= 4) {
-        if (Math.abs(rawDy) >= Math.abs(rawDx) * 1.15) {
-          this.meleeGuardDir = rawDy < 0 ? 'UP' : 'DOWN';
-        } else {
-          this.meleeGuardDir = rawDx < 0 ? 'LEFT' : 'RIGHT';
-        }
-        this._meleeDirInputTime = performance.now();
-      }
+      this.applyLookDelta(rawDx, rawDy, false, Boolean(e.altKey));
     });
 
     window.addEventListener('mousedown', (e) => {
+      if (performance.now() - (this._lastTouchEventAt || 0) < 650) return;
       this._modalCacheTime = 0;
       if (this.dead) return;
       const clickedModalOrUi =
@@ -1966,6 +1877,115 @@ export class PlayerController {
         this.toggleAdsScope();
       }
     });
+  }
+
+  /**
+   * Unified optical-FOV-scaled camera look delta used by BOTH desktop Pointer Lock mouse
+   * and PUBG/CoD Mobile Dual-Thumb Free-Look & Fire+Drag-Aim touch gestures!
+   */
+  applyLookDelta(rawDx = 0, rawDy = 0, isTouch = false, altKey = false) {
+    if (this.dead) return;
+    if (!Number.isFinite(rawDx) || !Number.isFinite(rawDy)) return;
+
+    const baseSens = this.isAds ? PLAYER.SENSITIVITY_ADS : PLAYER.SENSITIVITY_HIP;
+    const curFov = this.camera?.fov || 75;
+    const opticZoomScale =
+      curFov < 65
+        ? THREE.MathUtils.clamp(
+            Math.tan((curFov * Math.PI) / 360) / Math.tan((55 * Math.PI) / 360),
+            0.02,
+            1.0
+          )
+        : 1.0;
+    const sens = baseSens * opticZoomScale;
+    const dx = rawDx * sens;
+    const dy = rawDy * sens;
+    const av = this.activeVehicle;
+    const inDecoupledAirLook = Boolean(
+      av &&
+        av.isAircraft &&
+        av.aircraftRole !== 'gunship' &&
+        (this.keys['AltLeft'] || this.keys['AltRight'] || altKey || av.levelAutopilot)
+    );
+    const inAerobaticPlane = Boolean(
+      av &&
+        av.isAircraft &&
+        this.aircraftCollisionAvoidance === false &&
+        av.aircraftRole !== 'gunship' &&
+        av.aircraftRole !== 'b2_spirit'
+    );
+
+    if (inDecoupledAirLook) {
+      av.freeLookYaw = THREE.MathUtils.clamp((av.freeLookYaw || 0) - dx, -2.35, 2.35);
+      av.freeLookPitch = THREE.MathUtils.clamp((av.freeLookPitch || 0) - dy, -1.48, 1.35);
+    } else if (inAerobaticPlane) {
+      const loopInverted = Math.cos(av.pitch || 0) < -0.05;
+      const rollInverted = Math.cos(av.roll || 0) < -0.2;
+      const yawSign = (loopInverted ? -1 : 1) * (rollInverted ? -1 : 1);
+      const pitchSign = rollInverted ? -1 : 1;
+      this.yaw -= dx * yawSign;
+      this.pitch -= dy * pitchSign;
+      while (this.pitch > Math.PI) this.pitch -= Math.PI * 2;
+      while (this.pitch <= -Math.PI) this.pitch += Math.PI * 2;
+    } else {
+      const maxPitch =
+        av && av.isAircraft && av.aircraftRole !== 'gunship'
+          ? 1.08
+          : Math.PI / 2 - PLAYER.MAX_PITCH_OFFSET;
+      const inertiaShare = isTouch
+        ? curFov < 20
+          ? 0.45
+          : 0.18
+        : !av && curFov < 16
+        ? 0.78
+        : !av && curFov < 42
+        ? 0.58
+        : !av
+        ? 0.32
+        : 0.0;
+      const immDx = dx * (1 - inertiaShare);
+      const immDy = dy * (1 - inertiaShare);
+      this._pendingLookYaw = (this._pendingLookYaw || 0) - dx * inertiaShare;
+      this._pendingLookPitch = (this._pendingLookPitch || 0) - dy * inertiaShare;
+      this.yaw -= immDx;
+      this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch - immDy));
+    }
+
+    const swayCur = !av && typeof this.currentWeapon === 'function' ? this.currentWeapon() : null;
+    const swayLedge = !av && typeof this.isRestingOnCoverLedge === 'function' ? this.isRestingOnCoverLedge() : false;
+    const swayBipod = Boolean(swayCur?.def?.hasBipod && (this.prone || this.crouching || swayLedge));
+    const curCamFov = this.camera?.fov || 75;
+    const highMagStandingPenalty =
+      this.isAds && !this.isHoldingBreath && !swayBipod && !this.prone
+        ? curCamFov <= 3.2
+          ? 2.45
+          : curCamFov <= 4.8
+          ? 1.85
+          : curCamFov <= 7.8
+          ? 1.35
+          : 1.0
+        : 1.0;
+    const stanceSwayMult =
+      (swayBipod
+        ? PLAYER.SWAY_SCALE_BIPOD || 0.12
+        : this.prone
+        ? PLAYER.SWAY_SCALE_PRONE || 0.28
+        : this.crouching
+        ? PLAYER.SWAY_SCALE_CROUCH || 0.58
+        : swayLedge
+        ? 0.68
+        : 1.0) * highMagStandingPenalty;
+    const swayLim = PLAYER.SWAY_LIMIT * stanceSwayMult;
+    this.swayX = THREE.MathUtils.clamp(this.swayX - dx * PLAYER.SWAY_MULT * stanceSwayMult, -swayLim, swayLim);
+    this.swayY = THREE.MathUtils.clamp(this.swayY + dy * PLAYER.SWAY_MULT * stanceSwayMult, -swayLim, swayLim);
+    if (Math.hypot(rawDx, rawDy) >= 4) {
+      if (Math.abs(rawDy) >= Math.abs(rawDx) * 1.15) {
+        this.meleeGuardDir = rawDy < 0 ? 'UP' : 'DOWN';
+      } else {
+        this.meleeGuardDir = rawDx < 0 ? 'LEFT' : 'RIGHT';
+      }
+      this._meleeDirInputTime = performance.now();
+    }
   }
 
   getActiveOpticType() {
@@ -2814,17 +2834,27 @@ export class PlayerController {
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
 
     const moveDir = new THREE.Vector3();
+    let analogSpeedMult = 1.0;
     if (!modalOpenNow) {
       if (this.keys['KeyW']) moveDir.add(forward);
       if (this.keys['KeyS']) moveDir.sub(forward);
       if (this.keys['KeyD']) moveDir.add(right);
       if (this.keys['KeyA']) moveDir.sub(right);
+
+      const tx = this.touchMoveX || 0;
+      const tz = this.touchMoveZ || 0;
+      if (moveDir.lengthSq() < 0.001 && (Math.abs(tx) > 0.05 || Math.abs(tz) > 0.05)) {
+        moveDir.addScaledVector(forward, -tz);
+        moveDir.addScaledVector(right, tx);
+        analogSpeedMult = Math.max(0.38, Math.min(1.0, this.touchMoveMag || Math.hypot(tx, tz)));
+      }
     }
 
     const isMoving = moveDir.lengthSq() > 0.001;
     if (isMoving) moveDir.normalize();
 
-    if (!modalOpenNow && this.keys['ShiftLeft'] && (this.keys['KeyW'] || isMoving) && (this.prone || this.crouching)) {
+    const wantSprint = Boolean(this.keys['ShiftLeft'] || this.touchSprintLocked);
+    if (!modalOpenNow && wantSprint && (this.keys['KeyW'] || isMoving) && (this.prone || this.crouching)) {
       this.prone = false;
       this.crouching = false;
     }
@@ -2853,7 +2883,8 @@ export class PlayerController {
     const canHoldBreath = Boolean(
       !modalOpenNow && this.isAds && this.adsAmount > 0.4 && isHighZoomScope && !this.reloading
     );
-    if (canHoldBreath && this.keys['ShiftLeft'] && !this._breathExhausted) {
+    const holdBreathHeld = Boolean(this.keys['ShiftLeft'] || this.touchHoldBreath);
+    if (canHoldBreath && holdBreathHeld && !this._breathExhausted) {
       this.breathStamina = Math.max(0, this.breathStamina - dt * 1.0);
       if (this.breathStamina <= 0.02) {
         this._breathExhausted = true;
@@ -2864,14 +2895,14 @@ export class PlayerController {
     } else {
       this.isHoldingBreath = false;
       this.breathStamina = Math.min(4.5, this.breathStamina + dt * 1.45);
-      if (this._breathExhausted && (!this.keys['ShiftLeft'] || this.breathStamina >= 1.25)) {
+      if (this._breathExhausted && (!holdBreathHeld || this.breathStamina >= 1.25)) {
         if (this.breathStamina >= 1.25) this._breathExhausted = false;
       }
     }
 
     const sprinting =
       !modalOpenNow &&
-      this.keys['ShiftLeft'] &&
+      wantSprint &&
       !this.legFractured &&
       !this.isAds &&
       !this.crouching &&
@@ -2896,7 +2927,7 @@ export class PlayerController {
       : 7.0;
     const baseSpeed = this.parachuting
       ? rawBaseSpeed
-      : rawBaseSpeed * classSpdMult * fractureMoveMult;
+      : rawBaseSpeed * classSpdMult * fractureMoveMult * (sprinting ? 1.0 : analogSpeedMult);
 
     // [Space]: Stand up from Prone/Crouch, Vault over low wall/window, or Auto-Bunnyhop (when bhopEnabled is ON)!
     const bodyHeightNow = this.prone ? 0.65 : this.crouching ? 1.15 : 1.7;

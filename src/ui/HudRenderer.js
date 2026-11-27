@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
-import { UI, getEraRoles } from '../config.js?v=142';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=142';
+import { UI, getEraRoles } from '../config.js?v=143';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=143';
 
 export const HudRenderer = {
   _setText(el, str) {

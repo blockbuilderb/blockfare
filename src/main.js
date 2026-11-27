@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=142';
-import { VehicleManager } from './vehicles.js?v=142';
-import { BotManager } from './bots.js?v=142';
-import { PlayerController } from './player.js?v=142';
-import { NetworkManager } from './network.js?v=142';
-import { UIManager } from './ui.js?v=142';
-import { TelemetryLogger } from './telemetry.js?v=142';
-import { sound } from './audio.js?v=142';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=142';
-import { events, makeEventBridge } from './events.js?v=142';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=142';
+import { VoxelWorld } from './world.js?v=143';
+import { VehicleManager } from './vehicles.js?v=143';
+import { BotManager } from './bots.js?v=143';
+import { PlayerController } from './player.js?v=143';
+import { NetworkManager } from './network.js?v=143';
+import { UIManager } from './ui.js?v=143';
+import { TelemetryLogger } from './telemetry.js?v=143';
+import { sound } from './audio.js?v=143';
+import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=143';
+import { events, makeEventBridge } from './events.js?v=143';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=143';
 
 class BattleBitGame {
   constructor() {
@@ -29,10 +29,20 @@ class BattleBitGame {
     );
     this.scene.add(this.camera);
 
-    // Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    // Renderer (auto-caps DPR at 1.35 on mobile coarse-pointer devices to sustain 60 FPS without thermal throttling)
+    const isCoarseMobileBoot = Boolean(
+      (navigator.maxTouchPoints || 0) > 0 &&
+        (window.matchMedia?.('(pointer: coarse)')?.matches || window.innerWidth <= 1024)
+    );
+    this.isMobileDevice = isCoarseMobileBoot;
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: !isCoarseMobileBoot,
+      powerPreference: 'high-performance'
+    });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, CAMERA.PIXEL_RATIO_CAP));
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, isCoarseMobileBoot ? 1.35 : CAMERA.PIXEL_RATIO_CAP)
+    );
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.BasicShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
@@ -100,6 +110,8 @@ class BattleBitGame {
         ? 125
         : isInitialMp
         ? 125
+        : isCoarseMobileBoot
+        ? 75
         : 250;
     this.syncMatchTicketsForArmyScale(initialBotsPerSide, true);
     this.telemetry = new TelemetryLogger(this);
@@ -1913,6 +1925,7 @@ class BattleBitGame {
 
     this._runTimedStage('ui', () => {
       this.ui.update(dt, this.ticketsUS, this.ticketsRU, this.matchTimeRemaining, rawDt);
+      this.ui.mobileTouch?.update?.();
       if (this.telemetry) this.telemetry.update(dt);
     });
 

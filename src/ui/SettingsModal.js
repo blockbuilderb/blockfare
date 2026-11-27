@@ -1,4 +1,4 @@
-import { sound } from '../audio.js?v=142';
+import { sound } from '../audio.js?v=143';
 
 export const SettingsModal = {
   bindSettingsEvents() {
@@ -541,7 +541,7 @@ export const SettingsModal = {
       </div>
 
       <!-- CATEGORY 11: OPTIONAL TACTICAL DEATH CAM & 3D SHOT TRAJECTORY (DEFAULT: OFF FOR REALISM) -->
-      <div style="background:rgba(16,26,36,0.88);border:1px solid rgba(255,71,87,0.45);border-left:4px solid #ff4757;border-radius:6px;padding:10px 14px;margin-bottom:14px;">
+      <div style="background:rgba(16,26,36,0.88);border:1px solid rgba(255,71,87,0.45);border-left:4px solid #ff4757;border-radius:6px;padding:10px 14px;margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
           <div>
             <span style="font-size:13px;font-weight:900;color:#ff6b81;">11. OPTIONAL DEATH CAM &amp; 3D SHOT TRACE (DEFAULT: OFF FOR REALISM)</span>
@@ -559,6 +559,33 @@ export const SettingsModal = {
               : '🪖 DEATH CAM: OFF (REALISTIC DEFAULT)'
           }</button>
         </div>
+      </div>
+
+      <!-- CATEGORY 12: PUBG / COD MOBILE DUAL-THUMB TOUCH CONTROLS & AIM SENSITIVITY -->
+      <div style="background:rgba(16,26,36,0.92);border:1px solid rgba(0,210,211,0.5);border-left:4px solid #00d2d3;border-radius:6px;padding:10px 14px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
+          <div>
+            <span style="font-size:13px;font-weight:900;color:#81ecec;">12. 📱 MOBILE DUAL-THUMB TOUCH HUD &amp; AIM SENSITIVITY</span>
+            <div style="font-size:10px;color:#bdc3c7;"><b>AUTO</b> enables the PUBG/CoD Mobile Dual-Thumb Joystick + Fire/Drag-Aim HUD automatically on phones &amp; tablets while keeping Desktop KBM clean. Force <b>ON</b> anytime to test!</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span id="touch-sens-badge" style="background:rgba(0,210,211,0.16);border:1px solid #00d2d3;color:#81ecec;border-radius:4px;padding:2px 8px;font-size:11.5px;font-weight:900;min-width:58px;text-align:center;">
+              ${this.mobileTouch?.touchSensPct || 100}%
+            </span>
+            <button type="button" id="settings-touch-mode-btn" style="background:rgba(0,210,211,0.22);border:1.5px solid #00d2d3;color:#81ecec;border-radius:4px;padding:5px 11px;font-size:11.5px;font-weight:900;cursor:pointer;white-space:nowrap;">
+              📱 TOUCH: ${(this.mobileTouch?.mode || 'auto').toUpperCase()}
+            </button>
+          </div>
+        </div>
+        <input
+          id="touch-sens-slider"
+          type="range"
+          min="25"
+          max="200"
+          step="5"
+          value="${this.mobileTouch?.touchSensPct || 100}"
+          style="width:100%;accent-color:#00d2d3;cursor:pointer;height:6px;"
+        />
       </div>
 
       <!-- FOOTER ACTIONS -->
@@ -830,6 +857,24 @@ export const SettingsModal = {
         this.player.toggleDeathCamEnabled();
         this.renderSettingsModalContent(modal);
         this.updateDeathCamUI();
+      });
+    }
+
+    const touchModeBtn = modal.querySelector('#settings-touch-mode-btn');
+    if (touchModeBtn && this.mobileTouch) {
+      touchModeBtn.addEventListener('click', () => {
+        this.mobileTouch.cycleMode();
+        this.renderSettingsModalContent(modal);
+        sound.playRadioBeep(true);
+      });
+    }
+
+    const touchSensSlider = modal.querySelector('#touch-sens-slider');
+    const touchSensBadge = modal.querySelector('#touch-sens-badge');
+    if (touchSensSlider && this.mobileTouch) {
+      touchSensSlider.addEventListener('input', () => {
+        const applied = this.mobileTouch.setSensitivity(touchSensSlider.value);
+        if (touchSensBadge) touchSensBadge.textContent = `${applied}%`;
       });
     }
 
