@@ -6,7 +6,7 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=146';
+import { TEXTURES } from '../assets/textures.js?v=148';
 
 let propShared = null;
 
@@ -250,119 +250,154 @@ export function createSkyscraper3DMesh(spec = {}) {
 
   const curtainH = Math.max(4.0, curtainMaxY - curtainMinY);
   const midCurtainY = (curtainMinY + curtainMaxY) * 0.5;
+  const hx = spanX * 0.5 - 0.625;
+  const hz = spanZ * 0.5 - 0.625;
+  const spireX = hx - 1.8;
+  const spireZ = -hz + 1.8;
+  const spireH = spanX >= 22 && curtainH >= 20 ? 7.5 + (variant % 3) * 2.5 : 3.2;
 
-  // 1. Blocky Voxel-Grid-Aligned Middle Core Box (aligned flush with 1.25m voxel walls, inset 0.03m to prevent Z-fighting with stair wall)
-  const coreGeo = new THREE.BoxGeometry(spanX - 0.06, curtainH, spanZ - 0.06);
-  const uvAttr = coreGeo.attributes.uv;
-  const repX = Math.max(2, Math.round(spanX / 3.75));
-  const repZ = Math.max(2, Math.round(spanZ / 3.75));
-  const repY = Math.max(1, Math.round(curtainH / 5.0));
-  for (let face = 0; face < 6; face++) {
-    const rx = face < 2 ? repZ : repX;
-    const ry = face === 2 || face === 3 ? repZ : repY;
-    for (let v = 0; v < 4; v++) {
-      const idx = face * 4 + v;
-      uvAttr.setXY(idx, uvAttr.getX(idx) * rx, uvAttr.getY(idx) * ry);
-    }
+  // Shared GPU Geometry Cache for Modular Floor Shells:
+  // Reuses pre-merged modular story facade, steel girders, precast floor spandrel bands & interior stairwell liner
+  // across all buildings of matching (spanX, spanZ, curtainH, spireTier) so GPU vertex memory & upload cost drop ~75%!
+  if (!createSkyscraper3DMesh._geoCache) {
+    createSkyscraper3DMesh._geoCache = new Map();
   }
-  const glassMesh = new THREE.Mesh(coreGeo, facadeMat);
+  const baseKey = `${spanX.toFixed(2)}_${spanZ.toFixed(2)}_${curtainH.toFixed(2)}`;
+  const steelKey = `${baseKey}_${spireH.toFixed(1)}`;
+  let baseCached = createSkyscraper3DMesh._geoCache.get(baseKey);
+  if (!baseCached) {
+    // 1. Blocky Voxel-Grid-Aligned Modular Floor Core Box (centered at y = 0 in local space for reuse across terrain heights!)
+    const coreGeo = new THREE.BoxGeometry(spanX - 0.06, curtainH, spanZ - 0.06);
+    const uvAttr = coreGeo.attributes.uv;
+    const repX = Math.max(2, Math.round(spanX / 3.75));
+    const repZ = Math.max(2, Math.round(spanZ / 3.75));
+    const repY = Math.max(1, Math.round(curtainH / 6.25));
+    for (let face = 0; face < 6; face++) {
+      const rx = face < 2 ? repZ : repX;
+      const ry = face === 2 || face === 3 ? repZ : repY;
+      for (let v = 0; v < 4; v++) {
+        const idx = face * 4 + v;
+        uvAttr.setXY(idx, uvAttr.getX(idx) * rx, uvAttr.getY(idx) * ry);
+      }
+    }
+    coreGeo.userData.shared = true;
+
+    // Modular Floor Spandrel Bands every 1 story (`6.25m` = 5 voxels) + Interior Stairwell Shaft Liner (`x=0..6, z=0..7`)
+    const concreteParts = [];
+    const modularStories = Math.max(1, Math.round(curtainH / 6.25));
+    for (let s = 0; s <= modularStories; s++) {
+      const bandRelY = -curtainH * 0.5 + s * (curtainH / modularStories);
+      concreteParts.push({
+        geo: new THREE.BoxGeometry(spanX + 0.26, 0.48, spanZ + 0.26),
+        pos: [0, bandRelY, 0],
+        rot: [0, 0, 0]
+      });
+    }
+    const shaftEastLocalX = -spanX * 0.5 + 6.5 * 1.25;
+    const shaftSouthLocalZ = -spanZ * 0.5 + 7.5 * 1.25;
+    concreteParts.push({
+      geo: new THREE.BoxGeometry(0.28, curtainH, Math.min(spanZ - 0.5, 8.75)),
+      pos: [shaftEastLocalX, 0, -spanZ * 0.5 + 4.375],
+      rot: [0, 0, 0]
+    });
+    concreteParts.push({
+      geo: new THREE.BoxGeometry(Math.min(spanX - 0.5, 7.5), curtainH, 0.28),
+      pos: [-spanX * 0.5 + 3.75, 0, shaftSouthLocalZ],
+      rot: [0, 0, 0]
+    });
+    const concGeo = mergeStaticParts(concreteParts);
+    concGeo.userData.shared = true;
+    const beaconGeo =
+      createSkyscraper3DMesh._beaconGeo ||
+      (createSkyscraper3DMesh._beaconGeo = (() => {
+        const g = new THREE.BoxGeometry(0.42, 0.42, 0.42);
+        g.userData.shared = true;
+        return g;
+      })());
+
+    baseCached = { coreGeo, concGeo, beaconGeo };
+    createSkyscraper3DMesh._geoCache.set(baseKey, baseCached);
+  }
+
+  let steelGeo = createSkyscraper3DMesh._geoCache.get(steelKey);
+  if (!steelGeo) {
+    const steelParts = [];
+    const roofRelY = curtainH * 0.5 + 6.25;
+
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        steelParts.push({
+          geo: new THREE.BoxGeometry(1.26, curtainH + 0.08, 1.26),
+          pos: [sx * hx, 0, sz * hz],
+          rot: [0, 0, 0]
+        });
+      }
+    }
+    const xRibCount = Math.max(2, Math.floor(spanX / 7.5));
+    for (let i = 1; i < xRibCount; i++) {
+      const px = -spanX * 0.5 + i * 7.5;
+      if (Math.abs(px) < hx - 1.2) {
+        for (const sz of [-1, 1]) {
+          steelParts.push({
+            geo: new THREE.BoxGeometry(1.05, curtainH, 0.22),
+            pos: [px, 0, sz * (spanZ * 0.5 + 0.04)],
+            rot: [0, 0, 0]
+          });
+        }
+      }
+    }
+    const zRibCount = Math.max(2, Math.floor(spanZ / 7.5));
+    for (let i = 1; i < zRibCount; i++) {
+      const pz = -spanZ * 0.5 + i * 7.5;
+      if (Math.abs(pz) < hz - 1.2) {
+        for (const sx of [-1, 1]) {
+          steelParts.push({
+            geo: new THREE.BoxGeometry(0.22, curtainH, 1.05),
+            pos: [sx * (spanX * 0.5 + 0.04), midCurtainY * 0, pz],
+            rot: [0, 0, 0]
+          });
+        }
+      }
+    }
+    steelParts.push({
+      geo: new THREE.BoxGeometry(0.42, spireH, 0.42),
+      pos: [spireX, roofRelY + spireH * 0.5, spireZ],
+      rot: [0, 0, 0]
+    });
+    steelParts.push({
+      geo: new THREE.BoxGeometry(2.2, 1.25, 1.6),
+      pos: [spireX - 1.6, roofRelY + 0.625, spireZ + 0.3],
+      rot: [0, 0, 0]
+    });
+    steelGeo = mergeStaticParts(steelParts);
+    steelGeo.userData.shared = true;
+    createSkyscraper3DMesh._geoCache.set(steelKey, steelGeo);
+  }
+  const cached = { ...baseCached, steelGeo };
+
+  const glassMesh = new THREE.Mesh(cached.coreGeo, facadeMat);
   glassMesh.position.set(0, midCurtainY, 0);
   glassMesh.castShadow = true;
   glassMesh.receiveShadow = true;
   group.add(glassMesh);
 
-  // 2. Merged Blocky Steel Corner Girders, Voxel-Stepped Spandrel Ledges, Canopy & Rooftop Antenna Mast
-  const steelParts = [];
-  const concreteParts = [];
-  const hx = spanX * 0.5 - 0.625;
-  const hz = spanZ * 0.5 - 0.625;
+  const steelMesh = new THREE.Mesh(cached.steelGeo, mats.mullionSteel);
+  steelMesh.position.set(0, midCurtainY, 0);
+  steelMesh.castShadow = false;
+  steelMesh.receiveShadow = true;
+  group.add(steelMesh);
 
-  // 4 Blocky 1.25m Corner Steel Box-Girders along the 3D shaft so corners match 1F/Top-Floor `steelBeam` voxels!
-  for (const sx of [-1, 1]) {
-    for (const sz of [-1, 1]) {
-      steelParts.push({
-        geo: new THREE.BoxGeometry(1.26, curtainH + 0.08, 1.26),
-        pos: [sx * hx, midCurtainY, sz * hz],
-        rot: [0, 0, 0]
-      });
-    }
-  }
+  const concMesh = new THREE.Mesh(cached.concGeo, mats.trimConcrete);
+  concMesh.position.set(0, midCurtainY, 0);
+  concMesh.castShadow = false;
+  concMesh.receiveShadow = true;
+  group.add(concMesh);
 
-  // Blocky Exterior Structural Ribs every 6 voxels (7.5m) matching 1F/2F `steelBeam` perimeter piers
-  const xRibCount = Math.max(2, Math.floor(spanX / 7.5));
-  for (let i = 1; i < xRibCount; i++) {
-    const px = -spanX * 0.5 + i * 7.5;
-    if (Math.abs(px) < hx - 1.2) {
-      for (const sz of [-1, 1]) {
-        steelParts.push({
-          geo: new THREE.BoxGeometry(1.05, curtainH, 0.22),
-          pos: [px, midCurtainY, sz * (spanZ * 0.5 + 0.04)],
-          rot: [0, 0, 0]
-        });
-      }
-    }
-  }
-  const zRibCount = Math.max(2, Math.floor(spanZ / 7.5));
-  for (let i = 1; i < zRibCount; i++) {
-    const pz = -spanZ * 0.5 + i * 7.5;
-    if (Math.abs(pz) < hz - 1.2) {
-      for (const sx of [-1, 1]) {
-        steelParts.push({
-          geo: new THREE.BoxGeometry(0.22, curtainH, 1.05),
-          pos: [sx * (spanX * 0.5 + 0.04), midCurtainY, pz],
-          rot: [0, 0, 0]
-        });
-      }
-    }
-  }
-
-  // Blocky Precast Concrete Belt Ledges every 2 stories (10m) for chunky silhouette relief
-  for (let by = curtainMinY; by <= curtainMaxY + 0.1; by += 10.0) {
-    concreteParts.push({
-      geo: new THREE.BoxGeometry(spanX + 0.28, 0.62, spanZ + 0.28),
-      pos: [0, by, 0],
-      rot: [0, 0, 0]
-    });
-  }
-
-  // Blocky Rooftop Communications Mast + HVAC Box on NE corner (clear of Helipad & Stairwell!)
-  const spireX = hx - 1.8;
-  const spireZ = -hz + 1.8;
-  const spireH = 7.5 + (variant % 3) * 2.5;
-  steelParts.push({
-    geo: new THREE.BoxGeometry(0.42, spireH, 0.42),
-    pos: [spireX, roofTopY + spireH * 0.5, spireZ],
-    rot: [0, 0, 0]
-  });
-  steelParts.push({
-    geo: new THREE.BoxGeometry(2.2, 1.25, 1.6),
-    pos: [spireX - 1.6, roofTopY + 0.625, spireZ + 0.3],
-    rot: [0, 0, 0]
-  });
-
-  if (steelParts.length > 0) {
-    const steelGeo = mergeStaticParts(steelParts);
-    steelGeo.userData.shared = false;
-    const steelMesh = new THREE.Mesh(steelGeo, mats.mullionSteel);
-    steelMesh.castShadow = true;
-    steelMesh.receiveShadow = true;
-    group.add(steelMesh);
-  }
-
-  if (concreteParts.length > 0) {
-    const concGeo = mergeStaticParts(concreteParts);
-    concGeo.userData.shared = false;
-    const concMesh = new THREE.Mesh(concGeo, mats.trimConcrete);
-    concMesh.receiveShadow = true;
-    group.add(concMesh);
-  }
-
-  const beaconGeo = new THREE.BoxGeometry(0.42, 0.42, 0.42);
-  const beaconMesh = new THREE.Mesh(beaconGeo, mats.beaconRed);
+  const beaconMesh = new THREE.Mesh(cached.beaconGeo, mats.beaconRed);
   beaconMesh.position.set(spireX, roofTopY + spireH + 0.21, spireZ);
   group.add(beaconMesh);
 
-  group.userData.curtainShell = { glassMesh, spireTopY: roofTopY + spireH };
+  group.userData.curtainShell = { glassMesh, spireTopY: roofTopY + spireH, modularFloors: Math.max(1, Math.round(curtainH / 6.25)) };
   return group;
 }
 

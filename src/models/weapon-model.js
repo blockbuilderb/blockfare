@@ -18,30 +18,29 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=146';
+import { TEXTURES } from '../assets/textures.js?v=148';
 
 // Cached shared BLOCKY geometries & flat-shaded materials for 1st-person Operator Arms, Watch & Tactical Gloves
 // Matches 3rd-person blocky voxel-operator limb aesthetic (`soldier-model.js` BoxGeometry limbs, zero round noodle cylinders!)
 const _fpArmGeos = {
-  upperSleeve: new THREE.BoxGeometry(0.124, 0.22, 0.124),
-  forearmSleeve: new THREE.BoxGeometry(0.108, 0.22, 0.108),
-  sleeveFold: new THREE.BoxGeometry(0.116, 0.044, 0.116),
-  elbowPad: new THREE.BoxGeometry(0.118, 0.064, 0.120),
-  wristSkin: new THREE.BoxGeometry(0.080, 0.048, 0.080),
-  gloveCuff: new THREE.BoxGeometry(0.090, 0.040, 0.090),
-  velcroTab: new THREE.BoxGeometry(0.050, 0.014, 0.028),
-  watchBand: new THREE.BoxGeometry(0.086, 0.024, 0.086),
-  watchCase: new THREE.BoxGeometry(0.042, 0.014, 0.044),
-  watchScreen: new THREE.BoxGeometry(0.030, 0.004, 0.032),
-  watchTick: new THREE.BoxGeometry(0.020, 0.0045, 0.005),
-  palmCore: new THREE.BoxGeometry(0.078, 0.042, 0.082),
-  suedePatch: new THREE.BoxGeometry(0.066, 0.008, 0.068),
-  knuckleGuard: new THREE.BoxGeometry(0.076, 0.014, 0.026),
-  knucklePod: new THREE.BoxGeometry(0.015, 0.011, 0.015),
-  thumbProx: new THREE.BoxGeometry(0.022, 0.036, 0.022),
-  thumbDist: new THREE.BoxGeometry(0.020, 0.028, 0.020),
-  fingerProx: new THREE.BoxGeometry(0.018, 0.034, 0.018),
-  fingerDist: new THREE.BoxGeometry(0.017, 0.028, 0.017)
+  upperSleeve: new THREE.BoxGeometry(0.092, 0.22, 0.092),
+  forearmSleeve: new THREE.BoxGeometry(0.082, 0.22, 0.082),
+  sleeveFold: new THREE.BoxGeometry(0.086, 0.028, 0.086),
+  elbowPad: new THREE.BoxGeometry(0.088, 0.062, 0.088),
+  gloveCuff: new THREE.BoxGeometry(0.078, 0.028, 0.078),
+  velcroTab: new THREE.BoxGeometry(0.044, 0.016, 0.082),
+  watchBand: new THREE.BoxGeometry(0.082, 0.020, 0.082),
+  watchCase: new THREE.BoxGeometry(0.036, 0.028, 0.010),
+  watchScreen: new THREE.BoxGeometry(0.026, 0.020, 0.004),
+  watchTick: new THREE.BoxGeometry(0.016, 0.0035, 0.0045),
+  palmCore: new THREE.BoxGeometry(0.068, 0.046, 0.068),
+  suedePatch: new THREE.BoxGeometry(0.058, 0.008, 0.058),
+  knuckleGuard: new THREE.BoxGeometry(0.066, 0.010, 0.022),
+  knucklePod: new THREE.BoxGeometry(0.013, 0.006, 0.013),
+  thumbProx: new THREE.BoxGeometry(0.020, 0.030, 0.020),
+  thumbDist: new THREE.BoxGeometry(0.018, 0.024, 0.018),
+  fingerProx: new THREE.BoxGeometry(0.016, 0.028, 0.016),
+  fingerDist: new THREE.BoxGeometry(0.015, 0.022, 0.015)
 };
 for (const g of Object.values(_fpArmGeos)) {
   g.userData.shared = true;
@@ -89,7 +88,10 @@ const _ikWristLocal = new THREE.Vector3();
 const _ikElbowLocal = new THREE.Vector3();
 const _ikShoulderLocal = new THREE.Vector3();
 const _ikSegDir = new THREE.Vector3();
+const _ikUpperDir = new THREE.Vector3();
 const _ikSegMid = new THREE.Vector3();
+const _ikHandQuat = new THREE.Quaternion();
+const _ikRestQuat = new THREE.Quaternion();
 
 function setBlockyLimbQuaternion(targetQuat, segAxisY, upHintLocal) {
   _ikRightAxis.crossVectors(upHintLocal, segAxisY);
@@ -98,7 +100,8 @@ function setBlockyLimbQuaternion(targetQuat, segAxisY, upHintLocal) {
   } else {
     _ikRightAxis.normalize();
   }
-  _ikFwdAxis.crossVectors(segAxisY, _ikRightAxis).normalize();
+  // Right-handed basis: X = up × Y, Z = X × Y (det = +1)
+  _ikFwdAxis.crossVectors(_ikRightAxis, segAxisY).normalize();
   _ikBasisMat.makeBasis(_ikRightAxis, segAxisY, _ikFwdAxis);
   targetQuat.setFromRotationMatrix(_ikBasisMat);
 }
@@ -126,9 +129,10 @@ export function getWeaponHipOffsetX(def) {
 
 /**
  * Solves a 2-bone Shoulder -> Elbow -> Wrist analytical IK rig for both 1st-person arms in camera space:
- * - Left arm ALWAYS originates from the operator's left shoulder `(-0.28, -0.32, +0.12)` (bottom-left of screen).
- * - Right arm ALWAYS originates from the operator's right shoulder `(+0.28, -0.32, +0.12)` (bottom-right of screen).
- * - Prevents both arms from ever appearing side-by-side on the right edge of the viewport!
+ * - Left arm ALWAYS originates from the operator's left shoulder `(-0.27, -0.32, +0.06)` (bottom-left of screen).
+ * - Right arm ALWAYS originates from the operator's right shoulder `(+0.27, -0.32, +0.06)` (bottom-right of screen).
+ * - Aligns forearm, rolled camo cuff, tactical watch/band, and blocky glove cuff along ONE colinear axis
+ *   so there is zero broken-wrist kink, zero exposed flesh brick, and zero elbow gap!
  */
 export function updateFirstPersonArmShoulders(weaponMesh, overrideWeaponPos = null) {
   if (!weaponMesh) return;
@@ -143,52 +147,72 @@ export function updateFirstPersonArmShoulders(weaponMesh, overrideWeaponPos = nu
     const isLeft = sideIdx === 0;
     const arm = weaponMesh.getObjectByName(isLeft ? 'leftArmGroup' : 'rightArmGroup');
     if (!arm || !arm.visible || !arm.userData || !arm.userData.ikRefs) continue;
-    const { forearm, sleeveFold, upperSleeve, elbowPad } = arm.userData.ikRefs;
+    const { forearm, sleeveFold, upperSleeve, elbowPad, wristRig, handGroup } = arm.userData.ikRefs;
 
     _ikArmLocalMat.compose(arm.position, arm.quaternion, _ikScaleOne);
     _ikInvArmWorldMat.multiplyMatrices(_ikWepMat, _ikArmLocalMat).invert();
 
-    // Wrist anchor in camera space
-    _ikWristCam.copy(arm.position).applyMatrix4(_ikWepMat);
+    // Wrist anchor in camera space (tucked cleanly under grip/handguard)
+    _ikWristLocal.set(0, -0.016, 0.024);
+    _ikWristCam.copy(_ikWristLocal).applyMatrix4(_ikArmLocalMat).applyMatrix4(_ikWepMat);
 
-    // Fixed anatomical left/right shoulders in camera space (chunky blocky BattleBit operator proportions)
-    _ikShoulderCam.set(isLeft ? -0.24 : 0.24, -0.29, -0.04);
+    // Wide anatomical left/right shoulders behind & below the viewport corners
+    _ikShoulderCam.set(isLeft ? -0.28 : 0.28, -0.33, 0.06);
 
-    // Natural outward & downward elbow bend (clamped strictly below y = -0.23 so ADS bore is never occluded)
+    // Natural outward & downward elbow bend (clamped strictly below y = -0.24 so ADS sightline is 100% clear)
     _ikElbowCam.lerpVectors(_ikWristCam, _ikShoulderCam, 0.50);
-    _ikElbowCam.x += isLeft ? -0.075 : 0.065;
-    _ikElbowCam.y = Math.min(_ikElbowCam.y - 0.072, -0.23);
-    _ikElbowCam.z += 0.012;
+    _ikElbowCam.x += isLeft ? -0.065 : 0.055;
+    _ikElbowCam.y = Math.min(_ikElbowCam.y - 0.065, -0.24);
+    _ikElbowCam.z += 0.015;
 
-    // Transform joints & camera-up hint into `arm` local space so blocky square sleeves never twist into diamonds
-    _ikWristLocal.set(0, -0.002, 0.018);
+    // Transform joints & camera-up hint into `arm` local space so blocky square sleeves stay crisp & level
     _ikElbowLocal.copy(_ikElbowCam).applyMatrix4(_ikInvArmWorldMat);
     _ikShoulderLocal.copy(_ikShoulderCam).applyMatrix4(_ikInvArmWorldMat);
-    _ikUpLocal.set(0, 1, 0).transformDirection(_ikInvArmWorldMat);
+    _ikUpLocal.set(0, 1, 0).transformDirection(_ikInvArmWorldMat).normalize();
 
-    // 1) Blocky Forearm segment: Elbow (bottom) -> Wrist (top)
+    // 1) Blocky Forearm segment: Elbow (bottom, 16mm overlap) -> Sleeve Cuff (leaves 22mm clear for dark glove cuff & watch!)
     _ikSegDir.subVectors(_ikWristLocal, _ikElbowLocal);
-    const forearmLen = Math.max(0.08, _ikSegDir.length());
-    _ikSegDir.divideScalar(forearmLen);
-    _ikSegMid.addVectors(_ikElbowLocal, _ikWristLocal).multiplyScalar(0.5);
+    const rawForeLen = Math.max(0.08, _ikSegDir.length());
+    _ikSegDir.divideScalar(rawForeLen);
+    const foreOverlap = 0.016;
+    const cuffClearance = 0.022;
+    const totalForeLen = Math.max(0.06, rawForeLen - cuffClearance + foreOverlap);
+    _ikSegMid.copy(_ikElbowLocal).addScaledVector(_ikSegDir, (rawForeLen - cuffClearance - foreOverlap) * 0.5);
     forearm.position.copy(_ikSegMid);
     setBlockyLimbQuaternion(forearm.quaternion, _ikSegDir, _ikUpLocal);
-    forearm.scale.set(1, forearmLen / 0.22, 1);
+    forearm.scale.set(1, totalForeLen / 0.22, 1);
 
-    sleeveFold.position.copy(_ikWristLocal).addScaledVector(_ikSegDir, -0.022);
+    // Colinear Sleeve Cuff + Glove Cuff + Tactical Watch right at the front of the forearm (zero broken wrist!)
+    sleeveFold.position.copy(_ikWristLocal).addScaledVector(_ikSegDir, -0.028);
     sleeveFold.quaternion.copy(forearm.quaternion);
 
-    // 2) Blocky Upper-arm segment: Shoulder (bottom) -> Elbow (top)
-    _ikSegDir.subVectors(_ikElbowLocal, _ikShoulderLocal);
-    const upperLen = Math.max(0.08, _ikSegDir.length());
-    _ikSegDir.divideScalar(upperLen);
-    _ikSegMid.addVectors(_ikShoulderLocal, _ikElbowLocal).multiplyScalar(0.5);
+    if (wristRig) {
+      wristRig.position.copy(_ikWristLocal).addScaledVector(_ikSegDir, 0.004);
+      wristRig.quaternion.copy(forearm.quaternion);
+    }
+
+    if (handGroup) {
+      // Align blocky fist smoothly with the forearm-to-grip axis so there is never a jagged 50° wrist snap
+      handGroup.position.copy(_ikWristLocal).addScaledVector(_ikSegDir, 0.036);
+      // Map forearm's +Y limb axis to handGroup's -Z forward grip axis, blended gently toward grip orientation
+      _ikRestQuat.setFromAxisAngle(_ikRightAxis.set(1, 0, 0), Math.PI * 0.5);
+      _ikHandQuat.copy(forearm.quaternion).multiply(_ikRestQuat);
+      _ikRestQuat.identity();
+      handGroup.quaternion.copy(_ikHandQuat).slerp(_ikRestQuat, 0.35);
+    }
+
+    // 2) Blocky Upper-arm segment: Shoulder (`y = -0.11` anchor preserved!) -> Elbow (+16mm overlap)
+    _ikUpperDir.subVectors(_ikElbowLocal, _ikShoulderLocal);
+    const rawUpperLen = Math.max(0.08, _ikUpperDir.length());
+    _ikUpperDir.divideScalar(rawUpperLen);
+    const totalUpperLen = rawUpperLen + 0.016;
+    _ikSegMid.copy(_ikShoulderLocal).addScaledVector(_ikUpperDir, totalUpperLen * 0.5);
     upperSleeve.position.copy(_ikSegMid);
-    setBlockyLimbQuaternion(upperSleeve.quaternion, _ikSegDir, _ikUpLocal);
-    upperSleeve.scale.set(1, upperLen / 0.22, 1);
+    setBlockyLimbQuaternion(upperSleeve.quaternion, _ikUpperDir, _ikUpLocal);
+    upperSleeve.scale.set(1, totalUpperLen / 0.22, 1);
 
     elbowPad.position.copy(_ikElbowLocal);
-    elbowPad.quaternion.copy(forearm.quaternion);
+    elbowPad.quaternion.copy(forearm.quaternion).slerp(upperSleeve.quaternion, 0.5);
   }
 }
 
@@ -244,133 +268,126 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     const armGroup = new THREE.Group();
     const sideSign = isLeft ? 1 : -1;
 
-    // 1. Extended Combat-Shirt Upper/Lower Forearm Sleeve + Rolled Cuff + Molded Elbow Pad
+    // 1. Clean Blocky Voxel-Operator Camo Upper & Forearm Sleeves (matching 3rd-person `soldier-model.js` BoxGeometry limbs!)
     const upperSleeve = new THREE.Mesh(_fpArmGeos.upperSleeve, sleeveMat);
-    upperSleeve.rotation.x = Math.PI / 2;
     upperSleeve.position.set(sideSign * 0.008, -0.012, 0.31);
 
     const forearm = new THREE.Mesh(_fpArmGeos.forearmSleeve, sleeveMat);
-    forearm.rotation.x = Math.PI / 2;
-    forearm.position.set(0, -0.003, 0.135);
+    forearm.position.set(0, -0.016, 0.135);
 
     const sleeveFold = new THREE.Mesh(_fpArmGeos.sleeveFold, sleeveMat);
-    sleeveFold.rotation.x = Math.PI / 2;
-    sleeveFold.position.set(0, -0.002, 0.036);
+    sleeveFold.position.set(0, -0.016, 0.036);
 
     const elbowPad = new THREE.Mesh(_fpArmGeos.elbowPad, _fpCarbonKnuckleMat);
     elbowPad.position.set(sideSign * 0.006, -0.036, 0.25);
 
-    // 2. Exposed Wrist + Tactical Wrist Gear (Garmin/Tactical Watch on Left Arm, Paracord Cuff on Right Arm)
-    const wrist = new THREE.Mesh(_fpArmGeos.wristSkin, skinMat);
-    wrist.rotation.x = Math.PI / 2;
-    wrist.position.set(0, 0, 0.006);
+    // 2. Colinear Blocky Tactical Wrist Cuff + Flush Operator Watch (NO exposed flesh brick or 50° wrist snap!)
+    const wristRig = new THREE.Group();
+    wristRig.name = isLeft ? 'leftWristRig' : 'rightWristRig';
 
     const gloveCuff = new THREE.Mesh(_fpArmGeos.gloveCuff, gloveMat);
-    gloveCuff.rotation.x = Math.PI / 2;
-    gloveCuff.position.set(0, 0, -0.016);
-
     const velcroTab = new THREE.Mesh(_fpArmGeos.velcroTab, _fpTanSuedeMat);
-    velcroTab.position.set(0, 0.045, -0.016);
+    velcroTab.position.set(0, -0.004, 0);
+    wristRig.add(gloveCuff, velcroTab);
 
-    armGroup.add(upperSleeve, forearm, sleeveFold, elbowPad, wrist, gloveCuff, velcroTab);
+    if (isLeft) {
+      // Flush Blocky Garmin / Tactical Watch mounted cleanly on the inner-top face of the left wrist cuff
+      // Note: inside `wristRig`, local `+Y` points along the forearm toward the hand and local `+Z` is the dorsal/top face!
+      const watchGroup = new THREE.Group();
+      watchGroup.name = 'tacticalWatchGroup';
+      watchGroup.position.set(0, -0.018, 0);
+      const band = new THREE.Mesh(_fpArmGeos.watchBand, _fpWatchCaseMat);
+      const bezel = new THREE.Mesh(_fpArmGeos.watchCase, _fpWatchCaseMat);
+      bezel.position.set(0.010, 0, 0.043);
+      const screen = new THREE.Mesh(_fpArmGeos.watchScreen, _fpWatchScreenMat);
+      screen.position.set(0.010, 0, 0.049);
+      const readoutTop = new THREE.Mesh(_fpArmGeos.watchTick, _fpWatchGlowMat);
+      readoutTop.position.set(0.010, 0.004, 0.051);
+      const readoutBot = new THREE.Mesh(_fpArmGeos.watchTick, _fpWatchGlowMat);
+      readoutBot.scale.set(0.68, 1, 1);
+      readoutBot.position.set(0.008, -0.004, 0.051);
+      watchGroup.add(band, bezel, screen, readoutTop, readoutBot);
+      wristRig.add(watchGroup);
+    } else {
+      const paracordBand = new THREE.Mesh(_fpArmGeos.watchBand, _fpTanSuedeMat);
+      paracordBand.position.set(0, -0.018, 0);
+      wristRig.add(paracordBand);
+    }
+
+    // 3. Compact Blocky Tactical Glove Fist (tucked cleanly around grip/handguard so fingers never poke above rails!)
+    const handGroup = new THREE.Group();
+    handGroup.name = isLeft ? 'leftHandGroup' : 'rightHandGroup';
+    handGroup.position.set(0, -0.016, -0.02);
+
+    const palm = new THREE.Mesh(_fpArmGeos.palmCore, gloveMat);
+    const suedePalm = new THREE.Mesh(_fpArmGeos.suedePatch, _fpTanSuedeMat);
+    suedePalm.position.set(-sideSign * 0.003, -0.021, 0);
+
+    const knuckleBar = new THREE.Mesh(_fpArmGeos.knuckleGuard, _fpCarbonKnuckleMat);
+    knuckleBar.position.set(0, 0.021, -0.018);
+    handGroup.add(palm, suedePalm, knuckleBar);
+    for (let k = 0; k < 4; k++) {
+      const pod = new THREE.Mesh(_fpArmGeos.knucklePod, _fpCarbonKnuckleMat);
+      pod.position.set((k - 1.5) * 0.014, 0.025, -0.019);
+      handGroup.add(pod);
+    }
+
+    // Tucked Blocky Thumb wrapping inward onto the side of the grip / handguard
+    const thumbPivot = new THREE.Group();
+    thumbPivot.name = isLeft ? 'leftThumbGroup' : 'rightThumbGroup';
+    thumbPivot.position.set(sideSign * 0.026, 0.004, -0.008);
+    thumbPivot.rotation.set(0.24, -sideSign * 0.52, sideSign * 0.25);
+    const thumb1 = new THREE.Mesh(_fpArmGeos.thumbProx, gloveMat);
+    thumb1.rotation.x = Math.PI / 2;
+    thumb1.position.set(0, 0, -0.012);
+    const thumb2 = new THREE.Mesh(_fpArmGeos.thumbDist, _fpTanSuedeMat);
+    thumb2.rotation.x = Math.PI / 2 + 0.42;
+    thumb2.position.set(-sideSign * 0.004, -0.005, -0.028);
+    thumbPivot.add(thumb1, thumb2);
+    handGroup.add(thumbPivot);
+
+    // Compact Articulated Trigger / Support Index Finger
+    const indexPivot = new THREE.Group();
+    indexPivot.name = isLeft ? 'leftIndexGroup' : 'triggerFingerGroup';
+    indexPivot.position.set(sideSign * 0.018, 0.002, -0.028);
+    indexPivot.rotation.set(isLeft ? 0.68 : 0.28, -sideSign * (isLeft ? 0.18 : 0.22), 0);
+    indexPivot.userData.baseRotX = indexPivot.rotation.x;
+    indexPivot.userData.baseRotY = indexPivot.rotation.y;
+    const idx1 = new THREE.Mesh(_fpArmGeos.fingerProx, gloveMat);
+    idx1.rotation.x = Math.PI / 2;
+    idx1.position.set(0, 0, -0.012);
+    const idx2 = new THREE.Mesh(_fpArmGeos.fingerDist, _fpTanSuedeMat);
+    idx2.rotation.x = Math.PI / 2 + (isLeft ? 0.78 : 0.52);
+    idx2.position.set(-sideSign * 0.003, -0.008, -0.028);
+    indexPivot.add(idx1, idx2);
+    handGroup.add(indexPivot);
+
+    // Compact Curled Grip Fingers tucked tightly beneath the palm
+    const gripFingers = new THREE.Group();
+    gripFingers.name = isLeft ? 'leftGripFingers' : 'rightGripFingers';
+    for (let f = 0; f < 3; f++) {
+      const fX = sideSign * (0.005 - f * 0.013);
+      const curl = 0.92 + f * 0.08;
+      const fProx = new THREE.Mesh(_fpArmGeos.fingerProx, gloveMat);
+      fProx.rotation.x = Math.PI / 2 + curl * 0.6;
+      fProx.position.set(fX, -0.006, -0.032);
+      const fDist = new THREE.Mesh(_fpArmGeos.fingerDist, _fpTanSuedeMat);
+      fDist.rotation.x = Math.PI / 2 + curl * 1.3;
+      fDist.position.set(fX, -0.022, -0.040);
+      gripFingers.add(fProx, fDist);
+    }
+    handGroup.add(gripFingers);
+
+    armGroup.add(upperSleeve, forearm, sleeveFold, elbowPad, wristRig, handGroup);
     armGroup.userData.ikRefs = {
       forearm,
       sleeveFold,
       upperSleeve,
       elbowPad,
+      wristRig,
+      handGroup,
       isLeft
     };
-
-    if (isLeft) {
-      // Blocky Operator Tactical Watch / GPS Foretrex sitting flush on the square camo/wrist cuff
-      const watchGroup = new THREE.Group();
-      watchGroup.name = 'tacticalWatchGroup';
-      watchGroup.position.set(0, 0, 0.008);
-      watchGroup.rotation.z = -0.52; // Canted inward toward the operator's eyes
-      const band = new THREE.Mesh(_fpArmGeos.watchBand, _fpWatchCaseMat);
-      band.rotation.x = Math.PI / 2;
-      const bezel = new THREE.Mesh(_fpArmGeos.watchCase, _fpWatchCaseMat);
-      bezel.position.set(0, 0.045, 0);
-      const screen = new THREE.Mesh(_fpArmGeos.watchScreen, _fpWatchScreenMat);
-      screen.position.set(0, 0.0505, 0);
-      const readoutTop = new THREE.Mesh(_fpArmGeos.watchTick, _fpWatchGlowMat);
-      readoutTop.position.set(0, 0.053, -0.005);
-      const readoutBot = new THREE.Mesh(_fpArmGeos.watchTick, _fpWatchGlowMat);
-      readoutBot.scale.set(0.68, 1, 0.8);
-      readoutBot.position.set(-0.003, 0.053, 0.005);
-      watchGroup.add(band, bezel, screen, readoutTop, readoutBot);
-      armGroup.add(watchGroup);
-    } else {
-      const paracordBand = new THREE.Mesh(_fpArmGeos.watchBand, _fpTanSuedeMat);
-      paracordBand.rotation.x = Math.PI / 2;
-      paracordBand.position.set(0, 0, 0.008);
-      armGroup.add(paracordBand);
-    }
-
-    // 3. Sculpted Hard-Knuckle Tactical Glove Hand + Thumb + Curled Grip Fingers + Articulated Index Trigger Finger
-    const handGroup = new THREE.Group();
-    handGroup.name = isLeft ? 'leftHandGroup' : 'rightHandGroup';
-    handGroup.position.set(0, -0.002, -0.056);
-
-    const palm = new THREE.Mesh(_fpArmGeos.palmCore, gloveMat);
-    const suedePalm = new THREE.Mesh(_fpArmGeos.suedePatch, _fpTanSuedeMat);
-    suedePalm.position.set(-sideSign * 0.004, -0.019, 0);
-
-    const knuckleBar = new THREE.Mesh(_fpArmGeos.knuckleGuard, _fpCarbonKnuckleMat);
-    knuckleBar.position.set(0, 0.021, -0.024);
-    handGroup.add(palm, suedePalm, knuckleBar);
-    for (let k = 0; k < 4; k++) {
-      const pod = new THREE.Mesh(_fpArmGeos.knucklePod, _fpCarbonKnuckleMat);
-      pod.position.set((k - 1.5) * 0.016, 0.027, -0.026);
-      handGroup.add(pod);
-    }
-
-    // Opposable Thumb wrapping inward over the grip / handguard C-clamp
-    const thumbPivot = new THREE.Group();
-    thumbPivot.name = isLeft ? 'leftThumbGroup' : 'rightThumbGroup';
-    thumbPivot.position.set(sideSign * 0.028, 0.006, -0.012);
-    thumbPivot.rotation.set(isLeft ? 0.18 : 0.32, -sideSign * (isLeft ? 0.58 : 0.46), sideSign * 0.35);
-    const thumb1 = new THREE.Mesh(_fpArmGeos.thumbProx, gloveMat);
-    thumb1.rotation.x = Math.PI / 2;
-    thumb1.position.set(0, 0, -0.016);
-    const thumb2 = new THREE.Mesh(_fpArmGeos.thumbDist, _fpTanSuedeMat);
-    thumb2.rotation.x = Math.PI / 2 + 0.38;
-    thumb2.position.set(-sideSign * 0.005, -0.006, -0.04);
-    thumbPivot.add(thumb1, thumb2);
-    handGroup.add(thumbPivot);
-
-    // Index Finger (Extended Trigger Finger on Right Hand; C-Clamp / Forend Support Finger on Left Hand)
-    const indexPivot = new THREE.Group();
-    indexPivot.name = isLeft ? 'leftIndexGroup' : 'triggerFingerGroup';
-    indexPivot.position.set(sideSign * 0.02, 0.008, -0.036);
-    indexPivot.rotation.set(isLeft ? 0.62 : 0.24, -sideSign * (isLeft ? 0.12 : 0.22), 0);
-    indexPivot.userData.baseRotX = indexPivot.rotation.x;
-    indexPivot.userData.baseRotY = indexPivot.rotation.y;
-    const idx1 = new THREE.Mesh(_fpArmGeos.fingerProx, gloveMat);
-    idx1.rotation.x = Math.PI / 2;
-    idx1.position.set(0, 0, -0.016);
-    const idx2 = new THREE.Mesh(_fpArmGeos.fingerDist, _fpTanSuedeMat);
-    idx2.rotation.x = Math.PI / 2 + (isLeft ? 0.72 : 0.48);
-    idx2.position.set(-sideSign * 0.004, -0.01, -0.038);
-    indexPivot.add(idx1, idx2);
-    handGroup.add(indexPivot);
-
-    // Curled Middle, Ring & Little Fingers wrapping firmly around the grip / handguard
-    const gripFingers = new THREE.Group();
-    gripFingers.name = isLeft ? 'leftGripFingers' : 'rightGripFingers';
-    for (let f = 0; f < 3; f++) {
-      const fX = sideSign * (0.006 - f * 0.014);
-      const curl = 0.85 + f * 0.08;
-      const fProx = new THREE.Mesh(_fpArmGeos.fingerProx, gloveMat);
-      fProx.rotation.x = Math.PI / 2 + curl * 0.55;
-      fProx.position.set(fX, -0.002, -0.044);
-      const fDist = new THREE.Mesh(_fpArmGeos.fingerDist, _fpTanSuedeMat);
-      fDist.rotation.x = Math.PI / 2 + curl * 1.25;
-      fDist.position.set(fX, -0.022, -0.056);
-      gripFingers.add(fProx, fDist);
-    }
-    handGroup.add(gripFingers);
-    armGroup.add(handGroup);
 
     armGroup.name = isLeft ? 'leftArmGroup' : 'rightArmGroup';
     return armGroup;
@@ -465,34 +482,34 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
   } else if (def.type === 'binoculars') {
     // Dual-Tube Rubber-Armored AN/PVS-21 Recon Laser Rangefinder Binoculars
     const binoGroup = new THREE.Group();
-    binoGroup.position.set(0, -0.025, -0.22);
-    const barrelGeo = new THREE.CylinderGeometry(0.032, 0.026, 0.165, 14);
-    const lensGeo = new THREE.CylinderGeometry(0.027, 0.027, 0.004, 14);
+    binoGroup.position.set(0, -0.012, -0.25);
+    const barrelGeo = new THREE.CylinderGeometry(0.033, 0.028, 0.175, 14);
+    const lensGeo = new THREE.CylinderGeometry(0.029, 0.029, 0.004, 14);
     const lensCoatMat = new THREE.MeshBasicMaterial({ color: 0x00a8a8, transparent: true, opacity: 0.72 });
     for (const side of [-1, 1]) {
       const tube = new THREE.Mesh(barrelGeo, bodyMat);
       tube.rotation.x = Math.PI / 2;
-      tube.position.set(side * 0.044, 0, 0);
+      tube.position.set(side * 0.050, 0, 0);
       const lens = new THREE.Mesh(lensGeo, lensCoatMat);
       lens.rotation.x = Math.PI / 2;
-      lens.position.set(side * 0.044, 0, -0.083);
+      lens.position.set(side * 0.050, 0, -0.088);
       binoGroup.add(tube, lens);
     }
-    const hingeBridge = new THREE.Mesh(new THREE.BoxGeometry(0.056, 0.024, 0.095), darkSteelMat);
-    const lrfEmitter = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.022, 0.075), accentMat);
+    const hingeBridge = new THREE.Mesh(new THREE.BoxGeometry(0.064, 0.024, 0.098), darkSteelMat);
+    const lrfEmitter = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.022, 0.078), accentMat);
     lrfEmitter.position.set(0, 0.024, -0.02);
     const lrfButton = new THREE.Mesh(
       new THREE.CylinderGeometry(0.007, 0.007, 0.008, 10),
       new THREE.MeshBasicMaterial({ color: 0x00d2d3 })
     );
-    lrfButton.position.set(0.036, 0.032, 0.02);
+    lrfButton.position.set(0.040, 0.032, 0.02);
     binoGroup.add(hingeBridge, lrfEmitter, lrfButton);
     group.add(binoGroup);
 
-    leftArm.position.set(-0.078, -0.048, -0.21);
-    leftArm.rotation.set(0.18, 0.28, -0.18);
-    rightArm.position.set(0.078, -0.048, -0.21);
-    rightArm.rotation.set(0.18, -0.28, 0.18);
+    leftArm.position.set(-0.072, -0.052, -0.245);
+    leftArm.rotation.set(0.12, 0.18, -0.10);
+    rightArm.position.set(0.072, -0.052, -0.245);
+    rightArm.rotation.set(0.12, -0.18, 0.10);
     leftArm.userData.basePos = leftArm.position.clone();
     leftArm.userData.baseRot = leftArm.rotation.clone();
     rightArm.userData.basePos = rightArm.position.clone();
@@ -2953,15 +2970,15 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     }
 
     if (isPistol) {
-      leftArm.position.set(-0.024, -0.108, -0.185);
-      leftArm.rotation.set(0.18, 0.22, 0);
-      rightArm.position.set(0.024, -0.104, -0.175);
-      rightArm.rotation.set(0.18, -0.14, 0);
+      leftArm.position.set(-0.022, -0.096, -0.195);
+      leftArm.rotation.set(0.14, 0.20, 0);
+      rightArm.position.set(0.010, -0.092, -0.180);
+      rightArm.rotation.set(0.14, -0.10, 0);
     } else {
-      leftArm.position.set(-0.045, -0.065, -0.22 - length * 0.36);
-      leftArm.rotation.set(0.22, 0.38, -0.1);
-      rightArm.position.set(0.038, -0.085, -0.16);
-      rightArm.rotation.set(0.12, -0.08, 0);
+      leftArm.position.set(-0.022, -0.062, -0.22 - length * 0.35);
+      leftArm.rotation.set(0.16, 0.26, -0.06);
+      rightArm.position.set(0.008, -0.088, -0.16);
+      rightArm.rotation.set(0.10, -0.05, 0);
     }
     leftArm.userData.basePos = leftArm.position.clone();
     leftArm.userData.baseRot = leftArm.rotation.clone();

@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <title>MODERN BLOCKFARE — Multi-Era Voxel Combined Arms FPS</title>
-  <link rel="stylesheet" href="./style.css?v=146" />
+  <link rel="stylesheet" href="./style.css?v=148" />
   <script type="importmap">
     {
       "imports": {
@@ -207,8 +207,11 @@
           <div class="sniper-stadia st2">400m</div>
           <div class="sniper-stadia st3">800m</div>
         </div>
-        <!-- Dynamic Ballistic Computer Bullet-Drop Pipper Dot (Raptor-FVM40 13x & Wilcox RAPTAR LRF) -->
-        <div id="scope-ballistic-pipper" class="hidden" title="Ballistic Computer Impact Point"></div>
+        <!-- Dynamic Ballistic Computer Laser Bullet-Drop Impact Dot & Stem (Genesis 20-40x, Raptor-FVM40 13x & Wilcox RAPTAR LRF) -->
+        <div id="scope-ballistic-drop-stem" class="hidden"></div>
+        <div id="scope-ballistic-pipper" class="hidden" title="Ballistic Laser Impact Point (Place dot on target)">
+          <span id="scope-ballistic-pipper-tag"></span>
+        </div>
         <!-- RPG-7 PGO-7 Optical Range Ladder -->
         <div class="reticle ret-rpgSight">
           <div class="rpg-grid-v"></div>
@@ -707,15 +710,20 @@
 
         <div id="vitals-panel">
           <div class="vitals-top-flex">
-            <!-- Tactical Anatomy (Infantry) & Modular Airframe (Aircraft) Paper-Doll SVG -->
-            <div id="vitals-paperdoll-wrap" title="Localized Anatomy &amp; Airframe Integrity">
-              <svg id="soldier-limb-svg" viewBox="0 0 44 58" width="36" height="48">
-                <circle id="limb-svg-head" cx="22" cy="8" r="5.2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
-                <rect id="limb-svg-thorax" x="15" y="15" width="14" height="18" rx="2.5" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
-                <rect id="limb-svg-larm" x="8" y="16" width="5.5" height="17" rx="2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
-                <rect id="limb-svg-rarm" x="30.5" y="16" width="5.5" height="17" rx="2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
-                <rect id="limb-svg-lleg" x="15" y="35" width="6" height="20" rx="2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
-                <rect id="limb-svg-rleg" x="23" y="35" width="6" height="20" rx="2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+            <!-- Tactical Anatomy + Live Stance/Motion (Infantry) & Modular Airframe (Aircraft) Paper-Doll SVG -->
+            <div id="vitals-paperdoll-wrap" title="Localized Anatomy, Stance &amp; Movement State">
+              <svg id="soldier-limb-svg" viewBox="0 0 56 62" width="46" height="50">
+                <line id="limb-svg-ground" x1="4" y1="56" x2="52" y2="56" stroke="rgba(123,237,159,0.28)" stroke-width="1.4" stroke-dasharray="3 2"/>
+                <g id="limb-svg-motion" class="hidden" stroke="#00ffcc" stroke-width="1.5" stroke-linecap="round" fill="none">
+                  <polyline points="7,24 3,27 7,30"/>
+                  <polyline points="11,33 7,36 11,39"/>
+                </g>
+                <circle id="limb-svg-head" cx="28" cy="9" r="5.2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="limb-svg-thorax" x="21" y="16" width="14" height="18" rx="2.2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="limb-svg-larm" x="14" y="17" width="5.5" height="16" rx="1.8" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="limb-svg-rarm" x="36.5" y="17" width="5.5" height="16" rx="1.8" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="limb-svg-lleg" x="21" y="35.5" width="6" height="19.5" rx="1.8" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
+                <rect id="limb-svg-rleg" x="29" y="35.5" width="6" height="19.5" rx="1.8" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
               </svg>
               <svg id="aircraft-dmg-svg" class="hidden" viewBox="0 0 56 56" width="42" height="46">
                 <polygon id="air-svg-avionics" points="28,3 24,13 32,13" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
@@ -725,6 +733,7 @@
                 <rect id="air-svg-engines" x="23.5" y="22" width="9" height="17" rx="2" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
                 <polygon id="air-svg-tail" points="24,39 15,49 15,52 28,48 41,52 41,49 32,39" fill="#2ecc71" stroke="#0c1218" stroke-width="1"/>
               </svg>
+              <div id="vitals-pose-label">STAND</div>
             </div>
             <div class="vitals-bars-col">
               <!-- Vehicle Hull Armor Integrity Row (Shown when driving a Tank, APC, Aircraft, or Humvee) -->
@@ -1712,6 +1721,6 @@
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=146"></script>
+  <script type="module" src="./src/main.js?v=148"></script>
 </body>
 </html>

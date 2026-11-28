@@ -1,9 +1,9 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { ECONOMY, VEHICLE_STATS, SQUAD_KIT_CAPS, PROJECTILES } from '../src/config.js?v=146';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=146';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=146';
+import { ECONOMY, VEHICLE_STATS, SQUAD_KIT_CAPS, PROJECTILES } from '../src/config.js?v=148';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=148';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=148';
 import {
   VehicleManager,
   PITCH_LIMITS_CAR,
@@ -11,14 +11,14 @@ import {
   classifyWeaponBallistics,
   getVehicleSeatLayout,
   initVehicleOrdnance
-} from '../src/vehicles.js?v=146';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=146';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=146';
-import { sound } from '../src/audio/SoundManager.js?v=146';
-import { BotManager, SQUAD_9MAN_ROSTERS, evaluateCatastrophicKill } from '../src/bots.js?v=146';
-import { NetworkManager } from '../src/network.js?v=146';
-import { ConquestSystem } from '../src/world/ConquestSystem.js?v=146';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=146';
+} from '../src/vehicles.js?v=148';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=148';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=148';
+import { sound } from '../src/audio/SoundManager.js?v=148';
+import { BotManager, SQUAD_9MAN_ROSTERS, evaluateCatastrophicKill } from '../src/bots.js?v=148';
+import { NetworkManager } from '../src/network.js?v=148';
+import { ConquestSystem } from '../src/world/ConquestSystem.js?v=148';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=148';
 
 function createEconomyPlayerHarness(overrides = {}) {
   const storage = new Map();
@@ -545,7 +545,7 @@ describe('Squad Caliber Penetration, Optics/Sensor Crits, Avionics FCS & Beyond-
       buildConquestSyncPacket: NetworkManager.prototype.buildConquestSyncPacket
     };
 
-    // Stale peer still sitting on Round 1 Victory Screen (or legacy ?v=146 peer without roundEpoch) sends ticketsRU: 0
+    // Stale peer still sitting on Round 1 Victory Screen (or legacy ?v=148 peer without roundEpoch) sends ticketsRU: 0
     netStub.applyRemoteConquestSync({
       type: 'conquest_sync',
       ticketsUS: 640,

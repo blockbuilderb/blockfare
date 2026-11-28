@@ -393,15 +393,17 @@ export const ATTACHMENT_CATALOG = {
     },
     {
       id: 'ballistic_40x',
-      name: 'MARCH GENESIS ELR EXTREME TELEPHOTO (20.0X ⇄ 40.0X)',
+      name: 'MARCH GENESIS ELR EXTREME TELEPHOTO (20.0X ⇄ 40.0X + LASER DROP DOT)',
       shortName: 'GENESIS 20-40X',
       price: 5400,
       opticType: 'sniper40x',
       adsFov: 5.8,
       zoomLevels: [20.0, 40.0],
       zoomFovs: [5.8, 2.85],
+      hasSmartPipper: true,
+      hasBuiltInLrf: true,
       grantCanted: true,
-      desc: 'BF4-style 20.0x ⇄ 40.0x Cross-Valley Telephoto Scope! High standing sway — deploy Bipod / Prone [Z] / Rooftop Ledge Rest + [SHIFT] for cross-map headshots!'
+      desc: 'BF4-style 20.0x ⇄ 40.0x ELR Telephoto Scope with Live Ballistic Laser Bullet-Drop Impact Dot & Built-in LRF! Place the red laser dot directly on target at any zero/range + [SHIFT] Steady Breath!'
     }
   ],
   grip: [

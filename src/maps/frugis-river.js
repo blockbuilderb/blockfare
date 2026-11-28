@@ -3,7 +3,7 @@
 // All 5 Forward Operating Bases (A-E) start NEUTRAL (0%) for fair Conquest starts.
 // ============================================================================
 
-import { TERRAIN } from '../config.js?v=146';
+import { TERRAIN } from '../config.js?v=148';
 
 export const FRUGIS_RIVER_MAP = {
   "id": "frugis_river",
@@ -47,36 +47,36 @@ export const FRUGIS_RIVER_MAP = {
     {
       "x": -660,
       "z": -280,
-      "rx": 64,
-      "rz": 54,
+      "rx": 112,
+      "rz": 98,
       "h": 2.5
     },
     {
       "x": -320,
       "z": 320,
-      "rx": 60,
-      "rz": 52,
+      "rx": 116,
+      "rz": 100,
       "h": 1.25
     },
     {
       "x": 0,
       "z": 0,
-      "rx": 66,
-      "rz": 56,
+      "rx": 78,
+      "rz": 68,
       "h": 1.25
     },
     {
       "x": 330,
       "z": -320,
-      "rx": 64,
-      "rz": 54,
+      "rx": 114,
+      "rz": 102,
       "h": 6.25
     },
     {
       "x": 660,
       "z": 280,
-      "rx": 64,
-      "rz": 54,
+      "rx": 116,
+      "rz": 100,
       "h": 2.5
     },
     {
@@ -178,17 +178,17 @@ export const FRUGIS_RIVER_MAP = {
       "h": 1.25
     },
     {
-      "x": -82,
+      "x": -116,
       "z": 0,
-      "rx": 88,
-      "rz": 105,
+      "rx": 118,
+      "rz": 168,
       "h": 1.25
     },
     {
-      "x": 82,
+      "x": 116,
       "z": 0,
-      "rx": 88,
-      "rz": 105,
+      "rx": 118,
+      "rz": 168,
       "h": 1.25
     },
     {
@@ -233,7 +233,7 @@ export const FRUGIS_RIVER_MAP = {
   "flags": [
     {
       "id": "A",
-      "name": "OBJ ALPHA — WEST FRUGIS TOWN",
+      "name": "OBJ ALPHA — WEST FRUGIS TOWN CENTER",
       "x": -660,
       "z": -280,
       "owner": "NEUTRAL",
@@ -243,7 +243,7 @@ export const FRUGIS_RIVER_MAP = {
     },
     {
       "id": "B",
-      "name": "OBJ BRAVO — LOGISTICS CONTAINER YARD",
+      "name": "OBJ BRAVO — LOGISTICS DISTRIBUTION CENTER",
       "x": -320,
       "z": 320,
       "owner": "NEUTRAL",
@@ -253,7 +253,7 @@ export const FRUGIS_RIVER_MAP = {
     },
     {
       "id": "C",
-      "name": "OBJ CHARLIE — DOWNTOWN SKYLINE & BRIDGE PLAZA",
+      "name": "OBJ CHARLIE — MIDTOWN NYC SKYLINE & PLAZA",
       "x": 0,
       "z": 0,
       "owner": "NEUTRAL",
@@ -263,7 +263,7 @@ export const FRUGIS_RIVER_MAP = {
     },
     {
       "id": "D",
-      "name": "OBJ DELTA — RADAR HILL GARRISON",
+      "name": "OBJ DELTA — HIGHLAND TOWN CENTER",
       "x": 330,
       "z": -320,
       "owner": "NEUTRAL",
@@ -273,7 +273,7 @@ export const FRUGIS_RIVER_MAP = {
     },
     {
       "id": "E",
-      "name": "OBJ ECHO — EAST INDUSTRIAL SECTOR",
+      "name": "OBJ ECHO — EAST DISTRIBUTION CENTER",
       "x": 660,
       "z": 280,
       "owner": "NEUTRAL",
@@ -297,63 +297,103 @@ export const FRUGIS_RIVER_MAP = {
     [844, 8, 11, 9, 3, "concrete"],
     [862, 8, 11, 9, 3, "brick"],
     [862, -18, 11, 9, 2, "darkConcrete"],
-    [-550, -242, 14, 11, 4, "brick"],
-    [-530, -244, 13, 10, 5, "concrete"],
-    [-510, -238, 12, 10, 4, "brick"],
-    [-546, -220, 12, 10, 3, "concrete"],
-    [-526, -218, 11, 9, 3, "brick"],
-    [-508, -220, 11, 9, 3, "darkConcrete"],
-    [-568, -236, 12, 10, 3, "concrete"],
-    [-568, -216, 11, 9, 3, "brick"],
-    [-546, -202, 12, 10, 3, "darkConcrete"],
-    [-524, -200, 12, 10, 4, "brick"],
-    [-490, -238, 11, 9, 3, "concrete"],
-    [-490, -218, 11, 9, 3, "brick"],
-    [-274, 250, 14, 11, 4, "darkConcrete"],
-    [-250, 258, 13, 10, 4, "concrete"],
-    [-270, 270, 12, 10, 3, "brick"],
-    [-254, 236, 12, 10, 3, "darkConcrete"],
-    [-294, 250, 12, 10, 4, "concrete"],
-    [-294, 268, 11, 9, 3, "brick"],
-    [-278, 232, 11, 9, 3, "concrete"],
-    [-230, 258, 12, 10, 4, "darkConcrete"],
-    [-230, 238, 11, 9, 3, "brick"],
-    [-248, 276, 12, 10, 3, "darkConcrete"],
-    [-64, -40, 25, 22, 18, "darkConcrete"],
-    [-62, 18, 23, 20, 15, "concrete"],
-    [-100, -38, 21, 18, 13, "concrete"],
-    [-100, 18, 21, 18, 12, "darkConcrete"],
-    [-70, -72, 20, 18, 11, "brick"],
-    [-70, 52, 20, 18, 11, "brick"],
-    [38, 18, 25, 22, 18, "darkConcrete"],
-    [38, -38, 23, 20, 15, "concrete"],
-    [76, -38, 21, 18, 12, "darkConcrete"],
-    [76, 18, 21, 18, 13, "concrete"],
-    [48, -72, 20, 18, 11, "brick"],
-    [48, 52, 20, 18, 11, "brick"],
-    [248, -268, 14, 11, 4, "darkConcrete"],
-    [268, -258, 13, 10, 4, "concrete"],
-    [250, -246, 12, 10, 3, "darkConcrete"],
-    [266, -278, 12, 10, 3, "brick"],
-    [270, -240, 11, 9, 3, "concrete"],
-    [230, -264, 12, 10, 4, "concrete"],
-    [230, -244, 11, 9, 3, "brick"],
-    [288, -260, 12, 10, 4, "darkConcrete"],
-    [288, -240, 11, 9, 3, "brick"],
-    [246, -286, 12, 10, 3, "concrete"],
-    [286, -280, 11, 9, 3, "darkConcrete"],
-    [514, 214, 14, 11, 5, "brick"],
-    [534, 218, 13, 10, 4, "concrete"],
-    [516, 234, 12, 10, 4, "brick"],
-    [536, 236, 12, 10, 4, "darkConcrete"],
-    [496, 230, 11, 9, 3, "concrete"],
-    [534, 198, 11, 9, 3, "darkConcrete"],
-    [494, 210, 12, 10, 4, "concrete"],
-    [478, 228, 11, 9, 3, "brick"],
-    [554, 218, 12, 10, 4, "brick"],
-    [554, 236, 11, 9, 3, "concrete"],
-    [512, 196, 12, 10, 3, "brick"],
-    [552, 198, 11, 9, 3, "concrete"],
+
+    // ─── OBJECTIVE A (-660, -280 / gx=-528, gz=-224): WEST FRUGIS TOWN CENTER (16 Buildings framing Civic Square) ───
+    [-536, -268, 16, 12, 6, "brick"],
+    [-566, -266, 12, 10, 4, "concrete"],
+    [-504, -266, 12, 10, 4, "concrete"],
+    [-536, -192, 16, 12, 4, "brick"],
+    [-566, -192, 12, 10, 4, "darkConcrete"],
+    [-504, -192, 12, 10, 4, "brick"],
+    [-572, -242, 12, 11, 5, "brick"],
+    [-572, -216, 12, 11, 4, "concrete"],
+    [-496, -242, 12, 11, 5, "concrete"],
+    [-496, -216, 12, 11, 4, "brick"],
+    [-600, -266, 12, 10, 3, "brick"],
+    [-600, -230, 12, 10, 4, "concrete"],
+    [-600, -194, 12, 10, 3, "darkConcrete"],
+    [-468, -266, 12, 10, 3, "concrete"],
+    [-468, -230, 12, 10, 4, "brick"],
+    [-468, -194, 12, 10, 3, "brick"],
+
+    // ─── OBJECTIVE B (-320, +320 / gx=-256, gz=+256): LOGISTICS DISTRIBUTION CENTER (8 Fulfillment Halls & Dispatch Offices) ───
+    [-292, 288, 20, 18, 3, "darkConcrete"],
+    [-242, 288, 20, 18, 3, "concrete"],
+    [-292, 206, 20, 18, 3, "concrete"],
+    [-242, 206, 20, 18, 3, "darkConcrete"],
+    [-318, 240, 14, 12, 5, "darkConcrete"],
+    [-318, 268, 12, 10, 3, "brick"],
+    [-208, 240, 14, 12, 5, "concrete"],
+    [-208, 268, 12, 10, 3, "brick"],
+
+    // ─── OBJECTIVE C (0, 0): MIDTOWN MANHATTAN / NEW YORK CITY AVENUE & SKYLINE GRID (28 Towers & Corner Mid-Rises!) ───
+    // West Manhattan — Riverfront Skyline Avenue (gx = -58..-55, roomy 27.5m×25m+ UH-60M rooftop helipads, <=18F!)
+    [-58, -35, 24, 20, 18, "darkConcrete"],
+    [-58, 15, 24, 20, 17, "concrete"],
+    [-56, -66, 21, 18, 15, "brick"],
+    [-56, 48, 22, 20, 16, "darkConcrete"],
+    [-55, -98, 20, 18, 11, "concrete"],
+    [-55, 80, 20, 18, 12, "brick"],
+    // West Manhattan — 5th Avenue / Rockefeller Core (gx = -97..-95)
+    [-97, -35, 23, 20, 18, "concrete"],
+    [-97, 15, 23, 20, 16, "darkConcrete"],
+    [-95, -66, 20, 18, 13, "brick"],
+    [-95, 48, 20, 18, 14, "concrete"],
+    [-95, -98, 20, 18, 9, "brick"],
+    [-95, 80, 20, 18, 10, "darkConcrete"],
+    // West Manhattan — 7th Avenue / Hell's Kitchen Brownstones (gx = -136)
+    [-136, -34, 21, 19, 12, "brick"],
+    [-136, 15, 21, 19, 11, "darkConcrete"],
+    [-135, -66, 20, 18, 8, "concrete"],
+    [-135, 48, 20, 18, 8, "brick"],
+    // East Midtown — Riverfront UN / Chrysler Row (gx = +34, roomy 27.5m×25m+ UH-60M rooftop helipads!)
+    [34, 15, 24, 20, 18, "darkConcrete"],
+    [34, -35, 24, 20, 17, "concrete"],
+    [35, -66, 22, 20, 16, "concrete"],
+    [35, 48, 21, 18, 15, "brick"],
+    [35, -98, 20, 18, 12, "darkConcrete"],
+    [35, 80, 20, 18, 11, "concrete"],
+    // East Midtown — Lexington / MetLife Core (gx = +74)
+    [74, 15, 23, 20, 18, "concrete"],
+    [74, -35, 23, 20, 16, "darkConcrete"],
+    [75, -66, 20, 18, 13, "brick"],
+    [75, 48, 20, 18, 14, "darkConcrete"],
+    [75, -98, 20, 18, 10, "brick"],
+    [75, 80, 20, 18, 9, "concrete"],
+    // East Midtown — Park Avenue Outer Commercial Row (gx = +115)
+    [115, -34, 21, 19, 11, "concrete"],
+    [115, 15, 21, 19, 12, "brick"],
+    [115, -66, 20, 18, 8, "brick"],
+    [115, 48, 20, 18, 8, "darkConcrete"],
+
+    // ─── OBJECTIVE D (+330, -320 / gx=+264, gz=-256): HIGHLAND GARRISON TOWN CENTER (16 Town Square Buildings) ───
+    [256, -300, 16, 12, 6, "concrete"],
+    [226, -298, 12, 10, 4, "brick"],
+    [288, -298, 12, 10, 4, "darkConcrete"],
+    [256, -224, 16, 12, 4, "brick"],
+    [226, -224, 12, 10, 4, "concrete"],
+    [288, -224, 12, 10, 4, "brick"],
+    [220, -274, 12, 11, 5, "brick"],
+    [220, -248, 12, 11, 4, "darkConcrete"],
+    [296, -274, 12, 11, 5, "darkConcrete"],
+    [296, -248, 12, 11, 4, "brick"],
+    [192, -296, 12, 10, 3, "concrete"],
+    [192, -260, 12, 10, 4, "brick"],
+    [192, -224, 12, 10, 3, "concrete"],
+    [324, -296, 12, 10, 3, "brick"],
+    [324, -260, 12, 10, 4, "concrete"],
+    [324, -224, 12, 10, 3, "darkConcrete"],
+
+    // ─── OBJECTIVE E (+660, +280 / gx=+528, gz=+224): EAST REGIONAL DISTRIBUTION CENTER (8 Distribution Halls & Control Towers) ───
+    [492, 256, 20, 18, 3, "concrete"],
+    [542, 256, 20, 18, 3, "darkConcrete"],
+    [492, 174, 20, 18, 3, "darkConcrete"],
+    [542, 174, 20, 18, 3, "concrete"],
+    [466, 208, 14, 12, 5, "brick"],
+    [466, 236, 12, 10, 3, "concrete"],
+    [576, 208, 14, 12, 5, "darkConcrete"],
+    [576, 236, 12, 10, 3, "brick"],
+
     [-522, 210, 13, 10, 4, "brick"],
     [-502, 218, 11, 9, 3, "concrete"],
     [-540, 214, 11, 9, 3, "darkConcrete"],
@@ -370,50 +410,19 @@ export const FRUGIS_RIVER_MAP = {
     [282, 112, 12, 10, 3, "concrete"]
   ],
   "watchtowers": [
-    [
-      -1206,
-      14
-    ],
-    [
-      -1206,
-      -16
-    ],
-    [
-      1204,
-      -16
-    ],
-    [
-      1204,
-      14
-    ],
-    [
-      -842,
-      10
-    ],
-    [
-      840,
-      -12
-    ],
-    [
-      -510,
-      -216
-    ],
-    [
-      -240,
-      244
-    ],
-    [
-      -34,
-      42
-    ],
-    [
-      30,
-      -46
-    ],
-    [
-      508,
-      214
-    ]
+    [-1206, 14],
+    [-1206, -16],
+    [1204, -16],
+    [1204, 14],
+    [-842, 10],
+    [840, -12],
+    [-510, -216],
+    [-256, 276],
+    [-218, 224],
+    [-34, 42],
+    [30, -46],
+    [528, 246],
+    [484, 198]
   ],
   "hescoBastions": [
     [
@@ -542,113 +551,63 @@ export const FRUGIS_RIVER_MAP = {
     ]
   ],
   "shippingContainers": [
-    [
-      -1212,
-      10,
-      true,
-      "containerBlue",
-      0
-    ],
-    [
-      -1212,
-      -12,
-      true,
-      "containerOlive",
-      0
-    ],
-    [
-      1206,
-      -12,
-      true,
-      "containerRed",
-      0
-    ],
-    [
-      1206,
-      10,
-      true,
-      "containerOlive",
-      0
-    ],
-    [
-      -850,
-      8,
-      true,
-      "containerBlue",
-      0
-    ],
-    [
-      846,
-      -10,
-      true,
-      "containerRed",
-      0
-    ],
-    [
-      -262,
-      244,
-      true,
-      "containerRed",
-      0
-    ],
-    [
-      -262,
-      244,
-      true,
-      "containerBlue",
-      3
-    ],
-    [
-      -252,
-      246,
-      false,
-      "containerOlive",
-      0
-    ],
-    [
-      -244,
-      250,
-      true,
-      "containerRed",
-      0
-    ],
-    [
-      -244,
-      250,
-      true,
-      "containerOlive",
-      3
-    ],
-    [
-      274,
-      -266,
-      true,
-      "containerOlive",
-      0
-    ],
-    [
-      -332,
-      9,
-      true,
-      "containerOlive",
-      0
-    ],
-    [
-      326,
-      -12,
-      true,
-      "containerRed",
-      0
-    ]
+    [-1212, 10, true, "containerBlue", 0],
+    [-1212, -12, true, "containerOlive", 0],
+    [1206, -12, true, "containerRed", 0],
+    [1206, 10, true, "containerOlive", 0],
+    [-850, 8, true, "containerBlue", 0],
+    [846, -10, true, "containerRed", 0],
+
+    // ─── FOB B (-320, +320 / gx=-256, gz=+256): INTERMODAL DISTRIBUTION CENTER CONTAINER STACKS ───
+    [-286, 236, true, "containerRed", 0],
+    [-286, 236, true, "containerBlue", 3],
+    [-286, 248, true, "containerOlive", 0],
+    [-286, 266, true, "containerBlue", 0],
+    [-286, 266, true, "containerRed", 3],
+    [-274, 236, true, "containerBlue", 0],
+    [-274, 266, true, "containerOlive", 0],
+    [-274, 266, true, "containerBlue", 3],
+    [-242, 236, true, "containerOlive", 0],
+    [-242, 236, true, "containerRed", 3],
+    [-242, 266, true, "containerRed", 0],
+    [-230, 236, true, "containerBlue", 0],
+    [-230, 236, true, "containerOlive", 3],
+    [-230, 248, true, "containerRed", 0],
+    [-230, 266, true, "containerOlive", 0],
+    [-230, 266, true, "containerBlue", 3],
+
+    // ─── FOB E (+660, +280 / gx=+528, gz=+224): EAST REGIONAL DISTRIBUTION CENTER CONTAINER BAYS ───
+    [498, 204, true, "containerBlue", 0],
+    [498, 204, true, "containerRed", 3],
+    [498, 218, true, "containerOlive", 0],
+    [498, 236, true, "containerRed", 0],
+    [498, 236, true, "containerBlue", 3],
+    [510, 204, true, "containerOlive", 0],
+    [510, 236, true, "containerBlue", 0],
+    [510, 236, true, "containerOlive", 3],
+    [544, 204, true, "containerRed", 0],
+    [544, 204, true, "containerBlue", 3],
+    [544, 236, true, "containerOlive", 0],
+    [556, 204, true, "containerBlue", 0],
+    [556, 204, true, "containerRed", 3],
+    [556, 218, true, "containerRed", 0],
+    [556, 236, true, "containerBlue", 0],
+    [556, 236, true, "containerOlive", 3],
+
+    // ─── NYC OUTER FREIGHT & HIGHWAY CHECKPOINTS ───
+    [-136, -96, true, "containerBlue", 0],
+    [116, 82, true, "containerRed", 0],
+    [-332, 9, true, "containerOlive", 0],
+    [326, -12, true, "containerRed", 0]
   ],
   "radarTowers": [
     [
-      344,
-      -332
+      354,
+      -402
     ],
     [
-      312,
-      -338
+      306,
+      -402
     ]
   ],
   "powerTowers": [
@@ -1033,12 +992,12 @@ export const FRUGIS_RIVER_MAP = {
       -40
     ],
     [
-      -142,
-      -73
+      -225,
+      -145
     ],
     [
-      142,
-      73
+      225,
+      145
     ],
     [
       -427,

@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=146';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=146';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=146';
-import { getRideShortcutLabel } from '../utils/KeyboardShortcuts.js?v=146';
-import { events } from '../events.js?v=146';
+import { sound } from '../audio.js?v=148';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=148';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=148';
+import { getRideShortcutLabel } from '../utils/KeyboardShortcuts.js?v=148';
+import { events } from '../events.js?v=148';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -12,7 +12,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=146';
+} from '../core/StateMachines.js?v=148';
 
 function markShared(asset) {
   if (asset) {
@@ -362,10 +362,14 @@ export const VehicleControlMethods = {
       } else if (isHeliRooftopOrFastRope) {
         // Rooftop Step-Out or Low-Hover Fast-Rope Insertion (< 24m above roof/ground — zero fall damage & never steps off roof edge!)
         v.parkedByPlayer = !wasActiveRide;
+        if (wasActiveRide) {
+          this.unsuppressedExposureTimer = 0;
+          this.spottedTimer = 0;
+        }
         if (wasActiveRide && v.rideTask) {
-          // AI Airlift Pilot holds steady for 6.5s while you step clear on the rooftop, then departs cleanly!
+          // Depart promptly (~0.85s on rooftop so Airlift-1 clears the sniper's roof without drawing enemy AA/jet fire!)
           v.rideTask.phase = 'RTB_DEPART';
-          v.rideTask.departDelay = 6.5;
+          v.rideTask.departDelay = supportY > groundH + 3.5 ? 0.85 : 2.2;
         } else if (heliClearanceAboveSupport > 2.2) {
           v.heliHoverHold = true;
           v.heliHoverAlt = v.pos.y;
@@ -8005,17 +8009,17 @@ export const VehicleControlMethods = {
       Boolean(targetAircraft.driver || targetAircraft.aiPilotActive);
     if (!isAirborne) return null;
 
-    let targetVel;
+    const targetVel = this._leadScratchVel || (this._leadScratchVel = new THREE.Vector3());
     if (targetAircraft.trackedWorldVel && targetAircraft.trackedWorldVel.lengthSq() > 9) {
-      targetVel = targetAircraft.trackedWorldVel.clone();
+      targetVel.copy(targetAircraft.trackedWorldVel);
     } else if (targetAircraft.velVector && targetAircraft.velVector.lengthSq() > 4) {
-      targetVel = targetAircraft.velVector.clone();
+      targetVel.copy(targetAircraft.velVector);
     } else {
       const spd = Math.max(48, targetAircraft.forwardSpeed || targetAircraft.speed || 64);
       const pitch = targetAircraft.pitch || 0;
       const yaw = targetAircraft.yaw || 0;
       const cosP = Math.cos(pitch);
-      targetVel = new THREE.Vector3(
+      targetVel.set(
         -Math.sin(yaw) * cosP * spd,
         Math.sin(pitch) * spd + (targetAircraft.stallSinkVel || 0),
         -Math.cos(yaw) * cosP * spd
@@ -8054,7 +8058,7 @@ export const VehicleControlMethods = {
 
     const effSpeed = Math.max(80, bulletSpeed || 360);
     const d0 = p0.distanceTo(shooterOrigin);
-    const stepPos = new THREE.Vector3();
+    const stepPos = this._leadScratchStep || (this._leadScratchStep = new THREE.Vector3());
     const t0 = d0 / effSpeed;
     const d1 = predictPosAt(t0, stepPos).distanceTo(shooterOrigin);
     const t1 = d1 / effSpeed;
@@ -8066,21 +8070,26 @@ export const VehicleControlMethods = {
     const effTof = tof * dragComp;
     const gravCompY = 0.5 * bulletGravity * effTof * effTof;
 
-    const leadWorldPos = predictPosAt(effTof, new THREE.Vector3());
-    const aimPoint = leadWorldPos
-      .clone()
-      .add(new THREE.Vector3(0, gravCompY, 0));
+    const leadWorldPos = predictPosAt(
+      effTof,
+      this._leadScratchWorld || (this._leadScratchWorld = new THREE.Vector3())
+    );
+    const aimPoint = (this._leadScratchAim || (this._leadScratchAim = new THREE.Vector3())).set(
+      leadWorldPos.x,
+      leadWorldPos.y + gravCompY,
+      leadWorldPos.z
+    );
 
-    return {
-      leadPos: aimPoint,
-      interceptPos: leadWorldPos,
-      targetVel,
-      yawRate: omega,
-      dist: d0,
-      tof: effTof,
-      leadMeters: p0.distanceTo(leadWorldPos),
-      speedKnots: Math.round(targetVel.length() * 5.8)
-    };
+    const outObj = this._leadScratchResult || (this._leadScratchResult = {});
+    outObj.leadPos = aimPoint;
+    outObj.interceptPos = leadWorldPos;
+    outObj.targetVel = targetVel;
+    outObj.yawRate = omega;
+    outObj.dist = d0;
+    outObj.tof = effTof;
+    outObj.leadMeters = p0.distanceTo(leadWorldPos);
+    outObj.speedKnots = Math.round(targetVel.length() * 5.8);
+    return outObj;
   },
 
   /**

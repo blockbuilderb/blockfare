@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=146';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=146';
+import { sound } from './audio.js?v=148';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=148';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=146';
-import { createVehicleMesh } from './models/vehicle-model.js?v=146';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=146';
-import { getRideShortcutLabel } from './utils/KeyboardShortcuts.js?v=146';
-import { events, makeEventBridge } from './events.js?v=146';
+} from './assets/vehicle-defs.js?v=148';
+import { createVehicleMesh } from './models/vehicle-model.js?v=148';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=148';
+import { getRideShortcutLabel } from './utils/KeyboardShortcuts.js?v=148';
+import { events, makeEventBridge } from './events.js?v=148';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -22,7 +22,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=146';
+} from './core/StateMachines.js?v=148';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -5810,6 +5810,53 @@ export class VehicleManager {
 
         v._aiTargetScanTimer = (v._aiTargetScanTimer || 0) - dt;
         let usedCachedAiTarget = false;
+        const hasVehicleLosTo = (targetKey, tx, ty, tz) => {
+          if (!this.world || typeof this.world.raycastVoxel !== 'function') return true;
+          const nowSec = typeof performance !== 'undefined' ? performance.now() * 0.001 : Date.now() * 0.001;
+          if (!v._aiLosCache) v._aiLosCache = new Map();
+          const cached = v._aiLosCache.get(targetKey);
+          if (cached && nowSec < cached.expireAt) return cached.clear;
+          const ox = v.pos.x;
+          const oy = turretOriginY + 0.35;
+          const oz = v.pos.z;
+          const dxL = tx - ox;
+          const dyL = ty - oy;
+          const dzL = tz - oz;
+          const dL = Math.hypot(dxL, dyL, dzL);
+          let clear = true;
+          if (dL > 1.8) {
+            const hit = this.world.raycastVoxel(
+              tmpVec3(ox, oy, oz),
+              tmpVec3(dxL / dL, dyL / dL, dzL / dL),
+              Math.max(0.5, dL - 0.95),
+              0.12
+            );
+            clear = !hit;
+          }
+          if (v._aiLosCache.size > 48) v._aiLosCache.clear();
+          v._aiLosCache.set(targetKey, { clear, expireAt: nowSec + 0.35 });
+          return clear;
+        };
+
+        const isSilentElevatedPlayer = (plr) => {
+          if (!plr || plr.activeVehicle) return false;
+          const dyRoof = plr.pos.y - v.pos.y;
+          if (dyRoof <= 13.5) return false;
+          return (
+            (plr.unsuppressedExposureTimer || 0) <= 0 &&
+            (plr.spottedTimer || 0) <= 0 &&
+            !plr.uavRevealed
+          );
+        };
+
+        const isProtectedInsertionHeli = (airV) =>
+          Boolean(
+            airV?.rideTask?.active &&
+              (airV.rideTask.phase === 'ARRIVED_AT_DEST' ||
+                airV.rideTask.phase === 'HOLDING_FOR_PICKUP' ||
+                (airV.rideTask.phase === 'RTB_DEPART' && (airV.rideTask.departDelay || 0) > 0))
+          );
+
         if (v._aiTargetScanTimer > 0 && v._cachedAiTarget && v._cachedAiTarget.unit) {
           const ct = v._cachedAiTarget;
           const u = ct.unit;
@@ -5817,9 +5864,11 @@ export class VehicleManager {
             ct.kind === 'air' &&
             !u.dead &&
             !u.isShotDown &&
+            !isProtectedInsertionHeli(u) &&
             (u.driver || u.aiPilotActive) &&
             !((u.aircraftRole === 'b2_spirit' || u.isStealthAircraft) && (u.flareActiveTimer || 0) > 0) &&
-            isWithinElevationLimits(u.pos.x, u.pos.y, u.pos.z)
+            isWithinElevationLimits(u.pos.x, u.pos.y, u.pos.z) &&
+            hasVehicleLosTo('air_' + u.id, u.pos.x, u.pos.y, u.pos.z)
           ) {
             bestAirTarget = u;
             bestTargetPos = tmpVec3(u.pos.x, u.pos.y, u.pos.z);
@@ -5827,7 +5876,8 @@ export class VehicleManager {
           } else if (
             ct.kind === 'groundVeh' &&
             !u.dead &&
-            isWithinElevationLimits(u.pos.x, u.pos.y + 1.4, u.pos.z)
+            isWithinElevationLimits(u.pos.x, u.pos.y + 1.4, u.pos.z) &&
+            hasVehicleLosTo('gv_' + u.id, u.pos.x, u.pos.y + 1.4, u.pos.z)
           ) {
             bestTargetPos = tmpVec3(u.pos.x, u.pos.y + 1.4, u.pos.z);
             usedCachedAiTarget = true;
@@ -5836,7 +5886,8 @@ export class VehicleManager {
             !u.dead &&
             !u.downed &&
             !u.drivingVehicle &&
-            isWithinElevationLimits(u.pos.x, u.pos.y + 1.1, u.pos.z)
+            isWithinElevationLimits(u.pos.x, u.pos.y + 1.1, u.pos.z) &&
+            hasVehicleLosTo('bot_' + (u.id || u.name), u.pos.x, u.pos.y + 1.1, u.pos.z)
           ) {
             bestTargetPos = tmpVec3(u.pos.x, u.pos.y + 1.1, u.pos.z);
             usedCachedAiTarget = true;
@@ -5844,7 +5895,9 @@ export class VehicleManager {
             ct.kind === 'player' &&
             !u.dead &&
             !u.downed &&
-            isWithinElevationLimits(u.pos.x, u.pos.y + 1.2, u.pos.z)
+            !isSilentElevatedPlayer(u) &&
+            isWithinElevationLimits(u.pos.x, u.pos.y + 1.2, u.pos.z) &&
+            hasVehicleLosTo('PLAYER', u.pos.x, u.pos.y + 1.2, u.pos.z)
           ) {
             bestTargetPos = tmpVec3(u.pos.x, u.pos.y + 1.2, u.pos.z);
             usedCachedAiTarget = true;
@@ -5866,6 +5919,7 @@ export class VehicleManager {
             for (let ai = 0; ai < enemyPlanes.length; ai++) {
               const airV = enemyPlanes[ai];
               if (!airV.isAircraft || airV.dead || airV.team === v.team) continue;
+              if (isProtectedInsertionHeli(airV)) continue;
               if (!airV.driver && !airV.aiPilotActive) continue;
               const airGroundY = this.world.getGroundHeightAt(airV.pos.x, airV.pos.z);
               const airAltAgl = Math.max(0, airV.pos.y - airGroundY);
@@ -5878,7 +5932,8 @@ export class VehicleManager {
               if (
                 dSq < maxAirDist * maxAirDist &&
                 dSq < bestDistSq &&
-                isWithinElevationLimits(airV.pos.x, airV.pos.y, airV.pos.z)
+                isWithinElevationLimits(airV.pos.x, airV.pos.y, airV.pos.z) &&
+                hasVehicleLosTo('air_' + airV.id, airV.pos.x, airV.pos.y, airV.pos.z)
               ) {
                 bestDistSq = dSq;
                 bestAirTarget = airV;
@@ -5903,7 +5958,11 @@ export class VehicleManager {
                 continue;
               }
               const dSq = v.pos.distanceToSquared(otherV.pos);
-              if (dSq < bestDistSq && isWithinElevationLimits(otherV.pos.x, otherV.pos.y + 1.4, otherV.pos.z)) {
+              if (
+                dSq < bestDistSq &&
+                isWithinElevationLimits(otherV.pos.x, otherV.pos.y + 1.4, otherV.pos.z) &&
+                hasVehicleLosTo('gv_' + otherV.id, otherV.pos.x, otherV.pos.y + 1.4, otherV.pos.z)
+              ) {
                 bestDistSq = dSq;
                 selectedKind = 'groundVeh';
                 selectedUnit = otherV;
@@ -5925,7 +5984,8 @@ export class VehicleManager {
                 if (
                   dSq < infMaxSq &&
                   dSq < bestDistSq &&
-                  isWithinElevationLimits(b.pos.x, b.pos.y + 1.1, b.pos.z)
+                  isWithinElevationLimits(b.pos.x, b.pos.y + 1.1, b.pos.z) &&
+                  hasVehicleLosTo('bot_' + (b.id || b.name), b.pos.x, b.pos.y + 1.1, b.pos.z)
                 ) {
                   bestDistSq = dSq;
                   selectedKind = 'bot';
@@ -5943,7 +6003,8 @@ export class VehicleManager {
                 if (
                   dSq < infMaxSq &&
                   dSq < bestDistSq &&
-                  isWithinElevationLimits(b.pos.x, b.pos.y + 1.1, b.pos.z)
+                  isWithinElevationLimits(b.pos.x, b.pos.y + 1.1, b.pos.z) &&
+                  hasVehicleLosTo('bot_' + (b.id || b.name), b.pos.x, b.pos.y + 1.1, b.pos.z)
                 ) {
                   bestDistSq = dSq;
                   selectedKind = 'bot';
@@ -5960,12 +6021,14 @@ export class VehicleManager {
             !player.dead &&
             !player.downed &&
             player.team !== v.team &&
-            !(v.type === 'tank' && player.parachuting)
+            !(v.type === 'tank' && player.parachuting) &&
+            !isSilentElevatedPlayer(player)
           ) {
             const dSq = v.pos.distanceToSquared(player.pos);
             if (
               dSq < VEHICLE_STATS.ENGAGE_RANGE_INFANTRY * VEHICLE_STATS.ENGAGE_RANGE_INFANTRY &&
-              isWithinElevationLimits(player.pos.x, player.pos.y + 1.2, player.pos.z)
+              isWithinElevationLimits(player.pos.x, player.pos.y + 1.2, player.pos.z) &&
+              hasVehicleLosTo('PLAYER', player.pos.x, player.pos.y + 1.2, player.pos.z)
             ) {
               selectedKind = 'player';
               selectedUnit = player;

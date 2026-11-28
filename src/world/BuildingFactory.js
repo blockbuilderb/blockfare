@@ -5,7 +5,7 @@ import {
   createSkyscraper3DMesh,
   RADAR_TOWER_SPEC,
   POWER_TOWER_SPEC
-} from '../models/prop-models.js?v=146';
+} from '../models/prop-models.js?v=148';
 
 const VOXEL_SIZE = 1.25;
 const SPATIAL_MIN_X = -2048;
@@ -695,7 +695,8 @@ export const BuildingFactory = {
     }
 
     const hasSwitchbackStairs = width >= 9 && depth >= 8;
-    const isModernSkyscraper = floors >= 8 && width >= 14 && depth >= 12;
+    const isModernSkyscraper =
+      floors >= 4 && width >= 14 && depth >= 12 && (this.era || 'modern') === 'modern';
     const hasExpressLadder = floors >= 4 && width >= 10 && depth >= 8;
     // Only subdivide large >= 17-wide buildings so medium/small buildings have spacious open rooms!
     const hasEastWing = !isModernSkyscraper && width >= 17;
@@ -753,7 +754,15 @@ export const BuildingFactory = {
 
       for (let x = 0; x < width; x++) {
         for (let z = 0; z < depth; z++) {
-          if (isHybridCoreFloor && (x > 6 || z > 7)) {
+          if (isHybridCoreFloor) {
+            // Modular Floor Unit Optimization:
+            // On intermediate modular stories (`f = 1 .. floors - 2`), ONLY place the compact 4×2 walkable
+            // floor-to-floor landing slab (`x = 1..4, z = 1..2`)! The surrounding shaft walls & modular facade
+            // are enclosed by the shared 3D Modular Floor Shell (`archMesh`) + O(1) `solidHullBox`, eliminating
+            // ~135 redundant interior voxels per story (~2,150 voxels saved per tall building)!
+            if (x >= 1 && x <= 4 && z >= 1 && z <= 2) {
+              addBuildingVoxel(startGx + x, baseGy + floorHeight - 1, startGz + z, 'concrete');
+            }
             continue;
           }
           const gx = startGx + x;
@@ -769,23 +778,7 @@ export const BuildingFactory = {
             : z === 1 && x >= 1 && x <= 3;
           const isExpressShaftCutout = hasExpressLadder && x === 5 && z >= 5 && z <= 6;
           if (!isStairCutout && !isExpressShaftCutout) {
-            if (!isHybridCoreFloor || (x <= 6 && z <= 7)) {
-              // Note: on `f = floors - 2` of a hybrid skyscraper, we need the full ceiling slab (`baseGy + 3`)
-              // across the whole footprint so the Top Sniper Floor (`f = floors - 1`) has a solid walkable floor!
-              addBuildingVoxel(gx, baseGy + floorHeight - 1, gz, 'concrete');
-            }
-          }
-
-          if (isHybridCoreFloor) {
-            // Enclose the compact 6x7 stairwell & express shaft (`x = 0, x = 6, z = 0, z = 7`) cleanly on core floors
-            const isShaftWall = x === 0 || x === 6 || z === 0 || z === 7;
-            if (isShaftWall) {
-              const isCoreGirder = (x === 0 && z === 0) || (x === 6 && z === 7);
-              for (let y = 0; y < floorHeight - 1; y++) {
-                addBuildingVoxel(gx, baseGy + y, gz, isCoreGirder && useSteelFrame ? 'steelBeam' : 'darkConcrete');
-              }
-            }
-            continue;
+            addBuildingVoxel(gx, baseGy + floorHeight - 1, gz, 'concrete');
           }
 
           if (isExteriorWall) {
@@ -891,12 +884,12 @@ export const BuildingFactory = {
         }
       }
 
-      // Ensure the Top Sniper Floor (`f = floors - 1`) on hybrid skyscrapers has a complete walkable floor slab beneath it (`f = floors - 2`)
+      // Ensure the Top Sniper Floor (`f = floors - 1`) on modular tall buildings has a complete walkable floor slab beneath it (`f = floors - 2`)
       if (isModernSkyscraper && f === floors - 2) {
         const topSuiteSlabGy = baseGy + floorHeight - 1;
         for (let x = 0; x < width; x++) {
           for (let z = 0; z < depth; z++) {
-            if (x <= 6 && z <= 7) continue; // Already placed in core stairwell loop
+            if (x >= 1 && x <= 4 && z >= 1 && z <= 2) continue; // Already placed in modular core landing
             const isStairCut = x >= 1 && x <= 4 && z >= 3 && z <= 6;
             const isExpCut = hasExpressLadder && x === 5 && z >= 5 && z <= 6;
             if (!isStairCut && !isExpCut) {
@@ -925,9 +918,11 @@ export const BuildingFactory = {
           addBuildingVoxel(startGx + sx, baseGy + 3, startGz + 4, 'wood');
           addBuildingVoxel(startGx + sx, baseGy + 4, startGz + 3, 'wood');
         }
-        const deskX = startGx + width - 2;
-        const deskZ = startGz + depth - 2;
-        addBuildingVoxel(deskX, baseGy, deskZ, 'wood', true);
+        if (!isHybridCoreFloor) {
+          const deskX = startGx + width - 2;
+          const deskZ = startGz + depth - 2;
+          addBuildingVoxel(deskX, baseGy, deskZ, 'wood', true);
+        }
       } else if (width >= 6 && depth >= 6) {
         // Compact 5-step straight staircase along `z = 1, x = 1..5` reaching `baseGy + 4` cleanly
         for (let step = 0; step < floorHeight; step++) {
@@ -939,7 +934,7 @@ export const BuildingFactory = {
         addBuildingVoxel(deskX, baseGy, deskZ, 'wood', true);
       }
 
-      if (f > 0 && (!isModernSkyscraper || f <= 2) && width >= 9) {
+      if (f > 0 && (!isModernSkyscraper || f === 1) && width >= 9) {
         for (let bx = 2; bx < width - 2; bx++) {
           addBuildingVoxel(startGx + bx, baseGy - 1, startGz - 1, 'concrete');
           if (bx === 2 || bx === width - 3 || bx % 2 === 0) {

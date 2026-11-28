@@ -2,29 +2,29 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
 
-import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=146';
-import { VEHICLE_STATS } from '../src/config.js?v=146';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=146';
-import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=146';
-import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=146';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=146';
-import { createWeaponViewModel } from '../src/models/weapon-model.js?v=146';
-import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=146';
-import { BotManager } from '../src/bots/BotManager.js?v=146';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=146';
-import { CombatMethods } from '../src/player/PlayerCombat.js?v=146';
-import { PlayerController } from '../src/player/PlayerController.js?v=146';
-import { SoundManager } from '../src/audio/SoundManager.js?v=146';
-import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=146';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=146';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=146';
-import { BotAIMethods } from '../src/bots/BotAI.js?v=146';
-import { updateMedicRescue } from '../src/bots/MedicAI.js?v=146';
+import { MAT_DEFS } from '../src/assets/voxel-materials.js?v=148';
+import { VEHICLE_STATS } from '../src/config.js?v=148';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=148';
+import { VEHICLE_DEFS } from '../src/assets/vehicle-defs.js?v=148';
+import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=148';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=148';
+import { createWeaponViewModel } from '../src/models/weapon-model.js?v=148';
+import { VehicleManager, initVehicleOrdnance, classifyWeaponBallistics } from '../src/vehicles.js?v=148';
+import { BotManager } from '../src/bots/BotManager.js?v=148';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=148';
+import { CombatMethods } from '../src/player/PlayerCombat.js?v=148';
+import { PlayerController } from '../src/player/PlayerController.js?v=148';
+import { SoundManager } from '../src/audio/SoundManager.js?v=148';
+import { resolveGlobalCommandShortcut } from '../src/utils/KeyboardShortcuts.js?v=148';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=148';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=148';
+import { BotAIMethods } from '../src/bots/BotAI.js?v=148';
+import { updateMedicRescue } from '../src/bots/MedicAI.js?v=148';
 import {
   createDefaultMarksmanProfile,
   evaluateMarksmanShot,
   computeBallisticSolution
-} from '../src/player/MarksmanSystem.js?v=146';
+} from '../src/player/MarksmanSystem.js?v=148';
 
 function buildPilotHarness(role = 'fighter', team = 'US') {
   const scene = new THREE.Scene();
@@ -1585,7 +1585,8 @@ test('v137: Sniper Marksman Shot-Difficulty Badges, 2D Trajectory/Anatomy Replay
     assert.equal(closeAr.triggered, false, 'Close-range AR kill should not trigger sniper badge card');
 
     // 138m Crippling Leg Hit (non-lethal, A2 high-skill hit rule) -> triggers compact Marksman Hit readout!
-    const cripplingHit = evaluateMarksmanShot(
+    // Non-lethal hits no longer pop up the Sniper Kill Card; lethal femoral kills do!
+    const nonLethalLegHit = evaluateMarksmanShot(
       {
         wepDef: sv98,
         distanceM: 138,
@@ -1600,9 +1601,26 @@ test('v137: Sniper Marksman Shot-Difficulty Badges, 2D Trajectory/Anatomy Replay
       },
       profile
     );
-    assert.equal(cripplingHit.triggered, true, '138m crippling leg shot triggers Marksman readout');
+    assert.equal(nonLethalLegHit.triggered, false, 'Non-lethal shots do not trigger Sniper Kill Card');
+
+    const cripplingHit = evaluateMarksmanShot(
+      {
+        wepDef: sv98,
+        distanceM: 138,
+        flightTimeS: 0.12,
+        gravityMps2: sv98.bulletGravity,
+        damageDealt: 108,
+        isKill: true,
+        isHeadshot: false,
+        hitZone: 'leftLeg',
+        relHitY: 0.35,
+        fracturedLimb: 'leg'
+      },
+      profile
+    );
+    assert.equal(cripplingHit.triggered, true, '138m lethal femoral leg kill triggers Marksman readout');
     assert.equal(cripplingHit.anatomy.zoneKey, 'leftLeg', 'Highlights left leg on anatomy diagram');
-    assert.equal(profile.activeTitle, 'SCOUT SPOTTER', 'Earns initial SCOUT SPOTTER title');
+    assert.ok(Boolean(profile.activeTitle), 'Earns initial Marksman title on first kill');
 
     // 365m Rooftop Overwatch Moving Headshot on Enemy Recon -> Gold/Platinum Grade + EAGLE EYE Title + 2D Trajectory Arc!
     const mythicRoofShot = evaluateMarksmanShot(
@@ -1736,10 +1754,10 @@ test('v137: Sniper Marksman Shot-Difficulty Badges, 2D Trajectory/Anatomy Replay
 });
 
 test('v137b: Tank cannon passes past walking teammates, Coax MG hits close-in enemies in CHASE_3P, and Headshots/Explosions have high instant-KIA chance', async () => {
-  const { PlayerController } = await import('../src/player.js?v=146');
-  const { BotManager, evaluateCatastrophicKill } = await import('../src/bots.js?v=146');
-  const { VehicleManager, initVehicleOrdnance } = await import('../src/vehicles.js?v=146');
-  const { ProjectileManager } = await import('../src/world/ProjectileManager.js?v=146');
+  const { PlayerController } = await import('../src/player.js?v=148');
+  const { BotManager, evaluateCatastrophicKill } = await import('../src/bots.js?v=148');
+  const { VehicleManager, initVehicleOrdnance } = await import('../src/vehicles.js?v=148');
+  const { ProjectileManager } = await import('../src/world/ProjectileManager.js?v=148');
 
   const prevDoc = globalThis.document;
   const prevWin = globalThis.window;

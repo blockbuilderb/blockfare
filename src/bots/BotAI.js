@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=146';
-import { BOT } from '../config.js?v=146';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=146';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=146';
-import { events } from '../events.js?v=146';
+import { sound } from '../audio.js?v=148';
+import { BOT } from '../config.js?v=148';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=148';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=148';
+import { events } from '../events.js?v=148';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -553,7 +553,15 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
   const activeCamFov = player?.camera?.fov || 75;
   const opticZoomMag = THREE.MathUtils.clamp(75 / Math.max(8, activeCamFov), 1.0, 9.5);
   const playerInAircraft = Boolean(player?.activeVehicle && player.activeVehicle.isAircraft);
-  const maxRenderDist = playerInAircraft
+  const inPassengerHeliRide = Boolean(
+    playerInAircraft &&
+      player.activeVehicle.rideTask &&
+      player.activeVehicle.rideTask.active &&
+      player.activeVehicle.rideTask.phase !== 'RTB_DEPART'
+  );
+  const maxRenderDist = inPassengerHeliRide
+    ? 680
+    : playerInAircraft
     ? Math.min(3400, Math.round(Math.max(950, camY * 1.9 + 480) * Math.sqrt(opticZoomMag)))
     : Math.min(3000, Math.round(440 * opticZoomMag));
   const maxRenderDistSq = maxRenderDist * maxRenderDist;
@@ -792,9 +800,14 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       distSqCam > (playerInAircraft ? 45 * 45 : 22 * 22) &&
       dot3DUnnorm < 0 &&
       dot3DUnnorm * dot3DUnnorm > behindCosSq * distSqCam;
-    if (!offFrustum && hasCamFrustum && !playerInAircraft && opticZoomMag <= 1.5 && distSqCam > 26 * 26) {
+    if (
+      !offFrustum &&
+      hasCamFrustum &&
+      (!playerInAircraft || inPassengerHeliRide) &&
+      distSqCam > (inPassengerHeliRide ? 55 * 55 : 24 * 24)
+    ) {
       this._botCullSphere.center.set(bot.pos.x, bot.pos.y + 1.0, bot.pos.z);
-      this._botCullSphere.radius = 3.8;
+      this._botCullSphere.radius = inPassengerHeliRide ? 12.0 : 4.8;
       offFrustum = !this._botFrustum.intersectsSphere(this._botCullSphere);
     }
     const within3DRender = distSqCam <= maxRenderDistSq;
@@ -1501,7 +1514,10 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       nearestEnemy.pos = nearestEnemy.unit.pos;
       nearestDistSq = bot.pos.distanceToSquared(nearestEnemy.pos);
     } else {
-      bot._targetScanTimer = 0.28 + Math.random() * 0.22;
+      bot._targetScanTimer =
+        distSqCam > 240 * 240 && offFrustum
+          ? 0.58 + Math.random() * 0.34
+          : 0.28 + Math.random() * 0.22;
       if (!player.dead && !player.downed && player.team !== bot.team) {
         const dSq = bot.pos.distanceToSquared(player.pos);
         if (player.activeVehicle && !player.activeVehicle.dead) {
@@ -2541,7 +2557,10 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
 
       bot._whiskerTimer = (bot._whiskerTimer || 0) - dt;
       if (bot._whiskerTimer <= 0) {
-        bot._whiskerTimer = 0.16 + Math.random() * 0.08;
+        bot._whiskerTimer =
+          distSqCam > 240 * 240 && offFrustum
+            ? 0.34 + Math.random() * 0.16
+            : 0.16 + Math.random() * 0.08;
         const baseAngle = Math.atan2(desiredDir.x, desiredDir.z);
         const centerBlockedNear = this.isPointBlocked(
           bot.pos.x + Math.sin(baseAngle) * 1.85,
@@ -2563,19 +2582,44 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
           let foundDetour = false;
           if (Array.isArray(this.world.buildings)) {
             let hitBld = null;
+            const sGrid = this.world._spatialFootprintGrid;
             for (const stepDist of [2.1, 3.8, 5.6]) {
               const px = bot.pos.x + Math.sin(baseAngle) * stepDist;
               const pz = bot.pos.z + Math.cos(baseAngle) * stepDist;
-              for (let bi = 0; bi < this.world.buildings.length; bi++) {
-                const bld = this.world.buildings[bi];
-                if (
-                  px >= bld.minWx - 1.55 &&
-                  px <= bld.maxWx + 1.55 &&
-                  pz >= bld.minWz - 1.55 &&
-                  pz <= bld.maxWz + 1.55
-                ) {
-                  hitBld = bld;
-                  break;
+              if (sGrid) {
+                const cxG = (px - -2048) >> 5;
+                const czG = (pz - -1280) >> 5;
+                if (cxG >= 0 && cxG < 128 && czG >= 0 && czG < 80) {
+                  const bucket = sGrid[czG * 128 + cxG];
+                  if (bucket) {
+                    for (let bi = 0; bi < bucket.length; bi++) {
+                      const cand = bucket[bi];
+                      if (
+                        cand.floors &&
+                        !cand.collapsed &&
+                        px >= cand.minWx - 1.55 &&
+                        px <= cand.maxWx + 1.55 &&
+                        pz >= cand.minWz - 1.55 &&
+                        pz <= cand.maxWz + 1.55
+                      ) {
+                        hitBld = cand;
+                        break;
+                      }
+                    }
+                  }
+                }
+              } else {
+                for (let bi = 0; bi < this.world.buildings.length; bi++) {
+                  const bld = this.world.buildings[bi];
+                  if (
+                    px >= bld.minWx - 1.55 &&
+                    px <= bld.maxWx + 1.55 &&
+                    pz >= bld.minWz - 1.55 &&
+                    pz <= bld.maxWz + 1.55
+                  ) {
+                    hitBld = bld;
+                    break;
+                  }
                 }
               }
               if (hitBld) break;

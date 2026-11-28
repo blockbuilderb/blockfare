@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=146';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=146';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=146';
-import { VehicleManager } from '../src/vehicles.js?v=146';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=148';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=148';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=148';
+import { VehicleManager } from '../src/vehicles.js?v=148';
 import {
   evaluateMarksmanShot,
   resolveUnitPlaystyleTitle
-} from '../src/player/MarksmanSystem.js?v=146';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=146';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=146';
-import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=146';
-import { PlayerController } from '../src/player/PlayerController.js?v=146';
+} from '../src/player/MarksmanSystem.js?v=148';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=148';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=148';
+import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=148';
+import { PlayerController } from '../src/player/PlayerController.js?v=148';
 
 function makeMockElement(id = '') {
   const classes = new Set();
@@ -139,7 +139,7 @@ test('v138: Sniper & Anti-Materiel Arsenal, 13x-40x Optics, Marksman Shot Card V
     damageDealt: 45,
     isFriendly: true
   });
-  assert.equal(ffHit.cardVariant, 'friendly_fire');
+  assert.equal(ffHit.triggered, false, 'Sniper cards only appear on enemy kills (never on non-lethal/friendly hits)');
 
   const sharpshooterTitle = resolveUnitPlaystyleTitle({
     role: 'RECON',

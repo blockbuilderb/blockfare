@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=146';
+import { sound } from '../audio.js?v=148';
 import {
   PLAYER,
   COMBAT,
@@ -8,22 +8,22 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=146';
-import { events } from '../events.js?v=146';
+} from '../config.js?v=148';
+import { events } from '../events.js?v=148';
 import {
   WEAPON_DEFS,
   ATTACHMENT_CATALOG,
   createWeaponViewModel,
   getWeaponHipOffsetX
-} from '../weapons.js?v=146';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=146';
+} from '../weapons.js?v=148';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=148';
 import {
   evaluateMarksmanShot,
   computeBallisticSolution,
   syncActiveMarksmanTitle,
   saveMarksmanProfile,
   loadMarksmanProfile
-} from './MarksmanSystem.js?v=146';
+} from './MarksmanSystem.js?v=148';
 
 function markShared(asset) {
   if (asset) {
@@ -1440,9 +1440,20 @@ export const CombatMethods = {
   tryFireSingle() {
     const cur = this.currentWeapon();
     if (!cur || this.reloading || this.fireTimer > 0) return;
+    const isSemiOrBolt = Boolean(
+      !cur.def.auto ||
+        cur.def.isBoltSniper ||
+        cur.def.isAntiMateriel ||
+        cur.def.weaponCategory === 'sniper' ||
+        cur.def.weaponCategory === 'marksman'
+    );
+    if (isSemiOrBolt && this.isFiring && this._semiTriggerArmed === false) return;
     if (this.slowReloading) {
       this.slowReloading = false;
       this.magPackProgress = 0;
+    }
+    if (isSemiOrBolt && this.isFiring) {
+      this._semiTriggerArmed = false;
     }
     this.executeFire(cur);
   },
@@ -1539,6 +1550,7 @@ export const CombatMethods = {
     cur.clip--;
 
     if (def.type === 'rpg' || def.type === 'stinger') {
+      this.unsuppressedExposureTimer = Math.max(this.unsuppressedExposureTimer || 0, 9.0);
       sound.playRocketLaunch(0);
       if (def.type === 'stinger') {
         this.launchStingerMissile();
@@ -1590,6 +1602,14 @@ export const CombatMethods = {
       sound.playGunshot(def.audioProfile || def.soundType, 0, 0, Boolean(def.silenced), def);
       this.muzzleFlashTimer = def.flashMult === 0 ? 0 : 0.032;
       this.ejectBrassCasing();
+      if (!def.silenced) {
+        const expSecs = def.isAntiMateriel
+          ? 10.0
+          : def.weaponCategory === 'sniper' || def.isBoltSniper
+          ? 7.5
+          : 5.5;
+        this.unsuppressedExposureTimer = Math.max(this.unsuppressedExposureTimer || 0, expSecs);
+      }
     }
     events.emit('player:fired', {
       weapon: def,
@@ -2403,26 +2423,48 @@ export const CombatMethods = {
           bullet.collateralHits++;
           _stepImpactPt.copy(bestBotHit.point);
 
-          // Evaluate Sniper Marksman Shot Difficulty, Badges, Feat Ribbons & Earned Titles!
-          // Includes Smoke-Screen Ray Check (`throughSmoke` / `targetInSmoke`), Rapid Double-Shot (`<= 4.2s`),
-          // Enemy Medic Triage-Denied, Cranial Headshot, and Friendly-Fire (`⚠️ BLUE-ON-BLUE`) Warning Cards!
-          if (!this.activeVehicle) {
+          // Evaluate Sniper Marksman Kill Card, Difficulty, Multi-Kill Lineup, Bullet Angles & Earned Titles!
+          // STRICT KILL-ONLY RULE: Only lethal enemy kills trigger `#marksman-shot-card` (merely landing a non-lethal shot does NOT!).
+          if (!this.activeVehicle && res.killed && !isFriendlyBot) {
             if (!this.marksmanProfile) {
               this.marksmanProfile = loadMarksmanProfile();
             }
             const nowHitMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
-            const oneShotKill = Boolean(
-              !isFriendlyBot && res.killed && hpBeforeHit >= 92 && penIndex === 0
+            const oneShotKill = Boolean(hpBeforeHit >= 92 && penIndex === 0);
+            const withinMultiKillWindow = Boolean(
+              this._lastMarksmanKillAtMs && nowHitMs - this._lastMarksmanKillAtMs <= 5200
             );
-            const rapidDoubleShot = Boolean(
-              !isFriendlyBot &&
-                res.killed &&
-                this._lastMarksmanKillAtMs &&
-                nowHitMs - this._lastMarksmanKillAtMs <= 4200
-            );
+            const rapidDoubleShot = withinMultiKillWindow;
+            const priorVictims =
+              withinMultiKillWindow && Array.isArray(this._marksmanKillChain)
+                ? this._marksmanKillChain
+                : null;
             const flightTimeAtHit =
               bullet.flightTime +
               bestBotHit.distance / Math.max(60, bullet.vel.length() || bullet.muzzleVelocity || 780);
+
+            // Compute exact horizontal Entry Aspect (FRONT / BACK / LEFT SIDE / RIGHT SIDE) & vertical Terminal Impact Angle!
+            const bvHoriz = Math.hypot(bullet.vel.x, bullet.vel.z) || 1;
+            const inFromShooterX = -bullet.vel.x / bvHoriz;
+            const inFromShooterZ = -bullet.vel.z / bvHoriz;
+            const bYaw = bot.yaw || 0;
+            const botFwdX = Math.sin(bYaw);
+            const botFwdZ = Math.cos(bYaw);
+            const frontDot = inFromShooterX * botFwdX + inFromShooterZ * botFwdZ;
+            const rightDot = inFromShooterX * botRightX + inFromShooterZ * botRightZ;
+            const entryBearingDeg = Math.round((Math.atan2(rightDot, frontDot) * 180) / Math.PI);
+            const absBearing = Math.abs(entryBearingDeg);
+            const entryAspect =
+              absBearing <= 45
+                ? 'FRONT'
+                : absBearing >= 135
+                ? 'BACK'
+                : entryBearingDeg > 0
+                ? 'RIGHT SIDE'
+                : 'LEFT SIDE';
+            const impactAngleDeg = Number(
+              ((Math.atan2(-bullet.vel.y, bvHoriz) * 180) / Math.PI).toFixed(1)
+            );
 
             // Ray-segment check against active Tactical Smoke Screens (`this.botManager.smokeClouds`)
             let throughSmoke = false;
@@ -2474,7 +2516,7 @@ export const CombatMethods = {
                 shooterPos: bullet.startOrigin,
                 impactPos: bestBotHit.point,
                 damageDealt: dmg,
-                isKill: Boolean(res.killed),
+                isKill: true,
                 isHeadshot,
                 oneShotKill,
                 hitZone,
@@ -2484,47 +2526,49 @@ export const CombatMethods = {
                 targetSpeedMps,
                 targetRole: bot.role || '',
                 penetratedCover: hitThroughCover,
-                collateralCount: res.killed ? bullet.collateralKills + 1 : bullet.collateralHits,
+                collateralCount: bullet.collateralKills + 1,
                 isAds: Boolean(bullet.shooterWasAds),
                 useCantedSight: Boolean(bullet.shooterUsedCanted),
                 opticType: bullet.shooterOpticType,
                 stance: bullet.shooterStance || 'STANDING',
                 isHoldingBreath: Boolean(bullet.shooterHeldBreath),
                 currentDeadeyeStreak: this.deadeyeStreak || 0,
-                isFriendly: Boolean(isFriendlyBot),
+                isFriendly: false,
                 throughSmoke,
                 targetInSmoke,
                 smokeNormPos,
                 rapidDoubleShot,
-                wasRescuing: Boolean(res.wasRescuing || bot.rescueTarget)
+                wasRescuing: Boolean(res.wasRescuing || bot.rescueTarget),
+                entryAspect,
+                entryBearingDeg,
+                impactAngleDeg,
+                victimName: bot.name || 'ENEMY',
+                priorVictims
               },
               this.marksmanProfile
             );
             if (marksmanEval.triggered) {
-              if (isFriendlyBot) {
-                if (res.killed) this.deadeyeStreak = 0;
-              } else if (res.killed) {
-                this.deadeyeStreak = marksmanEval.deadeyeStreak;
-                this._lastMarksmanKillAtMs = nowHitMs;
-                const elevDeltaHere = (bullet.startOrigin?.y || 0) - (bestBotHit.point?.y || 0);
-                if (
-                  (this.prone || this.crouching || elevDeltaHere >= 8.0) &&
-                  totalFlightDist >= 75
-                ) {
-                  this.camperKills = (this.camperKills || 0) + 1;
-                }
+              this.deadeyeStreak = marksmanEval.deadeyeStreak;
+              this._lastMarksmanKillAtMs = nowHitMs;
+              this._marksmanKillChain = marksmanEval.victims || [];
+              const elevDeltaHere = (bullet.startOrigin?.y || 0) - (bestBotHit.point?.y || 0);
+              if (
+                (this.prone || this.crouching || elevDeltaHere >= 8.0) &&
+                totalFlightDist >= 75
+              ) {
+                this.camperKills = (this.camperKills || 0) + 1;
               }
               marksmanEval.timestamp = nowHitMs;
-              marksmanEval.victimName = bot.name || (isFriendlyBot ? 'FRIENDLY' : 'ENEMY');
+              marksmanEval.victimName = bot.name || 'ENEMY';
               this.lastMarksmanShot = marksmanEval;
-              if (!isFriendlyBot && marksmanEval.bonusXp > 0) {
+              if (marksmanEval.bonusXp > 0) {
                 this.score = (this.score || 0) + marksmanEval.bonusXp;
                 this.onAwardXp?.(
                   marksmanEval.bonusXp,
-                  `${marksmanEval.badge.icon} MARKSMAN [${marksmanEval.grade}] ${marksmanEval.badge.badgeName}: ${marksmanEval.distanceM}m • ${marksmanEval.anatomy.shortPart} (${dmg} DMG)`
+                  `${marksmanEval.badge.icon} MARKSMAN [${marksmanEval.grade}] ${marksmanEval.badge.badgeName}: ${marksmanEval.distanceM}m • ${entryAspect} • ${marksmanEval.anatomy.shortPart}`
                 );
               }
-              if (!isFriendlyBot && marksmanEval.bonusCash > 0 && typeof this.addCash === 'function') {
+              if (marksmanEval.bonusCash > 0 && typeof this.addCash === 'function') {
                 this.addCash(
                   marksmanEval.bonusCash,
                   `MARKSMAN ${marksmanEval.distanceM}M BONUS`,
@@ -2539,6 +2583,9 @@ export const CombatMethods = {
               }
               events.emit('marksman:shot', marksmanEval);
             }
+          } else if (isFriendlyBot && res.killed) {
+            this.deadeyeStreak = 0;
+            this._marksmanKillChain = null;
           }
 
           const impactColor = bullet.wepDef?.isIncendiaryAmmo
@@ -3340,10 +3387,10 @@ export const CombatMethods = {
   },
 
   /**
-   * Samples instantaneous Laser Rangefinder telemetry along the camera sightline (up to 1,800m)
+   * Samples instantaneous Laser Rangefinder telemetry along the camera sightline (up to 4,500m)
    * and computes exact drop/holdover/lead for the player's primary rifle (`slots[0]`).
    */
-  sampleLaserRangefinder(maxRange = 2500) {
+  sampleLaserRangefinder(maxRange = 4500) {
     if (!this.world || !this.camera) return null;
     this.camera.updateMatrixWorld(true);
     const origin = this.camera.getWorldPosition(new THREE.Vector3());
@@ -3367,11 +3414,11 @@ export const CombatMethods = {
     }
 
     // 2. Check terrain heightmap intersection if closer than voxel hit
-    for (let d = 6; d < bestDist; d += d < 250 ? 4 : 12) {
+    for (let d = 6; d < bestDist; d += d < 250 ? 4 : d < 1800 ? 10 : 18) {
       const px = origin.x + dir.x * d;
       const py = origin.y + dir.y * d;
       const pz = origin.z + dir.z * d;
-      if (Math.abs(px) > 2500 || Math.abs(pz) > 1700) break;
+      if (Math.abs(px) > 3800 || Math.abs(pz) > 2600) break;
       const ty = this.world.getGroundHeightAt(px, pz);
       if (py <= ty + 0.35) {
         bestDist = d;
@@ -3462,7 +3509,7 @@ export const CombatMethods = {
    *   so `[J]` calls a Moving-Target Laser-Guided GBU/Maverick Strike AND friendly Aircraft lock on from 2,500m!
    */
   fireLaserRangefinder(autoZeroRifle = true) {
-    const lrf = this.sampleLaserRangefinder(2500);
+    const lrf = this.sampleLaserRangefinder(4500);
     if (!lrf) return null;
 
     if (autoZeroRifle) {
@@ -3475,7 +3522,8 @@ export const CombatMethods = {
       this.role === 'recon' ||
         curWep?.def?.type === 'binoculars' ||
         curWep?.def?.hasRaptarLrf ||
-        curWep?.def?.opticType === 'raptor13x'
+        curWep?.def?.opticType === 'raptor13x' ||
+        curWep?.def?.opticType === 'sniper40x'
     );
 
     let laserPainted = false;

@@ -8,11 +8,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=146';
-import { sound } from '../audio.js?v=146';
-import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=146';
-import { events } from '../events.js?v=146';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=146';
+} from '../weapons.js?v=148';
+import { sound } from '../audio.js?v=148';
+import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=148';
+import { events } from '../events.js?v=148';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=148';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',
@@ -2720,7 +2720,10 @@ export const GunsmithMethods = {
     const capMult = mag ? mag.capMult : 1.0;
     const newClip = Math.max(1, Math.round(baseDef.clipSize * capMult));
 
-    // Tarkov Chest Rig (`vest`) + Backpack (`backpack`) + Class Trait (`CLASS_TRAITS`) expand spare magazine count & Loose Bullet capacity!
+    // Tarkov Chest Rig (`vest`) + Backpack (`backpack`) + Class Trait (`CLASS_TRAITS`) expand spare magazine count & Loose Bullet capacity,
+    // scaled by REALISTIC CARTRIDGE MASS & PHYSICAL BULK (relative to 12.3g 5.56×45mm NATO = 1.0× reference)!
+    // Prevents absurd loads like 2,000 rounds of .50 BMG (234 kg / 516 lbs) or 20×82mm cannon shells (420 kg / 926 lbs)!
+    const calProfile = this.getCaliberAmmoProfile(baseDef);
     const classTrait = CLASS_TRAITS[this.role] || {};
     const classReserveMult = classTrait.reserveMagMult || 1.0;
     const classReloadMult = classTrait.reloadTimeMult || 1.0;
@@ -2729,24 +2732,21 @@ export const GunsmithMethods = {
       1,
       Math.round((baseDef.reserveAmmo / Math.max(1, baseDef.clipSize)) * (isPrimaryGun ? classReserveMult : 1.0))
     );
-    const rigBonusMags = isPrimaryGun
-      ? vest?.bonusMags || 0
-      : Math.ceil((vest?.bonusMags || 0) * 0.5);
-    const packBonusMags = isPrimaryGun
-      ? backpack?.bonusMags || 0
-      : Math.ceil((backpack?.bonusMags || 0) * 0.5);
+    const rawVestMags = isPrimaryGun ? vest?.bonusMags || 0 : (vest?.bonusMags || 0) * 0.5;
+    const rawPackMags = isPrimaryGun ? backpack?.bonusMags || 0 : (backpack?.bonusMags || 0) * 0.5;
+    const rigBonusMags = Math.round(rawVestMags * calProfile.bonusMagScale);
+    const packBonusMags = Math.round(rawPackMags * calProfile.bonusMagScale);
     const totalSpareMags = Math.max(1, baseSpareMags + rigBonusMags + packBonusMags);
     const newReserve = Math.max(newClip, totalSpareMags * newClip);
 
-    const isSniperOrDmr = Boolean(baseDef.soundType === 'sniper' || (baseDef.clipSize <= 10 && baseDef.damage >= 55));
-    const sniperBandolierBonus = isSniperOrDmr && isPrimaryGun ? (this.role === 'recon' ? 1.4 : 1.15) : 1.0;
-    const baseLoose = isPrimaryGun
-      ? Math.max(isSniperOrDmr ? 60 : 30, backpack?.looseAmmoPrimary ?? 60)
+    // Loose rounds in backpack scale strictly by backpack cell capacity & cartridge physical volume/weight (NOT magazine capMult!)
+    const baseLoose556 = isPrimaryGun
+      ? backpack?.looseAmmoPrimary ?? 60
       : backpack?.looseAmmoSecondary ?? 36;
-    const maxLooseAmmo = Math.max(
-      newClip * 2,
-      Math.round(baseLoose * capMult * Math.max(1.0, classReserveMult) * sniperBandolierBonus)
+    const scaledPackLoose = Math.round(
+      baseLoose556 * calProfile.looseScale * Math.min(1.2, Math.max(1.0, classReserveMult))
     );
+    const maxLooseAmmo = Math.max(calProfile.minLooseRounds, scaledPackLoose);
     const vestSwapMult = vest?.magSwapMult || 1.0;
 
     const dmgMult = ammo && ammo.dmgMult ? ammo.dmgMult : 1.0;
@@ -2862,18 +2862,31 @@ export const GunsmithMethods = {
     const finalHasRaptarLrf = Boolean(
       baseDef.hasRaptarLrf ||
         (grip && grip.hasRaptarLrf) ||
-        (!explicitBareIron && ((useCustomOptic && optic.hasBuiltInLrf) || baseDef.hasSmartPipper))
+        (!explicitBareIron &&
+          ((useCustomOptic && optic.hasBuiltInLrf) ||
+            finalOpticType === 'sniper40x' ||
+            finalOpticType === 'raptor13x' ||
+            baseDef.hasSmartPipper))
     );
     const finalHasSmartPipper = Boolean(
       !explicitBareIron &&
         ((useCustomOptic && optic.hasSmartPipper) ||
+          finalOpticType === 'sniper40x' ||
+          finalOpticType === 'raptor13x' ||
           baseDef.hasSmartPipper ||
           (grip && grip.hasRaptarLrf))
     );
     const finalHasStraightPull = Boolean(baseDef.hasStraightPull || (grip && grip.hasStraightPull));
+    const forceSemiOrBolt = Boolean(
+      baseDef.weaponCategory === 'sniper' ||
+        baseDef.weaponCategory === 'marksman' ||
+        baseDef.isBoltSniper ||
+        baseDef.isAntiMateriel
+    );
 
     return {
       ...baseDef,
+      auto: forceSemiOrBolt ? false : Boolean(baseDef.auto),
       name:
         activeSkinFinish === 'pure_gold'
           ? `★ ${baseDef.name} // 24K GOLD`
@@ -2934,6 +2947,7 @@ export const GunsmithMethods = {
       reserveAmmo: newReserve,
       spareMagSlots: totalSpareMags,
       maxLooseAmmo,
+      roundMassGrams: calProfile.roundGrams,
       vestSwapMult,
       reloadTime: Number((baseDef.reloadTime * (mag ? mag.reloadMult : 1.0) * vestSwapMult * classReloadMult).toFixed(2)),
       recoilPitch: Number(
@@ -2993,6 +3007,79 @@ export const GunsmithMethods = {
           ? `${baseDef.caliber.split('•')[0].trim()} • ${tags.join(' + ')}`
           : baseDef.caliber
     };
+  },
+
+  /**
+   * Returns realistic physical cartridge mass (`roundGrams`), backpack loose-ammo packing density (`looseScale`,
+   * normalized against 12.3g `5.56×45mm NATO = 1.0`), and vest/pack pouch bulk factor (`bonusMagScale`):
+   * - 20×82mm Cannon (`ntw20`): ~210g/shell (0.46 lb!) -> 6..40 loose shells (~8 kg max in XL Raid Pack, never 2,000!)
+   * - 12.7×99mm .50 BMG / 12.7×108mm (`barrett_m82`, `gm6_lynx`): ~117g/round (0.26 lb!) -> 8..72 loose rounds (~8.4 kg max)
+   * - .408 CheyTac / .338 Lapua Magnum (`m200_intervention`, `awm`): 44g–60g/round -> 12..160 loose rounds
+   * - 23×75mm KS-23 (`82g`) & 12-Gauge Shells (`46g`): bulky hulls -> 10..190 loose shells
+   * - 7.62×51mm / 7.62×54mmR Snipers, DMRs, Battle Rifles & PKP Belts (`25g–29g`): ~0.42–0.48× 5.56mm count
+   * - 5.56×45mm / 5.45×39mm Assault Rifles (`12.3g`): 1.0× reference
+   * - 9×19mm / 5.7×28mm SMGs & Pistols (`7.5g–11.5g`): 1.15× compact count
+   */
+  getCaliberAmmoProfile(baseDef) {
+    if (!baseDef) {
+      return { roundGrams: 12.3, looseScale: 1.0, bonusMagScale: 1.0, minLooseRounds: 20 };
+    }
+    const id = baseDef.id || '';
+    if (id === 'ntw20') {
+      return { roundGrams: 210, looseScale: 0.05, bonusMagScale: 0.34, minLooseRounds: 6 };
+    }
+    if (baseDef.isAntiMateriel || id === 'barrett_m82' || id === 'gm6_lynx') {
+      return { roundGrams: 117, looseScale: 0.09, bonusMagScale: 0.38, minLooseRounds: 10 };
+    }
+    if (id === 'm200_intervention') {
+      return { roundGrams: 60, looseScale: 0.18, bonusMagScale: 0.5, minLooseRounds: 12 };
+    }
+    if (id === 'awm') {
+      return { roundGrams: 44, looseScale: 0.24, bonusMagScale: 0.55, minLooseRounds: 15 };
+    }
+    if (id === 'ks23') {
+      return { roundGrams: 82, looseScale: 0.15, bonusMagScale: 0.5, minLooseRounds: 10 };
+    }
+    if (baseDef.isShotgun || (baseDef.pellets && baseDef.pellets > 1)) {
+      return { roundGrams: 46, looseScale: 0.28, bonusMagScale: 0.65, minLooseRounds: 16 };
+    }
+    if (id === 'ash12') {
+      return { roundGrams: 34, looseScale: 0.35, bonusMagScale: 0.65, minLooseRounds: 20 };
+    }
+    if (id === 'pkp') {
+      return { roundGrams: 29, looseScale: 0.42, bonusMagScale: 0.35, minLooseRounds: 40 };
+    }
+    if (id === 'm249') {
+      return { roundGrams: 15, looseScale: 0.78, bonusMagScale: 0.35, minLooseRounds: 50 };
+    }
+    if (
+      baseDef.weaponCategory === 'sniper' ||
+      baseDef.weaponCategory === 'dmr' ||
+      id === 'scar_h' ||
+      id === 'mk14' ||
+      id === 'sr25' ||
+      id === 'sv98' ||
+      id === 'm40a5' ||
+      id === 'dvl10'
+    ) {
+      return { roundGrams: 25.4, looseScale: 0.48, bonusMagScale: 0.72, minLooseRounds: 20 };
+    }
+    if (id === 'deagle') {
+      return { roundGrams: 32, looseScale: 0.42, bonusMagScale: 0.75, minLooseRounds: 14 };
+    }
+    if (id === 'mcx_spear') {
+      return { roundGrams: 18.5, looseScale: 0.72, bonusMagScale: 0.85, minLooseRounds: 25 };
+    }
+    if (id === 'usp45' || id === 'vector') {
+      return { roundGrams: 21, looseScale: 0.85, bonusMagScale: 1.0, minLooseRounds: 24 };
+    }
+    if (baseDef.weaponCategory === 'smg' || baseDef.weaponCategory === 'pistol') {
+      return { roundGrams: 10.5, looseScale: 1.15, bonusMagScale: 1.0, minLooseRounds: 24 };
+    }
+    if (baseDef.isBow || baseDef.isCrossbow) {
+      return { roundGrams: 48, looseScale: 0.25, bonusMagScale: 0.5, minLooseRounds: 12 };
+    }
+    return { roundGrams: 12.3, looseScale: 1.0, bonusMagScale: 1.0, minLooseRounds: 30 };
   },
 
   /**

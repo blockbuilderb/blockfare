@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../textures.js?v=146';
-import { TERRAIN } from '../config.js?v=146';
-import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=146';
+import { TEXTURES } from '../textures.js?v=148';
+import { TERRAIN } from '../config.js?v=148';
+import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=148';
 
 const VOXEL_SIZE = 1.25;
 
@@ -89,11 +89,11 @@ export const TerrainGenerator = {
   },
 
   /**
-   * Returns true if (x, z) lies on the paved Frugis Valley road & bridge highway network.
+   * Returns true if (x, z) lies on the paved Frugis Valley highway, NYC Midtown grid, Town Square streets, or Distribution Center yards.
    */
   _isOnValleyRoad(x, z) {
-    // 1. Main East-West Highway (z = 0 across full 3,040m HQ-to-HQ corridor)
-    if (Math.abs(z) < 7.8 && Math.abs(x) <= 1600 && Math.abs(x) > 18) return true;
+    // 1. Main East-West Highway / NYC 42nd St Boulevard (z = 0 across full 3,040m HQ-to-HQ corridor)
+    if (Math.abs(z) < 8.5 && Math.abs(x) <= 1600 && Math.abs(x) > 18) return true;
     // 2. North Bridge Highway (z = +400, linking Obj B <-> North Bridge <-> Obj E)
     if (Math.abs(z - 400) < 6.4 && x >= -330 && x <= 668 && Math.abs(x) > 18) return true;
     // 3. South Bridge Highway (z = -400, linking Obj A <-> South Bridge <-> Obj D)
@@ -107,6 +107,55 @@ export const TerrainGenerator = {
     if (Math.abs(x - 2795) < 7.0 && z >= -4 && z <= 54) return true;    // Highway <-> RU Rear Airbase Gate
     if (Math.abs(x + 640) < 5.5 && z >= 0 && z <= 272) return true;     // NW Outpost Spur
     if (Math.abs(x - 640) < 5.5 && z >= -272 && z <= 0) return true;    // SE Outpost Spur
+
+    // 5. Objective C — Midtown Manhattan / NYC Orthogonal Avenue & Cross-Street Grid (|x| <= 186, |z| <= 136)
+    const ax = Math.abs(x);
+    const az = Math.abs(z);
+    if (ax >= 32 && ax <= 186 && az <= 136) {
+      // NYC North-South Avenues: Riverside/1st Ave (|x|=38), 5th/Lexington Ave (|x|=81), 7th/Park Ave (|x|=132), Outer Ave (|x|=177)
+      if (
+        Math.abs(ax - 38) < 5.5 ||
+        Math.abs(ax - 81) < 9.5 ||
+        Math.abs(ax - 132) < 9.5 ||
+        Math.abs(ax - 177) < 6.5
+      ) {
+        return true;
+      }
+      // NYC Numbered East-West Cross-Streets: 34th/50th St (|z|=51), 23rd/57th St (|z|=91), Outer St (|z|=129)
+      if (
+        az < 16.5 ||
+        Math.abs(az - 51) < 8.0 ||
+        Math.abs(az - 91) < 8.0 ||
+        Math.abs(az - 129) < 6.5
+      ) {
+        return true;
+      }
+    }
+
+    // 6. Objective A (-660, -280) — West Frugis Town Center Civic Square & Town Streets
+    const dxA = Math.abs(x + 660);
+    const dzA = Math.abs(z + 280);
+    if (dxA <= 96 && dzA <= 84) {
+      if (dxA <= 24 && dzA <= 24) return true; // Paved Town Square Plaza
+      if (Math.abs(dxA - 36) < 5.5 || Math.abs(dxA - 74) < 5.2 || Math.abs(dzA - 34) < 5.5 || Math.abs(dzA - 68) < 5.2) {
+        return true;
+      }
+    }
+
+    // 7. Objective D (+330, -320) — Highland Garrison Town Center Civic Square & Town Streets
+    const dxD = Math.abs(x - 330);
+    const dzD = Math.abs(z + 320);
+    if (dxD <= 96 && dzD <= 84) {
+      if (dxD <= 24 && dzD <= 24) return true; // Paved Hilltop Town Square
+      if (Math.abs(dxD - 36) < 5.5 || Math.abs(dxD - 74) < 5.2 || Math.abs(dzD - 34) < 5.5 || Math.abs(dzD - 68) < 5.2) {
+        return true;
+      }
+    }
+
+    // 8. Objective B (-320, +320) & Objective E (+660, +280) — Concrete Logistics & Freight Distribution Aprons
+    if (Math.abs(x + 320) <= 84 && Math.abs(z - 320) <= 72) return true;
+    if (Math.abs(x - 660) <= 84 && Math.abs(z - 280) <= 72) return true;
+
     return false;
   },
 
@@ -517,7 +566,7 @@ export const TerrainGenerator = {
     // Concentrates 80% of grid resolution inside the active ground-combat valley ([-1760..+1760] x [-560..+560] -> ~5.8m x 2.7m triangles)
     // so visual ground triangles match `getTerrainHeight(x, z)` within centimeters on slopes, riverbanks & HQ sunken bunkers,
     // while smoothly stretching to the exact ±3,800m × ±2,600m outer perimeter for seamless ContinentalHorizonSkirt stitching!
-    const groundGeo = new THREE.PlaneGeometry(7600, 5200, 760, 520);
+    const groundGeo = new THREE.PlaneGeometry(7600, 5200, 440, 300);
     groundGeo.rotateX(-Math.PI / 2);
 
     const remapTerrainAxis = (rawVal, halfSpan, innerFrac, innerWorldSpan) => {
@@ -601,6 +650,83 @@ export const TerrainGenerator = {
     ground.updateMatrix();
     this.scene.add(ground);
     if (this._ownedWorldObjects) this._ownedWorldObjects.push(ground);
+
+    // 1A-2. NYC Midtown Yellow Avenue Lines, White Zebra Crosswalks & Distribution Yard Bay Stripes (2 Static Instanced Draw Calls!)
+    if (isModern) {
+      const yellowMats = [];
+      const whiteMats = [];
+      const pushRoadMark = (arr, wx, wz, sx, sz, yaw = 0) => {
+        const wy = this.getTerrainHeight(wx, wz) + 0.045;
+        _instPos.set(wx, wy, wz);
+        _instEuler.set(0, yaw, 0);
+        _instQuat.setFromEuler(_instEuler);
+        _instScale.set(sx, 0.05, sz);
+        _instLocalMat.compose(_instPos, _instQuat, _instScale);
+        for (let m = 0; m < 16; m++) arr.push(_instLocalMat.elements[m]);
+      };
+
+      // NYC North-South Avenue Yellow Dashes (|x| = 81 & 132)
+      for (const avX of [-132, -81, 81, 132]) {
+        for (let z = -124; z <= 124; z += 10) {
+          if (Math.abs(z) < 12 || Math.abs(Math.abs(z) - 51) < 6 || Math.abs(Math.abs(z) - 91) < 6) continue;
+          pushRoadMark(yellowMats, avX, z, 0.35, 4.6, 0);
+        }
+      }
+      // NYC East-West Cross-Street Yellow Dashes (z = 0, ±51, ±91) + Zebra Crosswalks at Avenue Intersections
+      for (const stZ of [-91, -51, 0, 51, 91]) {
+        for (const sideSign of [-1, 1]) {
+          for (let ax = 44; ax <= 172; ax += 10) {
+            if (Math.abs(ax - 81) < 7 || Math.abs(ax - 132) < 7) continue;
+            pushRoadMark(yellowMats, sideSign * ax, stZ, 4.4, 0.35, 0);
+          }
+          for (const intX of [81, 132]) {
+            const cx = sideSign * intX;
+            for (let bar = -2; bar <= 2; bar++) {
+              pushRoadMark(whiteMats, cx - 7.5, stZ + bar * 1.9, 2.8, 0.65, 0);
+              pushRoadMark(whiteMats, cx + 7.5, stZ + bar * 1.9, 2.8, 0.65, 0);
+              pushRoadMark(whiteMats, cx + bar * 2.1, stZ - 6.8, 0.65, 2.8, 0);
+              pushRoadMark(whiteMats, cx + bar * 2.1, stZ + 6.8, 0.65, 2.8, 0);
+            }
+          }
+        }
+      }
+      // Distribution Centers B (-320, 320) & E (660, 280) Yellow Freight Lane & Loading Bay Stripes
+      for (const [dcX, dcZ] of [
+        [-320, 320],
+        [660, 280]
+      ]) {
+        for (let dz = -44; dz <= 44; dz += 11) {
+          pushRoadMark(yellowMats, dcX - 10, dcZ + dz, 0.35, 5.2, 0);
+          pushRoadMark(yellowMats, dcX + 10, dcZ + dz, 0.35, 5.2, 0);
+        }
+      }
+      // Town Centers A (-660, -280) & D (330, -320) Civic Square Crosswalks
+      for (const [tcX, tcZ] of [
+        [-660, -280],
+        [330, -320]
+      ]) {
+        for (let bar = -2; bar <= 2; bar++) {
+          pushRoadMark(whiteMats, tcX + bar * 2.0, tcZ - 24, 0.65, 3.0, 0);
+          pushRoadMark(whiteMats, tcX + bar * 2.0, tcZ + 24, 0.65, 3.0, 0);
+          pushRoadMark(whiteMats, tcX - 24, tcZ + bar * 2.0, 3.0, 0.65, 0);
+          pushRoadMark(whiteMats, tcX + 24, tcZ + bar * 2.0, 3.0, 0.65, 0);
+        }
+      }
+
+      const unitMarkGeo = markShared(new THREE.BoxGeometry(1, 1, 1));
+      const yellowMarkMat = markShared(new THREE.MeshBasicMaterial({ color: 0xf1c40f }));
+      const whiteMarkMat = markShared(new THREE.MeshBasicMaterial({ color: 0xecf0f1 }));
+      const yellowInst = buildStaticInstancedBatch(unitMarkGeo, yellowMarkMat, yellowMats);
+      const whiteInst = buildStaticInstancedBatch(unitMarkGeo, whiteMarkMat, whiteMats);
+      if (yellowInst) {
+        this.scene.add(yellowInst);
+        if (this._ownedWorldObjects) this._ownedWorldObjects.push(yellowInst);
+      }
+      if (whiteInst) {
+        this.scene.add(whiteInst);
+        if (this._ownedWorldObjects) this._ownedWorldObjects.push(whiteInst);
+      }
+    }
 
     // 1B. Stitched Seamless Continental Horizon Apron (±58,000m = 116 km × 116 km Surround):
     // Shares the exact outer perimeter coordinates & vertex heights of `groundGeo` (±3,800m × ±2,600m)

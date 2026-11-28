@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=146';
-import { TERRAIN } from '../config.js?v=146';
-import { events } from '../events.js?v=146';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=146';
+import { sound } from '../audio.js?v=148';
+import { TERRAIN } from '../config.js?v=148';
+import { events } from '../events.js?v=148';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=148';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;
@@ -1672,11 +1672,17 @@ export const ProjectileManager = {
       }
 
       const g = this.worldToGrid(curPos.x, curPos.y, curPos.z, _tmpGrid);
-      let hitVoxel = this.getVoxel(g.gx, g.gy, g.gz);
-      if (!hitVoxel && segLen > 0.4 && typeof this.raycastVoxel === 'function') {
+      let hitVoxel =
+        this.getVoxel(g.gx, g.gy, g.gz) ||
+        (typeof this.hasSolidSkyscraperHullAt === 'function' &&
+          this.hasSolidSkyscraperHullAt(curPos.x, curPos.y, curPos.z, 0.08, 0.16));
+      if (!hitVoxel && segLen > 0.25 && typeof this.raycastVoxel === 'function') {
         const segVoxelHit = this.raycastVoxel(_projPrevPos, _projSegDir, segLen);
-        if (segVoxelHit && segVoxelHit.voxel) {
-          hitVoxel = segVoxelHit.voxel;
+        if (
+          segVoxelHit &&
+          (segVoxelHit.voxel || segVoxelHit.isSkyscraperCore || segVoxelHit.isElevatedPlatform)
+        ) {
+          hitVoxel = segVoxelHit.voxel || true;
           curPos.copy(segVoxelHit.point);
         }
       }

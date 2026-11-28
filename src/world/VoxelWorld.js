@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=146';
-import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=146';
-import { getMapDefinition } from '../maps/index.js?v=146';
-import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=146';
-import { events, makeEventBridge } from '../events.js?v=146';
-import { TerrainGenerator } from './TerrainGenerator.js?v=146';
-import { BuildingFactory } from './BuildingFactory.js?v=146';
-import { ConquestSystem } from './ConquestSystem.js?v=146';
-import { ProjectileManager } from './ProjectileManager.js?v=146';
-import { WeatherSystem } from './WeatherSystem.js?v=146';
+import { TEXTURES } from '../assets/textures.js?v=148';
+import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=148';
+import { getMapDefinition } from '../maps/index.js?v=148';
+import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=148';
+import { events, makeEventBridge } from '../events.js?v=148';
+import { TerrainGenerator } from './TerrainGenerator.js?v=148';
+import { BuildingFactory } from './BuildingFactory.js?v=148';
+import { ConquestSystem } from './ConquestSystem.js?v=148';
+import { ProjectileManager } from './ProjectileManager.js?v=148';
+import { WeatherSystem } from './WeatherSystem.js?v=148';
 
 export { VOXEL_SIZE, MAT_DEFS };
 
@@ -790,7 +790,7 @@ export class VoxelWorld {
         return null;
       }
 
-      if (hasPlatforms && py > 8.0 && py < 85.0) {
+      if (hasPlatforms && py > 5.0 && py < 118.0) {
         for (let pIdx = 0; pIdx < platforms.length; pIdx++) {
           const plat = platforms[pIdx];
           if (
@@ -804,6 +804,7 @@ export class VoxelWorld {
             return {
               voxel: null,
               isGround: false,
+              isElevatedPlatform: true,
               distance: dist,
               point: new THREE.Vector3(px, py, pz),
               normal: new THREE.Vector3(0, dir.y < 0 ? 1 : -1, 0)
@@ -812,12 +813,12 @@ export class VoxelWorld {
         }
       }
 
-      // Fast O(1) Downtown 3D Hybrid Skyscraper Solid Core hit check (only tested inside Downtown C above 8.5m!)
+      // Fast O(1) 3D Modular Tall Building / Skyscraper Solid Core hit check across all urban & FOB sectors!
       if (
-        py > 8.5 &&
-        py < 96.0 &&
-        Math.abs(px) < 165.0 &&
-        Math.abs(pz) < 135.0 &&
+        py > 5.0 &&
+        py < 125.0 &&
+        Math.abs(px) < 1150.0 &&
+        Math.abs(pz) < 620.0 &&
         Array.isArray(this.skyscraperHullBoxes)
       ) {
         const hulls = this.skyscraperHullBoxes;

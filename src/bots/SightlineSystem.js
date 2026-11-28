@@ -1,5 +1,5 @@
-import { BOT } from '../config.js?v=146';
-import { tmpVec3 } from '../utils/VectorPool.js?v=146';
+import { BOT } from '../config.js?v=148';
+import { tmpVec3 } from '../utils/VectorPool.js?v=148';
 
 /**
  * Multi-Ray "Vision Tube" Sightline Check:
@@ -29,21 +29,32 @@ export function hasClearSightline(bot, targetPos, checkFov = true, targetUnit = 
     (bot.underFireTimer || 0) > 0 ||
     Boolean(bot._squadUnderSniperAlert);
 
-  // 1. Horizontal (150°) + Vertical (±25° unalerted street-patrol gaze) FOV check beyond 14m
-  if (checkFov && dist > BOT.FOV_CHECK_BEYOND && !isAlerted) {
+  const targetFiredUnsuppressed = Boolean(
+    targetUnit &&
+      ((targetUnit.unsuppressedExposureTimer || 0) > 0 ||
+        (targetUnit.spottedTimer || 0) > 0 ||
+        targetUnit.uavRevealed)
+  );
+
+  // 1. Horizontal (150°) + Vertical (±25° street-patrol gaze) FOV check beyond 14m:
+  // Even if street infantry are alerted by horizontal street firefights, they do NOT magically
+  // stare straight up 40m–100m at silent skyscraper roofs unless their squad is under sniper alert
+  // OR the rooftop shooter fired an unsuppressed weapon!
+  if (checkFov && dist > BOT.FOV_CHECK_BEYOND) {
     const horizDist = Math.hypot(dx, dz);
-    if (horizDist > 0.1) {
-      const fwdX = Math.sin(bot.yaw);
-      const fwdZ = Math.cos(bot.yaw);
-      const dot = (dx * fwdX + dz * fwdZ) / horizDist;
-      if (dot < BOT.FOV_BEHIND_DOT) return false;
-      // Unalerted street infantry scan the horizon rather than staring >25° straight up at skyscraper roofs
+    if (!isAlerted) {
+      if (horizDist > 0.1) {
+        const fwdX = Math.sin(bot.yaw);
+        const fwdZ = Math.cos(bot.yaw);
+        const dot = (dx * fwdX + dz * fwdZ) / horizDist;
+        if (dot < BOT.FOV_BEHIND_DOT) return false;
+      }
+    }
+    if (dy > 14.0 && !bot._squadUnderSniperAlert && !targetFiredUnsuppressed) {
       const maxUpTan = bot.role === 'RECON' ? 0.58 : 0.47;
-      if (dy > 14.0 && dy / horizDist > maxUpTan) {
+      if (horizDist <= 0.1 || dy / horizDist > maxUpTan) {
         return false;
       }
-    } else if (dy > 14.0) {
-      return false;
     }
   }
 

@@ -514,7 +514,7 @@
   border: 1px solid rgba(255, 255, 255, 0.15);
   padding: 7px 10px;
   border-radius: 4px;
-  width: 195px;
+  width: 212px;
 }
 
 .health-row {
@@ -581,12 +581,25 @@
 #vitals-paperdoll-wrap {
   flex-shrink: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(6, 12, 18, 0.65);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(6, 12, 18, 0.74);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 4px;
-  padding: 2px 3px;
+  padding: 2px 3px 1px;
+  min-width: 52px;
+}
+
+#vitals-pose-label {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.7px;
+  line-height: 1.05;
+  color: #7bed9f;
+  margin-top: 1px;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .vitals-bars-col {
@@ -2095,14 +2108,14 @@
   position: fixed;
   top: 62px;
   right: 16px;
-  width: 356px;
+  width: 396px;
   max-width: calc(100vw - 32px);
   padding: 9px 11px;
-  background: linear-gradient(145deg, rgba(8, 15, 24, 0.95), rgba(14, 24, 36, 0.93));
+  background: linear-gradient(145deg, rgba(8, 15, 24, 0.96), rgba(14, 24, 36, 0.94));
   border: 1.5px solid rgba(255, 211, 42, 0.68);
   border-left: 4px solid #ffd32a;
   border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.78), 0 0 18px rgba(255, 211, 42, 0.16);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 18px rgba(255, 211, 42, 0.18);
   color: #ecf0f1;
   font-family: 'Rajdhani', 'Segoe UI', sans-serif;
   pointer-events: none;
@@ -2146,59 +2159,107 @@
   flex-wrap: wrap;
 }
 .mm-sub-meta {
-  font-size: 10.5px;
+  font-size: 10px;
   color: #b2bec3;
   font-weight: 700;
 }
 .mm-metrics-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 5px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
   margin-bottom: 6px;
 }
 .mm-metric-box {
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.048);
+  border: 1px solid rgba(255, 255, 255, 0.11);
   border-radius: 4px;
-  padding: 3px 6px;
+  padding: 2.5px 4px;
   text-align: center;
 }
 .mm-metric-val {
-  font-size: 13px;
+  font-size: 11.5px;
   font-weight: 900;
   line-height: 1.15;
+  white-space: nowrap;
 }
 .mm-metric-lbl {
-  font-size: 9px;
+  font-size: 8.5px;
   color: #95a5a6;
   font-weight: 800;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.4px;
 }
 .mm-replay-split {
   display: grid;
-  grid-template-columns: 1fr 74px;
+  grid-template-columns: 1fr 126px;
   gap: 6px;
   align-items: stretch;
   margin-bottom: 6px;
 }
 .mm-traj-wrap {
-  background: rgba(4, 10, 16, 0.86);
-  border: 1px solid rgba(0, 210, 211, 0.32);
+  background: rgba(4, 10, 16, 0.88);
+  border: 1px solid rgba(0, 210, 211, 0.34);
   border-radius: 5px;
   padding: 2px;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
-.mm-anat-wrap {
-  background: rgba(4, 10, 16, 0.86);
-  border: 1px solid rgba(255, 107, 129, 0.35);
+.mm-aspect-wrap {
+  background: rgba(4, 10, 16, 0.88);
+  border: 1px solid rgba(116, 185, 255, 0.34);
   border-radius: 5px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 2px;
+}
+.mm-victims-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 5px;
+  background: rgba(4, 10, 16, 0.88);
+  border: 1px solid rgba(255, 107, 129, 0.35);
+  border-radius: 5px;
+  padding: 4px 6px;
+  margin-bottom: 6px;
+}
+.mm-victim-card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+.mm-victims-strip.is-multikill .mm-victim-card {
+  flex-direction: column;
+  text-align: center;
+  gap: 2px;
+  padding: 3px 3px;
+}
+.mm-victim-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+.mm-victim-name {
+  font-size: 10px;
+  font-weight: 900;
+  color: #ff6b81;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mm-victim-tags {
+  font-size: 8.5px;
+  font-weight: 800;
+  color: #dfe6e9;
+  line-height: 1.15;
 }
 .mm-ribbons-row {
   display: flex;

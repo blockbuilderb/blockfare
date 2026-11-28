@@ -299,11 +299,19 @@ export const WorldMarkers = {
 
     // 2. Friendly Chevrons, Clustered Downed '+' Micro-Dots, and Spotted Enemy Diamonds
     //    (Zero bulky text banners on the horizon — clusters of downed allies merge into a single tiny '+N' dot!)
-    const maxDownedIconDist = isPlayerMedic ? 42 : 28;
+    const activeVehNow = this.player.activeVehicle;
+    const isAirPassengerRide = Boolean(
+      activeVehNow &&
+        activeVehNow.isAircraft &&
+        activeVehNow.rideTask &&
+        activeVehNow.rideTask.active &&
+        activeVehNow.rideTask.phase !== 'RTB_DEPART'
+    );
+    const maxDownedIconDist = isAirPassengerRide ? 0 : isPlayerMedic ? 42 : 28;
     const maxDownedDistSq = maxDownedIconDist * maxDownedIconDist;
-    const maxAllyDistSq = 55 * 55;
-    const maxSpotDistSq = 160 * 160;
-    const maxUavDistSq = 380 * 380;
+    const maxAllyDistSq = isAirPassengerRide ? 18 * 18 : 55 * 55;
+    const maxSpotDistSq = isAirPassengerRide ? 95 * 95 : 160 * 160;
+    const maxUavDistSq = isAirPassengerRide ? 180 * 180 : 380 * 380;
     const plrX = this.player.pos.x;
     const plrY = this.player.pos.y;
     const plrZ = this.player.pos.z;
@@ -530,10 +538,28 @@ export const WorldMarkers = {
     //       100% Transparent Hollow Target Designator (TD) Boxes & Diamonds (Ace Combat / Battlefield 4 style)
     //       so 3D enemy planes and ground vehicles inside the brackets are NEVER blocked by opaque text pills!
     const activeVeh = this.player.activeVehicle;
-    const activeAircraft = activeVeh && activeVeh.isAircraft ? activeVeh : null;
+    const isPassengerRide = Boolean(
+      activeVeh &&
+        activeVeh.rideTask &&
+        activeVeh.rideTask.active &&
+        activeVeh.rideTask.phase !== 'RTB_DEPART'
+    );
+    const activeAircraft =
+      activeVeh && activeVeh.isAircraft && !isPassengerRide ? activeVeh : null;
+    const isHeliAircraft = Boolean(
+      activeAircraft &&
+        (activeAircraft.isHelicopter ||
+          activeAircraft.aircraftRole === 'heli_transport' ||
+          activeAircraft.aircraftRole === 'heli_attack' ||
+          activeAircraft.type === 'heli_transport' ||
+          activeAircraft.type === 'heli_attack')
+    );
     const isAaGround =
-      activeVeh && !activeVeh.isAircraft && (activeVeh.type === 'aa' || activeVeh.type === 'emplace_aa');
-    const isMortarEmplace = activeVeh && activeVeh.type === 'emplace_mortar';
+      !isPassengerRide &&
+      activeVeh &&
+      !activeVeh.isAircraft &&
+      (activeVeh.type === 'aa' || activeVeh.type === 'emplace_aa');
+    const isMortarEmplace = !isPassengerRide && activeVeh && activeVeh.type === 'emplace_mortar';
     const curWep = !activeVeh && this.player.currentWeapon ? this.player.currentWeapon() : null;
     const holdingStinger = Boolean(curWep && curWep.def && curWep.def.type === 'stinger');
 
@@ -672,6 +698,7 @@ export const WorldMarkers = {
           const vDist = Math.round(refPos.distanceTo(v.pos));
 
           if (v.isAircraft) {
+            if (activeAircraft && activeAircraft.aircraftRole === 'heli_transport') continue;
             const vGroundY = this.world ? this.world.getGroundHeightAt(v.pos.x, v.pos.z) : 0;
             const vAltAgl = Math.max(0, v.pos.y - vGroundY);
             if (vAltAgl < 6 && !v.driver && !v.npcDriver && !v.aiPilotActive) continue;
@@ -721,6 +748,7 @@ export const WorldMarkers = {
               if (
                 isEnemy &&
                 !inGunshipOrbitHud &&
+                !isHeliAircraft &&
                 (activeAircraft || isAaGround || holdingStinger) &&
                 vDist < 1950
               ) {
@@ -833,6 +861,7 @@ export const WorldMarkers = {
             const showRadarEeegsLead =
               isEnemy &&
               !v.isShotDown &&
+              !isHeliAircraft &&
               !isGunshipObserver &&
               !isB2Observer &&
               !isCasPassiveFunnel &&

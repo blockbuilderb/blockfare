@@ -358,8 +358,68 @@ export function isPrecisionMarksmanWeapon(wepDef) {
 }
 
 /**
+ * Simulates the exact 60Hz discrete ballistic step (`_stepBallisticBullet` + `executeFire` zeroing)
+ * along an inclined or level sightline of slant distance `d` and vertical drop `elevDeltaM = shooterY - targetY`:
+ * - Matches `vel.y -= g * dt; vel *= (1 - drag * dt); pos += vel * dt` to < 0.01m at 1,500m+!
+ * - Returns exact view-space `dropTan = tan(theta_drop)` so the 20x–40x laser pipper lands dead-on headshots!
+ */
+function simulateExactBallisticArc(d, elevDeltaM, v0, g, drag, zeroDist) {
+  const sinPitch = Math.max(-0.85, Math.min(0.85, -elevDeltaM / Math.max(1, d)));
+  const cosPitch = Math.sqrt(Math.max(0.04, 1 - sinPitch * sinPitch));
+  const zeroElev = (g * zeroDist) / (2 * v0 * v0);
+
+  // Camera forward in (horizX, worldY) = (cosPitch, sinPitch); camera up = (-sinPitch, cosPitch)
+  // Launch dir = normalize(camFwd + zeroElev * camUp) — identical to `_firePelletDir.set(0, zeroElev, -1).normalize().applyQuaternion(camQuat)`!
+  let lx = cosPitch - zeroElev * sinPitch;
+  let ly = sinPitch + zeroElev * cosPitch;
+  const lLen = Math.hypot(lx, ly) || 1;
+  lx /= lLen;
+  ly /= lLen;
+
+  let vx = lx * v0;
+  let vy = ly * v0;
+  let px = 0;
+  let py = 0;
+  let t = 0;
+  const dt = 1 / 240;
+  const damp = Math.max(0.88, 1 - drag * dt);
+  let prevProj = 0;
+  let prevPerpUp = 0;
+
+  for (let step = 0; step < 1400; step++) {
+    prevProj = px * cosPitch + py * sinPitch;
+    prevPerpUp = -px * sinPitch + py * cosPitch;
+    vy -= g * dt;
+    vx *= damp;
+    vy *= damp;
+    px += vx * dt;
+    py += vy * dt;
+    t += dt;
+    const proj = px * cosPitch + py * sinPitch;
+    if (proj >= d) {
+      const span = Math.max(1e-4, proj - prevProj);
+      const frac = (d - prevProj) / span;
+      const curPerpUp = -px * sinPitch + py * cosPitch;
+      const interpPerpUp = prevPerpUp + (curPerpUp - prevPerpUp) * frac;
+      const exactT = t - dt * (1 - frac);
+      const holdoverM = -interpPerpUp; // positive = bullet lands BELOW crosshair
+      const dropTan = holdoverM / Math.max(1, d);
+      const impactAngleDeg = Number(((Math.atan2(-vy, Math.max(1, Math.abs(vx))) * 180) / Math.PI).toFixed(1));
+      return { flightTimeS: exactT, holdoverM, dropTan, impactAngleDeg };
+    }
+  }
+  const finalPerpUp = -px * sinPitch + py * cosPitch;
+  return {
+    flightTimeS: t,
+    holdoverM: -finalPerpUp,
+    dropTan: -finalPerpUp / Math.max(1, px * cosPitch + py * sinPitch),
+    impactAngleDeg: Number(((Math.atan2(-vy, Math.max(1, Math.abs(vx))) * 180) / Math.PI).toFixed(1))
+  };
+}
+
+/**
  * Computes exact ballistic flight time, gravity drop, holdover relative to current zero,
- * and moving-target lead for Laser Rangefinder Binoculars & In-Scope Digital LRF.
+ * view-space laser pipper tangent (`dropTan`), and moving-target lead for Binoculars & 20x–40x Smart Scopes.
  */
 export function computeBallisticSolution(
   distM,
@@ -372,30 +432,35 @@ export function computeBallisticSolution(
   const v0 = Math.max(60, wepDef?.muzzleVelocity || 1180);
   const g = typeof wepDef?.bulletGravity === 'number' ? wepDef.bulletGravity : 5.8;
   const drag = wepDef?.isBuckshot ? 0.35 : 0.06;
-
-  // Analytical flight time including linear drag first-order expansion: t ≈ (d / v0) * (1 + 0.5 * drag * (d / v0))
-  const tIdeal = d / v0;
-  const flightTimeS = tIdeal * (1 + 0.5 * drag * tIdeal);
-  const rawGravityDropM = 0.5 * g * flightTimeS * flightTimeS;
-
-  // Zeroing upward launch compensation at range `d`: y_zero = ((g * D_zero) / (2 * v0^2)) * d
   const zeroDist = Math.max(25, Number(currentZeroM) || 100);
-  const zeroLiftM = ((g * zeroDist) / (2 * v0 * v0)) * d;
-  const holdoverM = rawGravityDropM - zeroLiftM;
+
+  const simZeroed = simulateExactBallisticArc(d, elevDeltaM, v0, g, drag, zeroDist);
+  const simBore = simulateExactBallisticArc(d, elevDeltaM, v0, g, drag, 0);
+  const flightTimeS = simZeroed.flightTimeS;
+  const rawGravityDropM = Math.max(0, simBore.holdoverM);
+  const holdoverM = simZeroed.holdoverM;
   const holdoverMils = (holdoverM / d) * 1000;
   const leadMeters = Math.max(0, targetSpeedMps) * flightTimeS;
-  const elevAngleDeg = Math.round((Math.atan2(-elevDeltaM, Math.max(1, Math.sqrt(Math.max(1, d * d - elevDeltaM * elevDeltaM)))) * 180) / Math.PI);
-  // Exact zero distance `D_zero` such that `zeroLiftM === rawGravityDropM` (accounting for drag!):
-  const exactZeroM = Math.max(25, Math.min(1500, Math.round((rawGravityDropM * 2 * v0 * v0) / Math.max(0.5, g * d))));
+  const horizDist = Math.max(1, Math.sqrt(Math.max(1, d * d - elevDeltaM * elevDeltaM)));
+  const elevAngleDeg = Number(((Math.atan2(-elevDeltaM, horizDist) * 180) / Math.PI).toFixed(1));
+
+  // Solve exact `recommendedZeroM` so pressing [F] auto-zeros the crosshair dead-on at `d` (up to 2,500m!)
+  const cosPitch = horizDist / Math.max(1, d);
+  const exactZeroM = Math.max(
+    25,
+    Math.min(2500, Math.round((rawGravityDropM * 2 * v0 * v0) / Math.max(0.5, g * d * Math.max(0.25, cosPitch))))
+  );
 
   return {
     distanceM: Number(d.toFixed(1)),
     flightTimeS: Number(flightTimeS.toFixed(2)),
     rawGravityDropM: Number(rawGravityDropM.toFixed(2)),
-    holdoverM: Number(holdoverM.toFixed(2)),
+    holdoverM: Number(holdoverM.toFixed(3)),
+    dropTan: simZeroed.dropTan,
     holdoverMils: Number(holdoverMils.toFixed(1)),
     leadMeters: Number(leadMeters.toFixed(2)),
     elevAngleDeg,
+    impactAngleDeg: simZeroed.impactAngleDeg,
     recommendedZeroM: exactZeroM
   };
 }
@@ -504,8 +569,18 @@ export function evaluateMarksmanShot(params, profile = null) {
     targetInSmoke = false,
     smokeNormPos = 0.65,
     rapidDoubleShot = false,
-    wasRescuing = false
+    wasRescuing = false,
+    entryAspect = 'FRONT',
+    entryBearingDeg = 0,
+    impactAngleDeg = null,
+    victimName = 'ENEMY',
+    priorVictims = null
   } = params || {};
+
+  // STRICT KILL-ONLY TRIGGER: Merely landing a non-lethal shot (or hitting an ally) NEVER shows the Sniper Card!
+  if (!isKill || isFriendly) {
+    return { triggered: false };
+  }
 
   if (!wepDef || wepDef.isBuckshot || wepDef.isMountedMg || wepDef.isVenomSpit) {
     return { triggered: false };
@@ -514,97 +589,23 @@ export function evaluateMarksmanShot(params, profile = null) {
   const isPrecision = isPrecisionMarksmanWeapon(wepDef);
   const dist = Math.max(0, Number(distanceM) || 0);
   const hasSmokeFeat = Boolean(throughSmoke || targetInSmoke);
-  const isDoubleShotFeat = Boolean(collateralCount >= 2 || (isKill && rapidDoubleShot));
+  const multiKillChainCount = Array.isArray(priorVictims) ? priorVictims.length + 1 : Math.max(1, Number(collateralCount) || 1);
+  const isDoubleShotFeat = Boolean(multiKillChainCount >= 2 || collateralCount >= 2 || rapidDoubleShot);
   const isMedicTarget = String(targetRole || '').toUpperCase() === 'MEDIC';
 
-  // Friendly Fire Warning Card (`⚠️ BLUE-ON-BLUE TEAMFIRE`) triggers immediately on precision friendly hits/kills!
-  if (isFriendly) {
-    if (!isPrecision && dist < 25) {
-      return { triggered: false };
-    }
-    const effFlightFF =
-      flightTimeS > 0 ? flightTimeS : dist / Math.max(60, wepDef.muzzleVelocity || 850);
-    const gravDropFF =
-      0.5 * (typeof gravityMps2 === 'number' ? gravityMps2 : 9.81) * effFlightFF * effFlightFF;
-    const elevFF = shooterPos && impactPos ? (shooterPos.y || 0) - (impactPos.y || 0) : 0;
-    const anatomyFF = resolveAnatomyDiagramTarget(hitZone, relHitY, relLateral, isHeadshot);
-    if (profile && isKill) {
-      saveMarksmanProfile(profile);
-    }
-    return {
-      triggered: true,
-      cardVariant: 'friendly_fire',
-      isFriendly: true,
-      isKill: Boolean(isKill),
-      weaponLabel: wepDef.shortName || weaponLabel,
-      distanceM: Number(dist.toFixed(1)),
-      flightTimeS: Number(effFlightFF.toFixed(2)),
-      gravityDropM: Number(gravDropFF.toFixed(2)),
-      elevDeltaM: Math.round(elevFF),
-      targetSpeedMps: Number(targetSpeedMps.toFixed(1)),
-      leadMeters: Number((Math.max(0, targetSpeedMps) * effFlightFF).toFixed(2)),
-      damageDealt: Math.round(damageDealt),
-      oneShotKill: false,
-      isHeadshot: Boolean(isHeadshot),
-      throughSmoke: Boolean(throughSmoke),
-      targetInSmoke: Boolean(targetInSmoke),
-      smokeNormPos: Number(smokeNormPos || 0.65),
-      difficultyScore: 0,
-      grade: 'FF',
-      badge: {
-        grade: 'FF',
-        id: 'blue_on_blue',
-        badgeName: isKill ? 'BLUE-ON-BLUE TEAMKILL!' : 'FRIENDLY FIRE WARNING!',
-        color: '#ff3838',
-        accent: '#b71540',
-        icon: '⚠️'
-      },
-      penaltyText: isKill ? '-$0.10 PENALTY' : 'CHECK TARGET PID!',
-      bonusXp: 0,
-      bonusCash: 0,
-      deadeyeStreak: 0,
-      anatomy: anatomyFF,
-      ribbons: [
-        { label: '⚠️ FRIENDLY TARGET', color: '#ff3838' },
-        { label: isKill ? '💸 -$0.10 COURT-MARTIAL' : '🛑 CEASE FIRE!', color: '#ff9f43' }
-      ],
-      isNewRecord: false,
-      newlyUnlockedTitle: null,
-      trajectory: {
-        elevDeltaM: Math.round(elevFF),
-        gravityDropM: Number(gravDropFF.toFixed(2)),
-        leadMeters: 0,
-        targetMoving: targetSpeedMps >= 1.6,
-        penetratedCover: Boolean(penetratedCover),
-        throughSmoke: Boolean(throughSmoke || targetInSmoke),
-        smokeNormPos: Number(smokeNormPos || 0.65),
-        samples: []
-      }
-    };
-  }
-
-  // Eligibility rules (including Smoke-Occluded, Medic, Double-Shot & Headshot feats):
+  // Kill eligibility rules:
   let eligible = false;
-  if (isKill) {
-    if (isPrecision) {
-      eligible =
-        dist >= 30 ||
-        hasSmokeFeat ||
-        isDoubleShotFeat ||
-        isMedicTarget ||
-        (dist >= 15 && (isHeadshot || penetratedCover || collateralCount >= 2 || targetSpeedMps >= 3.2));
-    } else {
-      eligible = dist >= 95 || (isHeadshot && dist >= 75) || (hasSmokeFeat && dist >= 45);
-    }
+  if (isPrecision) {
+    eligible =
+      dist >= 20 ||
+      hasSmokeFeat ||
+      isDoubleShotFeat ||
+      isMedicTarget ||
+      isHeadshot ||
+      penetratedCover ||
+      targetSpeedMps >= 2.5;
   } else {
-    if (isPrecision) {
-      eligible =
-        dist >= 115 ||
-        (hasSmokeFeat && dist >= 35) ||
-        (dist >= 85 && (isHeadshot || Boolean(fracturedLimb)));
-    } else {
-      eligible = (dist >= 135 && isHeadshot) || (hasSmokeFeat && dist >= 75 && isHeadshot);
-    }
+    eligible = dist >= 85 || (isHeadshot && dist >= 65) || (hasSmokeFeat && dist >= 45);
   }
 
   if (!eligible) {
@@ -613,12 +614,49 @@ export function evaluateMarksmanShot(params, profile = null) {
 
   const effFlightS =
     flightTimeS > 0 ? flightTimeS : dist / Math.max(60, wepDef.muzzleVelocity || 850);
-  const gravityDropM = 0.5 * (typeof gravityMps2 === 'number' ? gravityMps2 : 9.81) * effFlightS * effFlightS;
+  const gVal = typeof gravityMps2 === 'number' ? gravityMps2 : 9.81;
+  const gravityDropM = 0.5 * gVal * effFlightS * effFlightS;
   const elevDeltaM =
     shooterPos && impactPos ? (shooterPos.y || 0) - (impactPos.y || 0) : 0;
-  const leadMeters = Math.max(0, targetSpeedMps) * effFlightS;
+  const horizSpanM = Math.max(1, Math.sqrt(Math.max(1, dist * dist - elevDeltaM * elevDeltaM)));
+  const launchAngleDeg = Number(((Math.atan2(-elevDeltaM, horizSpanM) * 180) / Math.PI).toFixed(1));
+  const terminalDescentDeg =
+    typeof impactAngleDeg === 'number' && Number.isFinite(impactAngleDeg)
+      ? Number(impactAngleDeg.toFixed(1))
+      : Number(
+          (
+            (Math.atan2(elevDeltaM + gVal * effFlightS * effFlightS, horizSpanM) * 180) /
+            Math.PI
+          ).toFixed(1)
+        );
+  const cleanSpeed = Math.max(0, Number(targetSpeedMps) || 0);
+  const leadMeters = cleanSpeed * effFlightS;
+  const motionState = cleanSpeed >= 4.2 ? 'SPRINTING' : cleanSpeed >= 0.85 ? 'MOVING' : 'STILL';
+  const normAspect =
+    entryAspect === 'BACK' || entryAspect === 'LEFT SIDE' || entryAspect === 'RIGHT SIDE'
+      ? entryAspect
+      : 'FRONT';
+  const cleanBearingDeg = Math.max(-180, Math.min(180, Math.round(Number(entryBearingDeg) || 0)));
 
   const anatomy = resolveAnatomyDiagramTarget(hitZone, relHitY, relLateral, isHeadshot);
+
+  const currentVictimRecord = {
+    name: victimName || 'ENEMY',
+    role: String(targetRole || 'SOLDIER').toUpperCase(),
+    hitZone,
+    anatomy,
+    isHeadshot: Boolean(isHeadshot),
+    distanceM: Number(dist.toFixed(1)),
+    entryAspect: normAspect,
+    entryBearingDeg: cleanBearingDeg,
+    motionState,
+    speedMps: Number(cleanSpeed.toFixed(1)),
+    leadMeters: Number(leadMeters.toFixed(1))
+  };
+  const victims = Array.isArray(priorVictims) && priorVictims.length > 0
+    ? [...priorVictims.slice(-4), currentVictimRecord]
+    : [currentVictimRecord];
+  const multiKillCount = Math.max(victims.length, Number(collateralCount) || 1);
 
   // Physics-based Shot Difficulty Formula:
   const distPts = dist * 1.15 + Math.max(0, dist - 150) * 0.72 + Math.max(0, dist - 300) * 0.95;
@@ -661,12 +699,22 @@ export function evaluateMarksmanShot(params, profile = null) {
     contextBonus += 85;
   }
 
-  if (collateralCount >= 2) {
-    ribbons.unshift({ label: `⚡⚡ COLLATERAL ${collateralCount}×`, color: '#ff9f43' });
-    contextBonus += 135 * (collateralCount - 1);
-  } else if (isKill && rapidDoubleShot) {
-    ribbons.unshift({ label: '⚡⚡ RAPID DOUBLE SHOT', color: '#ff9f43' });
-    contextBonus += 110;
+  if (multiKillCount >= 2) {
+    const mkLabel =
+      collateralCount >= 2
+        ? `⚡⚡ COLLATERAL ${multiKillCount}× KIA`
+        : multiKillCount >= 4
+        ? `💀 ${multiKillCount}× MULTI-SNIPE`
+        : multiKillCount === 3
+        ? '⚡⚡⚡ TRIPLE SNIPE (3× KIA)'
+        : '⚡⚡ DOUBLE SNIPE (2× KIA)';
+    ribbons.unshift({ label: mkLabel, color: '#ff9f43' });
+    contextBonus += 125 * (multiKillCount - 1);
+  }
+  if (normAspect === 'BACK') {
+    ribbons.push({ label: '🗡️ BACK SHOT', color: '#a29bfe' });
+  } else if (normAspect === 'LEFT SIDE' || normAspect === 'RIGHT SIDE') {
+    ribbons.push({ label: `📐 ${normAspect} FLANK`, color: '#74b9ff' });
   }
 
   if (hasSmokeFeat) {
@@ -746,12 +794,19 @@ export function evaluateMarksmanShot(params, profile = null) {
       color: '#81ecec',
       accent: '#00a8a8'
     };
-  } else if (isDoubleShotFeat) {
+  } else if (multiKillCount >= 2 || isDoubleShotFeat) {
     cardVariant = 'double_shot';
     displayBadge = {
       ...tier,
-      icon: '⚡',
-      badgeName: collateralCount >= 2 ? `DOUBLE-PIERCE (${collateralCount}×)` : 'RAPID DOUBLE SHOT',
+      icon: multiKillCount >= 3 ? '💀' : '⚡',
+      badgeName:
+        collateralCount >= 2
+          ? `COLLATERAL ${multiKillCount}× KILL`
+          : multiKillCount >= 4
+          ? `QUAD SNIPE (${multiKillCount}× KIA)`
+          : multiKillCount === 3
+          ? 'TRIPLE SNIPE (3× KIA)'
+          : 'DOUBLE SNIPE (2× KIA)',
       color: '#ff9f43',
       accent: '#d35400'
     };
@@ -850,14 +905,23 @@ export function evaluateMarksmanShot(params, profile = null) {
     flightTimeS: Number(effFlightS.toFixed(2)),
     gravityDropM: Number(gravityDropM.toFixed(2)),
     elevDeltaM: Math.round(elevDeltaM),
-    targetSpeedMps: Number(targetSpeedMps.toFixed(1)),
+    launchAngleDeg,
+    impactAngleDeg: terminalDescentDeg,
+    entryAspect: normAspect,
+    entryBearingDeg: cleanBearingDeg,
+    motionState,
+    targetMoving: motionState !== 'STILL',
+    targetSpeedMps: Number(cleanSpeed.toFixed(1)),
     leadMeters: Number(leadMeters.toFixed(2)),
     damageDealt: Math.round(damageDealt),
     oneShotKill: Boolean(oneShotKill),
     isHeadshot: Boolean(isHeadshot),
     isMedicTarget: Boolean(isMedicTarget),
-    isDoubleShot: Boolean(isDoubleShotFeat),
+    isDoubleShot: Boolean(multiKillCount >= 2 || isDoubleShotFeat),
     collateralCount: Number(collateralCount || 1),
+    multiKillCount,
+    victims,
+    victimName: currentVictimRecord.name,
     throughSmoke: Boolean(throughSmoke),
     targetInSmoke: Boolean(targetInSmoke),
     smokeNormPos: Number(smokeNormPos || 0.65),

@@ -1,21 +1,21 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT, FORMATION, SQUAD_KIT_CAPS } from '../config.js?v=146';
-import { sound } from '../audio.js?v=146';
-import { tmpVec3 } from '../utils/VectorPool.js?v=146';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=146';
-import { events, makeEventBridge } from '../events.js?v=146';
+import { BOT, FORMATION, SQUAD_KIT_CAPS } from '../config.js?v=148';
+import { sound } from '../audio.js?v=148';
+import { tmpVec3 } from '../utils/VectorPool.js?v=148';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=148';
+import { events, makeEventBridge } from '../events.js?v=148';
 import {
   createSoldierMesh,
   updateSoldierEquippedWeapon,
   getDefaultWeaponIdForRole
-} from './SoldierMeshFactory.js?v=146';
-import { SightlineMethods } from './SightlineSystem.js?v=146';
-import { MedicAIMethods } from './MedicAI.js?v=146';
-import { BotAIMethods } from './BotAI.js?v=146';
+} from './SoldierMeshFactory.js?v=148';
+import { SightlineMethods } from './SightlineSystem.js?v=148';
+import { MedicAIMethods } from './MedicAI.js?v=148';
+import { BotAIMethods } from './BotAI.js?v=148';
 import {
   createBaseProtectionFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=146';
+} from '../core/StateMachines.js?v=148';
 
 const BOT_NAMES_US = [
   'SgtOkiDoki', 'WakistanVet', 'VoxelMedic', 'EagleOne', 'BlockBuster',

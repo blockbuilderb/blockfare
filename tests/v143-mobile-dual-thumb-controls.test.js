@@ -5,8 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import * as THREE from '../vendor/three.module.js';
-import { PlayerController } from '../src/player/PlayerController.js?v=146';
-import { MobileTouchControls } from '../src/ui/MobileTouchControls.js?v=146';
+import { PlayerController } from '../src/player/PlayerController.js?v=148';
+import { MobileTouchControls } from '../src/ui/MobileTouchControls.js?v=148';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');

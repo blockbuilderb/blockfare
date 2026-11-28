@@ -5,9 +5,9 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=146';
-import { WEAPON_DEFS } from '../assets/weapon-defs.js?v=146';
-import { createWeaponViewModel } from './weapon-model.js?v=146';
+import { TEXTURES } from '../assets/textures.js?v=148';
+import { WEAPON_DEFS } from '../assets/weapon-defs.js?v=148';
+import { createWeaponViewModel } from './weapon-model.js?v=148';
 
 export function getDefaultWeaponIdForRole(team = 'US', role = 'ASSAULT') {
   const r = String(role || 'ASSAULT').toUpperCase();

@@ -415,9 +415,11 @@ export const WeatherSystem = {
     // fog density scales smoothly with actual height above ground so cutting your chute NEVER hides the valley!
     let viewerY = 0;
     let isAirborneEntity = false;
+    let activeCamFov = 75;
     if (typeof window !== 'undefined' && window.game && window.game.player) {
       const p = window.game.player;
       viewerY = p.camera?.position?.y || p.pos?.y || 0;
+      activeCamFov = p.camera?.fov || 75;
       isAirborneEntity = Boolean(
         (p.activeVehicle && p.activeVehicle.isAircraft) || p.parachuting || p.parachuteCut || viewerY > 32
       );
@@ -428,6 +430,12 @@ export const WeatherSystem = {
       const altAtten = 1 / (1 + altAboveValley * 0.018);
       const maxAirFog = viewerY > 380 ? 0.00016 : 0.00042;
       targetDensity = Math.min(maxAirFog, targetDensity * altAtten);
+    }
+    // Telephoto Optic Clarity: High-zoom scopes (20x–40x) & panoramic binoculars (16x–64x) cut through valley mist
+    // so targets at 1,500m–3,500m remain sharp and legible instead of washing out in distance fog!
+    if (activeCamFov < 20) {
+      const zoomFogScale = Math.max(0.16, activeCamFov / 26);
+      targetDensity *= zoomFogScale;
     }
 
     // Soft Cloud-Core Vapor Immersion when flying a jet right through a cumulus cloud!
@@ -461,7 +469,7 @@ export const WeatherSystem = {
       this.scene.fog.density = THREE.MathUtils.lerp(
         currentDensity,
         targetDensity,
-        dt * (isAirborneEntity ? 5.0 : 1.2)
+        dt * (isAirborneEntity || activeCamFov < 20 ? 5.5 : 1.2)
       );
 
       // Restore fog color in-place when clearing

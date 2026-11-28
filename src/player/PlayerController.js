@@ -1,26 +1,26 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=146';
-import { sound } from '../audio.js?v=146';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=146';
+import { VOXEL_SIZE } from '../world.js?v=148';
+import { sound } from '../audio.js?v=148';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=148';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=146';
+} from '../utils/KeyboardShortcuts.js?v=148';
 import {
   animateBowOrCrossbowMesh,
   getWeaponHipOffsetX,
   updateFirstPersonArmShoulders
-} from '../models/weapon-model.js?v=146';
-import { events, makeEventBridge } from '../events.js?v=146';
-import { GunsmithMethods } from './GunsmithState.js?v=146';
-import { FortificationMethods } from './FortificationBuilder.js?v=146';
-import { CommanderMethods } from './CommanderAbilities.js?v=146';
-import { VehicleControlMethods } from './VehicleControl.js?v=146';
-import { CombatMethods } from './PlayerCombat.js?v=146';
-import { loadMarksmanProfile } from './MarksmanSystem.js?v=146';
+} from '../models/weapon-model.js?v=148';
+import { events, makeEventBridge } from '../events.js?v=148';
+import { GunsmithMethods } from './GunsmithState.js?v=148';
+import { FortificationMethods } from './FortificationBuilder.js?v=148';
+import { CommanderMethods } from './CommanderAbilities.js?v=148';
+import { VehicleControlMethods } from './VehicleControl.js?v=148';
+import { CombatMethods } from './PlayerCombat.js?v=148';
+import { loadMarksmanProfile } from './MarksmanSystem.js?v=148';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -28,7 +28,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=146';
+} from '../core/StateMachines.js?v=148';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -1695,6 +1695,9 @@ export class PlayerController {
         this.keys[k] = false;
       }
       this.isFiring = false;
+      this._rightMouseHeld = false;
+      this._macCtrlAimHeld = false;
+      this._semiTriggerArmed = true;
     });
 
     window.addEventListener('wheel', (e) => {
@@ -1859,9 +1862,11 @@ export class PlayerController {
       }
       if (e.button === 2 || isMacCtrlClick) {
         e.preventDefault();
+        this._macCtrlAimHeld = Boolean(isMacCtrlClick);
         this.handleSecondaryAimDown();
       } else if (e.button === 0) {
         this.isFiring = true;
+        this._semiTriggerArmed = true;
         if (!this.activeVehicle) {
           this.tryFireSingle();
         }
@@ -1869,10 +1874,15 @@ export class PlayerController {
     });
 
     window.addEventListener('mouseup', (e) => {
-      if (e.button === 0 && !this._rightMouseHeld) {
+      if (e.button === 0) {
         this.isFiring = false;
-      }
-      if (e.button === 2 || (this._rightMouseHeld && e.button === 0)) {
+        this._semiTriggerArmed = true;
+        if (this._macCtrlAimHeld) {
+          this._macCtrlAimHeld = false;
+          this.handleSecondaryAimUp();
+        }
+      } else if (e.button === 2) {
+        this._macCtrlAimHeld = false;
         this.handleSecondaryAimUp();
       }
     });
@@ -3338,7 +3348,10 @@ export class PlayerController {
       this.swayY += (Math.random() - 0.5) * flinchMag;
     }
 
-    // Multi-kill timer decay
+    // Multi-kill & unsuppressed acoustic/muzzle exposure timer decay
+    if ((this.unsuppressedExposureTimer || 0) > 0) {
+      this.unsuppressedExposureTimer = Math.max(0, this.unsuppressedExposureTimer - dt);
+    }
     if (this.multiKillTimer > 0) {
       this.multiKillTimer -= dt;
       if (this.multiKillTimer <= 0) {
@@ -3364,13 +3377,25 @@ export class PlayerController {
     this.lastShakePitch = shakePitch;
     this.syncCameraTransform();
 
+    if (!this.isFiring) {
+      this._semiTriggerArmed = true;
+    }
+
     // Execute full-auto fire AFTER camera position & rotation are updated for this frame
     // (Sub-frame accumulator catch-up ensures identical RPM at 20 FPS, 60 FPS, and 240 FPS!)
+    // Sniper rifles, DMRs, and Anti-Materiel Rifles are strictly excluded from full-auto loops.
+    const canFullAutoLoop = Boolean(
+      cur &&
+        cur.def.auto &&
+        !cur.def.isBoltSniper &&
+        !cur.def.isAntiMateriel &&
+        cur.def.weaponCategory !== 'sniper' &&
+        cur.def.weaponCategory !== 'marksman'
+    );
     let autoCatchUp = 0;
     while (
       this.isFiring &&
-      cur &&
-      cur.def.auto &&
+      canFullAutoLoop &&
       !this.reloading &&
       this.fireTimer <= 0 &&
       (cur.clip > 0 || autoCatchUp === 0) &&
