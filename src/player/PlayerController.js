@@ -1,26 +1,26 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=149';
-import { sound } from '../audio.js?v=149';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=149';
+import { VOXEL_SIZE } from '../world.js?v=150';
+import { sound } from '../audio.js?v=150';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=150';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=149';
+} from '../utils/KeyboardShortcuts.js?v=150';
 import {
   animateBowOrCrossbowMesh,
   getWeaponHipOffsetX,
   updateFirstPersonArmShoulders
-} from '../models/weapon-model.js?v=149';
-import { events, makeEventBridge } from '../events.js?v=149';
-import { GunsmithMethods } from './GunsmithState.js?v=149';
-import { FortificationMethods } from './FortificationBuilder.js?v=149';
-import { CommanderMethods } from './CommanderAbilities.js?v=149';
-import { VehicleControlMethods } from './VehicleControl.js?v=149';
-import { CombatMethods } from './PlayerCombat.js?v=149';
-import { loadMarksmanProfile } from './MarksmanSystem.js?v=149';
+} from '../models/weapon-model.js?v=150';
+import { events, makeEventBridge } from '../events.js?v=150';
+import { GunsmithMethods } from './GunsmithState.js?v=150';
+import { FortificationMethods } from './FortificationBuilder.js?v=150';
+import { CommanderMethods } from './CommanderAbilities.js?v=150';
+import { VehicleControlMethods } from './VehicleControl.js?v=150';
+import { CombatMethods } from './PlayerCombat.js?v=150';
+import { loadMarksmanProfile } from './MarksmanSystem.js?v=150';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -28,7 +28,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=149';
+} from '../core/StateMachines.js?v=150';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {

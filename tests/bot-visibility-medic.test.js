@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { BOT } from '../src/config.js?v=149';
-import { sound } from '../src/audio.js?v=149';
-import { BotManager } from '../src/bots/BotManager.js?v=149';
-import { BotAIMethods } from '../src/bots/BotAI.js?v=149';
-import { MedicAIMethods } from '../src/bots/MedicAI.js?v=149';
+import { BOT } from '../src/config.js?v=150';
+import { sound } from '../src/audio.js?v=150';
+import { BotManager } from '../src/bots/BotManager.js?v=150';
+import { BotAIMethods } from '../src/bots/BotAI.js?v=150';
+import { MedicAIMethods } from '../src/bots/MedicAI.js?v=150';
 import {
   MEDIC_RESCUE_EVENTS,
   MEDIC_RESCUE_STATES,
   createMedicRescueFSM
-} from '../src/core/StateMachines.js?v=149';
+} from '../src/core/StateMachines.js?v=150';
 
 function createMockWorld(overrides = {}) {
   const voxels = new Map();

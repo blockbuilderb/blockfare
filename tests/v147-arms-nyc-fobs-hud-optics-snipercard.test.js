@@ -8,16 +8,16 @@ import {
   createWeaponViewModel,
   getWeaponHipOffsetX,
   updateFirstPersonArmShoulders
-} from '../src/models/weapon-model.js?v=149';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=149';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=149';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=149';
+} from '../src/models/weapon-model.js?v=150';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=150';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=150';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=150';
 import {
   computeBallisticSolution,
   evaluateMarksmanShot
-} from '../src/player/MarksmanSystem.js?v=149';
-import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=149';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=149';
+} from '../src/player/MarksmanSystem.js?v=150';
+import { FRUGIS_RIVER_MAP } from '../src/maps/frugis-river.js?v=150';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=150';
 
 const ROOT = process.cwd();
 

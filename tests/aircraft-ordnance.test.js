@@ -1,14 +1,14 @@
 import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { sound } from '../src/audio.js?v=149';
-import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=149';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=149';
-import { VehicleManager } from '../src/vehicles.js?v=149';
-import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=149';
-import { createVehicleMesh } from '../src/models/vehicle-model.js?v=149';
-import { BotManager, SQUAD_DEFS } from '../src/bots/BotManager.js?v=149';
-import { SQUAD_KIT_CAPS } from '../src/config.js?v=149';
+import { sound } from '../src/audio.js?v=150';
+import { createAircraftFlightFSM, createVehicleSubsystemsFSM } from '../src/core/StateMachines.js?v=150';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=150';
+import { VehicleManager } from '../src/vehicles.js?v=150';
+import { ProjectileManager as ProjectileManagerMethods } from '../src/world/ProjectileManager.js?v=150';
+import { createVehicleMesh } from '../src/models/vehicle-model.js?v=150';
+import { BotManager, SQUAD_DEFS } from '../src/bots/BotManager.js?v=150';
+import { SQUAD_KIT_CAPS } from '../src/config.js?v=150';
 
 let createdWindowShim = false;
 let prevMuted = false;
@@ -1540,7 +1540,7 @@ test('v125.1 Real-World Doctrine: AC-130 105mm HE immobilizes MBT (~4-5 hits) & 
 //       Fast-Rope Insertions & Downtown FOB C High-Rise Skyline
 // ============================================================================
 test('v127.1 Helicopters (UH-60M/Mi-8 Transport & AH-64E/Ka-52 Attack) + 6x6 Troop Trucks: models, seats, Recon access, AI convoys & 2-hit Hellfire/Vikhr ATGM', async () => {
-  const { FRUGIS_RIVER_MAP } = await import('../src/maps/frugis-river.js?v=149');
+  const { FRUGIS_RIVER_MAP } = await import('../src/maps/frugis-river.js?v=150');
   const scene = new THREE.Scene();
   const contestedFlagC = {
     id: 'C',

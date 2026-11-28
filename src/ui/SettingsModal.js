@@ -1,4 +1,5 @@
-import { sound } from '../audio.js?v=149';
+import { sound } from '../audio.js?v=150';
+import { DEV_OPTIONS } from '../config.js?v=150';
 
 export const SettingsModal = {
   bindSettingsEvents() {
@@ -21,6 +22,32 @@ export const SettingsModal = {
         const modal = this.el('settings-modal');
         if (modal) {
           this.toggleSettingsModal(false);
+        }
+        return;
+      }
+      const modal = this.el('settings-modal');
+      const devAllowed =
+        DEV_OPTIONS.ENABLE_DEV_TAB_MASTER !== false &&
+        (this.player?.isDevTabEnabled
+          ? this.player.isDevTabEnabled()
+          : DEV_OPTIONS.DEFAULT_DEV_TAB_ENABLED !== false);
+      if (
+        modal &&
+        devAllowed &&
+        this._settingsActiveTab === 'developer' &&
+        document.activeElement?.id !== 'dev-code-text-input'
+      ) {
+        if (
+          e.code === 'ArrowLeft' ||
+          e.code === 'ArrowRight' ||
+          e.code === 'ArrowUp' ||
+          e.code === 'ArrowDown'
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          const res = this.player?.feedDevCodeInput?.(e.code);
+          sound.playRadioBeep?.(Boolean(res?.matched));
+          this.renderSettingsModalContent(modal);
         }
       }
     });
@@ -161,6 +188,24 @@ export const SettingsModal = {
   renderSettingsModalContent(modal) {
     if (!modal) return;
 
+    const mpHostLockedDevOff = Boolean(
+      this.network?.isMultiplayer?.() &&
+        typeof this.network.isLocalAdmin === 'function' &&
+        !this.network.isLocalAdmin() &&
+        this.network.roomAllowDevOptions === false
+    );
+    const masterHardDisabled = DEV_OPTIONS.ENABLE_DEV_TAB_MASTER === false;
+    const devTabEnabled = Boolean(
+      !masterHardDisabled &&
+        !mpHostLockedDevOff &&
+        (this.player?.isDevTabEnabled
+          ? this.player.isDevTabEnabled()
+          : DEV_OPTIONS.DEFAULT_DEV_TAB_ENABLED !== false)
+    );
+    if (!devTabEnabled && this._settingsActiveTab === 'developer') {
+      this._settingsActiveTab = 'gameplay';
+    }
+
     const tab = this._settingsActiveTab || 'audio';
     const masterVol = sound.getVolume('master');
     const weaponsVol = sound.getVolume('weapons');
@@ -177,7 +222,8 @@ export const SettingsModal = {
     const squadDoctrineEnabled = this.player ? this.player.squadDoctrineEnabled !== false : true;
     const ffEnabled = Boolean(this.player && this.player.friendlyFireEnabled);
     const deathCamOn = Boolean(this.player?.deathCamEnabled);
-    const uncappedFps = window.game?.uncappedFps !== false;
+    const uncappedFps =
+      typeof window !== 'undefined' ? window.game?.uncappedFps !== false : true;
     const showFpsOn = this.showFps !== false;
 
     const renderSliderCard = (id, label, val, accent = '#00cec9', extraBtnHtml = '') => `
@@ -333,6 +379,21 @@ export const SettingsModal = {
           'OFF (360° Rolls)',
           '#00d2d3'
         )}
+        ${
+          !masterHardDisabled
+            ? renderToggleRow(
+                '🛠️ Developer Options Tab',
+                mpHostLockedDevOff
+                  ? 'Locked OFF by Server Host Admin for realistic balance'
+                  : 'Show/hide sandbox cheat console (Turn OFF for realistic balance)',
+                'settings-dev-tab-toggle-btn',
+                devTabEnabled,
+                'ON (Sandbox)',
+                mpHostLockedDevOff ? '🔒 HOST OFF' : 'OFF (Realistic)',
+                '#f39c12'
+              )
+            : ''
+        }
 
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;background:rgba(16,25,36,0.9);border:1px solid rgba(255,255,255,0.1);border-radius:6px;padding:7px 10px;flex-wrap:wrap;">
           <span style="font-size:11.5px;font-weight:900;color:#f1c40f;">🪖 AI Army Scale</span>
@@ -419,21 +480,98 @@ export const SettingsModal = {
       </div>
     `;
 
+    const devCodeSeq = Array.isArray(this.player?._devCodeSeq) ? this.player._devCodeSeq : [];
+    const devNukeUnlocked = Boolean(this.player?.devNukeCodeUnlocked);
+    const devNukeActive = Boolean(this.player?.devNukeAmmoEnabled);
+    const seqSlotsHtml = ['←', '→', '←', '→', '↑', '↓']
+      .map((sym, idx) => {
+        const lit = devNukeUnlocked || idx < devCodeSeq.length;
+        return `<div class="dev-seq-slot" data-seq-idx="${idx}" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:15px;font-weight:900;border:1.5px solid ${
+          lit ? '#ffd32a' : 'rgba(255,255,255,0.18)'
+        };background:${
+          lit ? 'rgba(241,196,15,0.26)' : 'rgba(9,15,24,0.9)'
+        };color:${lit ? '#ffd32a' : '#64748b'};">${lit ? sym : '•'}</div>`;
+      })
+      .join('');
+
+    const developerBodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:9px;">
+        <div style="background:rgba(16,26,38,0.94);border:1.5px solid ${
+          devNukeActive ? '#ffd32a' : 'rgba(0,206,201,0.45)'
+        };border-radius:8px;padding:11px 13px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+            <div>
+              <div style="font-size:13px;font-weight:900;color:#ffd32a;letter-spacing:0.6px;">🛠️ DEVELOPER SECRET CODE CONSOLE</div>
+              <div style="font-size:10px;color:#94a3b8;">Press Arrow Keys (or click D-Pad / type sequence below) to unlock Developer Sandbox Cheats</div>
+            </div>
+            <span id="dev-code-status-pill" style="font-size:10px;font-weight:900;padding:3px 8px;border-radius:4px;background:${
+              devNukeActive
+                ? 'rgba(46,204,113,0.24)'
+                : devNukeUnlocked
+                ? 'rgba(241,196,15,0.2)'
+                : 'rgba(255,255,255,0.08)'
+            };border:1px solid ${
+              devNukeActive ? '#2ecc71' : devNukeUnlocked ? '#f1c40f' : 'rgba(255,255,255,0.2)'
+            };color:${devNukeActive ? '#7bed9f' : devNukeUnlocked ? '#ffd32a' : '#cbd5e1'};">
+              ${devNukeActive ? '☢️ NUKE AMMO ACTIVE' : devNukeUnlocked ? '🔓 UNLOCKED' : `SEQUENCE: ${devCodeSeq.length}/6`}
+            </span>
+          </div>
+
+          <div style="display:flex;gap:6px;justify-content:center;margin:8px 0;">
+            ${seqSlotsHtml}
+          </div>
+
+          <div style="display:flex;gap:6px;justify-content:center;margin-bottom:8px;flex-wrap:wrap;">
+            <button type="button" class="dev-dpad-btn" data-dir="LEFT" style="background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.25);color:#fff;border-radius:5px;padding:6px 12px;font-size:11.5px;font-weight:900;cursor:pointer;">⬅️ LEFT</button>
+            <button type="button" class="dev-dpad-btn" data-dir="RIGHT" style="background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.25);color:#fff;border-radius:5px;padding:6px 12px;font-size:11.5px;font-weight:900;cursor:pointer;">➡️ RIGHT</button>
+            <button type="button" class="dev-dpad-btn" data-dir="UP" style="background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.25);color:#fff;border-radius:5px;padding:6px 12px;font-size:11.5px;font-weight:900;cursor:pointer;">⬆️ UP</button>
+            <button type="button" class="dev-dpad-btn" data-dir="DOWN" style="background:rgba(255,255,255,0.09);border:1px solid rgba(255,255,255,0.25);color:#fff;border-radius:5px;padding:6px 12px;font-size:11.5px;font-weight:900;cursor:pointer;">⬇️ DOWN</button>
+          </div>
+
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input id="dev-code-text-input" type="text" placeholder="Or type: left right left right up down" style="flex:1;background:#091119;color:#ffd32a;border:1px solid rgba(241,196,15,0.45);border-radius:5px;padding:6px 9px;font-size:11px;font-weight:800;outline:none;" />
+            <button type="button" id="dev-code-submit-btn" style="background:#f39c12;color:#111;border:none;border-radius:5px;padding:6px 12px;font-size:11px;font-weight:900;cursor:pointer;">ENTER CODE</button>
+          </div>
+        </div>
+
+        ${
+          devNukeUnlocked
+            ? renderToggleRow(
+                '☢️ Tactical Nuke Ammo (All Guns)',
+                'Every bullet from any gun detonates a 3D Tactical Nuke mushroom cloud on impact!',
+                'settings-dev-nuke-toggle-btn',
+                devNukeActive,
+                '☢️ ARMED',
+                'OFF',
+                '#f1c40f'
+              )
+            : `<div style="background:rgba(16,25,36,0.75);border:1px dashed rgba(255,255,255,0.16);border-radius:6px;padding:9px 12px;font-size:11px;color:#94a3b8;text-align:center;">
+                🔒 Enter directional sequence above to unlock hidden Developer Munitions.
+              </div>`
+        }
+
+        <button type="button" id="dev-disable-tab-btn" style="background:rgba(231,76,60,0.16);border:1px solid rgba(231,76,60,0.65);color:#ff7675;border-radius:6px;padding:8px 12px;font-size:11px;font-weight:900;cursor:pointer;">
+          🛡️ Turn Off &amp; Hide Dev Tab (Disarm Cheats &amp; Restore Realistic Balance)
+        </button>
+      </div>
+    `;
+
     modal.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:8px;margin-bottom:8px;flex-shrink:0;">
         <span style="font-size:16px;font-weight:900;color:#00cec9;letter-spacing:0.8px;">⚙️ SETTINGS</span>
         <button type="button" id="settings-close-top-btn" style="background:rgba(231,76,60,0.22);border:1px solid #e74c3c;color:#ff7675;border-radius:5px;padding:4px 10px;font-size:11px;font-weight:900;cursor:pointer;">✕ Close</button>
       </div>
 
-      <div style="display:flex;gap:5px;margin-bottom:10px;flex-shrink:0;">
+      <div style="display:flex;gap:5px;margin-bottom:10px;flex-shrink:0;flex-wrap:wrap;">
         ${[
           { id: 'audio', lbl: '🔊 Audio' },
           { id: 'gameplay', lbl: '🎮 Gameplay' },
-          { id: 'controls', lbl: '📱 Controls & Mobile' }
+          { id: 'controls', lbl: '📱 Controls' },
+          ...(devTabEnabled ? [{ id: 'developer', lbl: '🛠️ Dev Options' }] : [])
         ]
           .map(
             (t) =>
-              `<button type="button" class="settings-tab-btn" data-stab="${t.id}" style="flex:1;padding:6px 8px;border-radius:6px;border:1px solid ${
+              `<button type="button" class="settings-tab-btn" data-stab="${t.id}" style="flex:1;min-width:110px;padding:6px 8px;border-radius:6px;border:1px solid ${
                 tab === t.id ? '#00cec9' : 'rgba(255,255,255,0.14)'
               };background:${
                 tab === t.id ? 'rgba(0,206,201,0.2)' : 'rgba(16,24,34,0.88)'
@@ -445,7 +583,15 @@ export const SettingsModal = {
       </div>
 
       <div style="flex:1;min-height:0;overflow-y:auto;padding-right:2px;">
-        ${tab === 'gameplay' ? gameplayBodyHtml : tab === 'controls' ? controlsBodyHtml : audioBodyHtml}
+        ${
+          tab === 'gameplay'
+            ? gameplayBodyHtml
+            : tab === 'controls'
+            ? controlsBodyHtml
+            : tab === 'developer'
+            ? developerBodyHtml
+            : audioBodyHtml
+        }
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,0.1);padding-top:9px;margin-top:9px;flex-shrink:0;">
@@ -566,6 +712,21 @@ export const SettingsModal = {
       this.renderSettingsModalContent(modal);
       this.updateDeathCamUI();
     });
+    modal.querySelector('#settings-dev-tab-toggle-btn')?.addEventListener('click', () => {
+      if (mpHostLockedDevOff) {
+        this.player?.onAwardXp?.(
+          0,
+          '🔒 ONLY SERVER HOST ADMIN CAN ENABLE DEV OPTIONS IN THIS ROOM'
+        );
+        sound.playRadioBeep?.(false);
+        return;
+      }
+      this.player?.toggleDevTabEnabled?.();
+      if (!this.player?.isDevTabEnabled?.() && this._settingsActiveTab === 'developer') {
+        this._settingsActiveTab = 'gameplay';
+      }
+      this.renderSettingsModalContent(modal);
+    });
 
     modal.querySelectorAll('.settings-bot-count-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -616,9 +777,53 @@ export const SettingsModal = {
       this.player?.toggleAircraftCollisionAvoidance?.(true);
       this.player?.setSquadDoctrineEnabled?.(true);
       this.player?.setDeathCamEnabled?.(false);
+      if (this.player?.devNukeAmmoEnabled) {
+        this.player?.setDevNukeAmmo?.(false);
+      }
+      this.player?.setDevTabEnabled?.(DEV_OPTIONS.DEFAULT_DEV_TAB_ENABLED !== false, {
+        silent: true
+      });
       this.renderSettingsModalContent(modal);
       this.updateAudioSettingsHud();
       sound.playRadioBeep(true);
+    });
+
+    modal.querySelectorAll('.dev-dpad-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const res = this.player?.feedDevCodeInput?.(btn.dataset.dir);
+        sound.playRadioBeep?.(Boolean(res?.matched));
+        this.renderSettingsModalContent(modal);
+      });
+    });
+
+    const devTextIn = modal.querySelector('#dev-code-text-input');
+    const devSubmitBtn = modal.querySelector('#dev-code-submit-btn');
+    const submitTypedDevCode = () => {
+      if (!devTextIn || !this.player?.submitDevCodeText) return;
+      const res = this.player.submitDevCodeText(devTextIn.value);
+      sound.playRadioBeep?.(Boolean(res?.matched));
+      this.renderSettingsModalContent(modal);
+    };
+    if (devSubmitBtn) {
+      devSubmitBtn.addEventListener('click', submitTypedDevCode);
+    }
+    if (devTextIn) {
+      devTextIn.addEventListener('keydown', (ev) => {
+        if (ev.code === 'Enter') {
+          ev.preventDefault();
+          submitTypedDevCode();
+        }
+      });
+    }
+
+    modal.querySelector('#settings-dev-nuke-toggle-btn')?.addEventListener('click', () => {
+      this.player?.setDevNukeAmmo?.(!this.player.devNukeAmmoEnabled);
+      this.renderSettingsModalContent(modal);
+    });
+    modal.querySelector('#dev-disable-tab-btn')?.addEventListener('click', () => {
+      this.player?.setDevTabEnabled?.(false);
+      this._settingsActiveTab = 'gameplay';
+      this.renderSettingsModalContent(modal);
     });
 
     modal.querySelector('#settings-open-manual-btn')?.addEventListener('click', () => {

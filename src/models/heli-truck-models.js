@@ -388,152 +388,606 @@ export function buildHelicopterModel(ctx) {
   return { barrelGroup };
 }
 
-export function buildTroopTruckModel(ctx) {
-  const { isUS, group, wheels, turretPivot, hullMat, eraMat, darkMat, barrelMat, glassMat, getTreadTire } =
-    ctx;
+// ─── SHARED 6x6 TRUCK GEOMETRY & MATERIAL CACHE (.userData.shared = true) ──
+const _truckGeoCache = new Map();
 
-  const canvasMat = new THREE.MeshStandardMaterial({
-    color: isUS ? 0x8d7f5e : 0x46543f,
+function _markTruckShared(res) {
+  if (res) {
+    res.userData = res.userData || {};
+    res.userData.shared = true;
+  }
+  return res;
+}
+
+const _truckHeadlightMat = _markTruckShared(new THREE.MeshBasicMaterial({ color: 0xf5f6fa }));
+const _truckTaillightMat = _markTruckShared(new THREE.MeshBasicMaterial({ color: 0xd63031 }));
+const _truckAmberMat = _markTruckShared(new THREE.MeshBasicMaterial({ color: 0xff9f1a }));
+const _truckOpticMat = _markTruckShared(
+  new THREE.MeshStandardMaterial({
+    color: 0x1dd1a1,
+    roughness: 0.18,
+    metalness: 0.84,
+    flatShading: true
+  })
+);
+const _truckCanvasUsMat = _markTruckShared(
+  new THREE.MeshStandardMaterial({
+    color: 0x8f8160,
     roughness: 0.88,
     metalness: 0.05,
     flatShading: true
-  });
-  const woodBenchMat = new THREE.MeshStandardMaterial({
+  })
+);
+const _truckCanvasRuMat = _markTruckShared(
+  new THREE.MeshStandardMaterial({
+    color: 0x485740,
+    roughness: 0.88,
+    metalness: 0.05,
+    flatShading: true
+  })
+);
+const _truckWoodMat = _markTruckShared(
+  new THREE.MeshStandardMaterial({
     color: 0x6e4f32,
     roughness: 0.82,
     flatShading: true
-  });
-  const supplyCrateMat = new THREE.MeshStandardMaterial({
-    color: 0x4b5320,
-    roughness: 0.72,
+  })
+);
+const _truckSupplyMat = _markTruckShared(
+  new THREE.MeshStandardMaterial({
+    color: 0x525e34,
+    roughness: 0.74,
+    metalness: 0.16,
     flatShading: true
-  });
-  const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfff3c4 });
+  })
+);
+const _truckJerryRedMat = _markTruckShared(
+  new THREE.MeshStandardMaterial({
+    color: 0xb33939,
+    roughness: 0.52,
+    metalness: 0.28,
+    flatShading: true
+  })
+);
 
-  // 1. Heavy 6x6 Frame Rails & Bumpers (Length ~7.2m: Cab -3.4..-1.2, Cargo Troop Bed -1.0..+3.5)
-  const chassis = new THREE.Mesh(new THREE.BoxGeometry(2.15, 0.42, 7.1), darkMat);
-  chassis.position.set(0, 0.82, 0.05);
-  chassis.castShadow = true;
-  group.add(chassis);
+function _tPart(geo, x, y, z, rx = 0, ry = 0, rz = 0) {
+  return { geo, pos: [x, y, z], rot: [rx, ry, rz] };
+}
 
-  const frontBumper = new THREE.Mesh(new THREE.BoxGeometry(2.48, 0.36, 0.34), darkMat);
-  frontBumper.position.set(0, 0.78, -3.58);
-  group.add(frontBumper);
+function _addTruckMerged(parent, key, ctx, mat, buildFn, castShadow = true, receiveShadow = false) {
+  let geo = _truckGeoCache.get(key);
+  if (!geo) {
+    const parts = [];
+    buildFn(parts);
+    geo = _markTruckShared(ctx.mergeParts(parts));
+    _truckGeoCache.set(key, geo);
+  }
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = castShadow;
+  mesh.receiveShadow = receiveShadow;
+  parent.add(mesh);
+  return mesh;
+}
 
-  // 2. 6 Heavy Off-Road 6x6 Military Tires (Front Steer Axle + Tandem Rear Drive Axles)
+function _getTruck6x6HubGeo(ctx) {
+  let g = _truckGeoCache.get('truck6x6:ctisHub');
+  if (!g) {
+    const parts = [];
+    // Deep-dish heavy steel beadlock wheel rim
+    parts.push(_tPart(ctx.getCyl(0.34, 0.34, 0.39, 12, Math.PI / 2), 0, 0, 0));
+    // Outer beadlock clamping ring
+    parts.push(_tPart(ctx.getCyl(0.355, 0.355, 0.41, 12, Math.PI / 2), 0, 0, 0));
+    // Protruding central CTIS planetary reduction hub + armored air-inflation line guard
+    parts.push(_tPart(ctx.getCyl(0.16, 0.185, 0.46, 10, Math.PI / 2), 0, 0, 0));
+    parts.push(_tPart(ctx.getBox(0.47, 0.075, 0.52), 0, 0, 0));
+    // 5-spoke lug bolt pattern + inner brake drum
+    parts.push(_tPart(ctx.getSpokes(5, 0.42, 0.042, 0.6), 0, 0, 0));
+    g = _markTruckShared(ctx.mergeParts(parts));
+    _truckGeoCache.set('truck6x6:ctisHub', g);
+  }
+  return g;
+}
+
+export function buildTroopTruckModel(ctx) {
+  const {
+    isUS,
+    group,
+    wheels,
+    turretPivot,
+    hullMat,
+    eraMat,
+    darkMat,
+    barrelMat,
+    glassMat,
+    getTreadTire
+  } = ctx;
+  const sideTag = isUS ? 'us' : 'ru';
+  const canvasMat = isUS ? _truckCanvasUsMat : _truckCanvasRuMat;
+
+  // =========================================================================
+  // 1. 6 ARTICULATED HEAVY 6x6 OFF-ROAD TIRES + BEADLOCK CTIS PLANETARY HUBS
+  //    Front Steer Axle (z = -2.35) + Tandem Rear Walking-Beam Bogie (z = +1.15, +2.55)
+  // =========================================================================
   const tireGeo = getTreadTire
-    ? getTreadTire(0.56, 0.38, 12, 10, 0.4, 0.06, 0.12, 0.56)
-    : new THREE.CylinderGeometry(0.56, 0.56, 0.38, 12);
-  if (!getTreadTire) tireGeo.rotateZ(Math.PI / 2);
+    ? getTreadTire(0.58, 0.42, 14, 12, 0.43, 0.058, 0.105, 0.575)
+    : _markTruckShared(new THREE.CylinderGeometry(0.58, 0.58, 0.42, 14).rotateZ(Math.PI / 2));
+  const hubGeo = ctx.mergeParts ? _getTruck6x6HubGeo(ctx) : null;
 
   for (const az of [-2.35, 1.15, 2.55]) {
     for (const side of [-1, 1]) {
-      const wheel = new THREE.Mesh(tireGeo, darkMat);
-      wheel.position.set(side * 1.18, 0.56, az);
-      wheel.castShadow = true;
-      group.add(wheel);
-      wheels.push(wheel);
+      const wheelPivot = new THREE.Group();
+      wheelPivot.position.set(side * 1.18, 0.58, az);
+
+      const tire = new THREE.Mesh(tireGeo, darkMat);
+      tire.castShadow = true;
+      wheelPivot.add(tire);
+
+      if (hubGeo) {
+        const hub = new THREE.Mesh(hubGeo, eraMat);
+        wheelPivot.add(hub);
+      }
+
+      group.add(wheelPivot);
+      wheels.push(wheelPivot);
     }
   }
 
-  // 3. Armored Military Cab-Over-Engine (M1083 MTV / KamAZ-5350) + Split Windshield
-  const cabLower = new THREE.Mesh(new THREE.BoxGeometry(2.42, 1.08, 2.15), hullMat);
-  cabLower.position.set(0, 1.52, -2.35);
-  cabLower.castShadow = true;
-  cabLower.receiveShadow = true;
-  group.add(cabLower);
+  // =========================================================================
+  // 2. HEAVY C-CHANNEL LADDER FRAME, 3 PORTAL AXLES, WALKING-BEAM BOGIE,
+  //    TRANSFER CASE, DRIVESHAFTS, WINCH BUMPER, EXHAUST STACK & SNORKEL (darkMat)
+  // =========================================================================
+  _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:chassisDark`,
+    ctx,
+    darkMat,
+    (p) => {
+      // Twin full-length heavy C-channel steel frame rails + 6 crossmembers
+      for (const s of [-1, 1]) {
+        p.push(_tPart(ctx.getBox(0.16, 0.34, 7.22), s * 0.56, 0.86, 0.04));
+      }
+      for (const cz of [-3.35, -1.95, -0.55, 0.85, 2.15, 3.48]) {
+        p.push(_tPart(ctx.getBox(1.26, 0.24, 0.16), 0, 0.86, cz));
+      }
 
-  const cabRoof = new THREE.Mesh(new THREE.BoxGeometry(2.38, 0.22, 2.05), hullMat);
-  cabRoof.position.set(0, 2.72, -2.3);
+      // Central 6x6 transfer case + angled front & tandem rear driveshafts
+      p.push(_tPart(ctx.getBox(0.56, 0.42, 0.62), 0, 0.74, -0.55));
+      p.push(_tPart(ctx.getCyl(0.055, 0.055, 1.82, 8), 0, 0.66, -1.45, Math.PI / 2 - 0.09, 0, 0));
+      p.push(_tPart(ctx.getCyl(0.055, 0.055, 1.72, 8), 0, 0.66, 0.3, Math.PI / 2 + 0.09, 0, 0));
+      p.push(_tPart(ctx.getCyl(0.055, 0.055, 1.4, 8), 0, 0.6, 1.85, Math.PI / 2, 0, 0));
+
+      // 3 live beam axles + differential pumpkins + multi-leaf spring packs
+      for (const az of [-2.35, 1.15, 2.55]) {
+        p.push(_tPart(ctx.getCyl(0.095, 0.095, 2.18, 8, Math.PI / 2), 0, 0.58, az));
+        p.push(_tPart(ctx.getBox(0.38, 0.36, 0.38), az < 0 ? 0.22 : 0, 0.58, az));
+        for (const s of [-1, 1]) {
+          p.push(_tPart(ctx.getBox(0.12, 0.11, 1.05), s * 0.68, 0.69, az));
+        }
+      }
+      // Tandem rear walking-beam bogie trunnion & torque arms
+      for (const s of [-1, 1]) {
+        p.push(_tPart(ctx.getBox(0.14, 0.2, 1.56), s * 0.72, 0.64, 1.85));
+        p.push(_tPart(ctx.getCyl(0.13, 0.13, 0.22, 8, Math.PI / 2), s * 0.72, 0.68, 1.85));
+        // Rubber mudflaps behind front steer tires & rear bogie tires
+        p.push(_tPart(ctx.getBox(0.46, 0.42, 0.04), s * 1.16, 0.56, -1.68, 0.12, 0, 0));
+        p.push(_tPart(ctx.getBox(0.46, 0.46, 0.04), s * 1.16, 0.56, 3.26, -0.1, 0, 0));
+      }
+
+      // Front heavy steel winch bumper, underride skidplate & brush guard (-Z front)
+      p.push(_tPart(ctx.getBox(2.52, 0.34, 0.32), 0, 0.82, -3.62));
+      p.push(_tPart(ctx.getBox(1.56, 0.12, 0.68), 0, 0.68, -3.32, 0.38, 0, 0));
+      if (isUS) {
+        // Oshkosh M1083A1 armored 5-bar horizontal radiator grille & headlight brush guards
+        p.push(_tPart(ctx.getBox(1.58, 0.64, 0.08), 0, 1.48, -3.48));
+        for (let gy = 1.24; gy <= 1.72; gy += 0.12) {
+          p.push(_tPart(ctx.getBox(1.48, 0.045, 0.12), 0, gy, -3.51));
+        }
+        // Tubular steel brush guard around cab nose
+        p.push(_tPart(ctx.getBox(2.38, 0.065, 0.065), 0, 1.22, -3.76));
+        p.push(_tPart(ctx.getBox(1.68, 0.065, 0.065), 0, 1.76, -3.72));
+        for (const bx of [-1.14, -0.78, 0.78, 1.14]) {
+          p.push(_tPart(ctx.getBox(0.065, 0.58, 0.08), bx, 1.24, -3.74));
+        }
+        // Right-rear vertical perforated exhaust stack + high desert cyclone snorkel
+        p.push(_tPart(ctx.getCyl(0.085, 0.085, 1.85, 8), 1.14, 1.98, -1.06));
+        p.push(_tPart(ctx.getCyl(0.125, 0.125, 1.15, 10), 1.14, 1.95, -1.06));
+        p.push(_tPart(ctx.getCyl(0.055, 0.055, 0.34, 8), 1.18, 2.98, -1.02, 0, 0, -0.38));
+        p.push(_tPart(ctx.getBox(0.22, 0.95, 0.22), -1.14, 2.12, -1.06));
+        p.push(_tPart(ctx.getCyl(0.18, 0.16, 0.16, 10), -1.14, 2.68, -1.06));
+      } else {
+        // KamAZ-5350 / Ural-4320 slatted V-cowl grille + heavy welded bullbar ram bumper
+        p.push(_tPart(ctx.getBox(1.64, 0.56, 0.09), 0, 1.46, -3.56));
+        for (let gy = 1.26; gy <= 1.66; gy += 0.1) {
+          p.push(_tPart(ctx.getBox(1.52, 0.04, 0.13), 0, gy, -3.59));
+        }
+        p.push(_tPart(ctx.getBox(2.44, 0.075, 0.075), 0, 1.32, -3.8));
+        for (const bx of [-0.88, 0.88]) {
+          p.push(_tPart(ctx.getBox(0.08, 0.64, 0.1), bx, 1.22, -3.78, -0.1, 0, 0));
+        }
+        // Behind-cab full-size 6x6 spare tire + crane carrier bracket (signature KamAZ-5350 detail!)
+        p.push(_tPart(ctx.getCyl(0.54, 0.54, 0.38, 14, Math.PI / 2), 0.62, 1.82, -0.96));
+        p.push(_tPart(ctx.getBox(0.12, 1.08, 0.36), 0.62, 1.42, -0.96));
+        // Left-side vertical snorkel & under-frame exhaust muffler
+        p.push(_tPart(ctx.getCyl(0.08, 0.08, 1.45, 8), -1.16, 2.05, -1.12));
+        p.push(_tPart(ctx.getCyl(0.16, 0.14, 0.16, 10), -1.16, 2.82, -1.12));
+      }
+
+      // West-Coast dual towing mirrors, cab grab handles, boarding steps & wipers
+      for (const s of [-1, 1]) {
+        p.push(_tPart(ctx.getBox(0.08, 0.46, 0.22), s * 1.36, 2.24, -3.05, 0, s * -0.18, 0));
+        p.push(_tPart(ctx.getBox(0.18, 0.04, 0.04), s * 1.28, 2.44, -3.05));
+        p.push(_tPart(ctx.getBox(0.18, 0.04, 0.04), s * 1.28, 2.04, -3.05));
+        // Dual cab boarding stirrup steps below doors
+        p.push(_tPart(ctx.getBox(0.18, 0.05, 0.48), s * 1.24, 0.88, -2.35));
+        p.push(_tPart(ctx.getBox(0.18, 0.05, 0.48), s * 1.24, 1.12, -2.35));
+        p.push(_tPart(ctx.getBox(0.05, 0.44, 0.05), s * 1.24, 1.86, -1.82));
+        // Dual windshield wipers
+        p.push(_tPart(ctx.getBox(0.42, 0.03, 0.03), s * 0.56, 2.04, -3.41, 0, 0, 0.24));
+      }
+
+      // Overhead tubular steel cargo canopy bows & rear NATO pintle bumper (+Z rear)
+      for (const mz of [0.55, 1.95, 3.35]) {
+        p.push(_tPart(ctx.getBox(2.42, 0.065, 0.065), 0, 2.9, mz));
+        for (const s of [-1, 1]) {
+          p.push(_tPart(ctx.getBox(0.065, 0.86, 0.065), s * 1.18, 2.48, mz));
+        }
+      }
+      p.push(_tPart(ctx.getBox(2.38, 0.24, 0.22), 0, 0.88, 3.62));
+      p.push(_tPart(ctx.getBox(0.22, 0.22, 0.26), 0, 0.88, 3.74));
+    },
+    true,
+    false
+  );
+
+  // =========================================================================
+  // 3. SCULPTED ARMORED CAB (US M1083A1P2 B-KIT COE vs RU KAMAZ-5350 MUSTANG)
+  //    & CORRUGATED STAKE-SIDE TROOP / LOGISTICS BED (hullMat)
+  // =========================================================================
+  _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:bodyHull`,
+    ctx,
+    hullMat,
+    (p) => {
+      if (isUS) {
+        // Oshkosh M1083A1P2 Cab-Over-Engine lower armored cowl & sloped nose apron
+        p.push(_tPart(ctx.getBox(2.42, 0.88, 2.08), 0, 1.48, -2.36));
+        p.push(_tPart(ctx.getBox(2.38, 0.34, 0.48), 0, 1.84, -3.22, 0.32, 0, 0));
+        // Flared front armored wheel-arch fenders
+        for (const s of [-1, 1]) {
+          p.push(_tPart(ctx.getBox(0.38, 0.12, 1.18), s * 1.18, 1.24, -2.35));
+          p.push(_tPart(ctx.getBox(0.36, 0.38, 0.22), s * 1.18, 1.06, -2.96, 0.45, 0, 0));
+          p.push(_tPart(ctx.getBox(0.36, 0.38, 0.22), s * 1.18, 1.06, -1.74, -0.45, 0, 0));
+          // Armored A/B cab pillars & center ballistic windshield mullion
+          p.push(_tPart(ctx.getBox(0.14, 0.78, 0.16), s * 1.13, 2.28, -3.26, 0.16, 0, 0));
+          p.push(_tPart(ctx.getBox(0.15, 0.82, 0.24), s * 1.14, 2.3, -1.48));
+        }
+        p.push(_tPart(ctx.getBox(0.12, 0.76, 0.14), 0, 2.28, -3.28, 0.16, 0, 0));
+        p.push(_tPart(ctx.getBox(2.4, 0.86, 0.2), 0, 2.28, -1.36));
+      } else {
+        // KamAZ-5350 Mustang beveled forward engine hood cowl + wide armored crew cab
+        p.push(_tPart(ctx.getBox(2.26, 0.78, 0.92), 0, 1.44, -3.12));
+        p.push(_tPart(ctx.getBox(2.18, 0.24, 0.94), 0, 1.84, -3.08, 0.22, 0, 0));
+        p.push(_tPart(ctx.getBox(2.44, 0.92, 1.56), 0, 1.5, -2.02));
+        for (const s of [-1, 1]) {
+          p.push(_tPart(ctx.getBox(0.38, 0.12, 1.22), s * 1.18, 1.24, -2.35));
+          p.push(_tPart(ctx.getBox(0.36, 0.36, 0.24), s * 1.18, 1.06, -2.98, 0.42, 0, 0));
+          p.push(_tPart(ctx.getBox(0.14, 0.76, 0.16), s * 1.14, 2.28, -2.72, 0.18, 0, 0));
+          p.push(_tPart(ctx.getBox(0.15, 0.8, 0.24), s * 1.15, 2.3, -1.34));
+        }
+        p.push(_tPart(ctx.getBox(0.11, 0.74, 0.14), 0, 2.28, -2.74, 0.18, 0, 0));
+        p.push(_tPart(ctx.getBox(2.42, 0.84, 0.2), 0, 2.28, -1.26));
+      }
+
+      // Heavy Steel Troop & Logistics Flatbed Deck + Tandem Rear Fender Arches (-0.68 .. +3.58)
+      p.push(_tPart(ctx.getBox(2.48, 0.22, 4.32), 0, 1.18, 1.44));
+      for (const s of [-1, 1]) {
+        // Tandem rear bogie steel mudguard fenders
+        p.push(_tPart(ctx.getBox(0.42, 0.1, 2.86), s * 1.14, 1.22, 1.85));
+        // Corrugated steel dropside cargo walls + 6 external vertical stake ribs
+        p.push(_tPart(ctx.getBox(0.12, 0.86, 4.26), s * 1.18, 1.72, 1.44));
+        p.push(_tPart(ctx.getBox(0.16, 0.09, 4.3), s * 1.19, 2.14, 1.44));
+        for (const sz of [-0.45, 0.3, 1.05, 1.8, 2.55, 3.32]) {
+          p.push(_tPart(ctx.getBox(0.17, 0.92, 0.09), s * 1.19, 1.7, sz));
+        }
+      }
+      // Front cargo headboard & rear hinged tailgate with stiffener ribs
+      p.push(_tPart(ctx.getBox(2.42, 0.96, 0.12), 0, 1.76, -0.66));
+      p.push(_tPart(ctx.getBox(2.38, 0.78, 0.12), 0, 1.66, 3.55));
+      for (const tx of [-0.85, 0, 0.85]) {
+        p.push(_tPart(ctx.getBox(0.09, 0.78, 0.16), tx, 1.66, 3.56));
+      }
+    },
+    true,
+    true
+  );
+
+  // Separate Cab Roof & Ballistic Windshield Meshes for clean `cockpitCanopyParts` 1P hiding!
+  const cabRoof = _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:cabRoof`,
+    ctx,
+    hullMat,
+    (p) => {
+      if (isUS) {
+        p.push(_tPart(ctx.getBox(2.4, 0.16, 2.02), 0, 2.72, -2.32));
+        // Forward armored sun-visor brow
+        p.push(_tPart(ctx.getBox(2.36, 0.1, 0.28), 0, 2.68, -3.38, 0.24, 0, 0));
+      } else {
+        p.push(_tPart(ctx.getBox(2.42, 0.16, 1.62), 0, 2.72, -2.02));
+        p.push(_tPart(ctx.getBox(2.38, 0.11, 0.3), 0, 2.68, -2.88, 0.26, 0, 0));
+      }
+    },
+    true,
+    false
+  );
   cabRoof.userData.hideIn1PCockpit = true;
-  group.add(cabRoof);
 
-  const windshield = new THREE.Mesh(new THREE.BoxGeometry(2.22, 0.68, 0.12), glassMat);
-  windshield.position.set(0, 2.32, -3.32);
-  windshield.rotation.x = 0.12;
+  const windshield = _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:cabGlass`,
+    ctx,
+    glassMat,
+    (p) => {
+      const wz = isUS ? -3.28 : -2.74;
+      const doorZ = isUS ? -2.35 : -2.05;
+      for (const s of [-1, 1]) {
+        // Split left & right armored windshield panes
+        p.push(_tPart(ctx.getBox(0.96, 0.58, 0.08), s * 0.56, 2.28, wz, 0.17, 0, 0));
+        // Recessed ballistic side door windows
+        p.push(_tPart(ctx.getBox(0.06, 0.42, 0.68), s * 1.19, 2.28, doorZ));
+      }
+    },
+    false,
+    false
+  );
   windshield.userData.hideIn1PCockpit = true;
-  group.add(windshield);
-
-  const cabBackWall = new THREE.Mesh(new THREE.BoxGeometry(2.38, 0.75, 0.18), hullMat);
-  cabBackWall.position.set(0, 2.32, -1.32);
-  group.add(cabBackWall);
-
   group.userData.cockpitCanopyParts = [cabRoof, windshield];
 
-  // Grille & Headlights
-  const grille = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.62, 0.08), darkMat);
-  grille.position.set(0, 1.42, -3.44);
-  group.add(grille);
-  for (const side of [-1, 1]) {
-    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.18, 0.08), headlightMat);
-    lamp.position.set(side * 0.96, 1.28, -3.44);
-    group.add(lamp);
+  // =========================================================================
+  // 4. B-KIT APPLIQUE DOOR ARMOR, SADDLE FUEL TANKS, AIR RESERVOIRS & WINCH (eraMat / barrelMat)
+  // =========================================================================
+  _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:armorEra`,
+    ctx,
+    eraMat,
+    (p) => {
+      const doorZ = isUS ? -2.35 : -2.05;
+      for (const s of [-1, 1]) {
+        // Bolt-on armored crew door panels + heavy exterior ballistic hinges
+        p.push(_tPart(ctx.getBox(0.11, 0.78, 0.96), s * 1.22, 1.62, doorZ));
+        p.push(_tPart(ctx.getBox(0.1, 0.48, 0.88), s * 1.2, 2.26, doorZ));
+        p.push(_tPart(ctx.getBox(0.14, 0.09, 0.14), s * 1.24, 1.84, doorZ - 0.38));
+        p.push(_tPart(ctx.getBox(0.14, 0.09, 0.14), s * 1.24, 1.42, doorZ - 0.38));
 
-    // Side Fuel Tank & Step Ladder
-    const tank = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.45, 1.15), eraMat);
-    tank.position.set(side * 1.08, 0.88, -0.55);
-    group.add(tank);
-  }
+        // Saddle diesel fuel tanks + compressed-air brake tanks between steer & bogie axles
+        if (isUS) {
+          p.push(_tPart(ctx.getBox(0.48, 0.48, 1.24), s * 1.02, 0.86, -0.45));
+        } else {
+          p.push(_tPart(ctx.getCyl(0.26, 0.26, 1.28, 10), s * 1.0, 0.86, -0.25, Math.PI / 2, 0, 0));
+          p.push(_tPart(ctx.getBox(0.44, 0.36, 0.56), -1.0, 0.9, -1.05));
+        }
+      }
+      if (!isUS) {
+        // Spare wheel CTIS hub cap behind KamAZ cab
+        p.push(_tPart(ctx.getCyl(0.32, 0.32, 0.4, 10, Math.PI / 2), 0.62, 1.82, -0.96));
+      }
+    },
+    true,
+    false
+  );
 
-  // 4. Open-Back 8-Soldier Troop & Logistics Cargo Bed (-1.05 .. +3.55)
-  const bedFloor = new THREE.Mesh(new THREE.BoxGeometry(2.46, 0.24, 4.65), hullMat);
-  bedFloor.position.set(0, 1.16, 1.25);
-  bedFloor.castShadow = true;
-  bedFloor.receiveShadow = true;
-  group.add(bedFloor);
+  _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:steelHardware`,
+    ctx,
+    barrelMat,
+    (p) => {
+      // Front Warn winch cable drum + forged D-ring recovery shackles + rear tow shackles + whip antenna
+      p.push(_tPart(ctx.getCyl(0.11, 0.11, 0.52, 8, Math.PI / 2), 0, 0.84, -3.78));
+      for (const s of [-1, 1]) {
+        p.push(_tPart(ctx.getBox(0.08, 0.13, 0.16), s * 0.88, 0.8, -3.8));
+        p.push(_tPart(ctx.getBox(0.08, 0.13, 0.16), s * 0.88, 0.86, 3.72));
+      }
+      p.push(_tPart(ctx.getCyl(0.016, 0.026, 1.38, 6), -1.16, 3.35, -1.42, -0.14, 0, 0));
+    },
+    false,
+    false
+  );
 
-  // Side Slatted Stake Walls + Twin Troop Benches + Folded Canvas Canopy Ribs
-  for (const side of [-1, 1]) {
-    const sideWall = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.88, 4.6), hullMat);
-    sideWall.position.set(side * 1.16, 1.68, 1.25);
-    sideWall.castShadow = true;
-    group.add(sideWall);
+  // =========================================================================
+  // 5. MULTI-RIBBED TACTICAL CANVAS HOOD, SLATTED WOOD TROOP BENCHES & SUPPLY CARGO
+  // =========================================================================
+  _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:canvasHood`,
+    ctx,
+    canvasMat,
+    (p) => {
+      // Forward covered supply bay tactical canvas hood + rolled side tarps
+      p.push(_tPart(ctx.getBox(2.44, 0.88, 1.48), 0, 2.48, 0.05));
+      p.push(_tPart(ctx.getBox(2.26, 0.22, 1.48), 0, 2.94, 0.05));
+      for (const s of [-1, 1]) {
+        p.push(_tPart(ctx.getCyl(0.11, 0.11, 2.75, 8), s * 1.18, 2.86, 2.08, Math.PI / 2, 0, 0));
+      }
+    },
+    true,
+    false
+  );
 
-    const troopBench = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.12, 3.65), woodBenchMat);
-    troopBench.position.set(side * 0.86, 1.58, 1.65);
-    group.add(troopBench);
-  }
+  _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:woodBenches`,
+    ctx,
+    _truckWoodMat,
+    (p) => {
+      for (const s of [-1, 1]) {
+        // Slatted hardwood 4-man troop bench seats + backrests + cargo pallet skids
+        p.push(_tPart(ctx.getBox(0.46, 0.08, 2.72), s * 0.86, 1.6, 2.08));
+        p.push(_tPart(ctx.getBox(0.07, 0.28, 2.72), s * 1.08, 1.88, 2.08));
+      }
+      p.push(_tPart(ctx.getBox(1.88, 0.1, 1.18), 0, 1.34, 0.05));
+    },
+    false,
+    false
+  );
 
-  const tailgate = new THREE.Mesh(new THREE.BoxGeometry(2.38, 0.72, 0.14), hullMat);
-  tailgate.position.set(0, 1.62, 3.52);
-  group.add(tailgate);
+  _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:supplyCargo`,
+    ctx,
+    _truckSupplyMat,
+    (p) => {
+      // Stacked NATO/Russian ammo crates, artillery shell cases & field ration trunks
+      p.push(_tPart(ctx.getBox(0.82, 0.54, 0.86), -0.48, 1.66, 0.02));
+      p.push(_tPart(ctx.getBox(0.82, 0.48, 0.84), 0.48, 1.63, 0.04));
+      p.push(_tPart(ctx.getBox(0.68, 0.36, 0.62), -0.44, 2.11, 0.02, 0, 0.08, 0));
+      p.push(_tPart(ctx.getBox(0.56, 0.42, 0.38), 0.52, 1.54, 0.72));
+    },
+    true,
+    false
+  );
 
-  // Forward Rolled Canvas Cover Arch & Logistics Ammo/Supply Crates inside the front of the bed!
-  const frontCanvasHood = new THREE.Mesh(new THREE.BoxGeometry(2.44, 1.15, 1.25), canvasMat);
-  frontCanvasHood.position.set(0, 2.38, -0.42);
-  frontCanvasHood.castShadow = true;
-  group.add(frontCanvasHood);
+  _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:jerryCans`,
+    ctx,
+    _truckJerryRedMat,
+    (p) => {
+      // Twin strapped steel fuel Jerry cans & trauma kit inside supply bay
+      p.push(_tPart(ctx.getBox(0.22, 0.46, 0.34), 0.24, 2.1, 0.08));
+      p.push(_tPart(ctx.getBox(0.22, 0.46, 0.34), 0.52, 2.1, 0.08));
+    },
+    false,
+    false
+  );
 
-  for (const mz of [0.85, 2.1, 3.35]) {
-    const archTop = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.07, 0.07), darkMat);
-    archTop.position.set(0, 2.86, mz);
-    group.add(archTop);
-    for (const side of [-1, 1]) {
-      const archPost = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.78, 0.07), darkMat);
-      archPost.position.set(side * 1.16, 2.48, mz);
-      group.add(archPost);
-    }
-  }
+  // =========================================================================
+  // 6. LED PROJECTOR HEADLIGHTS (-Z FRONT), CAB MARKER LIGHTS & RED TAILLIGHTS (+Z REAR)
+  // =========================================================================
+  _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:headlights`,
+    ctx,
+    _truckHeadlightMat,
+    (p) => {
+      const hz = isUS ? -3.52 : -3.62;
+      for (const s of [-1, 1]) {
+        p.push(_tPart(ctx.getBox(0.28, 0.16, 0.06), s * 0.96, 1.24, hz));
+        p.push(_tPart(ctx.getCyl(0.075, 0.075, 0.06, 8), s * 0.68, 0.84, -3.76, Math.PI / 2, 0, 0));
+      }
+    },
+    false,
+    false
+  );
 
-  for (const cx of [-0.46, 0.46]) {
-    const supplyBox = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.56, 0.78), supplyCrateMat);
-    supplyBox.position.set(cx, 1.56, -0.42);
-    group.add(supplyBox);
-  }
+  _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:amberMarkers`,
+    ctx,
+    _truckAmberMat,
+    (p) => {
+      const roofZ = isUS ? -3.32 : -2.82;
+      for (const mx of [-0.36, 0, 0.36]) {
+        p.push(_tPart(ctx.getBox(0.11, 0.06, 0.08), mx, 2.81, roofZ));
+      }
+      for (const s of [-1, 1]) {
+        p.push(_tPart(ctx.getBox(0.12, 0.08, 0.06), s * 1.14, 1.24, isUS ? -3.52 : -3.62));
+      }
+    },
+    false,
+    false
+  );
 
-  // 5. Cab Roof Ring-Mount 7.62mm Convoy Defense MG (`turretPivot` + `barrelGroup` for [F2] Co-Driver!)
-  turretPivot.position.set(0.45, 2.84, -2.15);
-  const ringShield = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.22, 10), eraMat);
-  turretPivot.add(ringShield);
+  _addTruckMerged(
+    group,
+    `truck6x6:${sideTag}:taillights`,
+    ctx,
+    _truckTaillightMat,
+    (p) => {
+      for (const s of [-1, 1]) {
+        p.push(_tPart(ctx.getBox(0.24, 0.12, 0.06), s * 0.96, 0.92, 3.72));
+        p.push(_tPart(ctx.getBox(0.18, 0.1, 0.05), s * 1.06, 1.38, 3.61));
+      }
+    },
+    false,
+    false
+  );
+
+  // =========================================================================
+  // 7. CAB ROOF SKATE-RING BALLISTIC SHIELD & .50 CAL M2HB / 12.7MM KORD TURRET
+  //    `turretPivot` at (0.45, 2.82, -2.15): local +Z points forward (-Z world)
+  //    when vehicles.js applies `turretPivot.rotation.y = turretYaw - yaw + Math.PI`!
+  //    All turret geometry kept <= 0.30 local Y (<= 3.12 world Y < 3.18 optic / 3.28 1P).
+  // =========================================================================
+  turretPivot.position.set(0.45, 2.82, -2.15);
+
+  _addTruckMerged(
+    turretPivot,
+    `truck6x6:${sideTag}:turretShield`,
+    ctx,
+    eraMat,
+    (p) => {
+      // Circular roof skate-ring collar + angled front/cheek ballistic gun-shield plates
+      p.push(_tPart(ctx.getCyl(0.46, 0.5, 0.09, 12), 0, -0.02, 0));
+      p.push(_tPart(ctx.getBox(0.38, 0.24, 0.055), 0, 0.13, 0.44, -0.14, 0, 0));
+      for (const s of [-1, 1]) {
+        p.push(_tPart(ctx.getBox(0.32, 0.24, 0.055), s * 0.32, 0.13, 0.34, -0.1, s * 0.58, 0));
+        p.push(_tPart(ctx.getBox(0.055, 0.2, 0.36), s * 0.45, 0.11, 0.02));
+      }
+      // Side .50 cal / 12.7mm ammo box on pintle cradle
+      p.push(_tPart(ctx.getBox(0.17, 0.16, 0.3), isUS ? -0.24 : 0.24, 0.13, 0.1));
+    },
+    true,
+    false
+  );
+
+  _addTruckMerged(
+    turretPivot,
+    `truck6x6:${sideTag}:turretOptic`,
+    ctx,
+    _truckOpticMat,
+    (p) => {
+      p.push(_tPart(ctx.getBox(0.18, 0.075, 0.065), 0, 0.21, 0.45));
+    },
+    false,
+    false
+  );
 
   const barrelGroup = new THREE.Group();
-  const mgReceiver = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.55), darkMat);
-  mgReceiver.position.set(0, 0.16, 0.1);
-  const mgBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.036, 0.85, 6), barrelMat);
-  mgBarrel.rotation.x = Math.PI / 2;
-  mgBarrel.position.set(0, 0.16, 0.65);
-  barrelGroup.add(mgReceiver, mgBarrel);
-  turretPivot.add(barrelGroup);
+  barrelGroup.position.set(0, 0.12, 0.12);
 
+  _addTruckMerged(
+    barrelGroup,
+    `truck6x6:${sideTag}:bgDark`,
+    ctx,
+    darkMat,
+    (p) => {
+      // Heavy HMG receiver, feed cover, spade grips, perforated barrel jacket & muzzle brake
+      p.push(_tPart(ctx.getBox(0.16, 0.16, 0.56), 0, 0.02, 0.02));
+      for (const s of [-1, 1]) {
+        p.push(_tPart(ctx.getCyl(0.018, 0.018, 0.14, 6), s * 0.075, 0.01, -0.32));
+      }
+      p.push(_tPart(ctx.getCyl(0.05, 0.055, 0.38, 8), 0, 0.03, 0.48, Math.PI / 2, 0, 0));
+      p.push(_tPart(ctx.getBox(0.085, 0.065, 0.14), 0, 0.03, 1.42));
+    },
+    true,
+    false
+  );
+
+  _addTruckMerged(
+    barrelGroup,
+    `truck6x6:${sideTag}:bgBarrel`,
+    ctx,
+    barrelMat,
+    (p) => {
+      p.push(_tPart(ctx.getCyl(0.032, 0.04, 1.02, 8), 0, 0.03, 0.88, Math.PI / 2, 0, 0));
+    },
+    true,
+    false
+  );
+
+  turretPivot.add(barrelGroup);
   return { barrelGroup };
 }

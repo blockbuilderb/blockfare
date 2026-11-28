@@ -1,12 +1,12 @@
-import { SQUAD_DEFS } from '../bots.js?v=149';
+import { SQUAD_DEFS } from '../bots.js?v=150';
 import {
   CLASS_TRAITS,
   VEHICLE_STATS,
   SQUAD_KIT_CAPS,
   getAllowedRoleIds,
   getFactionLabel
-} from '../config.js?v=149';
-import { events } from '../events.js?v=149';
+} from '../config.js?v=150';
+import { events } from '../events.js?v=150';
 import {
   WEAPON_DEFS,
   CLASS_LOADOUTS,
@@ -14,19 +14,19 @@ import {
   SECONDARY_WEAPON_CATEGORIES,
   SHOTGUN_SHELL_TYPES,
   getWeaponCategory
-} from '../weapons.js?v=149';
-import { buildWeaponSvg } from '../assets/gunsmith-svg.js?v=149';
-import { sound } from '../audio.js?v=149';
+} from '../weapons.js?v=150';
+import { buildWeaponSvg } from '../assets/gunsmith-svg.js?v=150';
+import { sound } from '../audio.js?v=150';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=149';
+} from '../core/StateMachines.js?v=150';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=149';
+} from '../utils/KeyboardShortcuts.js?v=150';
 
 export const DeployScreen = {
   bindDeployEvents() {

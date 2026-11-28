@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SQUAD_DEFS } from '../bots.js?v=149';
-import { getFactionLabel } from '../config.js?v=149';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=149';
+import { SQUAD_DEFS } from '../bots.js?v=150';
+import { getFactionLabel } from '../config.js?v=150';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=150';
 
 export const CommandPanel = {
   setCommandScope(scope, opts = {}) {

@@ -1,9 +1,10 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=149';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=149';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=149';
-import { getRideShortcutLabel } from '../utils/KeyboardShortcuts.js?v=149';
-import { events } from '../events.js?v=149';
+import { sound } from '../audio.js?v=150';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=150';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=150';
+import { computeMotoLocalPointWorld } from '../models/vehicle-model.js?v=150';
+import { getRideShortcutLabel } from '../utils/KeyboardShortcuts.js?v=150';
+import { events } from '../events.js?v=150';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -12,7 +13,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=149';
+} from '../core/StateMachines.js?v=150';
 
 function markShared(asset) {
   if (asset) {
@@ -2698,12 +2699,8 @@ export const VehicleControlMethods = {
         );
         camRollCoupling = (v.roll || 0) * 0.35;
       } else if (isMotoOrAtv) {
-        const leanShift = Math.sin(v.roll || 0) * 0.38;
-        this.camera.position.set(
-          v.pos.x - hullFwdX * 0.12 - hullRightX * leanShift,
-          v.pos.y + (v.type === 'atv' ? 1.66 : 1.56),
-          v.pos.z - hullFwdZ * 0.12 - hullRightZ * leanShift
-        );
+        const baseEyeH = v.type === 'atv' ? 1.66 : 1.56;
+        computeMotoLocalPointWorld(v, 0, baseEyeH, 0.12, this.camera.position);
         camRollCoupling = (v.roll || 0) * 0.65;
       } else if (v.type === 'humvee') {
         // Roof .50 Cal M2HB RWS / Gunner Cupola Sight (aligned with turretPivot z = +0.2 = -hullFwd * 0.2)
@@ -2713,6 +2710,14 @@ export const VehicleControlMethods = {
           v.pos.z - hullFwdZ * 0.2 - turFwdZ * 0.22
         );
         camRollCoupling = (v.roll || 0) * 0.35;
+      } else if (v.type === 'truck_transport') {
+        // 6x6 Cab Roof Skate-Ring Gunner / Commander Cupola (aligned with turretPivot at x = +0.45, z = -2.15)
+        this.camera.position.set(
+          v.pos.x + hullFwdX * 2.15 + hullRightX * 0.45 - turFwdX * 0.22,
+          v.pos.y + 3.28,
+          v.pos.z + hullFwdZ * 2.15 + hullRightZ * 0.45 - turFwdZ * 0.22
+        );
+        camRollCoupling = (v.roll || 0) * 0.32;
       } else {
         const eyeH = isDinoMount ? 3.8 : v.isEmplacement ? 1.85 : PLAYER.VEHICLE_1ST_PERSON_HEIGHT;
         this.camera.position.set(v.pos.x, v.pos.y + eyeH, v.pos.z);
@@ -2721,6 +2726,8 @@ export const VehicleControlMethods = {
       // 'OPTIC_NOSE': Clean Stabilized Gunner Bore-Sight / Roof RWS Optic
       const hullFwdX = -Math.sin(v.yaw || 0);
       const hullFwdZ = -Math.cos(v.yaw || 0);
+      const hullRightX = Math.cos(v.yaw || 0);
+      const hullRightZ = -Math.sin(v.yaw || 0);
       const turFwdX = -Math.sin(this.yaw || 0);
       const turFwdZ = -Math.cos(this.yaw || 0);
       if (v.type === 'humvee') {
@@ -2728,6 +2735,12 @@ export const VehicleControlMethods = {
           v.pos.x - hullFwdX * 0.2 + turFwdX * 0.65,
           v.pos.y + 2.88,
           v.pos.z - hullFwdZ * 0.2 + turFwdZ * 0.65
+        );
+      } else if (v.type === 'truck_transport') {
+        this.camera.position.set(
+          v.pos.x + hullFwdX * 2.15 + hullRightX * 0.45 + turFwdX * 0.65,
+          v.pos.y + 3.18,
+          v.pos.z + hullFwdZ * 2.15 + hullRightZ * 0.45 + turFwdZ * 0.65
         );
       } else {
         const opticH = isDinoMount ? 3.8 : v.isEmplacement ? 1.9 : isMotoOrAtv ? 1.48 : v.type === 'tank' || v.type === 'apc' || isAaVehicle ? 2.68 : PLAYER.VEHICLE_1ST_PERSON_HEIGHT;

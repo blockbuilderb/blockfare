@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { BotManager } from '../src/bots/BotManager.js?v=149';
-import { VehicleManager } from '../src/vehicles.js?v=149';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=149';
-import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=149';
-import { DeployScreen } from '../src/ui/DeployScreen.js?v=149';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=149';
+import { BotManager } from '../src/bots/BotManager.js?v=150';
+import { VehicleManager } from '../src/vehicles.js?v=150';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=150';
+import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=150';
+import { DeployScreen } from '../src/ui/DeployScreen.js?v=150';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=150';
 
 function makeMock2dCanvas(width = 760, height = 240) {
   const textCalls = [];

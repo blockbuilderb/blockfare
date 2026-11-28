@@ -1,4 +1,4 @@
-import { getFactionLabel } from '../config.js?v=149';
+import { getFactionLabel } from '../config.js?v=150';
 
 export const VictoryScreen = {
   showVictoryScreen(winnerTeam, ticketsUS, ticketsRU, matchTimeRemaining, extraction = null) {

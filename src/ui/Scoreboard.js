@@ -1,6 +1,6 @@
-import { SQUAD_DEFS } from '../bots.js?v=149';
-import { getFactionLabel } from '../config.js?v=149';
-import { resolveUnitPlaystyleTitle } from '../player/MarksmanSystem.js?v=149';
+import { SQUAD_DEFS } from '../bots.js?v=150';
+import { getFactionLabel } from '../config.js?v=150';
+import { resolveUnitPlaystyleTitle } from '../player/MarksmanSystem.js?v=150';
 
 export const Scoreboard = {
   computeBattleStats() {

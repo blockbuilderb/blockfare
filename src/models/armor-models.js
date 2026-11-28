@@ -106,13 +106,15 @@ function _getTankRoadwheelGeo(ctx, radius = 0.42, width = 0.54, hubR = 0.15) {
 function _getCtisWheelHubGeo(ctx, rimR, width, tag) {
   return _getCachedGeo(`ctisHub:${tag}:${rimR.toFixed(3)}_${width.toFixed(3)}`, () => {
     const parts = [];
-    // Recessed armored steel beadlock dish
-    parts.push(_part(ctx.getCyl(rimR, rimR, width * 0.94, 12, Math.PI / 2), 0, 0, 0));
-    // Protruding central CTIS planetary reduction hub
-    parts.push(_part(ctx.getCyl(rimR * 0.46, rimR * 0.52, width * 1.1, 10, Math.PI / 2), 0, 0, 0));
-    // CTIS armored air-line guard bar + radial beadlock lug bolts
-    parts.push(_part(ctx.getBox(width * 1.14, rimR * 0.24, rimR * 1.48), 0, 0, 0));
-    parts.push(_part(ctx.getSpokes(4, width * 1.02, 0.045, rimR * 1.72), 0, 0, 0));
+    // Recessed armored steel beadlock dish + raised outer beadlock clamping ring
+    parts.push(_part(ctx.getCyl(rimR, rimR, width * 0.94, 14, Math.PI / 2), 0, 0, 0));
+    parts.push(_part(ctx.getCyl(rimR * 1.04, rimR * 1.04, width * 0.99, 14, Math.PI / 2), 0, 0, 0));
+    // Protruding central CTIS planetary reduction hub + inner ventilated brake rotor
+    parts.push(_part(ctx.getCyl(rimR * 0.46, rimR * 0.52, width * 1.12, 10, Math.PI / 2), 0, 0, 0));
+    parts.push(_part(ctx.getCyl(rimR * 0.76, rimR * 0.76, width * 0.14, 12, Math.PI / 2), 0, 0, 0));
+    // CTIS armored air-line guard bar + 6 radial beadlock lug spokes
+    parts.push(_part(ctx.getBox(width * 1.15, rimR * 0.22, rimR * 1.52), 0, 0, 0));
+    parts.push(_part(ctx.getSpokes(6, width * 1.02, 0.04, rimR * 1.78), 0, 0, 0));
     return ctx.mergeParts(parts);
   });
 }
@@ -841,63 +843,69 @@ export function buildHumveeModel(ctx) {
 
   const hullRoot = _createForwardHullRoot(group);
 
-  // ── B. Armored Body, Sloped Hood, Flared Fenders & Slant-Back / Troop Roof (hullMat) ──
+  // ── B. Armored Body, Sculpted Hood, Flared Fenders & Slant-Back / Troop Roof (hullMat) ──
   _addMerged(
     hullRoot,
     `humvee:${sideTag}:hullMain`,
     ctx,
     hullMat,
     (p) => {
-      // High-clearance armored lower sill & cabin tub
-      p.push(_part(ctx.getBox(2.38, 0.64, 4.42), 0, 1.06, -0.02));
-      // Flared trapezoidal wheel-well fenders framing front & rear off-road tires
+      // High-clearance armored V-belly sill & crew cabin tub
+      p.push(_part(ctx.getBox(2.38, 0.62, 4.44), 0, 1.06, -0.02));
+      p.push(_part(ctx.getBox(1.92, 0.22, 4.18), 0, 0.72, -0.02));
+      // Flared trapezoidal wheel-well fenders + inner splash aprons framing front & rear tires
       for (const s of [-1, 1]) {
         for (const fz of [1.58, -1.58]) {
-          p.push(_part(ctx.getBox(0.36, 0.12, 1.14), s * 1.24, 1.28, fz));
-          p.push(_part(ctx.getBox(0.34, 0.34, 0.24), s * 1.23, 1.08, fz + (fz > 0 ? 0.62 : -0.62), fz > 0 ? -0.45 : 0.45, 0, 0));
-          p.push(_part(ctx.getBox(0.34, 0.34, 0.24), s * 1.23, 1.08, fz + (fz > 0 ? -0.62 : 0.62), fz > 0 ? 0.45 : -0.45, 0, 0));
+          p.push(_part(ctx.getBox(0.38, 0.12, 1.16), s * 1.24, 1.29, fz));
+          p.push(_part(ctx.getBox(0.36, 0.36, 0.24), s * 1.23, 1.08, fz + (fz > 0 ? 0.63 : -0.63), fz > 0 ? -0.46 : 0.46, 0, 0));
+          p.push(_part(ctx.getBox(0.36, 0.36, 0.24), s * 1.23, 1.08, fz + (fz > 0 ? -0.63 : 0.63), fz > 0 ? 0.46 : -0.46, 0, 0));
         }
-        // A/B/C armored cabin pillars & rocker armor rails
+        // Armored A/B/C cabin pillars, upper cant-rails & lower rocker armor sills
         p.push(_part(ctx.getBox(0.14, 0.68, 0.16), s * 1.1, 1.88, 0.96, -0.26, 0, 0));
         p.push(_part(ctx.getBox(0.14, 0.68, 0.18), s * 1.12, 1.9, -0.08));
         p.push(_part(ctx.getBox(0.14, 0.68, 0.22), s * 1.12, 1.9, -1.08));
+        p.push(_part(ctx.getBox(0.14, 0.11, 2.18), s * 1.11, 2.28, -0.1));
       }
-      // Split ballistic windshield perimeter frame & center armored divider pillar (+Z)
-      p.push(_part(ctx.getBox(2.26, 0.12, 0.14), 0, 2.24, 0.88, -0.26, 0, 0));
-      p.push(_part(ctx.getBox(2.28, 0.14, 0.18), 0, 1.56, 1.08));
+      // Split ballistic windshield perimeter frame, armored brow & center divider pillar (+Z)
+      p.push(_part(ctx.getBox(2.28, 0.12, 0.18), 0, 2.25, 0.9, -0.26, 0, 0));
+      p.push(_part(ctx.getBox(2.3, 0.14, 0.2), 0, 1.56, 1.08));
       p.push(_part(ctx.getBox(0.13, 0.66, 0.14), 0, 1.9, 0.98, -0.26, 0, 0));
 
       if (isUS) {
-        // M1151 wide flat-sloped armored hood (+Z) & 7-slot radiator surround
-        p.push(_part(ctx.getBox(2.34, 0.28, 1.28), 0, 1.4, 1.68, 0.11, 0, 0));
-        p.push(_part(ctx.getBox(2.32, 0.44, 0.18), 0, 1.24, 2.26));
-        // Armored crew cabin roof (top y = 2.38) + iconic sloped slant-back rear cargo hatch (-Z)
-        p.push(_part(ctx.getBox(2.28, 0.12, 2.02), 0, 2.34, -0.14));
-        p.push(_part(ctx.getBox(2.22, 0.16, 1.28), 0, 1.96, -1.68, -0.44, 0, 0));
-        p.push(_part(ctx.getBox(2.28, 0.56, 0.24), 0, 1.38, -2.2));
+        // M1151A1 multi-plane fiberglass hood (+Z), raised center power-dome & 7-slot nose surround
+        p.push(_part(ctx.getBox(2.34, 0.26, 1.3), 0, 1.4, 1.68, 0.11, 0, 0));
+        p.push(_part(ctx.getBox(1.36, 0.1, 1.08), 0, 1.53, 1.62, 0.11, 0, 0));
         for (const s of [-1, 1]) {
-          p.push(_part(ctx.getBox(0.14, 0.58, 1.12), s * 1.08, 1.84, -1.64));
+          p.push(_part(ctx.getBox(0.44, 0.2, 1.24), s * 0.96, 1.36, 1.68, 0.11, 0, s * -0.14));
+        }
+        p.push(_part(ctx.getBox(2.32, 0.46, 0.18), 0, 1.24, 2.27));
+        // Armored crew cabin roof (top y = 2.38) + iconic sloped slant-back rear cargo hatch & sponsons (-Z)
+        p.push(_part(ctx.getBox(2.28, 0.12, 2.02), 0, 2.34, -0.14));
+        p.push(_part(ctx.getBox(2.22, 0.16, 1.3), 0, 1.96, -1.68, -0.44, 0, 0));
+        p.push(_part(ctx.getBox(2.28, 0.58, 0.24), 0, 1.38, -2.2));
+        for (const s of [-1, 1]) {
+          p.push(_part(ctx.getBox(0.16, 0.6, 1.14), s * 1.08, 1.84, -1.64));
         }
       } else {
-        // GAZ-233014 Tigr-M raised V-hood armored cowling (+Z) & full-length troop roof (-Z)
-        p.push(_part(ctx.getBox(1.56, 0.34, 1.26), 0, 1.48, 1.68, 0.14, 0, 0));
+        // GAZ-233014 Tigr-M chiseled V-cowl armored hood (+Z), chamfered upper shoulders & troop roof (-Z)
+        p.push(_part(ctx.getBox(1.52, 0.36, 1.28), 0, 1.49, 1.68, 0.14, 0, 0));
         for (const s of [-1, 1]) {
-          p.push(_part(ctx.getBox(0.46, 0.28, 1.24), s * 0.94, 1.38, 1.66, 0.12, 0, s * -0.18));
-        }
-        p.push(_part(ctx.getBox(2.24, 0.48, 0.2), 0, 1.26, 2.26));
-        // Full-length armored troop compartment roof & vertical rear troop doors (-Z)
-        p.push(_part(ctx.getBox(2.28, 0.14, 3.16), 0, 2.35, -0.68));
-        p.push(_part(ctx.getBox(2.24, 0.96, 0.18), 0, 1.84, -2.22));
-        for (const s of [-1, 1]) {
+          p.push(_part(ctx.getBox(0.48, 0.28, 1.26), s * 0.94, 1.38, 1.66, 0.12, 0, s * -0.22));
+          // Chamfered upper ballistic hull roof shoulders running full cabin length
+          p.push(_part(ctx.getBox(0.22, 0.24, 3.16), s * 1.06, 2.24, -0.68, 0, 0, s * 0.32));
           p.push(_part(ctx.getBox(0.14, 0.88, 1.14), s * 1.1, 1.88, -1.64));
         }
+        p.push(_part(ctx.getBox(2.26, 0.5, 0.22), 0, 1.26, 2.27));
+        // Full-length armored troop compartment roof & twin vertical rear troop doors (-Z)
+        p.push(_part(ctx.getBox(2.12, 0.14, 3.16), 0, 2.36, -0.68));
+        p.push(_part(ctx.getBox(2.24, 0.96, 0.18), 0, 1.84, -2.22));
       }
     },
     true,
     true
   );
 
-  // ── C. 4 Recessed FRAG-5 Armored Side Doors, Hinges & Applique Armor (eraMat) ──
+  // ── C. 4 Recessed FRAG-5 X-Stamped Armored Doors, Hinges & Applique Armor (eraMat) ──
   _addMerged(
     hullRoot,
     `humvee:${sideTag}:hullEra`,
@@ -905,115 +913,170 @@ export function buildHumveeModel(ctx) {
     eraMat,
     (p) => {
       for (const s of [-1, 1]) {
-        // Front (z = +0.42) & Rear (z = -0.56) heavy recessed FRAG-5 ballistic doors
+        // Front (z = +0.42) & Rear (z = -0.56) heavy recessed FRAG-5 ballistic doors + X-stiffener ribs
         for (const dz of [0.42, -0.56]) {
           p.push(_part(ctx.getBox(0.12, 0.68, 0.86), s * 1.19, 1.48, dz));
           p.push(_part(ctx.getBox(0.11, 0.42, 0.82), s * 1.16, 2.02, dz));
+          if (isUS) {
+            // Iconic M1151 Frag-5 diagonal X-stamping ribs on lower armored doors
+            p.push(_part(ctx.getBox(0.04, 0.05, 0.74), s * 1.24, 1.48, dz, 0.52, 0, 0));
+            p.push(_part(ctx.getBox(0.04, 0.05, 0.74), s * 1.24, 1.48, dz, -0.52, 0, 0));
+          } else {
+            // Tigr-M side infantry firing-port armor blocks
+            p.push(_part(ctx.getBox(0.06, 0.14, 0.18), s * 1.23, 1.72, dz - 0.12));
+          }
           // Exterior heavy armor door hinges
           p.push(_part(ctx.getBox(0.15, 0.09, 0.12), s * 1.21, 1.66, dz + 0.34));
           p.push(_part(ctx.getBox(0.15, 0.09, 0.12), s * 1.21, 1.32, dz + 0.34));
         }
-        // Rocker blast-shield threshold step
-        p.push(_part(ctx.getBox(0.16, 0.12, 1.98), s * 1.24, 0.82, -0.06));
+        // Rocker blast-shield threshold step & B-pillar armor plate
+        p.push(_part(ctx.getBox(0.18, 0.12, 2.04), s * 1.25, 0.82, -0.06));
       }
       if (isUS) {
-        // Slant-back clamshell hatch armor ribs
-        p.push(_part(ctx.getBox(1.88, 0.08, 1.06), 0, 2.02, -1.68, -0.44, 0, 0));
-      } else {
-        // Tigr-M roof stiffener ribs & rear spare-wheel hub
-        for (const rz of [-0.6, -1.35, -2.0]) {
-          p.push(_part(ctx.getBox(2.06, 0.05, 0.1), 0, 2.43, rz));
+        // Slant-back clamshell hatch armor ribs + rear sponson louvers
+        p.push(_part(ctx.getBox(1.88, 0.08, 1.08), 0, 2.02, -1.68, -0.44, 0, 0));
+        for (const rx of [-0.58, 0, 0.58]) {
+          p.push(_part(ctx.getBox(0.08, 0.1, 1.06), rx, 2.04, -1.68, -0.44, 0, 0));
         }
-        p.push(_part(ctx.getCyl(0.24, 0.24, 0.28, 10), 0.44, 1.62, -2.38, Math.PI / 2, 0, 0));
+      } else {
+        // Tigr-M roof stiffener ribs, rear troop hatch ring & spare-wheel CTIS hub
+        for (const rz of [-0.6, -1.35, -2.0]) {
+          p.push(_part(ctx.getBox(2.02, 0.05, 0.1), 0, 2.44, rz));
+        }
+        p.push(_part(ctx.getCyl(0.25, 0.25, 0.3, 10, Math.PI / 2), 0.46, 1.62, -2.38));
       }
     },
     true,
     false
   );
 
-  // ── D. Underbody Skidplate, Louvered Hood Intake, 7-Slot Grille, Brush Guard, Snorkel & Handles (darkMat -> FLIR white-hot!) ──
+  // ── D. Double-Wishbone Portal Suspension, Coil-Overs, Skidplates, 7-Slot Grille, Brush Guard & Snorkel (darkMat) ──
   _addMerged(
     hullRoot,
     `humvee:${sideTag}:hullDark`,
     ctx,
     darkMat,
     (p) => {
-      // High-clearance ladder frame, portal axles & angled front skidplate
-      p.push(_part(ctx.getBox(1.36, 0.26, 3.85), 0, 0.68, 0));
-      p.push(_part(ctx.getBox(1.42, 0.12, 0.72), 0, 0.76, 2.08, -0.42, 0, 0));
+      // High-clearance boxed ladder frame + ribbed front & rear underride skidplates
+      p.push(_part(ctx.getBox(1.36, 0.26, 3.92), 0, 0.68, 0));
+      p.push(_part(ctx.getBox(1.48, 0.12, 0.78), 0, 0.76, 2.1, -0.42, 0, 0));
+      p.push(_part(ctx.getBox(1.44, 0.1, 0.62), 0, 0.74, -2.08, 0.38, 0, 0));
+
+      // Independent Double-Wishbone Control Arms, Coil-Over Shocks, CV Half-Shafts & Portal Hub Uprights
       for (const az of [1.58, -1.58]) {
-        p.push(_part(ctx.getCyl(0.085, 0.085, 2.28, 8, Math.PI / 2), 0, 0.56, az));
-        p.push(_part(ctx.getBox(0.32, 0.28, 0.32), 0, 0.58, az));
+        p.push(_part(ctx.getBox(0.38, 0.3, 0.38), 0, 0.6, az));
+        for (const s of [-1, 1]) {
+          // Upper & lower forged wishbone control arms + CV axle shaft + coil-over shock + portal upright
+          p.push(_part(ctx.getBox(0.68, 0.055, 0.24), s * 0.68, 0.68, az, 0, 0, s * -0.1));
+          p.push(_part(ctx.getBox(0.72, 0.065, 0.28), s * 0.68, 0.48, az, 0, 0, s * -0.06));
+          p.push(_part(ctx.getCyl(0.048, 0.048, 0.76, 8, Math.PI / 2), s * 0.68, 0.58, az));
+          p.push(_part(ctx.getCyl(0.075, 0.075, 0.52, 8), s * 0.78, 0.78, az, 0, 0, s * 0.24));
+          p.push(_part(ctx.getBox(0.18, 0.32, 0.24), s * 1.04, 0.58, az));
+          // Rubber wheel-well mudflaps
+          p.push(_part(ctx.getBox(0.38, 0.32, 0.04), s * 1.24, 0.62, az - 0.66));
+        }
       }
 
       // Hood louvered air intake grille (hot radiator plume in FLIR!)
-      p.push(_part(ctx.getBox(1.18, 0.05, 0.56), 0, 1.54, 1.58, 0.11, 0, 0));
-      for (let lz = 1.36; lz <= 1.8; lz += 0.11) {
-        p.push(_part(ctx.getBox(1.1, 0.035, 0.05), 0, 1.56, lz, 0.34, 0, 0));
+      p.push(_part(ctx.getBox(1.18, 0.05, 0.58), 0, 1.56, 1.58, 0.11, 0, 0));
+      for (let lz = 1.34; lz <= 1.82; lz += 0.1) {
+        p.push(_part(ctx.getBox(1.1, 0.035, 0.05), 0, 1.58, lz, 0.34, 0, 0));
       }
 
       if (isUS) {
-        // Iconic 7-slot vertical Humvee grille (+Z)
+        // Iconic 7-slot vertical Humvee grille + recessed radiator mesh (+Z)
+        p.push(_part(ctx.getBox(1.38, 0.34, 0.05), 0, 1.24, 2.31));
         for (let slot = -3; slot <= 3; slot++) {
-          p.push(_part(ctx.getBox(0.11, 0.32, 0.08), slot * 0.19, 1.24, 2.33));
+          p.push(_part(ctx.getBox(0.095, 0.34, 0.09), slot * 0.19, 1.24, 2.34));
         }
-        // Heavy winch bumper + tubular steel brush guard wrapping headlights & grille
-        p.push(_part(ctx.getBox(2.44, 0.22, 0.24), 0, 0.94, 2.4));
-        p.push(_part(ctx.getBox(2.28, 0.065, 0.065), 0, 1.48, 2.46));
-        p.push(_part(ctx.getBox(2.28, 0.06, 0.06), 0, 1.18, 2.48));
-        for (const bx of [-1.1, -0.58, 0.58, 1.1]) {
-          p.push(_part(ctx.getBox(0.065, 0.56, 0.08), bx, 1.22, 2.46));
+        // Heavy IED-ram winch bumper + multi-tube wraparound steel brush guard
+        p.push(_part(ctx.getBox(2.46, 0.24, 0.26), 0, 0.94, 2.41));
+        p.push(_part(ctx.getBox(2.3, 0.065, 0.065), 0, 1.49, 2.48));
+        p.push(_part(ctx.getBox(2.3, 0.06, 0.06), 0, 1.18, 2.5));
+        for (const bx of [-1.12, -0.58, 0.58, 1.12]) {
+          p.push(_part(ctx.getBox(0.065, 0.58, 0.08), bx, 1.22, 2.48));
         }
+        // Rear Duke CREW counter-IED jammer canister base (left rear corner, kept <= 2.46m!)
+        p.push(_part(ctx.getCyl(0.09, 0.11, 0.42, 8), -1.04, 2.18, -2.18));
       } else {
-        // Tigr-M armored V-cowl radiator grille + heavy welded bullbar ram bumper (+Z)
-        p.push(_part(ctx.getBox(1.28, 0.36, 0.08), 0, 1.28, 2.34));
-        p.push(_part(ctx.getBox(2.42, 0.26, 0.26), 0, 0.94, 2.42));
-        p.push(_part(ctx.getBox(1.62, 0.075, 0.075), 0, 1.52, 2.48));
-        for (const bx of [-0.76, 0.76]) {
-          p.push(_part(ctx.getBox(0.08, 0.58, 0.1), bx, 1.24, 2.48));
+        // Tigr-M armored V-cowl horizontal radiator slats + heavy welded ram bullbar (+Z)
+        p.push(_part(ctx.getBox(1.32, 0.38, 0.08), 0, 1.28, 2.34));
+        for (let gy = 1.14; gy <= 1.42; gy += 0.09) {
+          p.push(_part(ctx.getBox(1.24, 0.035, 0.12), 0, gy, 2.37));
         }
-        // Rear door-mounted spare tire (-Z)
-        p.push(_part(ctx.getCyl(0.46, 0.46, 0.26, 12), 0.44, 1.62, -2.36, Math.PI / 2, 0, 0));
+        p.push(_part(ctx.getBox(2.44, 0.26, 0.28), 0, 0.94, 2.43));
+        p.push(_part(ctx.getBox(1.68, 0.075, 0.075), 0, 1.54, 2.5));
+        p.push(_part(ctx.getBox(2.32, 0.065, 0.065), 0, 1.22, 2.5));
+        for (const bx of [-0.78, 0.78]) {
+          p.push(_part(ctx.getBox(0.08, 0.6, 0.1), bx, 1.24, 2.5));
+        }
+        // Rear door-mounted full-size treaded spare tire + 3-spoke retaining strap (-Z)
+        p.push(_part(ctx.getCyl(0.48, 0.48, 0.28, 14), 0.46, 1.62, -2.36, Math.PI / 2, 0, 0));
       }
 
-      // Door handles, side mirrors & windshield wipers
+      // Door handles, tubular A-pillar combat mirrors & dual windshield wipers
       for (const s of [-1, 1]) {
         for (const dz of [0.14, -0.82]) {
           p.push(_part(ctx.getBox(0.06, 0.05, 0.14), s * 1.26, 1.58, dz));
         }
-        p.push(_part(ctx.getBox(0.16, 0.22, 0.07), s * 1.32, 1.94, 0.92));
+        p.push(_part(ctx.getBox(0.08, 0.28, 0.18), s * 1.35, 1.96, 0.92, 0, s * 0.18, 0));
+        p.push(_part(ctx.getBox(0.16, 0.035, 0.035), s * 1.25, 2.08, 0.92));
+        p.push(_part(ctx.getBox(0.16, 0.035, 0.035), s * 1.25, 1.84, 0.92));
         p.push(_part(ctx.getBox(0.36, 0.03, 0.03), s * 0.52, 1.72, 1.07, 0, 0, 0.28));
       }
 
-      // Right B/A-pillar deep-fording snorkel intake stack + mushroom pre-cleaner cap
-      p.push(_part(ctx.getCyl(0.075, 0.085, 0.88, 8), 1.28, 1.92, 0.86));
-      p.push(_part(ctx.getCyl(0.14, 0.12, 0.12, 10), 1.28, 2.39, 0.86));
+      // Right A-pillar deep-fording cyclone snorkel stack + pre-cleaner cap (top = 2.45m < 2.80m!)
+      p.push(_part(ctx.getCyl(0.075, 0.085, 0.9, 8), 1.28, 1.92, 0.86));
+      p.push(_part(ctx.getCyl(0.145, 0.12, 0.13, 10), 1.28, 2.4, 0.86));
 
-      // Rear bumper & hot exhaust tailpipe (-Z)
-      p.push(_part(ctx.getBox(2.4, 0.2, 0.22), 0, 0.94, -2.36));
-      p.push(_part(ctx.getCyl(0.065, 0.065, 0.52, 8), -0.96, 0.82, -2.22, Math.PI / 2, 0, 0));
+      // Rear bumper, swing-out carrier & hot exhaust tailpipe (-Z)
+      p.push(_part(ctx.getBox(2.42, 0.22, 0.24), 0, 0.94, -2.37));
+      p.push(_part(ctx.getCyl(0.065, 0.065, 0.56, 8), -0.96, 0.8, -2.24, Math.PI / 2, 0, 0));
     },
     true,
     false
   );
 
-  // ── E. Front Winch Drum, Tow Hooks & Rear Whip Antenna (barrelMat) ──
+  // ── E. Front Winch Drum, Fairlead, Tow Shackles & Rear Whip Antenna (barrelMat) ──
   _addMerged(
     hullRoot,
     `humvee:${sideTag}:hullSteel`,
     ctx,
     barrelMat,
     (p) => {
-      // Front Warn winch cable drum + shackles (world -Z)
-      p.push(_part(ctx.getCyl(0.095, 0.095, 0.44, 8, Math.PI / 2), 0, 0.96, 2.48));
+      // Front Warn winch cable drum + roller fairlead + forged shackles (world -Z)
+      p.push(_part(ctx.getCyl(0.095, 0.095, 0.46, 8, Math.PI / 2), 0, 0.96, 2.5));
+      p.push(_part(ctx.getBox(0.36, 0.12, 0.06), 0, 0.96, 2.56));
       for (const s of [-1, 1]) {
-        p.push(_part(ctx.getBox(0.07, 0.11, 0.14), s * 0.82, 0.92, 2.52));
-        p.push(_part(ctx.getBox(0.07, 0.11, 0.14), s * 0.82, 0.92, -2.46));
+        p.push(_part(ctx.getBox(0.075, 0.12, 0.15), s * 0.84, 0.92, 2.54));
+        p.push(_part(ctx.getBox(0.075, 0.12, 0.15), s * 0.84, 0.92, -2.48));
       }
-      // Rear corner whip antenna angled slightly aft so center sightline is 100% open
-      p.push(_part(ctx.getCyl(0.015, 0.025, 1.15, 6), -1.18, 2.25, -2.18, -0.22, 0, 0.12));
+      // Rear corner whip antenna angled aft so center sightline is 100% open
+      p.push(_part(ctx.getCyl(0.015, 0.025, 1.15, 6), -1.18, 2.22, -2.2, -0.24, 0, 0.14));
     },
     false,
+    false
+  );
+
+  // ── E2. Rear Stowage Jerry Cans & BFT SATCOM Puck (_oliveGearMat) ──
+  _addMerged(
+    hullRoot,
+    `humvee:${sideTag}:hullGear`,
+    ctx,
+    _oliveGearMat,
+    (p) => {
+      if (isUS) {
+        // Twin rear swing-out NATO Jerry cans + left-front roof BFT GPS dome (top = 2.46m!)
+        p.push(_part(ctx.getBox(0.34, 0.46, 0.22), -0.68, 1.38, -2.38));
+        p.push(_part(ctx.getBox(0.34, 0.46, 0.22), 0.68, 1.38, -2.38));
+        p.push(_part(ctx.getCyl(0.14, 0.16, 0.08, 8), -0.78, 2.42, 0.56));
+      } else {
+        // Tigr-M left-rear Jerry can + side pioneer shovel/pack stowage
+        p.push(_part(ctx.getBox(0.34, 0.46, 0.22), -0.68, 1.44, -2.36));
+        p.push(_part(ctx.getBox(0.12, 0.18, 0.92), -1.22, 2.18, -1.58));
+      }
+    },
+    true,
     false
   );
 

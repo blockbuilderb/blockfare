@@ -1,6 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=149';
+import { sound } from '../audio.js?v=150';
 import {
+  DEV_OPTIONS,
   PLAYER,
   COMBAT,
   PROJECTILES,
@@ -8,22 +9,22 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=149';
-import { events } from '../events.js?v=149';
+} from '../config.js?v=150';
+import { events } from '../events.js?v=150';
 import {
   WEAPON_DEFS,
   ATTACHMENT_CATALOG,
   createWeaponViewModel,
   getWeaponHipOffsetX
-} from '../weapons.js?v=149';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=149';
+} from '../weapons.js?v=150';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=150';
 import {
   evaluateMarksmanShot,
   computeBallisticSolution,
   syncActiveMarksmanTitle,
   saveMarksmanProfile,
   loadMarksmanProfile
-} from './MarksmanSystem.js?v=149';
+} from './MarksmanSystem.js?v=150';
 
 function markShared(asset) {
   if (asset) {
@@ -1678,7 +1679,8 @@ export const CombatMethods = {
         armorPenMult,
         def,
         pelletCount,
-        muzzleWorldPos
+        muzzleWorldPos,
+        p === 0
       );
     }
 
@@ -1761,6 +1763,248 @@ export const CombatMethods = {
    * stepping and raycasting segment-by-segment each frame in `updateBallisticBullets(dt)` so
    * targets are only injured when the bullet physically reaches them!
    */
+  /**
+   * Controls whether the Developer Options tab & sandbox cheats are enabled.
+   * Left ON by default for now (`DEV_OPTIONS.DEFAULT_DEV_TAB_ENABLED = true`),
+   * and can be turned OFF anytime in Settings -> Gameplay (or enforced OFF by MP Host Admin)
+   * to immediately disarm cheats and preserve realistic game balance.
+   */
+  isDevTabEnabled() {
+    if (DEV_OPTIONS.ENABLE_DEV_TAB_MASTER === false) {
+      if (this.devNukeAmmoEnabled) this.devNukeAmmoEnabled = false;
+      return false;
+    }
+    const net =
+      (typeof window !== 'undefined' && window.game ? window.game.network : null) ||
+      this.network ||
+      null;
+    if (
+      net &&
+      typeof net.isMultiplayer === 'function' &&
+      net.isMultiplayer() &&
+      typeof net.isLocalAdmin === 'function' &&
+      !net.isLocalAdmin() &&
+      net.roomAllowDevOptions === false
+    ) {
+      if (this.devNukeAmmoEnabled) this.devNukeAmmoEnabled = false;
+      return false;
+    }
+    if (typeof this.devTabEnabled !== 'boolean') {
+      let saved = null;
+      try {
+        if (typeof localStorage !== 'undefined') {
+          saved = localStorage.getItem('bb_dev_tab_enabled');
+        }
+      } catch (_) {}
+      if (saved === 'false') {
+        this.devTabEnabled = false;
+      } else if (saved === 'true') {
+        this.devTabEnabled = true;
+      } else {
+        this.devTabEnabled = DEV_OPTIONS.DEFAULT_DEV_TAB_ENABLED !== false;
+      }
+    }
+    if (!this.devTabEnabled && this.devNukeAmmoEnabled) {
+      this.devNukeAmmoEnabled = false;
+    }
+    return this.devTabEnabled;
+  },
+
+  setDevTabEnabled(enabled, options = {}) {
+    const next = DEV_OPTIONS.ENABLE_DEV_TAB_MASTER === false ? false : Boolean(enabled);
+    this.devTabEnabled = next;
+    if (options.persist !== false) {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('bb_dev_tab_enabled', next ? 'true' : 'false');
+        }
+      } catch (_) {}
+    }
+    if (!next) {
+      this.devNukeAmmoEnabled = false;
+      this.devNukeCodeUnlocked = false;
+      this._devCodeSeq = [];
+    }
+    if (!options.silent) {
+      sound.playRadioBeep?.(true);
+      if (this.onAwardXp) {
+        this.onAwardXp(
+          0,
+          next
+            ? '🛠️ DEVELOPER OPTIONS TAB ENABLED — SANDBOX CONSOLE AVAILABLE IN SETTINGS'
+            : '🛡️ DEVELOPER OPTIONS TAB OFF — REALISTIC GAME BALANCE RESTORED'
+        );
+      }
+    }
+    const net =
+      (typeof window !== 'undefined' && window.game ? window.game.network : null) ||
+      this.network ||
+      null;
+    if (
+      net &&
+      typeof net.isMultiplayer === 'function' &&
+      net.isMultiplayer() &&
+      typeof net.isLocalAdmin === 'function' &&
+      net.isLocalAdmin() &&
+      typeof net.send === 'function' &&
+      typeof net.buildLocalStatePacket === 'function'
+    ) {
+      net.roomAllowDevOptions = next;
+      net.send(net.buildLocalStatePacket());
+    }
+    return this.devTabEnabled;
+  },
+
+  toggleDevTabEnabled() {
+    return this.setDevTabEnabled(!this.isDevTabEnabled());
+  },
+
+  /**
+   * Developer Options Secret Directional Code (`LEFT, RIGHT, LEFT, RIGHT, UP, DOWN`)
+   * Unlocks & arms Tactical Nuke Ammo for ANY gun the player fires!
+   */
+  feedDevCodeInput(direction) {
+    if (typeof this.isDevTabEnabled === 'function' && !this.isDevTabEnabled()) {
+      this._devCodeSeq = [];
+      this.devNukeAmmoEnabled = false;
+      return { matched: false, progress: 0, active: false, disabled: true };
+    }
+    const norm = String(direction || '')
+      .trim()
+      .toUpperCase();
+    const mapAlias = {
+      ARROWLEFT: 'LEFT',
+      KEYA: 'LEFT',
+      A: 'LEFT',
+      L: 'LEFT',
+      LEFT: 'LEFT',
+      ARROWRIGHT: 'RIGHT',
+      KEYD: 'RIGHT',
+      D: 'RIGHT',
+      R: 'RIGHT',
+      RIGHT: 'RIGHT',
+      ARROWUP: 'UP',
+      KEYW: 'UP',
+      W: 'UP',
+      U: 'UP',
+      UP: 'UP',
+      ARROWDOWN: 'DOWN',
+      KEYS: 'DOWN',
+      S: 'DOWN',
+      DN: 'DOWN',
+      DOWN: 'DOWN'
+    };
+    const token = mapAlias[norm];
+    if (!token) return { matched: false, progress: (this._devCodeSeq || []).length };
+
+    const SECRET = ['LEFT', 'RIGHT', 'LEFT', 'RIGHT', 'UP', 'DOWN'];
+    if (!Array.isArray(this._devCodeSeq)) this._devCodeSeq = [];
+    const expected = SECRET[this._devCodeSeq.length];
+    if (token === expected) {
+      this._devCodeSeq.push(token);
+    } else {
+      this._devCodeSeq = token === SECRET[0] ? [token] : [];
+    }
+
+    if (this._devCodeSeq.length >= SECRET.length) {
+      this._devCodeSeq = [];
+      this.devNukeCodeUnlocked = true;
+      this.setDevNukeAmmo(true);
+      return { matched: true, progress: SECRET.length, active: true };
+    }
+    return { matched: false, progress: this._devCodeSeq.length, active: Boolean(this.devNukeAmmoEnabled) };
+  },
+
+  submitDevCodeText(rawText) {
+    if (typeof this.isDevTabEnabled === 'function' && !this.isDevTabEnabled()) {
+      this._devCodeSeq = [];
+      this.devNukeAmmoEnabled = false;
+      return { matched: false, progress: 0, active: false, disabled: true };
+    }
+    const tokens = String(rawText || '')
+      .trim()
+      .toUpperCase()
+      .split(/[\s,/-]+/)
+      .filter(Boolean);
+    if (tokens.length === 0) return { matched: false, progress: 0 };
+    this._devCodeSeq = [];
+    let lastRes = { matched: false, progress: 0 };
+    for (let i = 0; i < tokens.length; i++) {
+      lastRes = this.feedDevCodeInput(tokens[i]);
+      if (lastRes.matched) return lastRes;
+    }
+    return lastRes;
+  },
+
+  setDevNukeAmmo(enabled) {
+    if (enabled && typeof this.isDevTabEnabled === 'function' && !this.isDevTabEnabled()) {
+      this.devNukeAmmoEnabled = false;
+      return false;
+    }
+    this.devNukeAmmoEnabled = Boolean(enabled);
+    if (this.devNukeAmmoEnabled) {
+      this.devNukeCodeUnlocked = true;
+    }
+    sound.playBuy?.();
+    if (this.onAwardXp) {
+      this.onAwardXp(
+        0,
+        this.devNukeAmmoEnabled
+          ? '☢️ DEV NUKE AMMO ARMED — EVERY GUN DETONATES A TACTICAL NUKE WHERE YOU SHOOT!'
+          : '🛡️ DEV NUKE AMMO DISARMED — STANDARD BALLISTIC AMMUNITION RESTORED'
+      );
+    }
+    return this.devNukeAmmoEnabled;
+  },
+
+  detonateTacticalNukeAt(impactPos) {
+    if (!impactPos || !this.world) return;
+    const blastPos = impactPos.clone();
+    const nukeRadius = 34;
+    const nukeDamage = 2800;
+
+    // Play layered heavy nuclear thunder boom
+    const dist = this.pos ? this.pos.distanceTo(blastPos) : 20;
+    sound.playExplosion?.(Math.min(dist, 35), 0, true);
+
+    if (typeof this.world.spawnNukeExplosionVisual === 'function') {
+      this.world.spawnNukeExplosionVisual(blastPos, nukeRadius);
+    } else if (typeof this.world.spawnExplosionVisual === 'function') {
+      this.world.spawnExplosionVisual(blastPos, nukeRadius);
+    }
+
+    // Throttle heavy 3D voxel-grid crater carving to 12 Hz if firing full-auto so FPS stays 60+!
+    let brokenCount = 0;
+    const nowPerf = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (!this._lastNukeVoxelCarveAt || nowPerf - this._lastNukeVoxelCarveAt >= 80) {
+      this._lastNukeVoxelCarveAt = nowPerf;
+      if (typeof this.world.damageAreaVoxels === 'function') {
+        this.world.damageAreaVoxels(blastPos, 14, 950);
+        brokenCount = 12;
+      }
+    }
+
+    if (this.onExplosionDamage) {
+      this.onExplosionDamage(
+        blastPos,
+        nukeRadius,
+        nukeDamage,
+        this,
+        brokenCount,
+        '☢️ TACTICAL NUKE AMMO'
+      );
+    } else {
+      events.emit('explosion:damage', {
+        pos: blastPos,
+        radius: nukeRadius,
+        maxDamage: nukeDamage,
+        owner: this,
+        brokenCount,
+        weaponOverride: '☢️ TACTICAL NUKE AMMO'
+      });
+    }
+  },
+
   fireBallisticRay(
     origin,
     dir,
@@ -1771,7 +2015,8 @@ export const CombatMethods = {
     armorPenMult = 1.0,
     wepDef = null,
     pelletCount = 1,
-    tracerOriginOverride = null
+    tracerOriginOverride = null,
+    isPrimaryPellet = true
   ) {
     if (!Array.isArray(this.activeBullets)) {
       this.activeBullets = [];
@@ -1865,9 +2110,16 @@ export const CombatMethods = {
       tracerStart.z - origin.z
     );
 
+    const isNukeRound = Boolean(
+      this.devNukeAmmoEnabled &&
+        (typeof this.isDevTabEnabled !== 'function' || this.isDevTabEnabled()) &&
+        isPrimaryPellet
+    );
     let tracerLine = null;
-    if (!hideTracers && this.scene && this.activeBullets.length < 140) {
-      const tracerColor = isVenomProj
+    if ((!hideTracers || isNukeRound) && this.scene && this.activeBullets.length < 140) {
+      const tracerColor = isNukeRound
+        ? 0x7fff00
+        : isVenomProj
         ? 0x2ecc71
         : isFireArrow
         ? 0xff5e00
@@ -1876,7 +2128,8 @@ export const CombatMethods = {
         : isBrightTracer
         ? 0xffeaa7
         : 0xf6d365;
-      const opacity = isFireArrow || isVenomProj || isBrightTracer || isMountedMg ? 0.94 : 0.55;
+      const opacity =
+        isNukeRound || isFireArrow || isVenomProj || isBrightTracer || isMountedMg ? 0.96 : 0.55;
       tracerLine = this._acquireTracerLine(
         tracerStart.x,
         tracerStart.y,
@@ -1968,6 +2221,7 @@ export const CombatMethods = {
       collateralHits: 0,
       collateralKills: 0,
       isBrightTracer,
+      isNukeRound,
       tracerLine,
       arrowMesh,
       explosiveSplash: wepDef && wepDef.explosiveSplash ? wepDef.explosiveSplash : null,
@@ -2885,6 +3139,21 @@ export const CombatMethods = {
       );
     }
 
+    // Ensure high-elevation hill terrain (>18m) also stops bullets cleanly on ground contact
+    if (!terminatedOnEntity && !stoppedByVoxel && this.world?.getGroundHeightAt) {
+      const endGroundY = this.world.getGroundHeightAt(_stepImpactPt.x, _stepImpactPt.z);
+      if (_stepImpactPt.y <= endGroundY + 0.05) {
+        _stepImpactPt.y = endGroundY;
+        stoppedByVoxel = {
+          voxel: null,
+          isGround: true,
+          distance: maxSegmentEntityDist,
+          point: _stepImpactPt.clone(),
+          normal: new THREE.Vector3(0, 1, 0)
+        };
+      }
+    }
+
     const bulletTerminated = Boolean(
       terminatedOnEntity || stoppedByVoxel || reachedMaxRange
     );
@@ -2956,7 +3225,9 @@ export const CombatMethods = {
         );
       }
 
-      if (bullet.explosiveSplash && this.world && (terminatedOnEntity || stoppedByVoxel)) {
+      if (bullet.isNukeRound && this.world) {
+        this.detonateTacticalNukeAt(_stepImpactPt);
+      } else if (bullet.explosiveSplash && this.world && (terminatedOnEntity || stoppedByVoxel)) {
         const sp = bullet.explosiveSplash;
         const splashPos = _stepImpactPt.clone();
         this.world.explodeAt(

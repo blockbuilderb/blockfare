@@ -4,14 +4,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as THREE from '../vendor/three.module.js';
 
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=149';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=149';
-import { CombatMethods } from '../src/player/PlayerCombat.js?v=149';
-import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=149';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=149';
-import { VehicleManager } from '../src/vehicles.js?v=149';
-import { BotManager } from '../src/bots.js?v=149';
-import { hasClearSightline } from '../src/bots/SightlineSystem.js?v=149';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=150';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=150';
+import { CombatMethods } from '../src/player/PlayerCombat.js?v=150';
+import { VehicleControlMethods } from '../src/player/VehicleControl.js?v=150';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=150';
+import { VehicleManager } from '../src/vehicles.js?v=150';
+import { BotManager } from '../src/bots.js?v=150';
+import { hasClearSightline } from '../src/bots/SightlineSystem.js?v=150';
 
 const ROOT = process.cwd();
 

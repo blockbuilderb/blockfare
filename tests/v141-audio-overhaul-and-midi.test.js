@@ -11,9 +11,9 @@ import {
   MidiSynthEngine,
   buildStandardMidiBytes,
   parseStandardMidiBytes
-} from '../src/audio/index.js?v=149';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=149';
-import { AUDIO } from '../src/config.js?v=149';
+} from '../src/audio/index.js?v=150';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=150';
+import { AUDIO } from '../src/config.js?v=150';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');

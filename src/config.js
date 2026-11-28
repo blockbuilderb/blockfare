@@ -5,6 +5,16 @@
 // =========================================================================
 
 // ---------------------------------------------------------------------------
+// DEVELOPER SANDBOX OPTIONS
+// Default ON for now; can be toggled OFF anytime in Settings -> Gameplay
+// (or locked build-wide by setting ENABLE_DEV_TAB_MASTER: false).
+// ---------------------------------------------------------------------------
+export const DEV_OPTIONS = {
+  ENABLE_DEV_TAB_MASTER: true,
+  DEFAULT_DEV_TAB_ENABLED: true
+};
+
+// ---------------------------------------------------------------------------
 // PLAYER
 // ---------------------------------------------------------------------------
 export const PLAYER = {

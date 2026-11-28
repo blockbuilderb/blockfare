@@ -7,10 +7,10 @@ import {
   createSoldierMesh,
   updateSoldierEquippedWeapon
 } from '../src/models/soldier-model.js';
-import { createWeaponViewModel } from '../src/models/weapon-model.js?v=149';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=149';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=149';
-import { TerrainGenerator } from '../src/world/TerrainGenerator.js?v=149';
+import { createWeaponViewModel } from '../src/models/weapon-model.js?v=150';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=150';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=150';
+import { TerrainGenerator } from '../src/world/TerrainGenerator.js?v=150';
 import { SpatialGrid2D } from '../src/utils/SpatialGrid2D.js';
 
 /**
@@ -245,6 +245,9 @@ test('createVehicleMesh: ground bikes and ATVs expose mesh.userData.riderGroup a
     { type: 'bike', bikeSubType: 'sport_600cc', team: 'US' },
     { type: 'bike', bikeSubType: 'superbike_1000cc', team: 'RU' },
     { type: 'bike', bikeSubType: 'twostroke_250cc', isTwoStroke: true, team: 'US' },
+    { type: 'bike', bikeSubType: 'twostroke_250cc', isMilitaryRecon: true, team: 'US' },
+    { type: 'bike', bikeSubType: 'twostroke_500cc', isMilitaryRecon: true, isAwdMoto: true, team: 'US' },
+    { type: 'bike', bikeSubType: 'sport_600cc', isMilitaryRecon: true, isMilitaryAdv: true, team: 'RU' },
     { type: 'bike', bikeSubType: 'emoto_stark_varg', isElectric: true, team: 'RU' },
     { type: 'bike', bikeSubType: 'scooter_kukirin', isScooter: true, team: 'US' }
   ];
@@ -258,7 +261,11 @@ test('createVehicleMesh: ground bikes and ATVs expose mesh.userData.riderGroup a
       riderGroup instanceof THREE.Group,
       `${label} must expose mesh.userData.riderGroup as a THREE.Group`
     );
-    assert.equal(riderGroup.parent, mesh, `${label} riderGroup must be parented to vehicle mesh`);
+    assert.equal(
+      isDescendantOf(riderGroup, mesh),
+      true,
+      `${label} riderGroup must belong to vehicle mesh hierarchy (inside rearWheelPivot)`
+    );
     assert.equal(
       riderGroup.visible,
       false,
@@ -678,6 +685,8 @@ test('createVehicleMesh & prop-models: upgraded faction armor, bombers, emplacem
     { type: 'tank', team: 'RU', expectedWheels: 12, maxMeshes: 40 },
     { type: 'humvee', team: 'US', expectedWheels: 4, maxMeshes: 32 },
     { type: 'humvee', team: 'RU', expectedWheels: 4, maxMeshes: 32 },
+    { type: 'truck_transport', team: 'US', expectedWheels: 6, maxMeshes: 32 },
+    { type: 'truck_transport', team: 'RU', expectedWheels: 6, maxMeshes: 32 },
     { type: 'apc', team: 'US', expectedWheels: 8, maxMeshes: 40 },
     { type: 'apc', team: 'RU', expectedWheels: 8, maxMeshes: 40 },
     { type: 'aa', team: 'US', expectedWheels: 8, maxMeshes: 40 },
@@ -861,7 +870,7 @@ test('All 29 Firearms & Launchers × All 18 Gunsmith Optics have 100% unobstruct
 });
 
 test('All US & RU Ground Vehicles orient headlights forward (-Z), red taillights aft (+Z), and main barrels forward (-Z)', () => {
-  const groundTypes = ['tank', 'humvee', 'apc', 'aa'];
+  const groundTypes = ['tank', 'humvee', 'truck_transport', 'apc', 'aa'];
   for (const team of ['US', 'RU']) {
     for (const type of groundTypes) {
       const { group: mesh, turretPivot, barrelGroup } = createVehicleMesh({ type, team });

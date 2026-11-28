@@ -20,10 +20,10 @@ export {
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from './assets/weapon-defs.js?v=149';
-export { ATTACHMENT_CATALOG } from './assets/attachment-defs.js?v=149';
+} from './assets/weapon-defs.js?v=150';
+export { ATTACHMENT_CATALOG } from './assets/attachment-defs.js?v=150';
 export {
   createWeaponViewModel,
   getWeaponHipOffsetX,
   updateFirstPersonArmShoulders
-} from './models/weapon-model.js?v=149';
+} from './models/weapon-model.js?v=150';

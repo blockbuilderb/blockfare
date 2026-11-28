@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { getFactionLabel } from '../config.js?v=149';
+import { getFactionLabel } from '../config.js?v=150';
 
 const MARKER_POOL_TYPES = ['flag', 'ally', 'spot', 'revive', 'airBox', 'leadLine', 'misc'];
 

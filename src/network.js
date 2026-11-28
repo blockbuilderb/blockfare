@@ -1,13 +1,14 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=149';
-import { sound } from './audio.js?v=149';
-import { NETWORK } from './config.js?v=149';
-import { events, makeEventBridge } from './events.js?v=149';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=150';
+import { sound } from './audio.js?v=150';
+import { NETWORK } from './config.js?v=150';
+import { events, makeEventBridge } from './events.js?v=150';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=149';
-import { WebRtcTransport } from './network/WebRtcTransport.js?v=149';
+} from './core/StateMachines.js?v=150';
+import { WebRtcTransport } from './network/WebRtcTransport.js?v=150';
+import { syncMotoWheeliePose } from './models/vehicle-model.js?v=150';
 
 function safeStorageGet(key) {
   try {
@@ -189,6 +190,7 @@ export class NetworkManager {
     this._isCoopChildWindow = Boolean(params.get('coop') === '1');
     this.serverAdminId = null;
     this.roomAdminId = this.clientId;
+    this.roomAllowDevOptions = true;
     this.ws = null;
     this.wsConnected = false;
     this.broadcastChannel = null;
@@ -1044,6 +1046,9 @@ export class NetworkManager {
           ) {
             this.gameRef.switchEra(msg.era, true, { fromAdminSync: true });
           }
+          if (!this.isLocalAdmin() && typeof this._applyAdminDevOptionsSync === 'function') {
+            this._applyAdminDevOptionsSync(msg.allowDevOptions);
+          }
           if (prevAdmin !== this.roomAdminId && this.onLobbyUpdated) {
             this.onLobbyUpdated();
           }
@@ -1157,6 +1162,10 @@ export class NetworkManager {
           : this.clientId || null,
       roomTenureMs:
         typeof this.getLocalRoomTenureMs === 'function' ? this.getLocalRoomTenureMs() : 0,
+      allowDevOptions:
+        typeof this.player?.isDevTabEnabled === 'function'
+          ? this.player.isDevTabEnabled()
+          : true,
       matchEnded: Boolean(g.matchEnded),
       ticketsUS: Math.round(g.ticketsUS ?? 400),
       ticketsRU: Math.round(g.ticketsRU ?? 400),
@@ -1223,6 +1232,13 @@ export class NetworkManager {
       if (typeof this.gameRef?.switchEra === 'function') {
         this.gameRef.switchEra(msg.era, true, { fromAdminSync: true });
       }
+    }
+    if (
+      senderIsAdmin &&
+      (typeof this.isLocalAdmin !== 'function' || !this.isLocalAdmin()) &&
+      typeof this._applyAdminDevOptionsSync === 'function'
+    ) {
+      this._applyAdminDevOptionsSync(msg?.allowDevOptions);
     }
     const g = this.gameRef;
     const msgEpoch = typeof msg?.roundEpoch === 'number' ? msg.roundEpoch : 1;
@@ -1665,6 +1681,13 @@ export class NetworkManager {
     ) {
       this.gameRef.switchEra(msg.era, true, { fromAdminSync: true });
     }
+    if (
+      this.isPeerAdmin(msg.senderId) &&
+      !this.isLocalAdmin() &&
+      typeof this._applyAdminDevOptionsSync === 'function'
+    ) {
+      this._applyAdminDevOptionsSync(msg.allowDevOptions);
+    }
 
     const prevTeam = rp.team;
     if (msg.name) rp.name = msg.name;
@@ -1802,6 +1825,33 @@ export class NetworkManager {
     return this.remoteHitMeshes;
   }
 
+  _applyAdminDevOptionsSync(allowDevOptions) {
+    if (typeof allowDevOptions !== 'boolean') return;
+    const prev = this.roomAllowDevOptions;
+    this.roomAllowDevOptions = allowDevOptions;
+    if (!allowDevOptions && typeof this.isLocalAdmin === 'function' && !this.isLocalAdmin()) {
+      if (this.player) {
+        const wasArmed = Boolean(this.player.devNukeAmmoEnabled);
+        this.player.devNukeAmmoEnabled = false;
+        this.player.devNukeCodeUnlocked = false;
+        this.player._devCodeSeq = [];
+        if (wasArmed && typeof this.player.onAwardXp === 'function') {
+          this.player.onAwardXp(
+            0,
+            '🛡️ SERVER ADMIN DISABLED DEV OPTIONS — REALISTIC BALANCE ENFORCED'
+          );
+        }
+      }
+    }
+    if (prev !== allowDevOptions) {
+      const ui = this.gameRef?.ui;
+      const modal = ui?.el?.('settings-modal');
+      if (modal && typeof ui?.renderSettingsModalContent === 'function') {
+        ui.renderSettingsModalContent(modal);
+      }
+    }
+  }
+
   buildLocalStatePacket() {
     const curSlot =
       typeof this.player.currentWeapon === 'function'
@@ -1845,6 +1895,10 @@ export class NetworkManager {
       era: this.world?.era || 'modern',
       roomAdminId: this.recomputeRoomAdmin(),
       roomTenureMs: this.getLocalRoomTenureMs(),
+      allowDevOptions:
+        typeof this.player?.isDevTabEnabled === 'function'
+          ? this.player.isDevTabEnabled()
+          : true,
       name: this.callsign,
       team: this.player.team,
       subFaction: this.player.subFaction || this.player.team || 'US',
@@ -2061,8 +2115,12 @@ export class NetworkManager {
           v.roll = THREE.MathUtils.lerp(v.roll || 0, v._remoteTargetRoll, blend);
         }
         if (v.mesh) {
-          v.mesh.position.copy(v.pos);
-          v.mesh.rotation.set(v.pitch || 0, v.yaw || 0, v.roll || 0, 'YXZ');
+          if (v.type === 'bike' || v.type === 'atv') {
+            syncMotoWheeliePose(v, this.world);
+          } else {
+            v.mesh.position.copy(v.pos);
+            v.mesh.rotation.set(v.pitch || 0, v.yaw || 0, v.roll || 0, 'YXZ');
+          }
           if (v.turretGroup && !v.isAircraft && typeof v.turretYaw === 'number') {
             v.turretGroup.rotation.y = v.turretYaw - (v.yaw || 0);
           }

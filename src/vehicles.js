@@ -1,15 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
-import { sound } from './audio.js?v=149';
-import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=149';
+import { sound } from './audio.js?v=150';
+import { VEHICLE_STATS, ECONOMY, PROJECTILES } from './config.js?v=150';
 import {
   VEHICLE_DEFS,
   MEDIEVAL_VEHICLE_DEFS,
   JURASSIC_VEHICLE_DEFS
-} from './assets/vehicle-defs.js?v=149';
-import { createVehicleMesh } from './models/vehicle-model.js?v=149';
-import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=149';
-import { getRideShortcutLabel } from './utils/KeyboardShortcuts.js?v=149';
-import { events, makeEventBridge } from './events.js?v=149';
+} from './assets/vehicle-defs.js?v=150';
+import { createVehicleMesh, syncMotoWheeliePose } from './models/vehicle-model.js?v=150';
+import { tmpVec3, tmpVec3Copy } from './utils/VectorPool.js?v=150';
+import { getRideShortcutLabel } from './utils/KeyboardShortcuts.js?v=150';
+import { events, makeEventBridge } from './events.js?v=150';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   AIRCRAFT_FLIGHT_STATES,
@@ -22,7 +22,7 @@ import {
   syncAircraftFlightFSM,
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM
-} from './core/StateMachines.js?v=149';
+} from './core/StateMachines.js?v=150';
 
 function markShared(item) {
   item.userData.shared = true;
@@ -6548,7 +6548,7 @@ export class VehicleManager {
           v.pitch = THREE.MathUtils.lerp(v.pitch || 0, 0, dt * 6.0);
           v.roll = THREE.MathUtils.lerp(v.roll || 0, 0, dt * 6.0);
         }
-        v.mesh.rotation.set(v.pitch || 0, v.yaw || 0, v.roll || 0, 'YXZ');
+        syncMotoWheeliePose(v, this.world);
 
         // Show 3D Articulated Rider Model in 3rd-Person Chase View (or when driven by an AI bot)
         const riderGroup = v.mesh?.userData?.riderGroup;

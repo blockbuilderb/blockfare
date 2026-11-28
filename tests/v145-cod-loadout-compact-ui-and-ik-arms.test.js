@@ -11,13 +11,13 @@ import {
   PRIMARY_WEAPON_CATEGORIES,
   SECONDARY_WEAPON_CATEGORIES,
   getWeaponCategory
-} from '../src/weapons.js?v=149';
+} from '../src/weapons.js?v=150';
 import {
   createWeaponViewModel,
   getWeaponHipOffsetX,
   updateFirstPersonArmShoulders
-} from '../src/models/weapon-model.js?v=149';
-import { GunsmithMethods } from '../src/player/GunsmithState.js?v=149';
+} from '../src/models/weapon-model.js?v=150';
+import { GunsmithMethods } from '../src/player/GunsmithState.js?v=150';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');

@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=149';
-import { TERRAIN } from '../config.js?v=149';
-import { events } from '../events.js?v=149';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=149';
+import { sound } from '../audio.js?v=150';
+import { TERRAIN } from '../config.js?v=150';
+import { events } from '../events.js?v=150';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=150';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;
@@ -1044,6 +1044,133 @@ export const ProjectileManager = {
     const chunkMult = isHeavy ? 2 : 1;
     this.spawnDebris(pos, isFlir ? _debrisFlirHotColor : _debrisEmberColor, 7 * chunkMult);
     this.spawnDebris(pos, isFlir ? _smokeFlirHotVaporColor : _debrisWarmEarthColor, 5 * chunkMult);
+  },
+
+  /**
+   * Iconic 3D Tactical Nuclear Detonation Visual (Blinding Flash + Triple Mach Shockwaves +
+   * Towering Incandescent Mushroom Stem + Toroidal Mushroom Cap Crown), built 100% from the
+   * pre-allocated InstancedMesh pools (`_glowPool`, `_fxPool`, `_debrisPool`, `_shockwavePool`)
+   * for zero heap / GPU geometry allocations!
+   */
+  spawnNukeExplosionVisual(pos, radius = 32) {
+    this._ensureParticlePools();
+    const isFlir = Boolean(typeof window !== 'undefined' && window.game?._flirSceneActive);
+    const groundY = this.getGroundHeightAt ? this.getGroundHeightAt(pos.x, pos.z) : pos.y;
+    const baseY = Math.max(pos.y, groundY + 0.25);
+
+    // 1. Searing white-hot nuclear fireball dome at ground zero
+    this._spawnGlowSlot(
+      pos.x,
+      baseY + 1.2,
+      pos.z,
+      0,
+      2.5,
+      0,
+      4,
+      5,
+      4,
+      radius * 0.65,
+      radius * 1.45,
+      _corePureWhiteColor,
+      1.15
+    );
+    this._spawnGlowSlot(
+      pos.x,
+      baseY + 3.5,
+      pos.z,
+      0,
+      6.5,
+      0,
+      3,
+      4,
+      3,
+      radius * 0.52,
+      radius * 1.15,
+      isFlir ? _corePureWhiteColor : _fireballBrightColor,
+      1.45
+    );
+
+    // 2. Towering Rising Mushroom Stem Column
+    for (let st = 0; st < 6; st++) {
+      const frac = st / 5;
+      this._spawnGlowSlot(
+        pos.x + (Math.random() - 0.5) * 1.6,
+        baseY + 2.0 + frac * 14.0,
+        pos.z + (Math.random() - 0.5) * 1.6,
+        (Math.random() - 0.5) * 1.8,
+        9.5 + frac * 8.5,
+        (Math.random() - 0.5) * 1.8,
+        2.2,
+        3.0,
+        2.2,
+        3.8 + (1 - Math.abs(frac - 0.5)) * 2.2,
+        3.2,
+        isFlir ? _corePureWhiteColor : st % 2 === 0 ? _fireballColor : _fireballBrightColor,
+        1.55 + frac * 0.35
+      );
+      this._spawnFxSlot(
+        pos.x + (Math.random() - 0.5) * 2.2,
+        baseY + 1.5 + frac * 13.0,
+        pos.z + (Math.random() - 0.5) * 2.2,
+        (Math.random() - 0.5) * 2.2,
+        8.0 + frac * 7.5,
+        (Math.random() - 0.5) * 2.2,
+        1.2,
+        1.8,
+        1.2,
+        4.4,
+        3.6,
+        isFlir ? _smokeFlirHotVaporColor : _smokeDustLightColor,
+        2.1 + frac * 0.4
+      );
+    }
+
+    // 3. Toroidal Mushroom Cloud Cap & Radioactive Crown at Altitude
+    const capLobes = 10;
+    for (let c = 0; c < capLobes; c++) {
+      const ang = (c / capLobes) * Math.PI * 2;
+      const ringR = 5.5 + (c % 2) * 2.2;
+      this._spawnGlowSlot(
+        pos.x + Math.cos(ang) * ringR,
+        baseY + 16.5 + (c % 2) * 2.4,
+        pos.z + Math.sin(ang) * ringR,
+        Math.cos(ang) * 7.5,
+        8.5 + (c % 2) * 2.5,
+        Math.sin(ang) * 7.5,
+        2.4,
+        2.8,
+        2.4,
+        6.2,
+        5.4,
+        isFlir ? _corePureWhiteColor : c % 2 === 0 ? _fireballBrightColor : _fireballColor,
+        1.85
+      );
+      this._spawnFxSlot(
+        pos.x + Math.cos(ang) * (ringR + 1.8),
+        baseY + 17.5 + (c % 3) * 1.8,
+        pos.z + Math.sin(ang) * (ringR + 1.8),
+        Math.cos(ang) * 8.2,
+        7.2,
+        Math.sin(ang) * 8.2,
+        1.0,
+        1.4,
+        1.0,
+        6.8,
+        5.8,
+        isFlir ? _smokeFlirHotVaporColor : c % 2 === 0 ? _smokeDustLightColor : _smokeDustMidColor,
+        2.45
+      );
+    }
+
+    // 4. Triple Supersonic Ground Mach-Stem Shockwave Rings + High-Intensity Flash Light
+    this._spawnShockwaveRing(pos.x, groundY + 0.25, pos.z, 4.5, radius * 2.4, 0.95, true, 0xffffff);
+    this._spawnShockwaveRing(pos.x, groundY + 0.35, pos.z, 3.5, radius * 3.4, 1.15, false, 0xffeaa7);
+    this._spawnShockwaveRing(pos.x, baseY + 15.0, pos.z, 4.0, radius * 2.2, 1.05, false, 0xff9f43);
+    this._spawnBlastLight(pos.x, baseY + 6.0, pos.z, radius * 1.8, isFlir);
+
+    // 5. Incandescent Radial Fallout Debris Shower
+    this.spawnDebris(pos, isFlir ? _debrisFlirHotColor : _debrisEmberColor, 22);
+    this.spawnDebris(pos, isFlir ? _smokeFlirHotVaporColor : _debrisWarmEarthColor, 14);
   },
 
   addAmmoCrate(wx, wz, team = null, owner = 'FOB SUPPLY', permanent = true, duration = 120) {

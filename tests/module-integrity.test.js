@@ -461,41 +461,41 @@ test('Module Integrity #6: import/ref extractors ignore comments and capture mul
     'import {',
     '  AIRCRAFT_FLIGHT_EVENTS,',
     '  syncAircraftFlightFSM',
-    "} from '../core/StateMachines.js?v=149';",
-    "export * from './bots/BotAI.js?v=149';",
-    "export { BotManager } from './bots/BotManager.js?v=149';",
-    "import './side-effect.js?v=149';",
-    "const lazy = () => import('./lazy-chunk.js?v=149');"
+    "} from '../core/StateMachines.js?v=150';",
+    "export * from './bots/BotAI.js?v=150';",
+    "export { BotManager } from './bots/BotManager.js?v=150';",
+    "import './side-effect.js?v=150';",
+    "const lazy = () => import('./lazy-chunk.js?v=150');"
   ].join('\n');
 
   const jsExtracted = extractJsRelativeImports(sampleJs, 'src/sample.js').map((r) => r.specifier);
   assert.deepEqual(jsExtracted, [
     '../../vendor/three.module.js',
-    '../core/StateMachines.js?v=149',
-    './bots/BotAI.js?v=149',
-    './bots/BotManager.js?v=149',
-    './side-effect.js?v=149',
-    './lazy-chunk.js?v=149'
+    '../core/StateMachines.js?v=150',
+    './bots/BotAI.js?v=150',
+    './bots/BotManager.js?v=150',
+    './side-effect.js?v=150',
+    './lazy-chunk.js?v=150'
   ]);
 
   const sampleHtml = [
     '<!-- <script type="module" src="./commented-out.js"></script> -->',
-    '<link rel="stylesheet" href="./style.css?v=149" />',
+    '<link rel="stylesheet" href="./style.css?v=150" />',
     '<script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>',
-    '<script type="module" src="./src/main.js?v=149"></script>'
+    '<script type="module" src="./src/main.js?v=150"></script>'
   ].join('\n');
   const htmlExtracted = extractHtmlRelativeRefs(sampleHtml, 'index.html').map((r) => r.specifier);
   assert.deepEqual(htmlExtracted, [
-    './style.css?v=149',
+    './style.css?v=150',
     './vendor/three.module.js',
-    './src/main.js?v=149'
+    './src/main.js?v=150'
   ]);
 
   const sampleCss = [
-    "/* @import './css/old.css?v=149'; */",
-    "@import './css/base.css?v=149';",
-    '@import url("./css/hud.css?v=149");'
+    "/* @import './css/old.css?v=150'; */",
+    "@import './css/base.css?v=150';",
+    '@import url("./css/hud.css?v=150");'
   ].join('\n');
   const cssExtracted = extractCssRelativeRefs(sampleCss, 'style.css').map((r) => r.specifier);
-  assert.deepEqual(cssExtracted, ['./css/base.css?v=149', './css/hud.css?v=149']);
+  assert.deepEqual(cssExtracted, ['./css/base.css?v=150', './css/hud.css?v=150']);
 });

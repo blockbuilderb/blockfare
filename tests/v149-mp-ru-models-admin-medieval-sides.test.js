@@ -1,15 +1,15 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { NetworkManager } from '../src/network.js?v=149';
+import { NetworkManager } from '../src/network.js?v=150';
 import { BattleRoomCore } from '../cloudflare-relay/src/room-core.js';
-import { getFactionLabel } from '../src/config.js?v=149';
-import { Scoreboard } from '../src/ui/Scoreboard.js?v=149';
-import { VictoryScreen } from '../src/ui/VictoryScreen.js?v=149';
-import { DeployScreen } from '../src/ui/DeployScreen.js?v=149';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=149';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=149';
-import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=149';
+import { getFactionLabel } from '../src/config.js?v=150';
+import { Scoreboard } from '../src/ui/Scoreboard.js?v=150';
+import { VictoryScreen } from '../src/ui/VictoryScreen.js?v=150';
+import { DeployScreen } from '../src/ui/DeployScreen.js?v=150';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=150';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=150';
+import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=150';
 
 function createFakeEl() {
   const classes = new Set();
