@@ -391,6 +391,41 @@ export function getRoleByHotkey(keyCode, era = 'modern', team = 'US') {
   return found ? found.id : null;
 }
 
+/**
+ * Returns era-accurate faction display labels so Medieval Era displays
+ * WEST / WEST KINGDOM / WEST KEEP vs EAST / EAST EMPIRE / EAST CITADEL
+ * instead of US vs RU, while keeping internal `'US'` / `'RU'` simulation IDs intact.
+ */
+export function getFactionLabel(team = 'US', era = 'modern', variant = 'short') {
+  const normEra = String(era || 'modern').toLowerCase();
+  const isRu = team === 'RU';
+  if (normEra === 'medieval') {
+    if (variant === 'forces' || variant === 'full') {
+      return isRu ? 'EAST EMPIRE' : 'WEST KINGDOM';
+    }
+    if (variant === 'hq') {
+      return isRu ? 'EAST CITADEL' : 'WEST KEEP';
+    }
+    return isRu ? 'EAST' : 'WEST';
+  }
+  if (normEra === 'jurassic') {
+    if (variant === 'forces' || variant === 'full') {
+      return isRu ? 'DINOSAURS' : 'USA + RUSSIA';
+    }
+    if (variant === 'hq') {
+      return isRu ? 'DINO CALDERA' : 'HUMAN HQ';
+    }
+    return isRu ? 'DINO' : 'HUMAN';
+  }
+  if (variant === 'forces' || variant === 'full') {
+    return isRu ? 'RU FORCES' : 'US FORCES';
+  }
+  if (variant === 'hq') {
+    return isRu ? 'RU HQ' : 'US HQ';
+  }
+  return isRu ? 'RU' : 'US';
+}
+
 // ---------------------------------------------------------------------------
 // COMBAT
 // ---------------------------------------------------------------------------

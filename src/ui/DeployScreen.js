@@ -1,6 +1,12 @@
-import { SQUAD_DEFS } from '../bots.js?v=148';
-import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=148';
-import { events } from '../events.js?v=148';
+import { SQUAD_DEFS } from '../bots.js?v=149';
+import {
+  CLASS_TRAITS,
+  VEHICLE_STATS,
+  SQUAD_KIT_CAPS,
+  getAllowedRoleIds,
+  getFactionLabel
+} from '../config.js?v=149';
+import { events } from '../events.js?v=149';
 import {
   WEAPON_DEFS,
   CLASS_LOADOUTS,
@@ -8,19 +14,19 @@ import {
   SECONDARY_WEAPON_CATEGORIES,
   SHOTGUN_SHELL_TYPES,
   getWeaponCategory
-} from '../weapons.js?v=148';
-import { buildWeaponSvg } from '../assets/gunsmith-svg.js?v=148';
-import { sound } from '../audio.js?v=148';
+} from '../weapons.js?v=149';
+import { buildWeaponSvg } from '../assets/gunsmith-svg.js?v=149';
+import { sound } from '../audio.js?v=149';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=148';
+} from '../core/StateMachines.js?v=149';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=148';
+} from '../utils/KeyboardShortcuts.js?v=149';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -93,8 +99,13 @@ export const DeployScreen = {
         btn.classList.add('active');
         this.selectedTeam = btn.dataset.team;
         this.selectedSubFaction = btn.dataset.subfaction || btn.dataset.team;
+        if (this.player && this.player.dead) {
+          this.player.team = this.selectedTeam;
+          this.player.subFaction = this.selectedSubFaction;
+        }
         this.botManager?.syncPlayerTeamSlot?.(this.selectedTeam);
         this.network?.syncDynamicHumanSlots?.(this.selectedTeam);
+        this.network?.broadcastImmediateState?.();
         this.syncEraUI?.();
       });
     });
@@ -103,10 +114,27 @@ export const DeployScreen = {
     const openMainMenuBtn = document.getElementById('open-main-menu-btn');
     if (openMainMenuBtn) {
       openMainMenuBtn.addEventListener('click', () => {
+        if (this.network?.isMultiplayer?.() && !this.network.isLocalAdmin?.()) {
+          const adminName = this.network.getRoomAdminName?.() || 'HOST ADMIN';
+          this.addXpNotification?.(
+            0,
+            `🔒 ONLY SERVER ADMIN (${adminName}) CAN CHANGE COMBAT ERA!`
+          );
+          return;
+        }
         this.openMainMenu();
       });
     }
     const enterEraConfig = (era) => {
+      if (this.network?.isMultiplayer?.() && !this.network.isLocalAdmin?.()) {
+        const adminName = this.network.getRoomAdminName?.() || 'HOST ADMIN';
+        this.addXpNotification?.(
+          0,
+          `🔒 ONLY SERVER ADMIN (${adminName}) CAN CHANGE COMBAT ERA!`
+        );
+        this.closeMainMenu();
+        return;
+      }
       const targetEra = era || 'modern';
       if (window.game && typeof window.game.switchEra === 'function') {
         window.game.switchEra(targetEra, true);
@@ -295,6 +323,14 @@ export const DeployScreen = {
     const nextRoundBtn = this.el('next-round-btn');
     if (nextRoundBtn) {
       nextRoundBtn.addEventListener('click', () => {
+        if (this.network?.isMultiplayer?.() && !this.network.isLocalAdmin?.()) {
+          const adminName = this.network.getRoomAdminName?.() || 'HOST ADMIN';
+          this.addXpNotification?.(
+            0,
+            `🔒 ONLY SERVER ADMIN (${adminName}) CAN START A NEW ROUND!`
+          );
+          return;
+        }
         if (this.onPlayNextRound) this.onPlayNextRound();
       });
     }
@@ -398,6 +434,14 @@ export const DeployScreen = {
     if (deployNewRoundBtn) {
       deployNewRoundBtn.addEventListener('click', (e) => {
         e.preventDefault();
+        if (this.network?.isMultiplayer?.() && !this.network.isLocalAdmin?.()) {
+          const adminName = this.network.getRoomAdminName?.() || 'HOST ADMIN';
+          this.addXpNotification?.(
+            0,
+            `🔒 ONLY SERVER ADMIN (${adminName}) CAN START A NEW ROUND!`
+          );
+          return;
+        }
         if (this.onPlayNextRound) {
           this.onPlayNextRound();
         }
@@ -1046,6 +1090,14 @@ export const DeployScreen = {
             this.victoryScreenEl && !this.victoryScreenEl.classList.contains('hidden');
           if (victoryVisible && this.onPlayNextRound) {
             e.preventDefault();
+            if (this.network?.isMultiplayer?.() && !this.network.isLocalAdmin?.()) {
+              const adminName = this.network.getRoomAdminName?.() || 'HOST ADMIN';
+              this.addXpNotification?.(
+                0,
+                `🔒 ONLY SERVER ADMIN (${adminName}) CAN START A NEW ROUND!`
+              );
+              return;
+            }
             this.onPlayNextRound();
             return;
           }
@@ -1118,15 +1170,31 @@ export const DeployScreen = {
       isCloudRelay: false,
       isWebRtc: true
     };
+    const activeEra = (this.world && this.world.era) || 'modern';
+    const isAdmin = this.network.isLocalAdmin ? this.network.isLocalAdmin() : true;
+    const adminName = this.network.getRoomAdminName ? this.network.getRoomAdminName() : 'YOU';
     if (statusEl) {
+      const adminPill = isAdmin
+        ? ` &bull; <span style="color:#ffd32a;font-weight:900;">👑 YOU ARE SERVER ADMIN</span>`
+        : ` &bull; <span style="color:#ffd32a;font-weight:900;">👑 ADMIN: ${adminName}</span>`;
       const peerNames =
         peers.length > 0
-          ? ` &bull; <span style="color:#2ecc71">ONLINE (${peers.length + 1}): YOU, ${peers
-              .map((p) => `${p.name} [${p.team}]`)
+          ? ` &bull; <span style="color:#2ecc71">ONLINE (${peers.length + 1}): YOU${
+              isAdmin ? ' 👑' : ''
+            }, ${peers
+              .map(
+                (p) =>
+                  `${p.name}${this.network.isPeerAdmin?.(p.id) ? ' 👑' : ''} [${getFactionLabel(
+                    p.team,
+                    activeEra,
+                    'short'
+                  )}]`
+              )
               .join(', ')}</span>`
           : ' &bull; <span style="color:#95a5a6">SHARE INVITE LINK WITH FRIENDS ANYWHERE!</span>';
-      statusEl.innerHTML = `<span style="color:#7bed9f;font-weight:900;">${transportInfo.label}</span> &bull; ROOM <strong style="color:#f1c40f">${this.network.roomCode}</strong> &bull; INVITE: <code style="color:#74b9ff;background:rgba(0,0,0,0.45);padding:2px 5px;border-radius:2px;">${lanUrl}</code>${peerNames}`;
+      statusEl.innerHTML = `<span style="color:#7bed9f;font-weight:900;">${transportInfo.label}</span> &bull; ROOM <strong style="color:#f1c40f">${this.network.roomCode}</strong>${adminPill} &bull; INVITE: <code style="color:#74b9ff;background:rgba(0,0,0,0.45);padding:2px 5px;border-radius:2px;">${lanUrl}</code>${peerNames}`;
     }
+    this.syncAdminControlsUI?.();
 
     // 1-Click Live Active Rooms Pill Strip on Deploy Screen (`/api/mp/rooms` live discovery!)
     const roomsPillWrap = this.el('mp-active-rooms-pills');
@@ -1278,17 +1346,24 @@ export const DeployScreen = {
       )
       .join(' ');
 
+    const activeEra = (this.world && this.world.era) || 'modern';
     const peersRowsHtml =
       peers.length === 0
-        ? `<div style="padding:10px;background:rgba(0,0,0,0.35);border-radius:4px;color:#95a5a6;font-size:12px;">No other human players in room <strong>${this.network.roomCode}</strong> yet. Open the Invite URL below in another browser tab, window, or computer on your Wi-Fi/LAN to join immediately!</div>`
+        ? `<div style="padding:10px;background:rgba(0,0,0,0.35);border-radius:4px;color:#95a5a6;font-size:12px;">No other human players in room <strong>${this.network.roomCode}</strong> yet. You are the <strong style="color:#ffd32a;">👑 Default Server Admin</strong> — open the Invite URL below in another browser tab, window, or computer to join!</div>`
         : peers
             .map(
               (p) => `
           <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.06);padding:6px 10px;border-radius:4px;margin-bottom:4px;font-size:12px;">
             <div>
-              <strong style="color:${p.team === 'US' ? '#5dade2' : '#ec7063'}">[${p.team}] ${
-                p.name
-              }</strong>
+              <strong style="color:${p.team === 'US' ? '#5dade2' : '#ec7063'}">[${getFactionLabel(
+                p.team,
+                activeEra,
+                'short'
+              )}] ${p.name}</strong>${
+                this.network.isPeerAdmin?.(p.id)
+                  ? ' <span style="background:rgba(241,196,15,0.22);border:1px solid #f1c40f;color:#ffd32a;font-size:9.5px;font-weight:900;padding:1px 5px;border-radius:3px;">👑 ADMIN</span>'
+                  : ''
+              }
               <span style="color:#95a5a6;margin-left:6px;">${p.role || 'SOLDIER'} &bull; ${
                 p.squad || 'ALPHA'
               } SQUAD &bull; ${Math.round(this.player.pos.distanceTo(p.pos))}m away</span>
@@ -1437,7 +1512,60 @@ export const DeployScreen = {
     });
   },
 
+  syncAdminControlsUI() {
+    if (typeof document === 'undefined') return;
+    const isMp = Boolean(this.network?.isMultiplayer?.());
+    const isAdmin = !isMp || Boolean(this.network?.isLocalAdmin?.());
+    const adminName = this.network?.getRoomAdminName?.() || 'HOST ADMIN';
+
+    const openMainMenuBtn = document.getElementById('open-main-menu-btn');
+    if (openMainMenuBtn) {
+      openMainMenuBtn.textContent = !isAdmin ? '🔒 Era (Admin)' : '🌍 Era';
+      openMainMenuBtn.style.opacity = !isAdmin ? '0.58' : '1';
+      openMainMenuBtn.style.cursor = !isAdmin ? 'not-allowed' : 'pointer';
+      openMainMenuBtn.title = !isAdmin
+        ? `Only Server Admin (${adminName}) can switch Combat Era`
+        : 'Switch Combat Era (Modern / Medieval / Jurassic)';
+    }
+
+    const nextRoundBtn = this.el('next-round-btn') || document.getElementById('next-round-btn');
+    if (nextRoundBtn) {
+      if (!isAdmin) {
+        nextRoundBtn.textContent = `⏳ WAITING FOR SERVER ADMIN (${adminName}) TO START NEXT ROUND`;
+        nextRoundBtn.style.opacity = '0.62';
+        nextRoundBtn.style.cursor = 'not-allowed';
+      } else {
+        nextRoundBtn.textContent = isMp
+          ? '👑 DEPLOY NEXT CONQUEST ROUND (HOST ADMIN)'
+          : 'DEPLOY NEXT CONQUEST ROUND';
+        nextRoundBtn.style.opacity = '1';
+        nextRoundBtn.style.cursor = 'pointer';
+      }
+    }
+
+    const deployNewRoundBtn =
+      this.el('deploy-new-round-btn') || document.getElementById('deploy-new-round-btn');
+    if (deployNewRoundBtn) {
+      const inExistingRound = Boolean(this.player?._hasDeployedInRound);
+      if (!isAdmin) {
+        deployNewRoundBtn.classList.add('hidden');
+        deployNewRoundBtn.style.display = 'none';
+      } else {
+        deployNewRoundBtn.classList.toggle('hidden', !inExistingRound);
+        deployNewRoundBtn.style.display = inExistingRound ? 'inline-flex' : 'none';
+      }
+    }
+  },
+
   openMainMenu() {
+    if (this.network?.isMultiplayer?.() && !this.network.isLocalAdmin?.()) {
+      const adminName = this.network.getRoomAdminName?.() || 'HOST ADMIN';
+      this.addXpNotification?.(
+        0,
+        `🔒 ONLY SERVER ADMIN (${adminName}) CAN CHANGE COMBAT ERA!`
+      );
+      return;
+    }
     if (document.pointerLockElement === document.body) {
       document.exitPointerLock();
     }
@@ -1644,6 +1772,7 @@ export const DeployScreen = {
     this.renderDeployLoadoutCards?.();
     this.renderDeployB2CustomizerBar?.();
     this.updateDeployClassTraitsCard?.();
+    this.syncAdminControlsUI?.();
     this.drawDeployMap?.(true);
   },
 
@@ -2251,6 +2380,7 @@ export const DeployScreen = {
     }
     this.player.deploy(this.selectedTeam, this.selectedClass, spawnVec);
     this.player._hasDeployedInRound = true;
+    this.network?.broadcastImmediateState?.();
 
     // Fulfill 1-Click Deploy Vehicle Selection:
     // - If spawning at MAIN BASE and an unclaimed HQ Pool vehicle of that type is parked there -> $0 FREE!
@@ -2353,9 +2483,10 @@ export const DeployScreen = {
           (b) => !b.dead && b.team === this.player.team && b.squad === this.player.squad
         );
       if (mate) {
+        const greetFaction = getFactionLabel(this.player.team, eraNow, 'short');
         const greetMsg =
           this.player.commandRank === 'COMMANDER'
-            ? `Force Commander on the ground! All 6 Squads (${this.player.team} ALPHA–FALCON) standing by on Command Net — click [A]–[E] or press [K]!`
+            ? `Force Commander on the ground! All 6 Squads (${greetFaction} ALPHA–FALCON) standing by on Command Net — click [A]–[E] or press [K]!`
             : this.player.commandRank === 'SQUAD_LEADER'
             ? `${this.player.squad} Squad formed up on you, Squad Lead! Click [A]–[E], [K], or hold [Y] to issue squad orders!`
             : `Welcome to ${this.player.squad} Squad! Follow Squad Leader ${mate.name} or take command anytime on the HUD!`;
@@ -2457,10 +2588,14 @@ export const DeployScreen = {
         const ss = String(rem % 60).padStart(2, '0');
         const tUS = Math.ceil(this.lastTicketsUS ?? 800);
         const tRU = Math.ceil(this.lastTicketsRU ?? 800);
-        statusPill.textContent = `🟢 EXISTING ROUND LIVE (${mm}:${ss} • US ${tUS} : ${tRU} RU)`;
+        const activeEra = (this.world && this.world.era) || 'modern';
+        const usLbl = getFactionLabel('US', activeEra, 'short');
+        const ruLbl = getFactionLabel('RU', activeEra, 'short');
+        statusPill.textContent = `🟢 EXISTING ROUND LIVE (${mm}:${ss} • ${usLbl} ${tUS} : ${tRU} ${ruLbl})`;
         statusPill.style.color = '#f1c40f';
       }
     }
+    this.syncAdminControlsUI?.();
   },
 
   showDeployScreen() {
@@ -2622,8 +2757,9 @@ export const DeployScreen = {
     ctx.fillRect(toMapX(-28), toMapY(-406), 22, 5);
     ctx.fillRect(toMapX(-28), toMapY(394), 22, 5);
 
-    // Base HQs (In Jurassic Era, both US HQ West and RU HQ East belong to the Allied Human Coalition!)
+    // Base HQs (Medieval: West Keep vs East Citadel; Jurassic: Allied Human Coalition; Modern: US HQ vs RU HQ)
     const isJur = this.world && this.world.era === 'jurassic';
+    const isMed = this.world && this.world.era === 'medieval';
     const usX = toMapX(this.world.spawns.US_BASE.x);
     const usY = toMapY(this.world.spawns.US_BASE.z);
     ctx.fillStyle = '#3498db';
@@ -2631,14 +2767,14 @@ export const DeployScreen = {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 9px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(isJur ? 'USA HQ' : 'US HQ', usX, usY - 11);
+    ctx.fillText(isMed ? 'WEST KEEP' : isJur ? 'USA HQ' : 'US HQ', usX, usY - 11);
 
     const ruX = toMapX(this.world.spawns.RU_BASE.x);
     const ruY = toMapY(this.world.spawns.RU_BASE.z);
     ctx.fillStyle = isJur ? '#00d2d3' : '#e74c3c';
     ctx.fillRect(ruX - 8, ruY - 8, 16, 16);
     ctx.fillStyle = '#fff';
-    ctx.fillText(isJur ? 'RUS HQ' : 'RU HQ', ruX, ruY - 11);
+    ctx.fillText(isMed ? 'EAST CITADEL' : isJur ? 'RUS HQ' : 'RU HQ', ruX, ruY - 11);
 
     if (isJur) {
       // Draw Dinosaur Jungle Nests across the island

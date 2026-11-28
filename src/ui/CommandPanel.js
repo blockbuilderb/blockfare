@@ -1,6 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
-import { SQUAD_DEFS } from '../bots.js?v=148';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=148';
+import { SQUAD_DEFS } from '../bots.js?v=149';
+import { getFactionLabel } from '../config.js?v=149';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=149';
 
 export const CommandPanel = {
   setCommandScope(scope, opts = {}) {
@@ -46,13 +47,31 @@ export const CommandPanel = {
     const bots = Array.isArray(this.botManager?.bots) ? this.botManager.bots : [];
 
     // 1. Named Sector Lookup for Player Position
-    const flagSectorNames = {
-      A: 'WEST TOWN',
-      B: 'CONTAINERS',
-      C: 'DOWNTOWN CITY',
-      D: 'RADAR HILL',
-      E: 'INDUSTRIAL'
-    };
+    const activeEra = (this.world && this.world.era) || 'modern';
+    const flagSectorNames =
+      activeEra === 'medieval'
+        ? {
+            A: 'WEST KEEP',
+            B: 'TREBUCHET RIDGE',
+            C: 'RIVER CITADEL',
+            D: 'WATCHTOWER',
+            E: 'EAST FORTRESS'
+          }
+        : activeEra === 'jurassic'
+        ? {
+            A: 'RAPTOR PADDOCK',
+            B: 'SKELETON CANYON',
+            C: 'LAGOON CROSSING',
+            D: 'VOLCANIC RIDGE',
+            E: 'T-REX NEST'
+          }
+        : {
+            A: 'WEST TOWN',
+            B: 'CONTAINERS',
+            C: 'DOWNTOWN CITY',
+            D: 'RADAR HILL',
+            E: 'INDUSTRIAL'
+          };
     let playerSectorLabel = 'OPEN VALLEY';
     let closestSectorDist = Infinity;
     for (let i = 0; i < flags.length; i++) {
@@ -71,9 +90,15 @@ export const CommandPanel = {
     const usBase = this.world?.spawns?.US_BASE;
     const ruBase = this.world?.spawns?.RU_BASE;
     if (usBase && Math.hypot(pPos.x - usBase.x, pPos.z - usBase.z) <= 185) {
-      playerSectorLabel = 'US MAIN BASE HQ';
+      playerSectorLabel =
+        activeEra === 'medieval'
+          ? 'WEST KEEP HQ'
+          : `${getFactionLabel('US', activeEra, 'short')} MAIN BASE HQ`;
     } else if (ruBase && Math.hypot(pPos.x - ruBase.x, pPos.z - ruBase.z) <= 185) {
-      playerSectorLabel = 'RU MAIN BASE HQ';
+      playerSectorLabel =
+        activeEra === 'medieval'
+          ? 'EAST CITADEL HQ'
+          : `${getFactionLabel('RU', activeEra, 'short')} MAIN BASE HQ`;
     }
 
     // 2. Locate Squadmates, Squad Leader (or Acting 2IC), and Squad Group Centroid
@@ -1567,9 +1592,15 @@ export const CommandPanel = {
               ? `🚁 RIDE LZ MODE (${curRideMode.toUpperCase()}) — CLICK ANY SKYSCRAPER ROOF OR POINT ON MAP TO REQUEST PICKUP & DROP-OFF!`
               : isStrikeClickMode
               ? '💥 AIRSTRIKE TARGETING MODE — CLICK ANYWHERE ON MAP TO CALL STRIKE AT THOSE EXACT COORDINATES!'
-              : `📍 FRUGIS RIVER VALLEY — CLICK OBJECTIVE A–E TO ORDER (${
+              : `📍 ${
+                  (this.world && this.world.era) === 'medieval'
+                    ? 'IRONKEEP CITADEL'
+                    : (this.world && this.world.era) === 'jurassic'
+                    ? 'ISLA CARNIVORA'
+                    : 'FRUGIS RIVER VALLEY'
+                } — CLICK OBJECTIVE A–E TO ORDER (${
                   this.player.commandScope === 'ALL' ? 'ALL 5 SQUADS' : playerSquadId + ' SQUAD'
-                }) OR USE [🚁 CLICK: RIDE LZ]`
+                })${isModernEra ? ' OR USE [🚁 CLICK: RIDE LZ]' : ''}`
           }</span>
           <div style="display:flex;gap:4px;flex-wrap:wrap;">
             <button id="cmd-map-mode-order" style="background:${

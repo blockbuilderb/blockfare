@@ -37,9 +37,32 @@ export class BattleRoomCore {
   constructor(ctx, env) {
     this.ctx = ctx;
     this.env = env;
-    this.players = new Map(); // clientId -> player state + _updated
+    this.players = new Map(); // clientId -> player state + _updated + _joinedAt
     this.events = []; // [{ seq, ts, packet }]
     this.seq = 0;
+    this.adminId = null;
+    this.activeEra = 'modern';
+  }
+
+  _refreshAdmin() {
+    if (this.adminId && this.players.has(this.adminId)) {
+      return this.adminId;
+    }
+    let bestId = null;
+    let bestJoined = Infinity;
+    for (const [cid, p] of this.players.entries()) {
+      const joinedAt = typeof p._joinedAt === 'number' ? p._joinedAt : Infinity;
+      if (
+        bestId === null ||
+        joinedAt < bestJoined ||
+        (joinedAt === bestJoined && cid < bestId)
+      ) {
+        bestId = cid;
+        bestJoined = joinedAt;
+      }
+    }
+    this.adminId = bestId;
+    return this.adminId;
   }
 
   _pruneStale(nowMs) {
@@ -48,6 +71,7 @@ export class BattleRoomCore {
         this.players.delete(cid);
       }
     }
+    this._refreshAdmin();
     if (this.events.length > 160) {
       this.events = this.events.slice(-100);
     }
@@ -113,6 +137,8 @@ export class BattleRoomCore {
       return jsonResponse({
         ok: true,
         code: roomCode,
+        adminId: this._refreshAdmin(),
+        era: this.activeEra,
         playerCount: Math.max(wsCount, playersList.length),
         players: playersList
       });
@@ -132,18 +158,36 @@ export class BattleRoomCore {
       const lastSeq = Number(payload.lastSeq || 0);
 
       if (clientId && state && typeof state === 'object') {
+        const existing = this.players.get(clientId);
+        const joinedAt = existing && typeof existing._joinedAt === 'number' ? existing._joinedAt : nowMs;
         this.players.set(clientId, {
           ...state,
           senderId: clientId,
           room: roomCode,
+          _joinedAt: joinedAt,
           _updated: nowMs
         });
+        this._refreshAdmin();
+        if (this.adminId === clientId && state.era) {
+          this.activeEra = String(state.era);
+        }
       }
 
+      const activeAdminId = this._refreshAdmin();
       for (const ev of inEvents) {
         if (ev && typeof ev === 'object') {
+          if (
+            (ev.type === 'match_reset' || ev.type === 'admin_era_change') &&
+            activeAdminId &&
+            clientId !== activeAdminId
+          ) {
+            continue;
+          }
+          if (ev.type === 'admin_era_change' && ev.era) {
+            this.activeEra = String(ev.era);
+          }
           this.seq++;
-          const pkt = { ...ev, senderId: clientId, room: roomCode };
+          const pkt = { ...ev, senderId: clientId, room: roomCode, serverAdminId: activeAdminId };
           this.events.push({ seq: this.seq, ts: nowMs, packet: pkt });
           this._broadcastPacket(JSON.stringify(pkt), null);
         }
@@ -169,6 +213,8 @@ export class BattleRoomCore {
       return jsonResponse({
         ok: true,
         room: roomCode,
+        serverAdminId: activeAdminId,
+        era: this.activeEra,
         players: peers,
         events: outEvents,
         latestSeq: this.seq
@@ -220,10 +266,71 @@ export class BattleRoomCore {
     const nowMs = Date.now();
     this._pruneStale(nowMs);
     const senderId = parsed.senderId || parsed._sender;
-    if (senderId && parsed.type === 'state') {
-      this.players.set(senderId, { ...parsed, _updated: nowMs });
+    const prevAdminId = this.adminId;
+    if (senderId && (parsed.type === 'state' || parsed.type === 'join_announce')) {
+      const existing = this.players.get(senderId);
+      const joinedAt = existing && typeof existing._joinedAt === 'number' ? existing._joinedAt : nowMs;
+      if (parsed.type === 'state') {
+        this.players.set(senderId, { ...parsed, _joinedAt: joinedAt, _updated: nowMs });
+      } else if (!existing) {
+        this.players.set(senderId, {
+          senderId,
+          name: parsed.name || senderId,
+          team: parsed.team || 'US',
+          _joinedAt: joinedAt,
+          _updated: nowMs
+        });
+      } else {
+        existing._updated = nowMs;
+      }
+      ws._clientId = senderId;
     } else if (senderId && this.players.has(senderId)) {
       this.players.get(senderId)._updated = nowMs;
+      ws._clientId = senderId;
+    }
+
+    const activeAdminId = this._refreshAdmin();
+    if (activeAdminId === senderId && parsed.era) {
+      this.activeEra = String(parsed.era);
+    }
+
+    // Server-side guard: only the Room Host Admin can reset the round or switch eras!
+    if (
+      (parsed.type === 'match_reset' || parsed.type === 'admin_era_change') &&
+      activeAdminId &&
+      senderId !== activeAdminId
+    ) {
+      try {
+        ws.send(
+          JSON.stringify({
+            type: 'room_admin',
+            serverAdminId: activeAdminId,
+            era: this.activeEra
+          })
+        );
+      } catch (_e) {
+        // Ignore
+      }
+      return;
+    }
+    if (parsed.type === 'admin_era_change' && parsed.era) {
+      this.activeEra = String(parsed.era);
+    }
+
+    if (parsed.type === 'join_announce' || prevAdminId !== activeAdminId) {
+      const adminNotice = JSON.stringify({
+        type: 'room_admin',
+        serverAdminId: activeAdminId,
+        era: this.activeEra
+      });
+      try {
+        ws.send(adminNotice);
+      } catch (_e) {
+        // Ignore
+      }
+      if (prevAdminId !== activeAdminId) {
+        this._broadcastPacket(adminNotice, ws);
+      }
     }
 
     this._broadcastPacket(rawText, ws);
@@ -231,6 +338,21 @@ export class BattleRoomCore {
 
   async webSocketClose(ws) {
     this._fallbackSockets?.delete(ws);
+    if (ws && ws._clientId && this.players.has(ws._clientId)) {
+      this.players.delete(ws._clientId);
+      const prevAdmin = this.adminId;
+      const nextAdmin = this._refreshAdmin();
+      if (prevAdmin !== nextAdmin && nextAdmin) {
+        this._broadcastPacket(
+          JSON.stringify({
+            type: 'room_admin',
+            serverAdminId: nextAdmin,
+            era: this.activeEra
+          }),
+          ws
+        );
+      }
+    }
     try {
       ws.close();
     } catch (_e) {

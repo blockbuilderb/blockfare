@@ -10,9 +10,9 @@
 // - Adaptive General MIDI Combat Soundtrack & Orchestral Stingers (MidiSynthEngine)
 // ============================================================================
 
-import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=148';
-import { AUDIO } from '../config.js?v=148';
-import { MidiSynthEngine } from './MidiSynthEngine.js?v=148';
+import { AUDIO_PACK, FLAT_AUDIO_PROFILES } from './audio-pack.js?v=149';
+import { AUDIO } from '../config.js?v=149';
+import { MidiSynthEngine } from './MidiSynthEngine.js?v=149';
 
 const AUDIO_STORAGE_KEY = 'bb_audio_settings_v1';
 const SPEED_OF_SOUND = AUDIO.SPEED_OF_SOUND_MPS || 343;

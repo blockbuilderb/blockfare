@@ -1,5 +1,6 @@
-import { SQUAD_DEFS } from '../bots.js?v=148';
-import { resolveUnitPlaystyleTitle } from '../player/MarksmanSystem.js?v=148';
+import { SQUAD_DEFS } from '../bots.js?v=149';
+import { getFactionLabel } from '../config.js?v=149';
+import { resolveUnitPlaystyleTitle } from '../player/MarksmanSystem.js?v=149';
 
 export const Scoreboard = {
   computeBattleStats() {
@@ -41,6 +42,7 @@ export const Scoreboard = {
       const rpTanks = rp.tanksDestroyed || 0;
       const rpCars = rp.carsDestroyed || 0;
       const entry = {
+        id: rp.id,
         name: rp.name,
         team: rp.team,
         squad: rp.squad || 'ALPHA',
@@ -180,6 +182,12 @@ export const Scoreboard = {
   },
 
   buildSideComparisonHtml(usStats, ruStats) {
+    const activeEra = (this.world && this.world.era) || 'modern';
+    const usForces = getFactionLabel('US', activeEra, 'forces');
+    const ruForces = getFactionLabel('RU', activeEra, 'forces');
+    const usShort = getFactionLabel('US', activeEra, 'short');
+    const ruShort = getFactionLabel('RU', activeEra, 'short');
+
     const totalPower = Math.max(
       1,
       usStats.tickets * 20 + usStats.score + (ruStats.tickets * 20 + ruStats.score)
@@ -190,9 +198,9 @@ export const Scoreboard = {
     const ruAdvantagePct = 100 - usAdvantagePct;
     const verdict =
       usStats.tickets > ruStats.tickets
-        ? `US FORCES DOMINATING (+${usStats.tickets - ruStats.tickets} TICKETS)`
+        ? `${usForces} DOMINATING (+${usStats.tickets - ruStats.tickets} TICKETS)`
         : ruStats.tickets > usStats.tickets
-        ? `RU FORCES DOMINATING (+${ruStats.tickets - usStats.tickets} TICKETS)`
+        ? `${ruForces} DOMINATING (+${ruStats.tickets - usStats.tickets} TICKETS)`
         : 'DEADLOCKED FRONTLINE';
 
     const usTStat = (this.ticketStats && this.ticketStats.US) || {
@@ -217,7 +225,7 @@ export const Scoreboard = {
     return `
       <div class="side-stat-box us">
         <div class="side-title-row">
-          <span>US FORCES (${usStats.flags}/5 FLAGS)</span>
+          <span>${usForces} (${usStats.flags}/5 FLAGS)</span>
           <span>${usStats.tickets} TICKETS</span>
         </div>
         <div class="side-metrics-row">
@@ -237,13 +245,13 @@ export const Scoreboard = {
         <div class="tug-bar-outer">
           <div class="tug-bar-us" style="width:${usAdvantagePct}%"></div>
         </div>
-        <div class="tug-sub">US MOMENTUM ${usAdvantagePct}% &mdash; ${ruAdvantagePct}% RU MOMENTUM</div>
+        <div class="tug-sub">${usShort} MOMENTUM ${usAdvantagePct}% &mdash; ${ruAdvantagePct}% ${ruShort} MOMENTUM</div>
       </div>
 
       <div class="side-stat-box ru">
         <div class="side-title-row">
           <span>${ruStats.tickets} TICKETS</span>
-          <span>RU FORCES (${ruStats.flags}/5 FLAGS)</span>
+          <span>${ruForces} (${ruStats.flags}/5 FLAGS)</span>
         </div>
         <div class="side-metrics-row">
           <span class="side-metric-pill">SCORE: ${ruStats.score.toLocaleString()}</span>
@@ -260,6 +268,7 @@ export const Scoreboard = {
   },
 
   buildSquadLeaderboardHtml(squads) {
+    const activeEra = (this.world && this.world.era) || 'modern';
     return squads
       .slice(0, 6)
       .map(
@@ -268,9 +277,11 @@ export const Scoreboard = {
           sq.hasPlayer ? 'player-sq' : ''
         }">
           <div class="sq-card-top">
-            <span style="color:${sq.team === 'US' ? '#5dade2' : '#ec7063'}">${sq.team} ${
-          sq.id
-        }</span>
+            <span style="color:${sq.team === 'US' ? '#5dade2' : '#ec7063'}">${getFactionLabel(
+          sq.team,
+          activeEra,
+          'short'
+        )} ${sq.id}</span>
             <span class="sq-rank-badge">#${idx + 1} SQUAD</span>
           </div>
           <div class="sq-spec">${sq.specialty} &bull; LDR: ${sq.leader}</div>
@@ -291,6 +302,9 @@ export const Scoreboard = {
     }
     this._lastScoreboardRenderAt = now;
     const { usUnits, ruUnits, usStats, ruStats, squads } = this.computeBattleStats();
+    const activeEra = (this.world && this.world.era) || 'modern';
+    const usForces = getFactionLabel('US', activeEra, 'forces');
+    const ruForces = getFactionLabel('RU', activeEra, 'forces');
 
     if (this.sbClockPillEl) {
       const mins = Math.floor(this.lastMatchTime / 60);
@@ -309,12 +323,12 @@ export const Scoreboard = {
     }
 
     if (this.sbUsHeaderEl) {
-      this.sbUsHeaderEl.innerHTML = `<span>US FORCES — INDIVIDUAL RANKINGS</span><span>MVP: ${
+      this.sbUsHeaderEl.innerHTML = `<span>${usForces} — INDIVIDUAL RANKINGS</span><span>MVP: ${
         usUnits[0] ? usUnits[0].name : '-'
       } (${usUnits[0] ? usUnits[0].score : 0} PTS)</span>`;
     }
     if (this.sbRuHeaderEl) {
-      this.sbRuHeaderEl.innerHTML = `<span>RU FORCES — INDIVIDUAL RANKINGS</span><span>MVP: ${
+      this.sbRuHeaderEl.innerHTML = `<span>${ruForces} — INDIVIDUAL RANKINGS</span><span>MVP: ${
         ruUnits[0] ? ruUnits[0].name : '-'
       } (${ruUnits[0] ? ruUnits[0].score : 0} PTS)</span>`;
     }
@@ -324,6 +338,10 @@ export const Scoreboard = {
       `<tr class="${u.isSelf ? 'self-row' : idx === 0 ? 'mvp-row' : ''}">
         <td>${idx === 0 ? '★1' : idx + 1}</td>
         <td>${u.name}${u.isSelf ? ' (YOU)' : ''}${
+        this.network?.isUnitRoomAdmin?.(u)
+          ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:rgba(241,196,15,0.22);border:1px solid #f1c40f;color:#ffd32a;font-weight:900;">👑 ADMIN</span>'
+          : ''
+      }${
         u.marksmanTitle
           ? ` <span style="font-size:9.5px;padding:1px 5px;border-radius:3px;background:rgba(255,211,42,0.14);border:1px solid ${u.marksmanTitleColor};color:${u.marksmanTitleColor};font-weight:900;">${u.marksmanTitleIcon} ${u.marksmanTitle}${u.longestShotM >= 50 ? ` • PB ${Math.round(u.longestShotM)}m` : ''}</span>`
           : ''

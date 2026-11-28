@@ -18,7 +18,7 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=148';
+import { TEXTURES } from '../assets/textures.js?v=149';
 
 // Cached shared BLOCKY geometries & flat-shaded materials for 1st-person Operator Arms, Watch & Tactical Gloves
 // Matches 3rd-person blocky voxel-operator limb aesthetic (`soldier-model.js` BoxGeometry limbs, zero round noodle cylinders!)

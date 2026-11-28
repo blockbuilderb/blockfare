@@ -1,4 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
+import { getFactionLabel } from '../config.js?v=149';
 
 const MARKER_POOL_TYPES = ['flag', 'ally', 'spot', 'revive', 'airBox', 'leadLine', 'misc'];
 
@@ -448,7 +449,11 @@ export const WorldMarkers = {
             iconClass: '',
             iconStyle:
               'background:rgba(211,84,0,0.88);border:1.5px solid #f1c40f;color:#fff;font-size:9.5px;font-weight:900;padding:1.5px 5px;border-radius:3px;white-space:nowrap;',
-            iconText: `🎯 ${v.team} ${vTypeLabel} (${vDist}m)`,
+            iconText: `🎯 ${getFactionLabel(
+              v.team,
+              this.world?.era || 'modern',
+              'short'
+            )} ${vTypeLabel} (${vDist}m)`,
             distText: ''
           });
         }

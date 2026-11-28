@@ -1,14 +1,20 @@
+import { getFactionLabel } from '../config.js?v=149';
+
 export const VictoryScreen = {
   showVictoryScreen(winnerTeam, ticketsUS, ticketsRU, matchTimeRemaining, extraction = null) {
     this.lastTicketsUS = ticketsUS;
     this.lastTicketsRU = ticketsRU;
     this.lastMatchTime = matchTimeRemaining;
+    const activeEra = (this.world && this.world.era) || 'modern';
+    const usShort = getFactionLabel('US', activeEra, 'short');
+    const ruShort = getFactionLabel('RU', activeEra, 'short');
 
     const { usStats, ruStats, squads, allUnits } = this.computeBattleStats();
     if (!this.victoryScreenEl) return;
 
     this.victoryScreenEl.classList.remove('hidden');
     this.scoreboardEl.classList.add('hidden');
+    this.syncAdminControlsUI?.();
 
     const reason =
       ticketsUS <= 0 || ticketsRU <= 0
@@ -16,14 +22,14 @@ export const VictoryScreen = {
         : 'CONQUEST VICTORY — TIME LIMIT REACHED';
     if (this.victoryReasonTagEl) this.victoryReasonTagEl.textContent = reason;
     if (this.victoryTitleEl) {
-      this.victoryTitleEl.textContent = `${winnerTeam} FORCES VICTORY`;
+      this.victoryTitleEl.textContent = `${getFactionLabel(winnerTeam, activeEra, 'forces')} VICTORY`;
       this.victoryTitleEl.style.color = winnerTeam === 'US' ? '#5dade2' : '#ec7063';
     }
     if (this.victoryScorelineEl) {
-      this.victoryScorelineEl.textContent = `FINAL TICKETS: US ${Math.max(
+      this.victoryScorelineEl.textContent = `FINAL TICKETS: ${usShort} ${Math.max(
         0,
         Math.floor(ticketsUS)
-      )} — RU ${Math.max(0, Math.floor(ticketsRU))} • TOTAL KILLS: ${
+      )} — ${ruShort} ${Math.max(0, Math.floor(ticketsRU))} • TOTAL KILLS: ${
         usStats.kills + ruStats.kills
       } • TOTAL REVIVES: ${usStats.revives + ruStats.revives}`;
     }
@@ -240,9 +246,11 @@ export const VictoryScreen = {
         {
           title: '★ MOST VALUABLE SOLDIER',
           unit: mvpOverall,
-          stat: `${mvpOverall ? mvpOverall.score.toLocaleString() : 0} PTS (${
-            mvpOverall ? mvpOverall.team : 'US'
-          } ${mvpOverall ? mvpOverall.squad : 'ALPHA'})`
+          stat: `${mvpOverall ? mvpOverall.score.toLocaleString() : 0} PTS (${getFactionLabel(
+            mvpOverall ? mvpOverall.team : 'US',
+            activeEra,
+            'short'
+          )} ${mvpOverall ? mvpOverall.squad : 'ALPHA'})`
         },
         {
           title: '+ TOP FIELD MEDIC',

@@ -1,13 +1,13 @@
 import * as THREE from '../vendor/three.module.js';
-import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=148';
-import { sound } from './audio.js?v=148';
-import { NETWORK } from './config.js?v=148';
-import { events, makeEventBridge } from './events.js?v=148';
+import { createSoldierMesh, updateSoldierEquippedWeapon } from './bots.js?v=149';
+import { sound } from './audio.js?v=149';
+import { NETWORK } from './config.js?v=149';
+import { events, makeEventBridge } from './events.js?v=149';
 import {
   NETWORK_TRANSPORT_EVENTS,
   createNetworkTransportFSM
-} from './core/StateMachines.js?v=148';
-import { WebRtcTransport } from './network/WebRtcTransport.js?v=148';
+} from './core/StateMachines.js?v=149';
+import { WebRtcTransport } from './network/WebRtcTransport.js?v=149';
 
 function safeStorageGet(key) {
   try {
@@ -185,6 +185,10 @@ export class NetworkManager {
 
     this.remotePlayers = new Map(); // id -> remotePlayer state
     this.remoteHitMeshes = [];
+    this._enteredRoomPerfAt = performance.now();
+    this._isCoopChildWindow = Boolean(params.get('coop') === '1');
+    this.serverAdminId = null;
+    this.roomAdminId = this.clientId;
     this.ws = null;
     this.wsConnected = false;
     this.broadcastChannel = null;
@@ -250,7 +254,120 @@ export class NetworkManager {
     return this.gameMode === 'MULTIPLAYER';
   }
 
+  getLocalRoomTenureMs() {
+    const base = Math.max(0, Math.round(performance.now() - (this._enteredRoomPerfAt || 0)));
+    return this._isCoopChildWindow ? Math.max(0, base - 1500) : base;
+  }
+
+  _getRemotePeerTenureMs(rp, nowPerf = performance.now()) {
+    if (!rp) return 0;
+    if (typeof rp._baseTenureMs === 'number' && typeof rp._baseTenurePerfAt === 'number') {
+      return Math.max(0, Math.round(rp._baseTenureMs + (nowPerf - rp._baseTenurePerfAt)));
+    }
+    return null;
+  }
+
+  recomputeRoomAdmin() {
+    if (this.gameMode !== 'MULTIPLAYER') {
+      this.roomAdminId = this.clientId;
+      return this.roomAdminId;
+    }
+    if (
+      this.serverAdminId &&
+      (this.serverAdminId === this.clientId || this.remotePlayers.has(this.serverAdminId))
+    ) {
+      this.roomAdminId = this.serverAdminId;
+      return this.roomAdminId;
+    }
+    const nowPerf = performance.now();
+    const myTenure = this.getLocalRoomTenureMs();
+    let bestId = this.clientId;
+    let bestTenure = myTenure;
+
+    for (const [peerId, rp] of this.remotePlayers.entries()) {
+      if (!rp) continue;
+      const peerTenure = this._getRemotePeerTenureMs(rp, nowPerf);
+      if (peerTenure === null) {
+        // Legacy/synthetic peer packet without roomTenureMs: tie-break deterministically by clientId
+        if (Math.abs(myTenure - bestTenure) <= 250 && peerId < bestId) {
+          bestId = peerId;
+        }
+        continue;
+      }
+      if (peerTenure - bestTenure > 250) {
+        bestId = peerId;
+        bestTenure = peerTenure;
+      } else if (Math.abs(peerTenure - bestTenure) <= 250 && peerId < bestId) {
+        bestId = peerId;
+        bestTenure = Math.max(bestTenure, peerTenure);
+      }
+    }
+
+    this.roomAdminId = bestId;
+    return this.roomAdminId;
+  }
+
+  getRoomAdminId() {
+    return this.recomputeRoomAdmin();
+  }
+
+  isLocalAdmin() {
+    if (this.gameMode !== 'MULTIPLAYER') return true;
+    return this.recomputeRoomAdmin() === this.clientId;
+  }
+
+  isPeerAdmin(peerId) {
+    if (!peerId) return false;
+    if (this.serverAdminId) {
+      return peerId === this.serverAdminId;
+    }
+    const currentAdmin = this.recomputeRoomAdmin();
+    if (peerId === currentAdmin) return true;
+    const rp = this.remotePlayers.get(peerId);
+    if (rp && rp.claimedAdminId === peerId && currentAdmin === this.clientId) {
+      const peerTenure = this._getRemotePeerTenureMs(rp);
+      if (peerTenure === null || peerTenure >= this.getLocalRoomTenureMs() - 250) {
+        this.roomAdminId = peerId;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  isUnitRoomAdmin(unit) {
+    if (!unit || this.gameMode !== 'MULTIPLAYER') return false;
+    const adminId = this.recomputeRoomAdmin();
+    if (unit.isSelf) return adminId === this.clientId;
+    if (unit.id && unit.id === adminId) return true;
+    return false;
+  }
+
+  getRoomAdminName() {
+    const adminId = this.recomputeRoomAdmin();
+    if (adminId === this.clientId) {
+      return this.callsign || this.player?.name || 'YOU';
+    }
+    const rp = this.remotePlayers.get(adminId);
+    return rp?.name || 'HOST ADMIN';
+  }
+
+  broadcastImmediateState() {
+    if (this.gameMode !== 'MULTIPLAYER') return;
+    this.syncTimer = 0;
+    this.send(this.buildLocalStatePacket());
+  }
+
   isRoomAuthority() {
+    if (this.serverAdminId) {
+      return this.serverAdminId === this.clientId;
+    }
+    const computedAdmin = this.recomputeRoomAdmin();
+    const anyPeerHasTenure = Array.from(this.remotePlayers.values()).some(
+      (rp) => rp && typeof rp._baseTenureMs === 'number'
+    );
+    if (anyPeerHasTenure && this.remotePlayers.size > 0) {
+      return computedAdmin === this.clientId;
+    }
     if (this.webrtc && this.webrtc.active && this.webrtc.isHost()) {
       return true;
     }
@@ -437,6 +554,8 @@ export class NetworkManager {
     this.remotePlayers.clear();
     this.remoteHitMeshes = [];
     if (this._peerSeqState) this._peerSeqState.clear();
+    this.serverAdminId = null;
+    this.recomputeRoomAdmin();
     this.syncDynamicHumanSlots();
   }
 
@@ -476,9 +595,13 @@ export class NetworkManager {
       type: 'join_announce',
       name: this.callsign,
       team: this.player.team,
+      subFaction: this.player.subFaction || this.player.team || 'US',
       squad: this.player.squad || 'ALPHA',
       role: String(this.player.role || 'engineer').toUpperCase(),
-      commandRank: this.player.commandRank || 'COMMANDER'
+      commandRank: this.player.commandRank || 'COMMANDER',
+      era: this.world?.era || 'modern',
+      roomTenureMs: this.getLocalRoomTenureMs(),
+      roomAdminId: this.recomputeRoomAdmin()
     });
   }
 
@@ -486,6 +609,14 @@ export class NetworkManager {
     const cleanMode = String(newMode || '').toUpperCase() === 'MULTIPLAYER' ? 'MULTIPLAYER' : 'SINGLEPLAYER';
     const modeChanged = cleanMode !== this.gameMode;
     this.gameMode = cleanMode;
+    if (modeChanged && cleanMode === 'MULTIPLAYER') {
+      this._enteredRoomPerfAt = performance.now();
+      this.serverAdminId = null;
+      this.roomAdminId = this.clientId;
+    } else if (cleanMode === 'SINGLEPLAYER') {
+      this.serverAdminId = null;
+      this.roomAdminId = this.clientId;
+    }
 
     if (optionalBotMode) {
       this.botPopulateMode = optionalBotMode;
@@ -546,6 +677,9 @@ export class NetworkManager {
 
     if (changed) {
       this._syncEpoch = (this._syncEpoch || 1) + 1;
+      this._enteredRoomPerfAt = performance.now();
+      this.serverAdminId = null;
+      this.roomAdminId = this.clientId;
       this.clearRemotePlayers();
       this.lastEventSeq = 0;
       if (this.relayWsUrl) {
@@ -612,7 +746,7 @@ export class NetworkManager {
     const baseShare = this.getShareUrl(false);
     const randSuffix = Math.floor(10 + Math.random() * 89);
     const sep = baseShare.includes('?') ? '&' : '?';
-    const url = `${baseShare}${sep}name=ALLY_${randSuffix}`;
+    const url = `${baseShare}${sep}name=ALLY_${randSuffix}&coop=1`;
     if (typeof window !== 'undefined' && typeof window.open === 'function') {
       window.open(url, '_blank');
     }
@@ -680,6 +814,10 @@ export class NetworkManager {
         try {
           const msg = JSON.parse(ev.data);
           if (!msg || msg.type === 'pong') return;
+          if (msg.type === 'room_admin') {
+            this.handleMessage(msg);
+            return;
+          }
           if (
             msg.senderId !== this.clientId &&
             (!msg.room || msg.room === this.roomCode)
@@ -889,6 +1027,29 @@ export class NetworkManager {
       case 'match_reset':
         this.applyRemoteMatchReset(msg);
         break;
+      case 'admin_era_change':
+        this.applyRemoteEraChange(msg);
+        break;
+      case 'room_admin': {
+        if (msg.serverAdminId) {
+          const prevAdmin = this.roomAdminId;
+          this.serverAdminId = msg.serverAdminId;
+          this.recomputeRoomAdmin();
+          if (
+            msg.era &&
+            !this.isLocalAdmin() &&
+            this.world?.era &&
+            msg.era !== this.world.era &&
+            typeof this.gameRef?.switchEra === 'function'
+          ) {
+            this.gameRef.switchEra(msg.era, true, { fromAdminSync: true });
+          }
+          if (prevAdmin !== this.roomAdminId && this.onLobbyUpdated) {
+            this.onLobbyUpdated();
+          }
+        }
+        break;
+      }
       case 'bot_sync':
         this.applyRemoteBotSync(msg);
         break;
@@ -930,10 +1091,17 @@ export class NetworkManager {
       }
       case 'join_announce': {
         if (msg.senderId !== this.clientId) {
+          this.updateRemotePlayer({
+            ...msg,
+            pos: msg.pos || [0, 0, 0],
+            dead: msg.dead !== undefined ? msg.dead : true
+          });
           events.emit('network:player-joined', { msg });
           if (this.onPlayerJoinedRoom && !this.onPlayerJoinedRoom._isEventsBridge) {
             this.onPlayerJoinedRoom(msg);
           }
+          // Reply immediately with our current state (including tenure, admin & era) so newcomer syncs at once!
+          this.send(this.buildLocalStatePacket());
         }
         break;
       }
@@ -982,6 +1150,13 @@ export class NetworkManager {
     return {
       type: 'conquest_sync',
       roundEpoch,
+      era: this.world?.era || 'modern',
+      roomAdminId:
+        typeof this.recomputeRoomAdmin === 'function'
+          ? this.recomputeRoomAdmin()
+          : this.clientId || null,
+      roomTenureMs:
+        typeof this.getLocalRoomTenureMs === 'function' ? this.getLocalRoomTenureMs() : 0,
       matchEnded: Boolean(g.matchEnded),
       ticketsUS: Math.round(g.ticketsUS ?? 400),
       ticketsRU: Math.round(g.ticketsRU ?? 400),
@@ -994,25 +1169,67 @@ export class NetworkManager {
     };
   }
 
-  applyRemoteMatchReset(msg) {
+  applyRemoteEraChange(msg) {
+    if (msg?.serverAdminId) {
+      this.serverAdminId = msg.serverAdminId;
+    }
+    const senderId = msg?.senderId || msg?._sender;
+    if (senderId && typeof this.isPeerAdmin === 'function' && !this.isPeerAdmin(senderId)) {
+      return false;
+    }
     const g = this.gameRef;
-    if (!g) return;
+    if (!g || typeof g.switchEra !== 'function' || !msg?.era) return false;
+    if (typeof msg.roundEpoch === 'number' && msg.roundEpoch > (g.roundEpoch || 1)) {
+      g.roundEpoch = msg.roundEpoch;
+    }
+    g.switchEra(msg.era, true, { fromAdminSync: true });
+    if (typeof msg.ticketsUS === 'number') g.ticketsUS = msg.ticketsUS;
+    if (typeof msg.ticketsRU === 'number') g.ticketsRU = msg.ticketsRU;
+    if (typeof msg.matchTimeRemaining === 'number') {
+      g.matchTimeRemaining = msg.matchTimeRemaining;
+    }
+    return true;
+  }
+
+  applyRemoteMatchReset(msg) {
+    if (msg?.serverAdminId) {
+      this.serverAdminId = msg.serverAdminId;
+    }
+    const senderId = msg?.senderId || msg?._sender;
+    if (senderId && typeof this.isPeerAdmin === 'function' && !this.isPeerAdmin(senderId)) {
+      return false;
+    }
+    const g = this.gameRef;
+    if (!g) return false;
     const incomingEpoch = typeof msg?.roundEpoch === 'number' ? msg.roundEpoch : 1;
     if (incomingEpoch > (g.roundEpoch || 1)) {
       g.roundEpoch = incomingEpoch;
+      if (msg.era && this.world?.era && msg.era !== this.world.era && typeof g.switchEra === 'function') {
+        g.switchEra(msg.era, true, { fromAdminSync: true });
+      }
       if (typeof g.resetMatch === 'function') {
         g.resetMatch(true);
       }
+      return true;
     }
+    return false;
   }
 
   applyRemoteConquestSync(msg) {
+    const senderId = msg?.senderId || msg?._sender;
+    const senderIsAdmin =
+      !senderId || typeof this.isPeerAdmin !== 'function' || this.isPeerAdmin(senderId);
+    if (senderId && senderIsAdmin && msg?.era && this.world?.era && msg.era !== this.world.era) {
+      if (typeof this.gameRef?.switchEra === 'function') {
+        this.gameRef.switchEra(msg.era, true, { fromAdminSync: true });
+      }
+    }
     const g = this.gameRef;
     const msgEpoch = typeof msg?.roundEpoch === 'number' ? msg.roundEpoch : 1;
     const localEpoch = g?.roundEpoch || 1;
     // Ignore stale conquest_sync packets from peers still on an older round or sitting on Victory Screen!
     if (msgEpoch < localEpoch) return;
-    if (g && msgEpoch > localEpoch) {
+    if (g && msgEpoch > localEpoch && senderIsAdmin) {
       g.roundEpoch = msgEpoch;
       if (g.matchEnded && !msg.matchEnded && typeof g.resetMatch === 'function') {
         g.resetMatch(true);
@@ -1290,18 +1507,77 @@ export class NetworkManager {
     if (!v.dead && v.mesh) v.mesh.visible = true;
   }
 
+  _buildRemotePlayerMeshSig(team, role, rank, era, subFaction) {
+    return `${team || 'US'}|${String(role || 'ENGINEER').toUpperCase()}|${
+      rank || 'COMMANDER'
+    }|${era || 'modern'}|${subFaction || team || 'US'}`;
+  }
+
+  _rebuildRemotePlayerMesh(rp) {
+    if (!rp) return null;
+    const activeEra = this.world?.era || 'modern';
+    const team = rp.team || 'US';
+    const role = String(rp.role || 'ENGINEER').toUpperCase();
+    const rank = rp.commandRank || 'COMMANDER';
+    const subFaction = rp.subFaction || team;
+
+    if (rp.mesh && this.scene) {
+      this.scene.remove(rp.mesh);
+    }
+    this.remoteHitMeshes = this.remoteHitMeshes.filter(
+      (m) => m?.userData?.remotePlayer !== rp
+    );
+
+    const mesh = createSoldierMesh(team, role, rank, activeEra, subFaction);
+    mesh.position.copy(rp.pos);
+    mesh.rotation.y = (rp.yaw || 0) + Math.PI;
+    mesh.visible = !rp.dead && !rp.vehicleId;
+    if (this.scene) {
+      this.scene.add(mesh);
+    }
+
+    mesh.traverse((child) => {
+      if (child.isMesh && child.name !== 'teamMarker' && !child.userData.skipHitbox) {
+        child.userData.remotePlayer = rp;
+        this.remoteHitMeshes.push(child);
+      }
+    });
+
+    rp.mesh = mesh;
+    rp._meshSig = this._buildRemotePlayerMeshSig(team, role, rank, activeEra, subFaction);
+    rp._lastWepSig = '';
+    return mesh;
+  }
+
+  rebuildAllRemotePlayerMeshes() {
+    for (const rp of this.remotePlayers.values()) {
+      this._rebuildRemotePlayerMesh(rp);
+      if (rp.mesh) {
+        updateSoldierEquippedWeapon(rp.mesh, rp.weaponId, rp.team, {
+          skinFinish: rp.skinFinish,
+          attachments: rp.attachments,
+          role: rp.role
+        });
+      }
+    }
+  }
+
   updateRemotePlayer(msg) {
     let rp = this.remotePlayers.get(msg.senderId);
     const rank = msg.commandRank || 'COMMANDER';
     const role = (msg.role || 'ENGINEER').toUpperCase();
+    const activeEra = this.world?.era || 'modern';
+    const incomingTeam = msg.team || 'US';
+    const incomingSubFaction = msg.subFaction || incomingTeam;
 
     if (!rp) {
-      const mesh = createSoldierMesh(msg.team || 'US', role, rank);
+      const mesh = createSoldierMesh(incomingTeam, role, rank, activeEra, incomingSubFaction);
       if (this.scene) this.scene.add(mesh);
       rp = {
         id: msg.senderId,
         name: msg.name || `PLAYER_${msg.senderId.slice(2, 5)}`,
-        team: msg.team || 'US',
+        team: incomingTeam,
+        subFaction: incomingSubFaction,
         squad: msg.squad || 'ALPHA',
         role,
         commandRank: rank,
@@ -1331,6 +1607,16 @@ export class NetworkManager {
         speechBubbleText: '',
         speechBubbleTimer: 0,
         lastSeen: performance.now(),
+        _baseTenureMs: typeof msg.roomTenureMs === 'number' ? msg.roomTenureMs : null,
+        _baseTenurePerfAt: typeof msg.roomTenureMs === 'number' ? performance.now() : null,
+        claimedAdminId: msg.roomAdminId || null,
+        _meshSig: this._buildRemotePlayerMeshSig(
+          incomingTeam,
+          role,
+          rank,
+          activeEra,
+          incomingSubFaction
+        ),
         mesh
       };
 
@@ -1342,22 +1628,73 @@ export class NetworkManager {
       });
 
       this.remotePlayers.set(msg.senderId, rp);
+      this.recomputeRoomAdmin();
       if (this.onLobbyUpdated) {
         this.onLobbyUpdated();
       }
     }
 
-    rp.lastSeen = performance.now();
+    const nowPerf = performance.now();
+    rp.lastSeen = nowPerf;
+    if (typeof msg.roomTenureMs === 'number') {
+      if (rp._baseTenureMs === null || rp._baseTenureMs === undefined) {
+        rp._baseTenureMs = msg.roomTenureMs;
+        rp._baseTenurePerfAt = nowPerf;
+      } else {
+        const est = rp._baseTenureMs + (nowPerf - rp._baseTenurePerfAt);
+        if (Math.abs(msg.roomTenureMs - est) > 1500) {
+          rp._baseTenureMs = msg.roomTenureMs;
+          rp._baseTenurePerfAt = nowPerf;
+        }
+      }
+    }
+    if (msg.roomAdminId) {
+      rp.claimedAdminId = msg.roomAdminId;
+    }
+    const prevAdminId = this.roomAdminId;
+    this.recomputeRoomAdmin();
+
+    // If this peer is the Room Host Admin and is running a different Era, sync our client to the Admin's Era!
+    if (
+      msg.era &&
+      this.isPeerAdmin(msg.senderId) &&
+      !this.isLocalAdmin() &&
+      this.world?.era &&
+      msg.era !== this.world.era &&
+      typeof this.gameRef?.switchEra === 'function'
+    ) {
+      this.gameRef.switchEra(msg.era, true, { fromAdminSync: true });
+    }
+
     const prevTeam = rp.team;
     if (msg.name) rp.name = msg.name;
     rp.team = msg.team || rp.team;
-    if (rp.team !== prevTeam || !rp._slotSynced) {
-      rp._slotSynced = true;
-      this.syncDynamicHumanSlots();
-    }
+    rp.subFaction = msg.subFaction || rp.team;
     if (msg.squad) rp.squad = msg.squad;
     if (msg.role) rp.role = String(msg.role).toUpperCase();
     if (msg.commandRank) rp.commandRank = msg.commandRank;
+
+    // Rebuild 3D soldier mesh & hitboxes whenever remote player switches Team (e.g. default US -> RU red helmet!), Role, Rank, or Era!
+    const desiredMeshSig = this._buildRemotePlayerMeshSig(
+      rp.team,
+      rp.role,
+      rp.commandRank,
+      this.world?.era || 'modern',
+      rp.subFaction
+    );
+    if (rp._meshSig !== desiredMeshSig || (this.scene && rp.mesh && rp.mesh.parent !== this.scene)) {
+      this._rebuildRemotePlayerMesh(rp);
+    }
+
+    if (rp.team !== prevTeam || !rp._slotSynced) {
+      rp._slotSynced = true;
+      this.syncDynamicHumanSlots();
+      if (this.onLobbyUpdated) {
+        this.onLobbyUpdated();
+      }
+    } else if (prevAdminId !== this.roomAdminId && this.onLobbyUpdated) {
+      this.onLobbyUpdated();
+    }
     rp.hp = typeof msg.hp === 'number' ? msg.hp : 100;
     rp.dead = Boolean(msg.dead);
     rp.downed = Boolean(msg.downed);
@@ -1505,8 +1842,12 @@ export class NetworkManager {
     return {
       type: 'state',
       room: this.roomCode,
+      era: this.world?.era || 'modern',
+      roomAdminId: this.recomputeRoomAdmin(),
+      roomTenureMs: this.getLocalRoomTenureMs(),
       name: this.callsign,
       team: this.player.team,
+      subFaction: this.player.subFaction || this.player.team || 'US',
       squad: this.player.squad || 'ALPHA',
       role: String(this.player.role || 'engineer').toUpperCase(),
       commandRank: this.player.commandRank || 'COMMANDER',
@@ -1619,6 +1960,19 @@ export class NetworkManager {
           this.roomCode === reqRoom
         ) {
           if (data.lanIp) this.lanIp = data.lanIp;
+          if (data.serverAdminId) {
+            this.serverAdminId = data.serverAdminId;
+            this.recomputeRoomAdmin();
+          }
+          if (
+            data.era &&
+            !this.isLocalAdmin() &&
+            this.world?.era &&
+            data.era !== this.world.era &&
+            typeof this.gameRef?.switchEra === 'function'
+          ) {
+            this.gameRef.switchEra(data.era, true, { fromAdminSync: true });
+          }
           if (typeof data.latestSeq === 'number') {
             this.lastEventSeq = data.latestSeq;
           }
@@ -1801,6 +2155,10 @@ export class NetworkManager {
         );
         this.remotePlayers.delete(id);
         if (this._peerSeqState) this._peerSeqState.delete(id);
+        if (this.serverAdminId === id) {
+          this.serverAdminId = null;
+        }
+        this.recomputeRoomAdmin();
         this.syncDynamicHumanSlots();
         if (this.onLobbyUpdated) {
           this.onLobbyUpdated();

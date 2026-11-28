@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
-import { UI, getEraRoles } from '../config.js?v=148';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=148';
+import { UI, getEraRoles, getFactionLabel } from '../config.js?v=149';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=149';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -674,10 +674,13 @@ export const HudRenderer = {
         ? `${fsmSnap.match.state} • UI:${fsmSnap.uiModal.state} • PLR:${fsmSnap.player.vitality.state}/${fsmSnap.player.stance.state}/${fsmSnap.player.weapon.state}`
         : 'ACTIVE';
       const invOk = !fsmSnap || fsmSnap.invariants.valid;
+      const activeEraTelem = (this.world && this.world.era) || 'modern';
+      const telemUs = getFactionLabel('US', activeEraTelem, 'short');
+      const telemRu = getFactionLabel('RU', activeEraTelem, 'short');
       this.telemSummaryGridEl.innerHTML = `
         <div class="telem-stat-box">
           <div class="telem-stat-label">SPAWN RULE AUDIT (BASE / FLAG)</div>
-          <div class="telem-stat-val ok">US ${d.usBaseSpawns}B/${d.usFlagSpawns}F • RU ${d.ruBaseSpawns}B/${d.ruFlagSpawns}F (0 ILLEGAL)</div>
+          <div class="telem-stat-val ok">${telemUs} ${d.usBaseSpawns}B/${d.usFlagSpawns}F • ${telemRu} ${d.ruBaseSpawns}B/${d.ruFlagSpawns}F (0 ILLEGAL)</div>
         </div>
         <div class="telem-stat-box">
           <div class="telem-stat-label">CONTESTED BASE SPAWN LOCKOUT</div>
@@ -1029,26 +1032,30 @@ export const HudRenderer = {
       }
     }
 
+    const activeEraHud = (this.world && this.world.era) || 'modern';
+    const usHudShort = getFactionLabel('US', activeEraHud, 'short');
+    const ruHudShort = getFactionLabel('RU', activeEraHud, 'short');
+
     const diff = tUS - tRU;
     const bleedText =
       ruBleedPerMin >= 60
-        ? ` • ⚠️ RU MERCY BLEED (-60/m • 5-0 FLAGS)`
+        ? ` • ⚠️ ${ruHudShort} MERCY BLEED (-60/m • 5-0 FLAGS)`
         : usBleedPerMin >= 60
-        ? ` • ⚠️ US MERCY BLEED (-60/m • 0-5 FLAGS)`
+        ? ` • ⚠️ ${usHudShort} MERCY BLEED (-60/m • 0-5 FLAGS)`
         : ruBleedPerMin > 0
-        ? ` • RU BLEEDING -${ruBleedPerMin}/m (${usFlagsHeld}-${ruFlagsHeld} FLAGS)`
+        ? ` • ${ruHudShort} BLEEDING -${ruBleedPerMin}/m (${usFlagsHeld}-${ruFlagsHeld} FLAGS)`
         : usBleedPerMin > 0
-        ? ` • US BLEEDING -${usBleedPerMin}/m (${usFlagsHeld}-${ruFlagsHeld} FLAGS)`
+        ? ` • ${usHudShort} BLEEDING -${usBleedPerMin}/m (${usFlagsHeld}-${ruFlagsHeld} FLAGS)`
         : ` • FLAGS ${usFlagsHeld}-${ruFlagsHeld} (NO BLEED)`;
 
     if (this.matchLeadTextEl) {
       let leadTxt;
       let leadCol;
       if (diff > 5) {
-        leadTxt = `US LEADING +${diff}${bleedText}`;
+        leadTxt = `${usHudShort} LEADING +${diff}${bleedText}`;
         leadCol = '#70bdff';
       } else if (diff < -5) {
-        leadTxt = `RU LEADING +${Math.abs(diff)}${bleedText}`;
+        leadTxt = `${ruHudShort} LEADING +${Math.abs(diff)}${bleedText}`;
         leadCol = '#ff7878';
       } else {
         leadTxt = `CONTESTED MATCH (${tUS}-${tRU})${bleedText}`;
@@ -1122,10 +1129,14 @@ export const HudRenderer = {
       if (this.captureStatusEl.classList.contains('hidden')) {
         this.captureStatusEl.classList.remove('hidden');
       }
+      const enemyHqLbl =
+        activeEraHud === 'medieval'
+          ? getFactionLabel(enemyTeam, activeEraHud, 'hq')
+          : `${getFactionLabel(enemyTeam, activeEraHud, 'short')} MAIN BASE`;
       if (enemyBaseInfo.contested) {
         this._setText(
           this.captureTitleEl,
-          `⚠️ ${enemyTeam} MAIN BASE CONTESTED — ALL DEFENDERS ELIMINATED (SPAWNS LOCKED!)`
+          `⚠️ ${enemyHqLbl} CONTESTED — ALL DEFENDERS ELIMINATED (SPAWNS LOCKED!)`
         );
         this._setWidth(this.captureBarEl, '100%');
         if (this.captureBarEl._lastBg !== '#f39c12') {
@@ -1135,7 +1146,7 @@ export const HudRenderer = {
       } else {
         this._setText(
           this.captureTitleEl,
-          `${enemyTeam} MAIN BASE PERIMETER — ELIMINATE ${enemyBaseInfo.defenders} DEFENDERS TO LOCK SPAWNS`
+          `${enemyHqLbl} PERIMETER — ELIMINATE ${enemyBaseInfo.defenders} DEFENDERS TO LOCK SPAWNS`
         );
         const clearPct = Math.max(15, 100 - enemyBaseInfo.defenders * 18);
         this._setWidth(this.captureBarEl, `${clearPct}%`);
@@ -1166,14 +1177,19 @@ export const HudRenderer = {
           : '';
       const defDmgPct = Math.min(42, 25 + defStage * 4);
       const holdMult = activeCaptureFlag.defenderWeightMult || (1.35 + defStage * 0.075).toFixed(2);
+      const ownerShort =
+        activeCaptureFlag.owner === 'NEUTRAL'
+          ? 'NEUTRAL'
+          : getFactionLabel(activeCaptureFlag.owner, activeEraHud, 'short');
+      const myShort = getFactionLabel(this.player.team, activeEraHud, 'short');
       if (enemyCount > 0 && myCount > 0) {
-        statusLabel = ` • ⚔️ CONTESTED (US ${usInZone} vs RU ${ruInZone} ACTIVE${downedNote}${garSquad} • DEFENDER BUFF: -${defDmgPct}% DMG, -30% RECOIL, ${holdMult}× HOLD)`;
+        statusLabel = ` • ⚔️ CONTESTED (${usHudShort} ${usInZone} vs ${ruHudShort} ${ruInZone} ACTIVE${downedNote}${garSquad} • DEFENDER BUFF: -${defDmgPct}% DMG, -30% RECOIL, ${holdMult}× HOLD)`;
       } else if (!isFriendlyHeld && activeCaptureFlag.owner !== 'NEUTRAL') {
-        statusLabel = ` • 🔻 LOWERING ${activeCaptureFlag.owner} FLAG (${absPct}% -> 0%${downedNote} • SPAWN LOCKED!)`;
+        statusLabel = ` • 🔻 LOWERING ${ownerShort} FLAG (${absPct}% -> 0%${downedNote} • SPAWN LOCKED!)`;
       } else if (!isFriendlyHeld && activeCaptureFlag.owner === 'NEUTRAL') {
-        statusLabel = ` • 🔺 RAISING ${this.player.team} FLAG (${absPct}% -> 100%${downedNote})`;
+        statusLabel = ` • 🔺 RAISING ${myShort} FLAG (${absPct}% -> 100%${downedNote})`;
       } else {
-        statusLabel = ` (${activeCaptureFlag.owner} HELD ${absPct}%${downedNote}${garSquad} • 🛡️ DEFENDER ADVANTAGE: -${defDmgPct}% DMG, -30% RECOIL, +HP/ARMOR TRIAGE, ${holdMult}× HOLD • FORT ${defStage}/4 [F])`;
+        statusLabel = ` (${ownerShort} HELD ${absPct}%${downedNote}${garSquad} • 🛡️ DEFENDER ADVANTAGE: -${defDmgPct}% DMG, -30% RECOIL, +HP/ARMOR TRIAGE, ${holdMult}× HOLD • FORT ${defStage}/4 [F])`;
       }
       this._setText(this.captureTitleEl, `${activeCaptureFlag.name}${statusLabel}`);
       this._setWidth(this.captureBarEl, `${absPct}%`);

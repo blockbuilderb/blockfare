@@ -2,16 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
 
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=148';
-import { WEAPON_DEFS } from '../src/weapons.js?v=148';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=149';
+import { WEAPON_DEFS } from '../src/weapons.js?v=149';
 import {
   createWeaponViewModel,
   updateFirstPersonArmShoulders
-} from '../src/models/weapon-model.js?v=148';
-import { PlayerController } from '../src/player/PlayerController.js?v=148';
-import { BotManager } from '../src/bots/BotManager.js?v=148';
-import { VehicleManager } from '../src/vehicles.js?v=148';
-import { DISTANCES } from '../src/config.js?v=148';
+} from '../src/models/weapon-model.js?v=149';
+import { PlayerController } from '../src/player/PlayerController.js?v=149';
+import { BotManager } from '../src/bots/BotManager.js?v=149';
+import { VehicleManager } from '../src/vehicles.js?v=149';
+import { DISTANCES } from '../src/config.js?v=149';
 
 test('v146: C-to-D corridor, dry valley & HQ sunken bunkers never false-trigger river water or floating infantry', () => {
   const scene = new THREE.Scene();

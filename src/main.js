@@ -1,15 +1,23 @@
 import * as THREE from '../vendor/three.module.js';
-import { VoxelWorld } from './world.js?v=148';
-import { VehicleManager } from './vehicles.js?v=148';
-import { BotManager } from './bots.js?v=148';
-import { PlayerController } from './player.js?v=148';
-import { NetworkManager } from './network.js?v=148';
-import { UIManager } from './ui.js?v=148';
-import { TelemetryLogger } from './telemetry.js?v=148';
-import { sound } from './audio.js?v=148';
-import { CAMERA, LIGHTING, MATCH, ECONOMY, WEATHER, SKY_FOG_COLOR } from './config.js?v=148';
-import { events, makeEventBridge } from './events.js?v=148';
-import { GameStateMachineRegistry } from './core/StateMachines.js?v=148';
+import { VoxelWorld } from './world.js?v=149';
+import { VehicleManager } from './vehicles.js?v=149';
+import { BotManager } from './bots.js?v=149';
+import { PlayerController } from './player.js?v=149';
+import { NetworkManager } from './network.js?v=149';
+import { UIManager } from './ui.js?v=149';
+import { TelemetryLogger } from './telemetry.js?v=149';
+import { sound } from './audio.js?v=149';
+import {
+  CAMERA,
+  LIGHTING,
+  MATCH,
+  ECONOMY,
+  WEATHER,
+  SKY_FOG_COLOR,
+  getFactionLabel
+} from './config.js?v=149';
+import { events, makeEventBridge } from './events.js?v=149';
+import { GameStateMachineRegistry } from './core/StateMachines.js?v=149';
 
 class BattleBitGame {
   constructor() {
@@ -286,7 +294,21 @@ class BattleBitGame {
     }
   }
 
-  switchEra(eraId = 'modern', closeMainMenu = true) {
+  switchEra(eraId = 'modern', closeMainMenu = true, opts = {}) {
+    const fromAdminSync = Boolean(opts && opts.fromAdminSync);
+    if (!fromAdminSync && this.network?.isMultiplayer?.() && !this.network.isLocalAdmin()) {
+      const adminName = this.network.getRoomAdminName?.() || 'HOST ADMIN';
+      this.ui?.addXpNotification?.(
+        0,
+        `🔒 ONLY SERVER ADMIN (${adminName}) CAN CHANGE COMBAT ERA!`
+      );
+      this.ui?.syncEraUI?.(this.world?.era || this.activeEra || 'modern');
+      if (closeMainMenu) {
+        this.ui?.closeMainMenu?.();
+      }
+      return this.world;
+    }
+
     const normalized = String(eraId || 'modern').toLowerCase();
     const targetEra =
       normalized.includes('medieval')
@@ -404,6 +426,19 @@ class BattleBitGame {
     if (this.network) {
       this.network.world = this.world;
       this.network.botManager = this.botManager;
+      this.network.rebuildAllRemotePlayerMeshes?.();
+      if (!fromAdminSync && this.network.isMultiplayer?.() && this.network.isLocalAdmin()) {
+        this.roundEpoch = (this.roundEpoch || 1) + 1;
+        this.network.send({
+          type: 'admin_era_change',
+          era: this.activeEra,
+          roundEpoch: this.roundEpoch,
+          ticketsUS: this.ticketsUS,
+          ticketsRU: this.ticketsRU,
+          matchTimeRemaining: this.matchTimeRemaining
+        });
+        this.network.broadcastImmediateState?.();
+      }
     }
     if (this.ui) {
       this.ui.world = this.world;
@@ -1878,18 +1913,21 @@ class BattleBitGame {
       this.bleedPopupTimer -= dt;
       if (this.bleedPopupTimer <= 0) {
         this.bleedPopupTimer = MATCH.BLEED_POPUP_INTERVAL;
+        const activeEra = this.world?.era || 'modern';
+        const usShort = getFactionLabel('US', activeEra, 'short');
+        const ruShort = getFactionLabel('RU', activeEra, 'short');
         if (bleedInfo.bleedRUPerMin > 0 && this.ui) {
           const drop = Math.max(1, Math.round(bleedInfo.bleedRUPerSec * 10));
           const label = bleedInfo.ruMercyBleed
-            ? `MERCY BLEED — US HOLDS ALL 5 FLAGS (-${bleedInfo.bleedRUPerMin}/m)`
-            : `TERRITORY BLEED — US HOLDS ${bleedInfo.usFlags}/5 FLAGS (-${bleedInfo.bleedRUPerMin}/m)`;
+            ? `MERCY BLEED — ${usShort} HOLDS ALL 5 FLAGS (-${bleedInfo.bleedRUPerMin}/m)`
+            : `TERRITORY BLEED — ${usShort} HOLDS ${bleedInfo.usFlags}/5 FLAGS (-${bleedInfo.bleedRUPerMin}/m)`;
           this.ui.addTicketEvent('RU', -drop, 'FLAG', label);
         }
         if (bleedInfo.bleedUSPerMin > 0 && this.ui) {
           const drop = Math.max(1, Math.round(bleedInfo.bleedUSPerSec * 10));
           const label = bleedInfo.usMercyBleed
-            ? `MERCY BLEED — RU HOLDS ALL 5 FLAGS (-${bleedInfo.bleedUSPerMin}/m)`
-            : `TERRITORY BLEED — RU HOLDS ${bleedInfo.ruFlags}/5 FLAGS (-${bleedInfo.bleedUSPerMin}/m)`;
+            ? `MERCY BLEED — ${ruShort} HOLDS ALL 5 FLAGS (-${bleedInfo.bleedUSPerMin}/m)`
+            : `TERRITORY BLEED — ${ruShort} HOLDS ${bleedInfo.ruFlags}/5 FLAGS (-${bleedInfo.bleedUSPerMin}/m)`;
           this.ui.addTicketEvent('US', -drop, 'FLAG', label);
         }
       }
@@ -2261,6 +2299,14 @@ class BattleBitGame {
   }
 
   resetMatch(fromRemote = false) {
+    if (!fromRemote && this.network?.isMultiplayer?.() && !this.network.isLocalAdmin()) {
+      const adminName = this.network.getRoomAdminName?.() || 'HOST ADMIN';
+      this.ui?.addXpNotification?.(
+        0,
+        `🔒 ONLY SERVER ADMIN (${adminName}) CAN START A NEW ROUND!`
+      );
+      return false;
+    }
     if (!fromRemote) {
       this.roundEpoch = (this.roundEpoch || 1) + 1;
     }
@@ -2454,15 +2500,17 @@ class BattleBitGame {
     }
     this.ui.hideVictoryScreen();
     this.ui.showDeployScreen();
-    if (!fromRemote && this.network?.isMultiplayer?.()) {
+    if (!fromRemote && this.network?.isMultiplayer?.() && this.network.isLocalAdmin()) {
       this.network.send({
         type: 'match_reset',
         roundEpoch: this.roundEpoch,
+        era: this.world?.era || 'modern',
         ticketsUS: this.ticketsUS,
         ticketsRU: this.ticketsRU,
         matchTimeRemaining: this.matchTimeRemaining
       });
     }
+    return true;
   }
 }
 

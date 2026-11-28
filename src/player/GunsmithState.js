@@ -8,11 +8,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=148';
-import { sound } from '../audio.js?v=148';
-import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=148';
-import { events } from '../events.js?v=148';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=148';
+} from '../weapons.js?v=149';
+import { sound } from '../audio.js?v=149';
+import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=149';
+import { events } from '../events.js?v=149';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=149';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',

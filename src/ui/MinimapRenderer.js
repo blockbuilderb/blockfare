@@ -427,6 +427,8 @@ export const MinimapRenderer = {
     }
 
     // Base HQs
+    const isMedMap = this.world && this.world.era === 'medieval';
+    const isJurMap = this.world && this.world.era === 'jurassic';
     const usX = toMapX(this.world.spawns.US_BASE.x);
     const usY = toMapY(this.world.spawns.US_BASE.z);
     ctx.fillStyle = '#3498db';
@@ -434,14 +436,14 @@ export const MinimapRenderer = {
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 9px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('US HQ', usX, usY - 10);
+    ctx.fillText(isMedMap ? 'WEST KEEP' : isJurMap ? 'USA HQ' : 'US HQ', usX, usY - 10);
 
     const ruX = toMapX(this.world.spawns.RU_BASE.x);
     const ruY = toMapY(this.world.spawns.RU_BASE.z);
-    ctx.fillStyle = '#e74c3c';
+    ctx.fillStyle = isJurMap ? '#00d2d3' : '#e74c3c';
     ctx.fillRect(ruX - 7, ruY - 7, 14, 14);
     ctx.fillStyle = '#fff';
-    ctx.fillText('RU HQ', ruX, ruY - 10);
+    ctx.fillText(isMedMap ? 'EAST CITADEL' : isJurMap ? 'RUS HQ' : 'RU HQ', ruX, ruY - 10);
 
     const team = this.player.team || 'US';
     const cmdOrder = this.botManager.commanderOrders && this.botManager.commanderOrders[team];
