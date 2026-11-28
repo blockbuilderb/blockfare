@@ -236,26 +236,29 @@
   transition: width 0.1s linear;
 }
 
-/* Network & Controls Panel (Top Left) */
+/* Network & Controls Panel (Top Left — Compact Pill) */
 #net-status-panel {
   position: absolute;
-  top: 96px;
+  top: 90px;
   left: 14px;
-  background: rgba(12, 18, 24, 0.76);
+  background: rgba(11, 17, 24, 0.78);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  padding: 6px 10px;
-  border-radius: 4px;
-  font-size: 10px;
-  max-width: 348px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 9.5px;
+  max-width: 285px;
 }
 
 .net-indicator {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-weight: 700;
+  gap: 6px;
+  font-weight: 800;
   color: #dfe6e9;
-  margin-bottom: 5px;
+  margin-bottom: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dot {
@@ -613,60 +616,66 @@
   to { opacity: 1; }
 }
 
-/* Bottom Right: Ammo & Slots */
+/* Bottom Right: Compact Ammo & Slots */
 #bottom-right-hud {
   position: absolute;
-  bottom: 16px;
-  right: 16px;
+  bottom: 14px;
+  right: 14px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 8px;
+  gap: 6px;
 }
 
 #ammo-panel {
-  background: rgba(12, 18, 24, 0.84);
+  background: rgba(11, 17, 24, 0.86);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-right: 4px solid #f1c40f;
-  padding: 8px 12px;
-  border-radius: 4px;
+  border-right: 3px solid #f1c40f;
+  padding: 6px 10px;
+  border-radius: 6px;
   text-align: right;
-  max-width: 235px;
+  max-width: 205px;
 }
 
 #weapon-name {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 900;
   color: #f1c40f;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ammo-numbers {
-  margin: 2px 0;
+  margin: 1px 0;
 }
 
 #ammo-clip {
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 900;
   color: #ffffff;
 }
 
 .ammo-sep {
-  font-size: 18px;
+  font-size: 15px;
   color: #7f8c8d;
   margin: 0 3px;
 }
 
 #ammo-reserve {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 700;
   color: #bdc3c7;
 }
 
 #fire-mode {
-  font-size: 10px;
-  color: #95a5a6;
-  font-weight: 700;
+  font-size: 9.5px;
+  color: #cbd5e1;
+  font-weight: 800;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #bottom-center-hud {
@@ -677,22 +686,13 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   z-index: 22;
   pointer-events: auto;
 }
 
 #selected-weapon-indicator {
-  background: rgba(10, 18, 26, 0.92);
-  border: 1.5px solid #2ecc71;
-  border-radius: 4px;
-  padding: 2px 12px;
-  font-size: 11px;
-  font-weight: 900;
-  color: #7bed9f;
-  letter-spacing: 0.7px;
-  box-shadow: 0 0 12px rgba(46, 204, 113, 0.4);
-  white-space: nowrap;
+  display: none !important;
 }
 
 #selected-weapon-indicator-name {
@@ -701,39 +701,39 @@
 
 #slot-list {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   align-items: center;
 }
 
 .weapon-slot {
-  background: rgba(12, 18, 24, 0.85);
-  border: 1.5px solid rgba(255, 255, 255, 0.16);
-  padding: 5px 10px;
-  border-radius: 4px;
+  background: rgba(11, 17, 24, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  padding: 4px 9px;
+  border-radius: 5px;
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 800;
-  color: #95a5a6;
+  color: #94a3b8;
   cursor: pointer;
   transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
 .weapon-slot.active {
-  background: linear-gradient(180deg, rgba(46, 204, 113, 0.28), rgba(241, 196, 15, 0.22));
+  background: linear-gradient(180deg, rgba(46, 204, 113, 0.28), rgba(241, 196, 15, 0.18));
   border-color: #2ecc71;
-  border-bottom: 3px solid #f1c40f;
+  border-bottom: 2.5px solid #f1c40f;
   color: #ffffff;
-  box-shadow: 0 0 16px rgba(46, 204, 113, 0.65);
-  transform: translateY(-2px);
+  box-shadow: 0 0 12px rgba(46, 204, 113, 0.45);
+  transform: translateY(-1px);
 }
 
 .slot-key {
-  background: rgba(255, 255, 255, 0.18);
-  padding: 1px 5px;
-  border-radius: 2px;
-  font-size: 10px;
+  background: rgba(255, 255, 255, 0.16);
+  padding: 1px 4.5px;
+  border-radius: 3px;
+  font-size: 9.5px;
   font-weight: 900;
 }
 
@@ -743,19 +743,7 @@
 }
 
 .slot-active-pill {
-  display: none;
-  background: rgba(46, 204, 113, 0.25);
-  border: 1px solid #2ecc71;
-  color: #7bed9f;
-  border-radius: 3px;
-  padding: 0 4px;
-  font-size: 8.5px;
-  font-weight: 900;
-  letter-spacing: 0.4px;
-}
-
-.weapon-slot.active .slot-active-pill {
-  display: inline-block;
+  display: none !important;
 }
 
 #bottom-center-roll-case-btn {

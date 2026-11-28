@@ -1,6 +1,6 @@
 import * as THREE from '../../vendor/three.module.js';
-import { UI, getEraRoles } from '../config.js?v=144';
-import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=144';
+import { UI, getEraRoles } from '../config.js?v=145';
+import { isMacPlatform, getShortOrderModifierLabel } from '../utils/KeyboardShortcuts.js?v=145';
 
 export const HudRenderer = {
   _setText(el, str) {
@@ -2466,7 +2466,7 @@ export const HudRenderer = {
       }
       if (this.magBarsRowEl) this.magBarsRowEl.innerHTML = '';
     } else if (cur) {
-      this._setText(this.weaponNameEl, cur.def.name);
+      this._setText(this.weaponNameEl, cur.def.shortName || cur.def.name);
       this._setText(this.ammoClipEl, cur.clip);
       this._setText(this.ammoReserveEl, cur.reserve);
       let fireModeStr;
@@ -2475,50 +2475,29 @@ export const HudRenderer = {
         const sPct = Math.round((this.player.stingerLockProgress || 0) * 100);
         fireModeStr = sTgt
           ? this.player.stingerLockedTarget
-            ? `🔒 IR LOCKED ON ${sTgt.name.split(' ')[0]} — FIRE [LMB]! • [3] SWAP TO RPG-7 AT`
-            : `📡 SEEKING ${sTgt.name.split(' ')[0]} (${sPct}%) • [3] SWAP TO RPG-7 AT`
-          : 'IR ANTI-AIR SAM (AIM AT ENEMY JET) • PRESS [3] AGAIN TO SWAP TO RPG-7 AT';
+            ? `🔒 LOCKED — FIRE! • [3] RPG-7`
+            : `📡 SEEKING (${sPct}%) • [3] RPG-7`
+          : 'IR SAM • [3] RPG-7';
       } else if (cur.def.type === 'rpg') {
-        fireModeStr = `${cur.def.caliber} • PRESS [3] AGAIN TO SWAP TO STINGER AA`;
+        fireModeStr = '85MM HEAT • [3] STINGER';
+      } else if (cur.def.type === 'binoculars') {
+        fireModeStr = '8X–24X • [LMB] PAINT • [J] CAS';
+      } else if (cur.def.type === 'c4') {
+        fireModeStr = '[LMB] THROW • [RMB] DETONATE';
+      } else if (cur.def.type === 'medkit') {
+        fireModeStr = 'HOLD [LMB] HEAL & BANDAGE';
+      } else if (cur.def.type === 'ammocrate') {
+        fireModeStr = '[LMB] DROP AMMO CRATE';
+      } else if (cur.def.type === 'hammer') {
+        fireModeStr = '[LMB] BUILD • [RMB] BREACH';
       } else if (cur.def.type === 'melee_sword') {
-        const dirIconMap = {
-          UP: '▴ OVERHEAD CLEAVE',
-          DOWN: '▾ HALF-SWORD THRUST',
-          LEFT: '◂ LEFT ZORNHAU SWEEP',
-          RIGHT: '▸ RIGHT ZORNHAU SLASH'
-        };
         const gDir = this.player.meleeGuardDir || 'RIGHT';
-        const dirTag = cur.def.isTwoHandedShield
-          ? '🛡️ LMB: HEAVY SHIELD BASH (KNOCKBACK)'
-          : cur.def.isPolearm
-          ? gDir === 'UP'
-            ? '🔱 LMB: HALBERD OVERHEAD CHOP'
-            : '🔱 LMB: 5.8M SPEAR THRUST'
-          : this.player.isAds && cur.def.id === 'longsword'
-          ? '🛡️⚔️ LMB: SHIELD BASH + RIPOSTE THRUST'
-          : `⚔️ ${dirIconMap[gDir] || '▸ RIGHT SLASH'}`;
-        const blockTag = cur.def.isTwoHandedShield
-          ? this.player.isAds
-            ? '🛡️ RMB WALL: ACTIVE (-92% DMG)'
-            : '🛡️ PASSIVE SHIELD: -35% (HOLD RMB: -92%)'
-          : cur.def.id === 'longsword'
-          ? this.player.isAds
-            ? '🛡️ RMB SHIELD BLOCK: ACTIVE (-75% DMG)'
-            : '🛡️ OFF-HAND SHIELD: -30% (HOLD RMB: -75%)'
-          : cur.def.isPolearm
-          ? this.player.isAds
-            ? '🔱 RMB SPEAR BRACE: ACTIVE (-65% DMG)'
-            : 'HOLD RMB: ANTI-CAVALRY SPEAR BRACE (-65%)'
-          : this.player.isAds
-          ? `⚔️ RMB ${gDir} PARRY: ACTIVE (-60% MELEE / -25% ARROW)`
-          : 'HOLD RMB: 4-DIR ZWEIHÄNDER PARRY (-60% DMG)';
-        fireModeStr = `${dirTag} • ${blockTag}`;
+        fireModeStr = cur.def.isTwoHandedShield
+          ? '🛡️ [RMB] WALL • [LMB] BASH'
+          : `⚔️ ${gDir} • [RMB] BLOCK`;
       } else if (cur.def.isShotgun || (cur.def.pellets && cur.def.pellets > 1) || cur.def.activeShellBadge) {
         const shellBadge = cur.def.activeShellBadge || '🐚 00 BUCK';
-        const shellName = cur.def.activeShellName || '00 BUCKSHOT';
-        const pCnt = cur.def.isSlugAmmo ? '1 SLUG' : `${cur.def.pellets || 8} PELLETS`;
-        const mv = cur.def.muzzleVelocity ? ` • ${cur.def.muzzleVelocity} M/S` : '';
-        fireModeStr = `${shellBadge}: ${shellName} (${pCnt}${mv}) • PRESS [B] TO SWITCH SHELLS`;
+        fireModeStr = `${shellBadge} • [B] SHELL`;
         if (this.fireModeEl && !this.fireModeEl._shotgunClickBound) {
           this.fireModeEl._shotgunClickBound = true;
           this.fireModeEl.style.cursor = 'pointer';
@@ -2532,74 +2511,81 @@ export const HudRenderer = {
           });
         }
       } else {
-        const mv = cur.def.muzzleVelocity ? ` • ${cur.def.muzzleVelocity} M/S` : '';
-        fireModeStr = `${cur.def.caliber}${mv} • [F/V] INSPECT`;
+        const modeTag = cur.def.auto ? 'AUTO' : cur.def.isBoltSniper ? 'BOLT' : 'SEMI';
+        const calPart = (cur.def.caliber || '').split('•')[1]?.trim() || '';
+        fireModeStr = calPart ? `${modeTag} • ${calPart}` : modeTag;
       }
       this._setText(this.fireModeEl, fireModeStr);
       this.updateMagBars(cur);
     }
 
-    // Update Zeroing, Arrow/Optic Type, and Fortification Blueprint Badges
+    // Update Zeroing, Arrow/Optic Type, and Fortification Blueprint Badges (Compact & Context-Filtered)
     const isBowOrXbowActive = Boolean(
       (activeVeh && activeVeh.type === 'warhorse') ||
         (cur && cur.def && (cur.def.isBow || cur.def.isCrossbow))
     );
+    const isNonRangedGadget = Boolean(
+      !activeVeh &&
+        cur?.def &&
+        (cur.def.type === 'hammer' ||
+          cur.def.type === 'medkit' ||
+          cur.def.type === 'c4' ||
+          cur.def.type === 'ammocrate' ||
+          cur.def.type === 'melee_sword')
+    );
     if (this.zeroBadgeEl) {
-      const lrfTag = this.player.isExactLrfZero ? ' 🎯LRF' : '';
-      const mmTitle = this.player.marksmanProfile?.activeTitle
-        ? ` • ${this.player.marksmanProfile.activeTitleIcon || '🏅'} ${this.player.marksmanProfile.activeTitle}`
-        : '';
-      this._setText(
-        this.zeroBadgeEl,
-        isBowOrXbowActive
-          ? `ELEV [X]: ${this.player.zeroDistance || 50}M${mmTitle}`
-          : `ZERO [X/F]: ${this.player.zeroDistance}m${lrfTag}${mmTitle}`
-      );
+      this._setDisplay(this.zeroBadgeEl, isNonRangedGadget ? 'none' : '');
+      if (!isNonRangedGadget) {
+        const lrfTag = this.player.isExactLrfZero ? ' 🎯' : '';
+        this._setText(
+          this.zeroBadgeEl,
+          isBowOrXbowActive
+            ? `${this.player.zeroDistance || 50}m [X]`
+            : `${this.player.zeroDistance}m${lrfTag} [X]`
+        );
+      }
     }
     if (this.cantedBadgeEl && (cur || (activeVeh && activeVeh.type === 'warhorse'))) {
-      let cantedTxt;
-      let cantedCol = '';
-      if (isBowOrXbowActive) {
-        const isFire = Boolean(this.player.fireArrowsActive);
-        cantedTxt = isFire
-          ? '🔥 [V] ARROW: FIRE ARROW (+BURN)'
-          : '🏹 [V] ARROW: REGULAR BODKIN';
-        cantedCol = isFire ? '#ff7f50' : '#7bed9f';
-      } else if (!cur.def.opticType) {
-        cantedTxt = 'OPTIC: IRON SIGHTS';
-      } else if (Array.isArray(cur.def.zoomLevels) && cur.def.zoomLevels.length > 1) {
-        const zIdx = Math.min(cur.def.zoomLevels.length - 1, Math.max(0, this.player.opticZoomIndex || 0));
-        cantedTxt = this.player.useCantedSight
-          ? 'OPTIC [V]: CANTED 45° (1X)'
-          : `OPTIC [WHEEL/V]: ${cur.def.zoomLevels[zIdx]}X (${cur.def.zoomLevels.join('⇄')}X)`;
-        cantedCol = '#00d2d3';
-      } else if (cur.def.hasCantedSight) {
-        cantedTxt = `OPTIC [V]: ${
-          this.player.useCantedSight ? 'CANTED 45°' : cur.def.opticType.toUpperCase()
-        }`;
-      } else {
-        cantedTxt = `OPTIC: ${cur.def.opticType.toUpperCase()}`;
-      }
-      this._setText(this.cantedBadgeEl, cantedTxt);
-      if (this.cantedBadgeEl._lastCol !== cantedCol) {
-        this.cantedBadgeEl._lastCol = cantedCol;
-        this.cantedBadgeEl.style.color = cantedCol;
+      this._setDisplay(this.cantedBadgeEl, isNonRangedGadget ? 'none' : '');
+      if (!isNonRangedGadget) {
+        let cantedTxt;
+        let cantedCol = '';
+        if (isBowOrXbowActive) {
+          const isFire = Boolean(this.player.fireArrowsActive);
+          cantedTxt = isFire ? '🔥 Fire [V]' : '🏹 Bodkin [V]';
+          cantedCol = isFire ? '#ff7f50' : '#7bed9f';
+        } else if (!cur.def.opticType) {
+          cantedTxt = '1× Iron';
+        } else if (Array.isArray(cur.def.zoomLevels) && cur.def.zoomLevels.length > 1) {
+          const zIdx = Math.min(cur.def.zoomLevels.length - 1, Math.max(0, this.player.opticZoomIndex || 0));
+          cantedTxt = this.player.useCantedSight
+            ? '1× Canted [V]'
+            : `${cur.def.zoomLevels[zIdx]}× [V]`;
+          cantedCol = '#00d2d3';
+        } else if (cur.def.hasCantedSight) {
+          cantedTxt = this.player.useCantedSight
+            ? '1× Canted [V]'
+            : `${cur.def.opticType.toUpperCase()} [V]`;
+        } else {
+          cantedTxt = cur.def.opticType.toUpperCase();
+        }
+        this._setText(this.cantedBadgeEl, cantedTxt);
+        if (this.cantedBadgeEl._lastCol !== cantedCol) {
+          this.cantedBadgeEl._lastCol = cantedCol;
+          this.cantedBadgeEl.style.color = cantedCol;
+        }
       }
     }
     if (this.blueprintBadgeEl) {
-      const bpName =
-        typeof this.player.getBlueprintName === 'function'
-          ? this.player.getBlueprintName()
-          : 'CHEST WALL';
-      const stashCd = Math.ceil(this.player.ammoStashCooldown || 0);
-      const stashText = stashCd > 0 ? `STASH [7]: ${stashCd}s` : 'STASH [7]: RDY';
-      const isModernEra = (this.world?.era || 'modern') === 'modern';
-      this._setText(
-        this.blueprintBadgeEl,
-        isModernEra
-          ? `BUILD [F/T/B]: ${bpName} • 🏰 EMPLACE [8] • ✈️ JET/AC-130 [9] • ${stashText}`
-          : `BUILD [F/T/B]: ${bpName} • 🏰 FORTIFY [8] • ${stashText}`
-      );
+      const showBp = Boolean(!activeVeh && cur?.def?.type === 'hammer');
+      this._setDisplay(this.blueprintBadgeEl, showBp ? '' : 'none');
+      if (showBp) {
+        const bpName =
+          typeof this.player.getBlueprintName === 'function'
+            ? this.player.getBlueprintName()
+            : 'CHEST WALL';
+        this._setText(this.blueprintBadgeEl, `🔨 ${bpName} [T]`);
+      }
     }
 
     const selWepIndNameEl = this.el('selected-weapon-indicator-name');

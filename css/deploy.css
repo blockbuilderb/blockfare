@@ -1,50 +1,29 @@
-.squad-btn {
-  flex: 1;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: #bdc3c7;
-  font-size: 9.5px;
-  font-weight: 800;
-  padding: 5px 4px;
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-.squad-btn.active {
-  background: rgba(46, 204, 113, 0.22);
-  border-color: #2ecc71;
-  color: #ffffff;
-}
-
-/* Deploy Screen — Strictly Single-Screen Fit (No Outer Vertical Scrollbar) */
+/* Compact Centered Deploy Screen & CoD Loadout Quick-Picker */
 #deploy-screen {
   position: fixed;
   inset: 0;
-  height: 100vh;
   z-index: 25;
-  background: radial-gradient(circle at center, rgba(16, 24, 34, 0.78), rgba(8, 12, 18, 0.94));
+  background: radial-gradient(circle at center, rgba(12, 20, 30, 0.72), rgba(5, 9, 15, 0.92));
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
+  padding: 10px;
   overflow: hidden;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(5px);
 }
 
 .deploy-container {
-  width: 1060px;
-  max-width: 98vw;
-  height: calc(100vh - 16px);
-  max-height: 850px;
+  width: min(880px, 95vw);
+  height: min(565px, 93vh);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: rgba(13, 20, 28, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-top: 3px solid #f1c40f;
-  border-radius: 8px;
-  padding: 10px 16px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+  background: rgba(11, 17, 25, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-top: 2.5px solid #f1c40f;
+  border-radius: 10px;
+  padding: 10px 14px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85);
 }
 
 .deploy-header {
@@ -52,9 +31,9 @@
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   padding-bottom: 7px;
-  margin-bottom: 7px;
+  margin-bottom: 8px;
   gap: 8px;
   flex-shrink: 0;
 }
@@ -62,26 +41,26 @@
 .deploy-title-row {
   display: flex;
   align-items: baseline;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
 }
 
 .deploy-title-sep {
   color: rgba(255, 255, 255, 0.3);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .game-tag {
   font-size: 10.5px;
   font-weight: 900;
   color: #f1c40f;
-  letter-spacing: 1.2px;
+  letter-spacing: 1px;
   white-space: nowrap;
 }
 
 .deploy-header h1 {
   margin: 0;
-  font-size: 17px;
+  font-size: 15.5px;
   font-weight: 900;
   letter-spacing: 0.5px;
   color: #ffffff;
@@ -93,7 +72,7 @@
 .deploy-header-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-wrap: wrap;
 }
 
@@ -110,9 +89,9 @@
   background: transparent;
   border: none;
   color: #94a3b8;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 900;
-  padding: 4px 9px;
+  padding: 3px 8px;
   border-radius: 3px;
   cursor: pointer;
   white-space: nowrap;
@@ -135,7 +114,7 @@
   background: rgba(8, 14, 20, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 5px;
-  padding: 3px 7px;
+  padding: 2px 6px;
   font-size: 10px;
   font-weight: 800;
   color: #94a3b8;
@@ -146,7 +125,7 @@
   background: transparent;
   border: none;
   color: #ecf0f1;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 900;
   cursor: pointer;
   outline: none;
@@ -159,14 +138,14 @@
 
 .deploy-tool-btn,
 .deploy-nav-btn {
-  padding: 5px 10px;
+  padding: 5px 9px;
   font-size: 11px;
   font-weight: 900;
   border-radius: 5px;
   cursor: pointer;
   white-space: nowrap;
   letter-spacing: 0.3px;
-  transition: filter 0.12s;
+  transition: filter 0.12s, transform 0.1s;
 }
 
 .deploy-tool-btn:hover,
@@ -175,26 +154,26 @@
 }
 
 .deploy-tool-btn.armory {
-  background: rgba(241, 196, 15, 0.18);
+  background: linear-gradient(135deg, rgba(241, 196, 15, 0.24), rgba(230, 126, 34, 0.18));
   border: 1px solid #f1c40f;
   color: #ffd32a;
 }
 
 .deploy-tool-btn.backpack {
-  background: rgba(155, 89, 182, 0.22);
-  border: 1px solid #9b59b6;
+  background: rgba(155, 89, 182, 0.2);
+  border: 1px solid rgba(155, 89, 182, 0.65);
   color: #d6a2e8;
 }
 
 .deploy-tool-btn.settings {
-  background: rgba(0, 206, 201, 0.16);
-  border: 1px solid #00cec9;
+  background: rgba(0, 206, 201, 0.14);
+  border: 1px solid rgba(0, 206, 201, 0.65);
   color: #81ecec;
 }
 
 .deploy-nav-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   color: #ecf0f1;
 }
 
@@ -203,8 +182,8 @@
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-columns: 1.18fr 1fr;
-  gap: 14px;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 12px;
 }
 
 .deploy-card {
@@ -214,159 +193,479 @@
   overflow: hidden;
 }
 
+.role-col-card {
+  overflow-y: auto;
+  padding-right: 2px;
+  gap: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(241, 196, 15, 0.4) transparent;
+}
+
 .deploy-sec-hdr {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 5px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .deploy-card h2 {
   margin: 0;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 900;
-  color: #95a5a6;
-  letter-spacing: 0.9px;
+  color: #94a3b8;
+  letter-spacing: 0.8px;
+}
+
+.deploy-role-trait {
+  font-size: 10px;
+  font-weight: 800;
+  color: #7bed9f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #deploy-air-economy-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 10px;
+  gap: 6px;
+  font-size: 9.5px;
   font-weight: 800;
   color: #f1c40f;
   white-space: nowrap;
 }
 
-.class-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
+/* 1. Compact Faction + Squad + Rank Strip */
+.deploy-unit-strip {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(241, 196, 15, 0.45) rgba(255, 255, 255, 0.05);
+  align-items: center;
+  gap: 5px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  background: rgba(16, 24, 34, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 4px 6px;
 }
 
-.class-list::-webkit-scrollbar {
-  width: 6px;
+.team-select-row {
+  display: inline-flex;
+  gap: 3px;
+  flex-shrink: 0;
 }
 
-.class-list::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 3px;
+.team-btn {
+  padding: 4px 8px;
+  font-size: 10.5px;
+  font-weight: 900;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
-.class-list::-webkit-scrollbar-thumb {
-  background: rgba(241, 196, 15, 0.45);
-  border-radius: 3px;
+.team-btn[data-team="US"].active {
+  background: rgba(41, 128, 185, 0.38);
+  border-color: #3498db;
+  color: #74b9ff;
+}
+
+.team-btn[data-team="RU"].active {
+  background: rgba(192, 57, 43, 0.38);
+  border-color: #e74c3c;
+  color: #ff7675;
+}
+
+.squad-compact-wrap {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+#deploy-squad-select {
+  flex: 1;
+  min-width: 0;
+  background: rgba(8, 14, 22, 0.92);
+  border: 1px solid rgba(46, 204, 113, 0.45);
+  color: #ecf0f1;
+  border-radius: 4px;
+  padding: 3.5px 5px;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 800;
+  cursor: pointer;
+  outline: none;
+}
+
+#deploy-squad-select option {
+  background: #0b131d;
+  color: #ecf0f1;
+}
+
+#open-create-squad-btn {
+  background: rgba(46, 204, 113, 0.2);
+  border: 1px solid #2ecc71;
+  color: #7bed9f;
+  border-radius: 4px;
+  width: 22px;
+  height: 23px;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.rank-select-row {
+  display: inline-flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.rank-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #94a3b8;
+  font-size: 9.5px;
+  font-weight: 900;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rank-btn.active {
+  background: rgba(241, 196, 15, 0.22);
+  border-color: #f1c40f;
+  color: #ffeaa7;
+}
+
+/* 2. Compact 4x2 Unit Role Tile Grid */
+.class-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  flex-shrink: 0;
 }
 
 .class-btn {
-  flex-shrink: 0;
   text-align: left;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(20, 29, 40, 0.78);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-left: 4px solid transparent;
-  padding: 5px 9px;
-  border-radius: 4px;
+  padding: 5px 7px;
+  border-radius: 6px;
   color: #ecf0f1;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.12s ease;
+  min-width: 0;
 }
 
 .class-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(30, 44, 60, 0.9);
+  border-color: rgba(241, 196, 15, 0.45);
 }
 
 .class-btn.active {
-  background: rgba(241, 196, 15, 0.14);
-  border-color: rgba(241, 196, 15, 0.5);
-  border-left-color: #f1c40f;
+  background: linear-gradient(180deg, rgba(241, 196, 15, 0.22), rgba(241, 196, 15, 0.08));
+  border-color: #f1c40f;
+  box-shadow: 0 0 10px rgba(241, 196, 15, 0.18);
 }
 
 .class-title {
   font-size: 11px;
   font-weight: 900;
-  color: #f1c40f;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.class-btn.active .class-title {
+  color: #ffd32a;
+}
+
+.class-title .squad-kit-cap-pill {
+  display: none !important;
 }
 
 .class-loadout {
-  font-size: 10px;
-  color: #dfe6e9;
-  margin: 1px 0;
+  font-size: 9px;
+  color: #94a3b8;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
 }
 
 .class-desc {
-  font-size: 9.2px;
-  color: #95a5a6;
+  display: none;
 }
 
-.deploy-sub-controls {
-  flex-shrink: 0;
-  padding-top: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.09);
-  margin-top: 6px;
-}
-
-.team-select-row {
+/* 3. CoD Primary & Secondary Loadout Cards on Deploy */
+.deploy-cod-loadout {
   display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.dep-wep-row {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
   gap: 6px;
 }
 
-.team-btn {
+.dep-wep-card {
+  background: rgba(14, 22, 32, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 3px;
+  min-width: 0;
+  transition: border-color 0.12s;
+}
+
+.dep-wep-card.primary {
+  border-color: rgba(46, 204, 113, 0.48);
+}
+
+.dep-wep-card.secondary {
+  border-color: rgba(52, 152, 219, 0.45);
+}
+
+.dep-wep-card.picker-open {
+  border-color: #f1c40f;
+  box-shadow: 0 0 12px rgba(241, 196, 15, 0.22);
+}
+
+.dep-wep-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
+}
+
+.dep-slot-lbl {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+}
+
+.dep-cat-badge {
+  font-size: 8.5px;
+  font-weight: 900;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(241, 196, 15, 0.16);
+  border: 1px solid rgba(241, 196, 15, 0.45);
+  color: #ffd32a;
+}
+
+.dep-wep-mid {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 36px;
+}
+
+.dep-wep-name {
+  font-size: 12px;
+  font-weight: 900;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dep-wep-sub {
+  font-size: 9px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.dep-wep-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.dep-swap-btn {
   flex: 1;
-  padding: 5px 6px;
-  font-size: 11px;
+  background: rgba(52, 152, 219, 0.2);
+  border: 1px solid rgba(52, 152, 219, 0.55);
+  color: #74b9ff;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 9.5px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.dep-swap-btn:hover {
+  background: rgba(52, 152, 219, 0.34);
+  color: #ffffff;
+}
+
+.dep-mods-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #dfe6e9;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 9.5px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.dep-shell-bar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+  background: rgba(230, 126, 34, 0.12);
+  border: 1px solid rgba(230, 126, 34, 0.4);
+  border-radius: 5px;
+  padding: 3px 6px;
+}
+
+.dep-shell-pill {
+  flex: 1;
+  background: rgba(12, 18, 26, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #cbd5e1;
+  border-radius: 4px;
+  padding: 2.5px 4px;
+  font-size: 9px;
+  font-weight: 900;
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.dep-shell-pill.active {
+  background: rgba(243, 156, 18, 0.3);
+  border-color: #f1c40f;
+  color: #ffeaa7;
+}
+
+/* Inline CoD Category Weapon Picker Drawer */
+.dep-picker-drawer {
+  background: rgba(9, 15, 23, 0.98);
+  border: 1.5px solid #f1c40f;
+  border-radius: 7px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.dep-cat-tabs {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.dep-cat-tab {
+  flex: 1;
+  min-width: 48px;
+  background: rgba(20, 30, 42, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #94a3b8;
+  border-radius: 4px;
+  padding: 3px 5px;
+  font-size: 9.5px;
+  font-weight: 900;
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.dep-cat-tab.active {
+  background: rgba(241, 196, 15, 0.24);
+  border-color: #f1c40f;
+  color: #ffd32a;
+}
+
+.dep-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  max-height: 128px;
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.dep-pick-gun-btn {
+  background: rgba(18, 28, 40, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  padding: 4px 5px;
+  color: #ecf0f1;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  text-align: left;
+  min-width: 0;
+}
+
+.dep-pick-gun-btn:hover {
+  border-color: #74b9ff;
+  background: rgba(30, 46, 66, 0.95);
+}
+
+.dep-pick-gun-btn.equipped {
+  border-color: #2ecc71;
+  background: rgba(39, 174, 96, 0.2);
+}
+
+/* Right Column: Map & Compact Spawn Sector Pills */
+.atmos-select-row {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.atmos-btn {
+  padding: 2px 6px;
+  font-size: 10.5px;
   font-weight: 800;
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.05);
   color: #ecf0f1;
   cursor: pointer;
-  white-space: nowrap;
 }
 
-.team-btn[data-team="US"].active {
-  background: rgba(41, 128, 185, 0.35);
-  border-color: #3498db;
-  color: #70bdff;
-}
-
-.team-btn[data-team="RU"].active {
-  background: rgba(192, 57, 43, 0.35);
-  border-color: #e74c3c;
-  color: #ff7878;
-}
-
-.rank-select-row,
-.squad-select-row {
-  margin-top: 5px;
-  display: flex;
-  gap: 5px;
-}
-
-.atmos-select-row {
-  display: inline-flex;
-  gap: 4px;
+.atmos-btn.active {
+  background: rgba(243, 156, 18, 0.28);
+  border-color: #f39c12;
+  color: #f1c40f;
 }
 
 .tactical-map-box {
   flex: 1;
-  min-height: 120px;
-  background: #141e28;
-  border: 1.5px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
+  min-height: 140px;
+  background: #121c26;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 6px;
+  margin: 5px 0;
 }
 
 #deploy-map-canvas {
@@ -382,17 +681,17 @@
 .spawn-buttons {
   flex-shrink: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
 }
 
 .spawn-btn {
-  padding: 5px 7px;
-  font-size: 10px;
+  padding: 4.5px 5px;
+  font-size: 9.5px;
   font-weight: 800;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 3px;
+  border-radius: 4px;
   color: #dfe6e9;
   cursor: pointer;
   white-space: nowrap;
@@ -401,32 +700,31 @@
 }
 
 .spawn-btn.active {
-  background: rgba(46, 204, 113, 0.22);
+  background: rgba(46, 204, 113, 0.24);
   border-color: #2ecc71;
-  color: #2ecc71;
+  color: #7bed9f;
 }
 
 .spawn-btn.locked-spawn {
-  opacity: 0.36;
+  opacity: 0.34;
   cursor: not-allowed;
-  border-color: rgba(231, 76, 60, 0.35) !important;
+  border-color: rgba(231, 76, 60, 0.3) !important;
 }
 
 .deploy-footer {
   flex-shrink: 0;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .control-tips {
   font-size: 10.5px;
-  color: #bdc3c7;
-  line-height: 1.3;
+  color: #94a3b8;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -439,17 +737,17 @@
 #deploy-btn,
 #deploy-top-btn,
 .deploy-cta-btn {
-  padding: 9px 22px;
-  font-size: 13.5px;
+  padding: 8px 18px;
+  font-size: 12.5px;
   font-weight: 900;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.6px;
   background: linear-gradient(135deg, #f39c12, #e67e22);
   color: #111;
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
-  box-shadow: 0 4px 15px rgba(243, 156, 18, 0.4);
+  box-shadow: 0 4px 14px rgba(243, 156, 18, 0.38);
   transition: transform 0.1s, filter 0.15s;
 }
 
@@ -460,147 +758,23 @@
   transform: translateY(-1px);
 }
 
-.atmos-btn {
-  padding: 3px 8px;
-  font-size: 10px;
-  font-weight: 800;
-  border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.05);
-  color: #ecf0f1;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.atmos-btn.active {
-  background: rgba(243, 156, 18, 0.28);
-  border-color: #f39c12;
-  color: #f1c40f;
-}
-
-/* Singleplayer vs. Multiplayer Mode Selector & Banners */
-#game-mode-bar {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 7px;
-}
-
-.game-mode-btn {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
-  border-radius: 5px;
-  border: 1.5px solid rgba(255, 255, 255, 0.16);
-  background: rgba(14, 22, 30, 0.85);
-  color: #bdc3c7;
-  cursor: pointer;
-  text-align: left;
-  transition: all 0.15s ease;
-}
-
-.game-mode-btn:hover {
-  border-color: rgba(255, 255, 255, 0.35);
-  background: rgba(22, 34, 46, 0.92);
-}
-
-.game-mode-btn[data-mode="SINGLEPLAYER"].active {
-  background: linear-gradient(135deg, rgba(41, 128, 185, 0.32), rgba(16, 28, 42, 0.95));
-  border-color: #3498db;
-  color: #ffffff;
-  box-shadow: 0 0 14px rgba(52, 152, 219, 0.35);
-}
-
-.game-mode-btn[data-mode="MULTIPLAYER"].active {
-  background: linear-gradient(135deg, rgba(39, 174, 96, 0.32), rgba(14, 30, 22, 0.95));
-  border-color: #2ecc71;
-  color: #ffffff;
-  box-shadow: 0 0 14px rgba(46, 204, 113, 0.35);
-}
-
-.gm-icon {
-  font-size: 20px;
-  line-height: 1;
-}
-
-.gm-title {
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.7px;
-}
-
-.game-mode-btn[data-mode="SINGLEPLAYER"].active .gm-title {
-  color: #74b9ff;
-}
-
-.game-mode-btn[data-mode="MULTIPLAYER"].active .gm-title {
-  color: #2ecc71;
-}
-
-.gm-sub {
-  font-size: 9.5px;
-  color: #95a5a6;
-  font-weight: 600;
-}
-
-#sp-mode-banner {
-  background: rgba(14, 24, 36, 0.92);
-  border: 1px solid rgba(52, 152, 219, 0.45);
-  border-radius: 4px;
-  padding: 6px 12px;
-  margin-bottom: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 #sp-mode-banner.hidden,
-#mp-lobby-bar.hidden {
+#mp-lobby-bar.hidden,
+#deploy-lobby-drawer.hidden {
   display: none !important;
 }
 
-.sp-banner-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10.5px;
-  font-weight: 700;
-  color: #dfe6e9;
-}
-
-.sp-pill {
-  background: rgba(52, 152, 219, 0.25);
-  border: 1px solid #3498db;
-  color: #74b9ff;
-  padding: 2px 7px;
-  border-radius: 3px;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.6px;
-}
-
-.sp-banner-right {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.bot-scale-btn {
-  padding: 3px 9px;
-  font-size: 10px;
-  font-weight: 900;
-  border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.06);
-  color: #bdc3c7;
-  cursor: pointer;
-}
-
-.bot-scale-btn.active {
-  background: rgba(52, 152, 219, 0.32);
-  border-color: #74b9ff;
-  color: #ffffff;
+@media (max-width: 780px) {
+  .deploy-container {
+    width: 98vw;
+    height: 96vh;
+    padding: 8px 10px;
+  }
+  .deploy-grid {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+  .class-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }

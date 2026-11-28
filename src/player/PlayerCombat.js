@@ -1,5 +1,5 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=144';
+import { sound } from '../audio.js?v=145';
 import {
   PLAYER,
   COMBAT,
@@ -8,17 +8,22 @@ import {
   DEPLOYABLES,
   getAllowedRoleIds,
   resolveRoleForEra
-} from '../config.js?v=144';
-import { events } from '../events.js?v=144';
-import { WEAPON_DEFS, ATTACHMENT_CATALOG, createWeaponViewModel } from '../weapons.js?v=144';
-import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=144';
+} from '../config.js?v=145';
+import { events } from '../events.js?v=145';
+import {
+  WEAPON_DEFS,
+  ATTACHMENT_CATALOG,
+  createWeaponViewModel,
+  getWeaponHipOffsetX
+} from '../weapons.js?v=145';
+import { evaluateCatastrophicKill } from '../bots/BotManager.js?v=145';
 import {
   evaluateMarksmanShot,
   computeBallisticSolution,
   syncActiveMarksmanTitle,
   saveMarksmanProfile,
   loadMarksmanProfile
-} from './MarksmanSystem.js?v=144';
+} from './MarksmanSystem.js?v=145';
 
 function markShared(asset) {
   if (asset) {
@@ -1136,7 +1141,7 @@ export const CombatMethods = {
     }
     const cur = this.currentWeapon();
     if (cur && cur.mesh) {
-      cur.mesh.position.set(0.22, -0.34, -0.26);
+      cur.mesh.position.set(getWeaponHipOffsetX(cur.def), -0.34, -0.26);
       this.viewModelGroup.add(cur.mesh);
     }
     this.weaponDrawDuration = cur?.def?.slot === 'secondary' ? 0.19 : 0.26;
@@ -3285,7 +3290,7 @@ export const CombatMethods = {
     }
     const newMesh = createWeaponViewModel(newDef, this.team, {});
     if (this.currentSlotIndex === 2 && !this.activeVehicle && this.viewModelGroup) {
-      newMesh.position.set(0.22, -0.34, -0.26);
+      newMesh.position.set(getWeaponHipOffsetX(newDef), -0.34, -0.26);
       this.viewModelGroup.add(newMesh);
     }
 

@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=144';
-import { TERRAIN } from '../config.js?v=144';
-import { events } from '../events.js?v=144';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=144';
+import { sound } from '../audio.js?v=145';
+import { TERRAIN } from '../config.js?v=145';
+import { events } from '../events.js?v=145';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=145';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;

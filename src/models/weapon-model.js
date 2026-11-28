@@ -18,7 +18,7 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=144';
+import { TEXTURES } from '../assets/textures.js?v=145';
 
 // Cached shared geometries & materials for 1st-person Spec-Ops Operator Arms, Watch & Articulated Tactical Gloves
 const _fpArmGeos = {
@@ -67,6 +67,111 @@ const _fpTanSuedeMat = new THREE.MeshStandardMaterial({
   roughness: 0.88
 });
 _fpTanSuedeMat.userData.shared = true;
+
+// Pre-allocated scratch math objects for zero-GC 2-bone 1st-person Shoulder-to-Wrist IK
+const _ikUpY = new THREE.Vector3(0, 1, 0);
+const _ikScaleOne = new THREE.Vector3(1, 1, 1);
+const _ikWepPos = new THREE.Vector3();
+const _ikWepMat = new THREE.Matrix4();
+const _ikArmLocalMat = new THREE.Matrix4();
+const _ikInvArmWorldMat = new THREE.Matrix4();
+const _ikWristCam = new THREE.Vector3();
+const _ikShoulderCam = new THREE.Vector3();
+const _ikElbowCam = new THREE.Vector3();
+const _ikWristLocal = new THREE.Vector3();
+const _ikElbowLocal = new THREE.Vector3();
+const _ikShoulderLocal = new THREE.Vector3();
+const _ikSegDir = new THREE.Vector3();
+const _ikSegMid = new THREE.Vector3();
+
+/**
+ * Returns the natural camera-space horizontal hipfire offset (`X`) for a weapon or gadget.
+ * Two-handed symmetrical items (Binoculars, Medkit, Ammo Crate, C4, 2H Shield) are held centered
+ * in front of the operator's chest instead of shoved onto the right hip.
+ */
+export function getWeaponHipOffsetX(def) {
+  if (!def) return 0.19;
+  if (
+    def.type === 'binoculars' ||
+    def.type === 'medkit' ||
+    def.type === 'ammocrate' ||
+    def.isTwoHandedShield
+  ) {
+    return 0.0;
+  }
+  if (def.type === 'c4') {
+    return 0.02;
+  }
+  return 0.19;
+}
+
+/**
+ * Solves a 2-bone Shoulder -> Elbow -> Wrist analytical IK rig for both 1st-person arms in camera space:
+ * - Left arm ALWAYS originates from the operator's left shoulder `(-0.28, -0.32, +0.12)` (bottom-left of screen).
+ * - Right arm ALWAYS originates from the operator's right shoulder `(+0.28, -0.32, +0.12)` (bottom-right of screen).
+ * - Prevents both arms from ever appearing side-by-side on the right edge of the viewport!
+ */
+export function updateFirstPersonArmShoulders(weaponMesh, overrideWeaponPos = null) {
+  if (!weaponMesh) return;
+  if (overrideWeaponPos) {
+    _ikWepPos.copy(overrideWeaponPos);
+  } else {
+    _ikWepPos.copy(weaponMesh.position);
+  }
+  _ikWepMat.compose(_ikWepPos, weaponMesh.quaternion, _ikScaleOne);
+
+  for (let sideIdx = 0; sideIdx < 2; sideIdx++) {
+    const isLeft = sideIdx === 0;
+    const arm = weaponMesh.getObjectByName(isLeft ? 'leftArmGroup' : 'rightArmGroup');
+    if (!arm || !arm.visible || !arm.userData || !arm.userData.ikRefs) continue;
+    const { forearm, sleeveFold, upperSleeve, elbowPad } = arm.userData.ikRefs;
+
+    _ikArmLocalMat.compose(arm.position, arm.quaternion, _ikScaleOne);
+    _ikInvArmWorldMat.multiplyMatrices(_ikWepMat, _ikArmLocalMat).invert();
+
+    // Wrist anchor in camera space
+    _ikWristCam.copy(arm.position).applyMatrix4(_ikWepMat);
+
+    // Fixed anatomical left/right shoulders in camera space (bottom-left & bottom-right off-screen)
+    _ikShoulderCam.set(isLeft ? -0.28 : 0.28, -0.32, 0.12);
+
+    // Natural outward & downward elbow bend (clamped strictly below y = -0.22 so ADS bore is never occluded)
+    _ikElbowCam.lerpVectors(_ikWristCam, _ikShoulderCam, 0.48);
+    _ikElbowCam.x += isLeft ? -0.075 : 0.065;
+    _ikElbowCam.y = Math.min(_ikElbowCam.y - 0.085, -0.22);
+    _ikElbowCam.z += 0.02;
+
+    // Transform joints into `arm` local space
+    _ikWristLocal.set(0, -0.002, 0.018);
+    _ikElbowLocal.copy(_ikElbowCam).applyMatrix4(_ikInvArmWorldMat);
+    _ikShoulderLocal.copy(_ikShoulderCam).applyMatrix4(_ikInvArmWorldMat);
+
+    // 1) Forearm segment: Elbow (bottom) -> Wrist (top)
+    _ikSegDir.subVectors(_ikWristLocal, _ikElbowLocal);
+    const forearmLen = Math.max(0.06, _ikSegDir.length());
+    _ikSegDir.divideScalar(forearmLen);
+    _ikSegMid.addVectors(_ikElbowLocal, _ikWristLocal).multiplyScalar(0.5);
+    forearm.position.copy(_ikSegMid);
+    forearm.quaternion.setFromUnitVectors(_ikUpY, _ikSegDir);
+    forearm.scale.set(1, forearmLen / 0.22, 1);
+
+    sleeveFold.position.copy(_ikWristLocal).addScaledVector(_ikSegDir, -0.02);
+    sleeveFold.quaternion.copy(forearm.quaternion);
+
+    // 2) Upper-arm segment: Shoulder (bottom) -> Elbow (top)
+    _ikSegDir.subVectors(_ikElbowLocal, _ikShoulderLocal);
+    const upperLen = Math.max(0.06, _ikSegDir.length());
+    _ikSegDir.divideScalar(upperLen);
+    _ikSegMid.addVectors(_ikShoulderLocal, _ikElbowLocal).multiplyScalar(0.5);
+    upperSleeve.position.copy(_ikSegMid);
+    upperSleeve.quaternion.setFromUnitVectors(_ikUpY, _ikSegDir);
+    upperSleeve.scale.set(1, upperLen / 0.22, 1);
+
+    elbowPad.position.copy(_ikElbowLocal);
+    elbowPad.quaternion.copy(forearm.quaternion);
+    elbowPad.rotateX(Math.PI / 2);
+  }
+}
 
 export function createWeaponViewModel(def, team = 'US', custom = {}) {
   const group = new THREE.Group();
@@ -146,6 +251,13 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     velcroTab.position.set(0, 0.028, -0.016);
 
     armGroup.add(upperSleeve, forearm, sleeveFold, elbowPad, wrist, gloveCuff, velcroTab);
+    armGroup.userData.ikRefs = {
+      forearm,
+      sleeveFold,
+      upperSleeve,
+      elbowPad,
+      isLeft
+    };
 
     if (isLeft) {
       // Inward-canted Operator Tactical Watch / GPS Foretrex (visible during hipfire,ADS, reload & inspect!)
@@ -355,8 +467,10 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     binoGroup.add(hingeBridge, lrfEmitter, lrfButton);
     group.add(binoGroup);
 
-    leftArm.position.set(-0.085, -0.055, -0.21);
-    rightArm.position.set(0.085, -0.055, -0.21);
+    leftArm.position.set(-0.078, -0.048, -0.21);
+    leftArm.rotation.set(0.18, 0.28, -0.18);
+    rightArm.position.set(0.078, -0.048, -0.21);
+    rightArm.rotation.set(0.18, -0.28, 0.18);
     leftArm.userData.basePos = leftArm.position.clone();
     leftArm.userData.baseRot = leftArm.rotation.clone();
     rightArm.userData.basePos = rightArm.position.clone();
@@ -364,35 +478,53 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     group.add(leftArm, rightArm);
   } else if (def.type === 'c4') {
     const clacker = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.11, 0.04), bodyMat);
-    clacker.position.set(0.08, -0.04, -0.22);
+    clacker.position.set(0.09, -0.04, -0.22);
     const led = new THREE.Mesh(
       new THREE.BoxGeometry(0.018, 0.018, 0.018),
       new THREE.MeshBasicMaterial({ color: 0xff2222 })
     );
-    led.position.set(0.08, 0.02, -0.22);
+    led.position.set(0.09, 0.02, -0.22);
 
     const brick = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.19), accentMat);
-    brick.position.set(-0.08, -0.03, -0.26);
+    brick.position.set(-0.09, -0.03, -0.26);
     group.add(clacker, led, brick);
 
-    leftArm.position.set(-0.09, -0.06, -0.24);
-    rightArm.position.set(0.08, -0.07, -0.2);
+    leftArm.position.set(-0.095, -0.06, -0.24);
+    leftArm.rotation.set(0.16, 0.24, -0.12);
+    rightArm.position.set(0.09, -0.07, -0.2);
+    rightArm.rotation.set(0.16, -0.22, 0.12);
     leftArm.userData.basePos = leftArm.position.clone();
     leftArm.userData.baseRot = leftArm.rotation.clone();
     rightArm.userData.basePos = rightArm.position.clone();
     rightArm.userData.baseRot = rightArm.rotation.clone();
     group.add(leftArm, rightArm);
-  } else if (def.type === 'medkit') {
+  } else if (def.type === 'medkit' || def.type === 'ammocrate') {
     const box = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.13, 0.14), bodyMat);
     box.position.set(0, -0.03, -0.26);
-    const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.025, 0.145), accentMat);
-    crossH.position.set(0, -0.03, -0.26);
-    const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.08, 0.145), accentMat);
-    crossV.position.set(0, -0.03, -0.26);
-    group.add(box, crossH, crossV);
+    group.add(box);
+    if (def.type === 'ammocrate') {
+      const bandL = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.136, 0.146), darkSteelMat);
+      bandL.position.set(-0.055, -0.03, -0.26);
+      const bandR = bandL.clone();
+      bandR.position.x = 0.055;
+      const stencil = new THREE.Mesh(
+        new THREE.BoxGeometry(0.075, 0.028, 0.145),
+        new THREE.MeshBasicMaterial({ color: 0xf1c40f })
+      );
+      stencil.position.set(0, -0.03, -0.26);
+      group.add(bandL, bandR, stencil);
+    } else {
+      const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.025, 0.145), accentMat);
+      crossH.position.set(0, -0.03, -0.26);
+      const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.08, 0.145), accentMat);
+      crossV.position.set(0, -0.03, -0.26);
+      group.add(crossH, crossV);
+    }
 
-    leftArm.position.set(-0.09, -0.05, -0.25);
-    rightArm.position.set(0.09, -0.05, -0.25);
+    leftArm.position.set(-0.095, -0.055, -0.25);
+    leftArm.rotation.set(0.15, 0.25, -0.15);
+    rightArm.position.set(0.095, -0.055, -0.25);
+    rightArm.rotation.set(0.15, -0.25, 0.15);
     leftArm.userData.basePos = leftArm.position.clone();
     leftArm.userData.baseRot = leftArm.rotation.clone();
     rightArm.userData.basePos = rightArm.position.clone();
@@ -1926,6 +2058,10 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
       isPistol ? 0.008 : 0,
       -0.22 - length * (isPistol ? 0.36 : 0.44)
     );
+    if (wId === 'rem870') {
+      handguard.name = 'pumpForendMesh';
+      handguard.userData.baseZ = handguard.position.z;
+    }
     group.add(handguard);
 
     // Handguard cooling slots / M-LOK vents on rifles & SMGs
@@ -2833,6 +2969,10 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     group.add(flash);
   }
 
+  updateFirstPersonArmShoulders(
+    group,
+    new THREE.Vector3(getWeaponHipOffsetX(def), -0.2, -0.31)
+  );
   return group;
 }
 

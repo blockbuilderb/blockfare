@@ -9,12 +9,21 @@
 
 export {
   WEAPON_DEFS,
+  ALL_MODERN_ROLES,
+  WEAPON_CATEGORIES,
+  PRIMARY_WEAPON_CATEGORIES,
+  SECONDARY_WEAPON_CATEGORIES,
+  getWeaponCategory,
   SHOTGUN_SHELL_TYPES,
   CLASS_LOADOUTS,
   CASE_PRICE,
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from './assets/weapon-defs.js?v=144';
-export { ATTACHMENT_CATALOG } from './assets/attachment-defs.js?v=144';
-export { createWeaponViewModel } from './models/weapon-model.js?v=144';
+} from './assets/weapon-defs.js?v=145';
+export { ATTACHMENT_CATALOG } from './assets/attachment-defs.js?v=145';
+export {
+  createWeaponViewModel,
+  getWeaponHipOffsetX,
+  updateFirstPersonArmShoulders
+} from './models/weapon-model.js?v=145';

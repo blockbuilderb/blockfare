@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { WEAPON_DEFS, SHOTGUN_SHELL_TYPES } from '../src/assets/weapon-defs.js?v=144';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=144';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=144';
+import { WEAPON_DEFS, SHOTGUN_SHELL_TYPES } from '../src/assets/weapon-defs.js?v=145';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=145';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=145';
 import {
   VehicleManager,
   classifyWeaponBallistics,
   initVehicleOrdnance,
   PITCH_LIMITS_TANK_CANNON,
   PITCH_LIMITS_TANK_ROOF_HMG
-} from '../src/vehicles.js?v=144';
-import { PlayerController } from '../src/player/PlayerController.js?v=144';
+} from '../src/vehicles.js?v=145';
+import { PlayerController } from '../src/player/PlayerController.js?v=145';
 
 test('v144 #1: Scaled-Up Enterable Buildings, 6.25m Stories, High-Cube Containers & Roomy Bunkers', () => {
   const scene = new THREE.Scene();

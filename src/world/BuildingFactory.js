@@ -5,7 +5,7 @@ import {
   createSkyscraper3DMesh,
   RADAR_TOWER_SPEC,
   POWER_TOWER_SPEC
-} from '../models/prop-models.js?v=144';
+} from '../models/prop-models.js?v=145';
 
 const VOXEL_SIZE = 1.25;
 const SPATIAL_MIN_X = -2048;

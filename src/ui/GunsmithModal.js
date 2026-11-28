@@ -2,22 +2,26 @@ import {
   WEAPON_DEFS,
   ATTACHMENT_CATALOG,
   CLASS_LOADOUTS,
+  PRIMARY_WEAPON_CATEGORIES,
+  SECONDARY_WEAPON_CATEGORIES,
+  SHOTGUN_SHELL_TYPES,
+  getWeaponCategory,
   CASE_PRICE,
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from '../weapons.js?v=144';
-import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=144';
-import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=144';
-import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=144';
-import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=144';
-import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=144';
-import { sound } from '../audio.js?v=144';
+} from '../weapons.js?v=145';
+import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=145';
+import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=145';
+import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=145';
+import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=145';
+import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=145';
+import { sound } from '../audio.js?v=145';
 import {
   ARMORY_CASE_STATES,
   ARMORY_CASE_EVENTS,
   createArmoryCaseRouletteFSM
-} from '../core/StateMachines.js?v=144';
+} from '../core/StateMachines.js?v=145';
 
 export const GunsmithModal = {
   formatCashAmount(val) {
@@ -55,6 +59,7 @@ export const GunsmithModal = {
       this.ammoGunsmithBtnEl.textContent = `🔧 [L] ARMORY (🏦$${whStr})`;
     }
     this.updateFriendlyFireUI?.();
+    this.renderDeployLoadoutCards?.();
     this.renderDeployExtractedLootBar();
     this.renderDeployB2CustomizerBar();
     const modal = this.el('gunsmith-modal');
@@ -82,8 +87,11 @@ export const GunsmithModal = {
     if (!bar) {
       bar = document.createElement('div');
       bar.id = 'deploy-b2-customizer-bar';
+      const vehAnchor = document.getElementById('deploy-veh-anchor');
       const gridEl = this.deployScreenEl.querySelector('.deploy-grid');
-      if (gridEl && gridEl.parentNode) {
+      if (vehAnchor) {
+        vehAnchor.appendChild(bar);
+      } else if (gridEl && gridEl.parentNode) {
         gridEl.parentNode.insertBefore(bar, gridEl);
       } else {
         this.deployScreenEl.appendChild(bar);
@@ -437,17 +445,6 @@ export const GunsmithModal = {
       this.toggleGunsmithModal(false);
       return;
     }
-    const access = this.player?.canAccessGunsmithWorkbench
-      ? this.player.canAccessGunsmithWorkbench()
-      : { allowed: true, locationLabel: 'ARMORY READY' };
-    if (!access.allowed) {
-      sound.playEmptyClick?.();
-      this.addXpNotification?.(
-        0,
-        '🔧 GUNSMITH WORKBENCH [L] REQUIRES MAIN BASE HQ, CAPTURED FRIENDLY FOB (A–E), OR AMMO STASH [7]! (USE [I] FOR BACKPACK)'
-      );
-      return;
-    }
     this._gunsmithRole = this.player?.role || this.selectedClass || 'engineer';
     const nearEnemyLoot =
       this.player && typeof this.player.findNearestEnemyLoot === 'function'
@@ -510,26 +507,26 @@ export const GunsmithModal = {
       document.body.appendChild(modal);
       if (this._domCache) this._domCache.set('gunsmith-modal', modal);
     }
-    const isFullScreen = this._gunsmithEdgeFullscreen !== false;
+    const isFullScreen = this._gunsmithEdgeFullscreen === true;
     if (isFullScreen) {
       modal.style.cssText = `
         position: fixed; top: 0; left: 0; transform: none;
         width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh;
         display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;
         background-color: rgba(8, 13, 20, 0.985); border: 2px solid #f1c40f;
-        border-radius: 0px; padding: 8px 14px; z-index: 10025;
+        border-radius: 0px; padding: 10px 16px; z-index: 10025;
         font-family: 'Rajdhani', 'Segoe UI', sans-serif; color: #ecf0f1;
         box-shadow: 0 22px 70px rgba(0, 0, 0, 0.95); pointer-events: auto;
       `;
     } else {
       modal.style.cssText = `
         position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        width: 94vw; height: 92vh; max-width: 96vw; max-height: 94vh;
+        width: min(900px, 95vw); height: min(585px, 92vh); max-width: 96vw; max-height: 94vh;
         display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box;
-        background-color: rgba(10, 15, 22, 0.98); border: 2px solid #f1c40f;
-        border-radius: 8px; padding: 8px 14px; z-index: 10025;
+        background-color: rgba(11, 17, 25, 0.98); border: 1.5px solid rgba(241, 196, 15, 0.55);
+        border-top: 3px solid #f1c40f; border-radius: 10px; padding: 10px 14px; z-index: 10025;
         font-family: 'Rajdhani', 'Segoe UI', sans-serif; color: #ecf0f1;
-        box-shadow: 0 22px 70px rgba(0, 0, 0, 0.95); pointer-events: auto;
+        box-shadow: 0 0 0 100vmax rgba(4, 8, 14, 0.72), 0 24px 64px rgba(0, 0, 0, 0.95); pointer-events: auto;
       `;
     }
 
@@ -922,7 +919,7 @@ export const GunsmithModal = {
       this.player.syncTotalCash();
     }
 
-    const isFullScreen = this._gunsmithEdgeFullscreen !== false;
+    const isFullScreen = this._gunsmithEdgeFullscreen === true;
     if (modal) {
       if (isFullScreen) {
         modal.style.top = '0';
@@ -938,11 +935,11 @@ export const GunsmithModal = {
         modal.style.top = '50%';
         modal.style.left = '50%';
         modal.style.transform = 'translate(-50%, -50%)';
-        modal.style.width = '92vw';
-        modal.style.height = '90vh';
+        modal.style.width = 'min(900px, 95vw)';
+        modal.style.height = 'min(585px, 92vh)';
         modal.style.maxWidth = '96vw';
         modal.style.maxHeight = '94vh';
-        modal.style.borderRadius = '8px';
+        modal.style.borderRadius = '10px';
         modal.style.boxSizing = 'border-box';
       }
     }
@@ -950,13 +947,9 @@ export const GunsmithModal = {
     const workbenchAccess = this.player?.canAccessGunsmithWorkbench
       ? this.player.canAccessGunsmithWorkbench()
       : { allowed: true, locationLabel: 'ARMORY READY' };
-    if (
-      !workbenchAccess.allowed &&
-      this._gunsmithActiveTab !== 'backpack' &&
-      this._gunsmithActiveTab !== 'vehicles' &&
-      this._gunsmithActiveTab !== 'requisitions'
-    ) {
-      this._gunsmithActiveTab = this.player?.activeVehicle ? 'vehicles' : 'backpack';
+    if (this._gunsmithActiveTab === 'requisitions') {
+      this._gunsmithActiveTab = 'vehicles';
+      this._vehicleBaySubTab = 'drops';
     }
     const activeTab = this._gunsmithActiveTab || 'warehouse';
     const era = this.world?.era || 'modern';
@@ -1046,1136 +1039,400 @@ export const GunsmithModal = {
       totalExtractedCash: 0
     };
 
-    // ─── LEFT PANEL: OPERATOR EQUIPMENT SLOTS ("PAPER DOLL" RIG VIEW) ─────────
-    const renderOperatorRigPanel = () => {
-      const allowedEraIds = getAllowedRoleIds(era, playerTeam);
-      const visibleClassMeta = CLASS_META.filter((c) => allowedEraIds.includes(c.id));
-      const activeClassMeta =
-        visibleClassMeta.find((c) => c.id === activeRole) ||
-        CLASS_META.find((c) => c.id === activeRole) ||
-        visibleClassMeta[0] ||
-        CLASS_META[0];
-      const classTabsHtml = visibleClassMeta.map((c) => {
+    // ─── COMPACT STAT BARS (4 CLEAN METRICS) ──────────────────────────────────
+    const allowedEraIds = getAllowedRoleIds(era, playerTeam);
+    const visibleClassMeta = CLASS_META.filter((c) => allowedEraIds.includes(c.id));
+    const classHeaderPillsHtml = visibleClassMeta
+      .map((c) => {
         const isSel = c.id === activeRole;
-        return `
-          <button type="button" class="abi-class-tab gs-role-btn ${isSel ? 'active' : ''}" data-role="${c.id}" title="${c.label}: ${c.gadget}">
-            <div>${c.icon} ${c.short}</div>
-          </button>
-        `;
-      }).join('');
+        return `<button type="button" class="abi-class-tab gs-role-btn ${
+          isSel ? 'active' : ''
+        }" data-role="${c.id}" title="${c.label}: ${c.gadget}">${c.icon} ${c.short}</button>`;
+      })
+      .join('');
 
-      const primMeta = WEAPON_GRID_SIZES[primaryId] || { label: '4×2', cat: 'PRIMARY', weight: '3.4 kg' };
-      const isBareIronSights = !customPrimaryDef.opticType || customPrimaryDef.opticType === 'iron';
-      const isSecBareIron = !customSecondaryDef.opticType || customSecondaryDef.opticType === 'iron';
+    // ─── TAB 1: CALL OF DUTY CREATE-A-CLASS WEAPONS BROWSER ───────────────────
+    const renderCodWeaponsMode = () => {
+      const browseSlot = this._codBrowseSlot || 'primary';
+      const equippedPrimCat = getWeaponCategory(basePrimaryDef);
+      if (
+        !this._codPrimaryCategory ||
+        !PRIMARY_WEAPON_CATEGORIES.some((c) => c.id === this._codPrimaryCategory)
+      ) {
+        this._codPrimaryCategory = equippedPrimCat;
+      }
+      const activeCat = browseSlot === 'secondary' ? 'pistol' : this._codPrimaryCategory;
 
-      const buildNodePillsForWeapon = (attMap, baseDef, customDef, slotName) => {
-        const bareIron = !customDef.opticType || customDef.opticType === 'iron';
-        const defs = [
-          {
-            key: 'optic',
-            label: 'OPTIC',
-            val: bareIron ? 'IRON' : String(customDef.opticType).toUpperCase(),
-            cls: bareIron ? 'iron-sight' : 'upgraded'
-          },
-          {
-            key: 'muzzle',
-            label: 'MUZZLE',
-            val:
-              (attMap.muzzle || 'stock') === 'stock'
-                ? baseDef.silenced
-                  ? 'INTEGRAL'
-                  : 'STOCK'
-                : attMap.muzzle.toUpperCase().slice(0, 6),
-            cls: (attMap.muzzle || 'stock') !== 'stock' || baseDef.silenced ? 'upgraded' : ''
-          },
-          {
-            key: 'magazine',
-            label: 'MAG',
-            val: `${customDef.clipSize} RDS`,
-            cls: (attMap.magazine || 'std_mag') !== 'std_mag' ? 'upgraded' : ''
-          },
-          {
-            key: 'grip',
-            label: slotName === 'secondary' ? 'LASER' : 'GRIP',
-            val: (attMap.grip || 'std_grip') === 'std_grip' ? 'STOCK' : 'MODDED',
-            cls: (attMap.grip || 'std_grip') !== 'std_grip' ? 'upgraded' : ''
-          },
-          {
-            key: 'ammoType',
-            label: 'AMMO',
-            val:
-              (attMap.ammoType || 'fmj') === 'fmj'
-                ? 'FMJ'
-                : attMap.ammoType.toUpperCase().slice(0, 6),
-            cls: (attMap.ammoType || 'fmj') !== 'fmj' ? 'upgraded' : ''
-          }
-        ];
-        return defs
-          .map(
-            (n) => `
-            <button type="button" class="abi-node-pill gs-jump-hardpoint ${n.cls}" data-hardpoint="${n.key}" data-wep-slot="${slotName}" title="Click to modify ${n.label} on ${customDef.shortName} in Gunsmith Workbench">
-              <div style="font-size:8px;color:#95a5a6;font-weight:800;">${n.label}</div>
-              <div style="font-size:9px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${n.val}</div>
-            </button>
-          `
-          )
-          .join('');
-      };
+      const isShotgunView =
+        !isPrimitiveEra &&
+        browseSlot === 'primary' &&
+        (activeCat === 'shotgun' || Boolean(basePrimaryDef.isShotgun));
+      const curShellId =
+        customPrimaryDef.activeShellId || this.player.activeShotgunShellId || 'buckshot_00';
 
-      const nodePillsHtml = buildNodePillsForWeapon(
-        primAttMap,
-        basePrimaryDef,
-        customPrimaryDef,
-        'primary'
-      );
-      const secNodePillsHtml = buildNodePillsForWeapon(
-        secAttMap,
-        baseSecondaryDef,
-        customSecondaryDef,
-        'secondary'
-      );
+      const shellStripHtml = isShotgunView
+        ? `<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;background:rgba(230,126,34,0.14);border:1px solid rgba(243,156,18,0.45);border-radius:5px;padding:3px 7px;">
+            <span style="font-size:9.5px;font-weight:900;color:#f39c12;">12G SHELL [B]:</span>
+            ${SHOTGUN_SHELL_TYPES.map(
+              (sh) =>
+                `<button type="button" class="gs-shell-pill" data-shell-id="${sh.id}" style="background:${
+                  curShellId === sh.id ? 'rgba(243,156,18,0.32)' : 'rgba(12,18,26,0.88)'
+                };border:1px solid ${
+                  curShellId === sh.id ? '#f1c40f' : 'rgba(255,255,255,0.16)'
+                };color:${
+                  curShellId === sh.id ? '#ffeaa7' : '#cbd5e1'
+                };border-radius:4px;padding:2.5px 7px;font-size:9.5px;font-weight:900;cursor:pointer;" title="${sh.name}: ${sh.desc}">${sh.badge}</button>`
+            ).join('')}
+          </div>`
+        : '';
 
-      const allowedPrimaryGuns = primaryGuns.filter(
-        (w) => !w.allowedClasses || w.allowedClasses.includes(activeRole)
-      );
-      const primaryQuickSwapHtml = allowedPrimaryGuns
+      const catButtonsHtml = isPrimitiveEra
+        ? `<span style="font-size:10.5px;font-weight:900;color:#f1c40f;">⚔️ ${era.toUpperCase()} ARSENAL</span>`
+        : browseSlot === 'secondary'
+        ? SECONDARY_WEAPON_CATEGORIES.map(
+            (c) =>
+              `<button type="button" class="cod-cat-btn active" data-cod-cat="${c.id}">${c.icon} ${c.label}</button>`
+          ).join('')
+        : PRIMARY_WEAPON_CATEGORIES.map((c) => {
+            const count = primaryGuns.filter((g) => getWeaponCategory(g) === c.id).length;
+            return `<button type="button" class="cod-cat-btn ${
+              activeCat === c.id ? 'active' : ''
+            }" data-cod-cat="${c.id}">${c.icon} ${c.label} <span style="opacity:0.65;font-size:9px;">(${count})</span></button>`;
+          }).join('');
+
+      const displayedGuns = (browseSlot === 'secondary' ? secondaryGuns : primaryGuns).filter((w) => {
+        if (isPrimitiveEra) {
+          return !w.allowedClasses || w.allowedClasses.includes(activeRole);
+        }
+        if (browseSlot === 'secondary') return true;
+        return getWeaponCategory(w) === activeCat;
+      });
+
+      const weaponCardsHtml = displayedGuns
         .map((w) => {
-          const isEq = w.id === primaryId;
-          const isOwn = ownedWeapons.has(w.id) || (w.warehousePrice || 0) === 0;
+          const isSec = browseSlot === 'secondary' || w.slot === 'secondary';
+          const isEquipped = (isSec ? secondaryId : primaryId) === w.id;
+          const price = w.warehousePrice || 0;
+          const isOwned = ownedWeapons.has(w.id) || price === 0;
+          const canAfford = totalCash >= price;
+          const gunAtts = this.player.getWeaponAttachmentMap
+            ? this.player.getWeaponAttachmentMap(w.id)
+            : {};
+          const dmgLabel = w.pellets > 1 ? `${w.damage}×${w.pellets}` : `${w.damage}`;
+          const statusTxt = isEquipped
+            ? '✓ EQUIPPED'
+            : price === 0
+            ? 'STARTER'
+            : isOwned
+            ? 'OWNED'
+            : `$${price.toLocaleString()}`;
+          const statusCol = isEquipped
+            ? '#2ecc71'
+            : isOwned
+            ? '#74b9ff'
+            : canAfford
+            ? '#f1c40f'
+            : '#ff7675';
+
+          const btnLabel = isEquipped
+            ? '✓ EQUIPPED'
+            : isOwned
+            ? 'EQUIP'
+            : canAfford
+            ? `UNLOCK ($${price.toLocaleString()})`
+            : `NEED $${price.toLocaleString()}`;
+          const btnBg = isEquipped
+            ? '#27ae60'
+            : isOwned
+            ? '#2980b9'
+            : canAfford
+            ? '#f39c12'
+            : '#475569';
+
           return `
-            <button type="button" class="gs-weapon-btn" data-slot="primary" data-weapon="${w.id}" style="
-              flex:1;min-width:68px;background:${isEq ? '#27ae60' : isOwn ? 'rgba(41,128,185,0.38)' : 'rgba(241,196,15,0.2)'};
-              border:1px solid ${isEq ? '#2ecc71' : isOwn ? '#3498db' : '#f1c40f'};
-              color:#fff;border-radius:3px;padding:3px 5px;font-size:9px;font-weight:900;cursor:pointer;
-            " title="Select ${w.name} (${w.caliber})">
-              ${isEq ? '✓ ' : ''}${w.shortName}${!isOwn ? ` ($${w.warehousePrice})` : ''}
-            </button>
+            <div class="cod-gun-card ${isEquipped ? 'equipped' : ''}">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
+                <span style="font-size:12px;font-weight:900;color:${
+                  isEquipped ? '#7bed9f' : '#ffffff'
+                };white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.shortName || w.name}</span>
+                <span style="font-size:9.5px;font-weight:900;color:${statusCol};flex-shrink:0;">${statusTxt}</span>
+              </div>
+
+              <div style="height:46px;display:flex;align-items:center;justify-content:center;background:rgba(6,11,18,0.55);border-radius:5px;padding:2px 6px;">
+                ${this.buildWeaponSvg(w.id, gunAtts, { height: isSec ? 34 : 42 })}
+              </div>
+
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:9.5px;color:#94a3b8;font-weight:800;">
+                <span>DMG <b style="color:#ecf0f1;">${dmgLabel}</b></span>
+                <span><b style="color:#ecf0f1;">${w.rpm}</b> RPM</span>
+                <span><b style="color:#ecf0f1;">${w.clipSize}R</b> MAG</span>
+              </div>
+
+              <div style="display:flex;gap:4px;">
+                <button type="button" class="gs-weapon-btn" data-slot="${
+                  isSec ? 'secondary' : 'primary'
+                }" data-weapon="${w.id}" style="flex:1;background:${btnBg};color:${
+            !isEquipped && !isOwned && canAfford ? '#111' : '#fff'
+          };border:none;border-radius:4px;padding:4.5px 8px;font-size:10px;font-weight:900;cursor:pointer;">
+                  ${btnLabel}
+                </button>
+                ${
+                  isOwned && !isPrimitiveEra
+                    ? `<button type="button" class="gs-stash-build-btn" data-slot="${
+                        isSec ? 'secondary' : 'primary'
+                      }" data-weapon="${w.id}" style="background:rgba(52,152,219,0.22);border:1px solid #3498db;color:#74b9ff;border-radius:4px;padding:4.5px 7px;font-size:9.5px;font-weight:900;cursor:pointer;" title="Customize Optics &amp; Attachments">🔧 MODS</button>`
+                    : ''
+                }
+              </div>
+            </div>
           `;
         })
         .join('');
 
-      const sidearmQuickSwapHtml = secondaryGuns
-        .map((s) => {
-          const isEq = s.id === secondaryId;
-          const isOwn = ownedWeapons.has(s.id) || (s.warehousePrice || 0) === 0;
-          return `
-            <button type="button" class="gs-weapon-btn" data-slot="secondary" data-weapon="${s.id}" style="
-              flex:1 1 66px;min-width:64px;white-space:nowrap;background:${isEq ? '#27ae60' : isOwn ? 'rgba(41,128,185,0.35)' : 'rgba(241,196,15,0.2)'};
-              border:1px solid ${isEq ? '#2ecc71' : isOwn ? '#3498db' : '#f1c40f'};
-              color:#fff;border-radius:3px;padding:3px 5px;font-size:9px;font-weight:900;cursor:pointer;
-            ">
-              ${isEq ? '✓ ' : ''}${s.shortName}${!isOwn ? ` ($${s.warehousePrice})` : ''}
-            </button>
-          `;
-        })
-        .join('');
+      const activeMeta =
+        CLASS_META.find((c) => c.id === activeRole) || CLASS_META[0];
+      const gadgetBoxHtml =
+        !isPrimitiveEra && (activeRole === 'engineer' || activeRole === 'armor')
+          ? `<div style="display:flex;gap:3px;margin-top:3px;">
+              <button type="button" class="gs-eng-launcher-btn" data-launcher="rpg7" style="flex:1;background:${
+                (this.player.preferredEngineerLauncher || 'rpg7') !== 'stinger'
+                  ? '#d35400'
+                  : 'rgba(255,255,255,0.08)'
+              };border:1px solid #f39c12;color:#fff;border-radius:3px;padding:2px 4px;font-size:8.5px;font-weight:900;cursor:pointer;">🚀 RPG-7</button>
+              <button type="button" class="gs-eng-launcher-btn" data-launcher="stinger" style="flex:1;background:${
+                this.player.preferredEngineerLauncher === 'stinger'
+                  ? '#27ae60'
+                  : 'rgba(255,255,255,0.08)'
+              };border:1px solid #2ecc71;color:#fff;border-radius:3px;padding:2px 4px;font-size:8.5px;font-weight:900;cursor:pointer;">📡 Stinger</button>
+            </div>`
+          : `<div style="font-size:9px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${activeMeta.gadget}</div>`;
 
-      const vestQuickBtnsHtml = (ATTACHMENT_CATALOG.vest || [])
-        .map((v) => {
-          const isEq = v.id === equippedVestId;
-          const isOwn = ownedUpgrades.has(v.id) || v.price === 0;
-          return `
-            <button type="button" class="gunsmith-item-btn" data-cat="vest" data-id="${v.id}" data-weapon="${primaryId}" style="
-              flex:1 1 62px;min-width:58px;white-space:nowrap;background:${isEq ? '#27ae60' : isOwn ? 'rgba(41,128,185,0.35)' : 'rgba(241,196,15,0.18)'};
-              border:1px solid ${isEq ? '#2ecc71' : isOwn ? '#3498db' : '#f1c40f'};
-              color:#fff;border-radius:3px;padding:3px 4px;font-size:8.5px;font-weight:900;cursor:pointer;
-            " title="${v.name}: ${v.desc}">
-              ${isEq ? '✓ ' : ''}${v.maxArmor}HP/${v.magSlots || 4}M${!isOwn ? ` ($${v.price})` : ''}
-            </button>
-          `;
-        })
-        .join('');
-
-      const backpackQuickBtnsHtml = (ATTACHMENT_CATALOG.backpack || [])
-        .map((bp) => {
-          const isEq = bp.id === equippedBackpackId;
-          const isOwn = ownedUpgrades.has(bp.id) || bp.price === 0;
-          const shortTag =
-            bp.id === 'no_pack'
-              ? 'NONE'
-              : bp.id === 'sling_pack'
-              ? 'S (9C)'
-              : bp.id === 'berkut_pack'
-              ? 'M (16C)'
-              : bp.id === 'beta2_pack'
-              ? 'L (25C)'
-              : 'XL (36C)';
-          return `
-            <button type="button" class="gunsmith-item-btn" data-cat="backpack" data-id="${bp.id}" data-weapon="${primaryId}" style="
-              flex:1 1 52px;min-width:48px;white-space:nowrap;background:${isEq ? '#27ae60' : isOwn ? 'rgba(41,128,185,0.35)' : 'rgba(241,196,15,0.18)'};
-              border:1px solid ${isEq ? '#2ecc71' : isOwn ? '#3498db' : '#f1c40f'};
-              color:#fff;border-radius:3px;padding:3px 3px;font-size:8.5px;font-weight:900;cursor:pointer;
-            " title="${bp.name}: ${bp.desc}">
-              ${isEq ? '✓ ' : ''}${shortTag}${!isOwn ? ` ($${bp.price})` : ''}
-            </button>
-          `;
-        })
-        .join('');
-
-      const tacGearQuickBtnsHtml = (ATTACHMENT_CATALOG.tacticalGear || [])
-        .map((tg) => {
-          const isEq = tg.id === equippedTacGearId;
-          const isOwn = ownedUpgrades.has(tg.id) || tg.price === 0;
-          const shortTag =
-            tg.id === 'std_helmet'
-              ? 'ACH'
-              : tg.id === 'fast_mt_comtac'
-              ? 'FAST MT'
-              : tg.id === 'altyn_faceshield'
-              ? 'ALTYN'
-              : tg.id === 'propital_rig'
-              ? 'STIM'
-              : 'GPNVG [N]';
-          return `
-            <button type="button" class="gunsmith-item-btn" data-cat="tacticalGear" data-id="${tg.id}" data-weapon="${primaryId}" style="
-              flex:1 1 54px;min-width:50px;white-space:nowrap;background:${isEq ? '#27ae60' : isOwn ? 'rgba(41,128,185,0.35)' : 'rgba(241,196,15,0.18)'};
-              border:1px solid ${isEq ? '#2ecc71' : isOwn ? '#3498db' : '#f1c40f'};
-              color:#fff;border-radius:3px;padding:3px 4px;font-size:8.5px;font-weight:900;cursor:pointer;
-            " title="${tg.name}: ${tg.desc}">
-              ${isEq ? '✓ ' : ''}${shortTag}${!isOwn ? ` ($${tg.price})` : ''}
-            </button>
-          `;
-        })
-        .join('');
-
-      const magCount = Math.max(
-        1,
-        Math.round((customPrimaryDef.reserveAmmo || 120) / Math.max(1, customPrimaryDef.clipSize || 30))
-      );
-      const loosePrimaryRds = customPrimaryDef.maxLooseAmmo || 60;
-      const bandagesCount =
-        (activeRole === 'medic' ? 6 : 3) +
-        (equippedVestItem ? equippedVestItem.bonusBandages : 0) +
-        (equippedBackpackItem ? equippedBackpackItem.bonusBandages : 0);
-      const fragsCount =
-        2 +
-        (equippedVestItem ? equippedVestItem.bonusGrenades : 0) +
-        (equippedBackpackItem ? equippedBackpackItem.bonusGrenades : 0);
-
-      const primScopeBadge = isBareIronSights
-        ? '🎯 BARE IRON SIGHTS'
-        : customPrimaryDef.isThermal
-        ? `🌡️ FLIR ${customPrimaryDef.zoomLevels ? `${customPrimaryDef.zoomLevels[0]}X⇄${customPrimaryDef.zoomLevels[1]}X` : 'IR'}`
-        : Array.isArray(customPrimaryDef.zoomLevels)
-        ? `🔭 ${customPrimaryDef.zoomLevels[0]}X ⇄ ${customPrimaryDef.zoomLevels[1]}X`
-        : `🔭 SCOPE: ${String(customPrimaryDef.opticType).toUpperCase()}`;
-
-      const rigSubTab = this._rigSubTab || 'weapons';
+      const meleeLabel =
+        this.player?.equippedHammerSkin === 'karambit'
+          ? '★ Karambit'
+          : this.player?.equippedHammerSkin === 'butterfly'
+          ? '★ Butterfly'
+          : 'Sledgehammer';
 
       return `
-        <div class="abi-rig-panel" style="min-width:0;max-width:100%;box-sizing:border-box;">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap;flex-shrink:0;">
-            <span style="font-size:11px;font-weight:900;color:#f1c40f;letter-spacing:0.5px;">
-              🪖 OPERATOR RIG // ${activeClassMeta.label}
-            </span>
-            <span style="font-size:9px;color:#7bed9f;font-weight:900;">
-              ${activeClassMeta.gadget}
-            </span>
-          </div>
-
-          <!-- 7-Class Selector Strip -->
-          <div class="abi-class-strip" style="flex-shrink:0;">
-            ${classTabsHtml}
-          </div>
-
-          <!-- Zero-Scroll Rig Sub-Toggle: [WEAPONS & SLOTS] vs [ARMOR, PACK & STATS] -->
-          <div style="display:flex;gap:4px;flex-shrink:0;">
-            <button type="button" class="gs-rig-subtab-btn" data-rig-sub="weapons" style="flex:1;padding:4px 6px;border-radius:4px;border:1.5px solid ${
-              rigSubTab === 'weapons' ? '#2ecc71' : 'rgba(255,255,255,0.18)'
-            };background:${
-              rigSubTab === 'weapons' ? 'rgba(46,204,113,0.22)' : 'rgba(16,24,34,0.9)'
-            };color:${
-              rigSubTab === 'weapons' ? '#7bed9f' : '#cbd5e1'
-            };font-size:9.5px;font-weight:900;cursor:pointer;">
-              🔫 1. WEAPONS &amp; SLOTS
-            </button>
-            <button type="button" class="gs-rig-subtab-btn" data-rig-sub="gear" style="flex:1;padding:4px 6px;border-radius:4px;border:1.5px solid ${
-              rigSubTab === 'gear' ? '#f1c40f' : 'rgba(255,255,255,0.18)'
-            };background:${
-              rigSubTab === 'gear' ? 'rgba(241,196,15,0.22)' : 'rgba(16,24,34,0.9)'
-            };color:${
-              rigSubTab === 'gear' ? '#ffeaa7' : '#cbd5e1'
-            };font-size:9.5px;font-weight:900;cursor:pointer;">
-              🛡️ 2. ARMOR, PACK &amp; STATS
-            </button>
-          </div>
-
-          <div style="display:${rigSubTab === 'weapons' ? 'flex' : 'none'};flex-direction:column;gap:6px;">
-          <!-- SLOT 1: PRIMARY SLING (4x2 CELLS) -->
-          <div class="abi-slot-card primary-slot" style="overflow:hidden;min-width:0;max-width:100%;box-sizing:border-box;padding:6px 8px;${workbenchSlot === 'primary' && activeTab === 'attachments' ? 'border-color:#2ecc71;box-shadow:0 0 12px rgba(46,204,113,0.25);' : ''}">
-            <div class="abi-slot-header">
-              <span style="color:#7bed9f;">SLOT 1 // PRIMARY SLING (${primMeta.cat})</span>
-              <span class="abi-cell-tag">${primMeta.label} • ${primMeta.weight}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px;gap:4px;flex-wrap:wrap;">
-              <span style="font-size:12.5px;font-weight:900;color:#fff;">${customPrimaryDef.name}</span>
-              <span style="font-size:9px;color:${customPrimaryDef.isThermal ? '#ff9f43' : '#f1c40f'};font-weight:900;">
-                ${primScopeBadge}
-              </span>
-            </div>
-            <div style="padding:1px 4px;background:rgba(0,0,0,0.35);border-radius:4px;border:1px solid rgba(255,255,255,0.06);">
-              ${this.buildWeaponSvg(primaryId, primAttMap, { height: 48 })}
-            </div>
-            <div style="margin-top:4px;">
-              <div style="font-size:8.5px;font-weight:900;color:#7bed9f;margin-bottom:2px;letter-spacing:0.4px;">
-                🔫 SELECT PRIMARY FIREARM FOR ${activeRole.toUpperCase()}:
+        <div style="display:flex;flex-direction:column;flex:1;min-height:0;">
+          <!-- Equipped Primary + Secondary + Gadget/Melee Summary Bar -->
+          <div class="cod-equipped-bar">
+            <div class="cod-slot-box ${browseSlot === 'primary' ? 'active' : ''}" data-cod-slot="primary">
+              <div style="min-width:0;flex:1;">
+                <div style="font-size:9px;font-weight:900;color:#7bed9f;letter-spacing:0.5px;">[1] PRIMARY WEAPON</div>
+                <div style="font-size:13px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${customPrimaryDef.shortName || customPrimaryDef.name}</div>
+                <div style="font-size:9.5px;color:#94a3b8;">${customPrimaryDef.clipSize}R &bull; ${
+                  !customPrimaryDef.opticType || customPrimaryDef.opticType === 'iron'
+                    ? 'Iron Sights'
+                    : String(customPrimaryDef.opticType).toUpperCase()
+                }</div>
               </div>
-              <div style="display:flex;gap:3px;flex-wrap:wrap;">
-                ${primaryQuickSwapHtml}
+              <div style="width:96px;flex-shrink:0;">
+                ${this.buildWeaponSvg(primaryId, primAttMap, { height: 36 })}
               </div>
+              <button type="button" class="gs-wep-workbench-btn" data-wep-slot="primary" style="background:#2980b9;color:#fff;border:none;border-radius:4px;padding:5px 7px;font-size:9.5px;font-weight:900;cursor:pointer;flex-shrink:0;">🔧 Mods</button>
             </div>
-            <div class="abi-node-strip">
-              ${nodePillsHtml}
-            </div>
-            <div style="display:flex;gap:5px;margin-top:5px;flex-wrap:wrap;">
-              <button type="button" class="gs-wep-workbench-btn" data-wep-slot="primary" style="flex:1.3;background:${workbenchSlot === 'primary' && activeTab === 'attachments' ? '#27ae60' : '#2980b9'};color:#fff;border:none;border-radius:4px;padding:4px 8px;font-size:9.5px;font-weight:900;cursor:pointer;">
-                🔧 MODIFY RIFLE IN WORKBENCH
-              </button>
-              <button type="button" class="gs-tab-btn" data-tab="backpack" style="flex:1;background:rgba(243,156,18,0.22);color:#f1c40f;border:1px solid rgba(241,196,15,0.55);border-radius:4px;padding:4px 8px;font-size:9.5px;font-weight:900;cursor:pointer;">
-                🎒 BACKPACK &amp; LOOT
-              </button>
-            </div>
-          </div>
 
-          <!-- SLOT 2: SIDEARM HOLSTER (2x1 CELLS) WITH CALL OF DUTY PISTOL ATTACHMENTS -->
-          <div class="abi-slot-card secondary-slot" style="overflow:hidden;min-width:0;max-width:100%;box-sizing:border-box;${workbenchSlot === 'secondary' && activeTab === 'attachments' ? 'border-color:#2ecc71;box-shadow:0 0 12px rgba(46,204,113,0.25);' : ''}">
-            <div class="abi-slot-header">
-              <span style="color:#74b9ff;">SLOT 2 // HOLSTER SIDEARM (PISTOL ATTACHMENTS)</span>
-              <span class="abi-cell-tag">2×1 • ${isSecBareIron ? 'IRON SIGHTS' : String(customSecondaryDef.opticType).toUpperCase()}</span>
-            </div>
-            <div style="display:grid;grid-template-columns:minmax(0,1fr) 118px;gap:6px;align-items:center;">
-              <div style="min-width:0;">
-                <div style="font-size:12px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${customSecondaryDef.name}</div>
-                <div style="font-size:9.5px;color:#bdc3c7;">
-                  DMG: <b>${customSecondaryDef.damage}</b> • RPM: <b>${customSecondaryDef.rpm}</b> • MAG: <b>${customSecondaryDef.clipSize}R</b>
-                </div>
+            <div class="cod-slot-box ${browseSlot === 'secondary' ? 'active' : ''}" data-cod-slot="secondary">
+              <div style="min-width:0;flex:1;">
+                <div style="font-size:9px;font-weight:900;color:#74b9ff;letter-spacing:0.5px;">[2] SECONDARY</div>
+                <div style="font-size:12.5px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${customSecondaryDef.shortName || customSecondaryDef.name}</div>
+                <div style="font-size:9.5px;color:#94a3b8;">${customSecondaryDef.clipSize}R &bull; Sidearm</div>
               </div>
-              <div style="background:rgba(0,0,0,0.35);border-radius:4px;padding:2px;overflow:hidden;">
-                ${this.buildWeaponSvg(secondaryId, secAttMap, { height: 42 })}
+              <div style="width:68px;flex-shrink:0;">
+                ${this.buildWeaponSvg(secondaryId, secAttMap, { height: 30 })}
               </div>
+              <button type="button" class="gs-wep-workbench-btn" data-wep-slot="secondary" style="background:#8e44ad;color:#fff;border:none;border-radius:4px;padding:5px 7px;font-size:9.5px;font-weight:900;cursor:pointer;flex-shrink:0;">🔧 Mods</button>
             </div>
-            <div class="abi-node-strip" style="margin-top:4px;">
-              ${secNodePillsHtml}
-            </div>
-            <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;min-width:0;max-width:100%;">
-              ${sidearmQuickSwapHtml}
-              <button type="button" class="gs-wep-workbench-btn" data-wep-slot="secondary" style="flex:1 1 112px;min-width:106px;white-space:nowrap;background:${workbenchSlot === 'secondary' && activeTab === 'attachments' ? '#27ae60' : '#8e44ad'};color:#fff;border:1px solid #9b59b6;border-radius:3px;padding:4px 7px;font-size:9px;font-weight:900;cursor:pointer;" title="Customize Call of Duty Pistol Optics, Suppressors, Extended/Drum Mags & Laser!">
-                🔧 MODIFY PISTOL
-              </button>
-            </div>
-          </div>
 
-          ${
-            activeRole === 'engineer' || activeRole === 'armor'
-              ? `
-                <!-- SLOT 3: ENGINEER / ARMOR CREWMAN COMBINED ANTI-ARMOR (RPG-7) & ANTI-AIR (STINGER SAM) LAUNCHER -->
-                <div class="abi-slot-card" style="border-color:rgba(241,196,15,0.65);background:rgba(24,18,12,0.92);">
-                  <div class="abi-slot-header">
-                    <span style="color:#f1c40f;">SLOT 3 // COMBINED ANTI-ARMOR &amp; ANTI-AIR LAUNCHER [KEY 3]</span>
-                    <span class="abi-cell-tag">PRESS [3] IN FIELD TO TOGGLE LIVE</span>
-                  </div>
-                  <div style="font-size:9.5px;color:#bdc3c7;margin-bottom:4px;">
-                    Carries both <b>RPG-7V2 HEAT (Anti-Armor)</b> and <b>FIM-92 Stinger / Igla (Anti-Air SAM)</b>. Choose your default below or press <b>[3]</b> again in combat to swap instantly!
-                  </div>
-                  <div style="display:flex;gap:5px;">
-                    <button type="button" class="gs-eng-launcher-btn" data-launcher="rpg7" style="flex:1;background:${
-                      (this.player.preferredEngineerLauncher || 'rpg7') !== 'stinger'
-                        ? '#d35400'
-                        : 'rgba(255,255,255,0.1)'
-                    };border:1.5px solid ${
-                      (this.player.preferredEngineerLauncher || 'rpg7') !== 'stinger'
-                        ? '#f1c40f'
-                        : 'rgba(255,255,255,0.2)'
-                    };color:#fff;border-radius:4px;padding:5px 6px;font-size:9.5px;font-weight:900;cursor:pointer;">
-                      🚀 RPG-7V2 HEAT (ANTI-ARMOR) ${(this.player.preferredEngineerLauncher || 'rpg7') !== 'stinger' ? '✓' : ''}
-                    </button>
-                    <button type="button" class="gs-eng-launcher-btn" data-launcher="stinger" style="flex:1;background:${
-                      this.player.preferredEngineerLauncher === 'stinger'
-                        ? '#27ae60'
-                        : 'rgba(255,255,255,0.1)'
-                    };border:1.5px solid ${
-                      this.player.preferredEngineerLauncher === 'stinger'
-                        ? '#2ecc71'
-                        : 'rgba(255,255,255,0.2)'
-                    };color:#fff;border-radius:4px;padding:5px 6px;font-size:9.5px;font-weight:900;cursor:pointer;">
-                      📡 FIM-92 STINGER (ANTI-AIR SAM) ${this.player.preferredEngineerLauncher === 'stinger' ? '✓' : ''}
-                    </button>
-                  </div>
-                </div>
-              `
-              : ''
-          }
-
-          <!-- RIDE & AIRCRAFT CUSTOMIZATION BAY CARD (HIGHLIGHTED FOR ARMOR CREWMAN & COMBAT PILOT) -->
-          <div class="abi-slot-card" style="border-color:${
-            activeRole === 'armor' || activeRole === 'pilot' || activeTab === 'vehicles'
-              ? '#48dbfb'
-              : 'rgba(72,219,251,0.42)'
-          };background:rgba(12,24,36,0.95);">
-            <div class="abi-slot-header">
-              <span style="color:#48dbfb;">
-                ${
-                  activeRole === 'armor'
-                    ? '🛡️ ARMOR CREWMAN RIDE BAY // TANK & IFV LOADOUT'
-                    : activeRole === 'pilot'
-                    ? '✈️ COMBAT PILOT AIRWING BAY // JET & AC-130J LOADOUT'
-                    : '🚜 VEHICLE & AIRCRAFT CUSTOMIZATION BAY'
-                }
-              </span>
-              <span class="abi-cell-tag" style="background:rgba(72,219,251,0.22);color:#48dbfb;">
-                KEY [X] IN RIDE
-              </span>
-            </div>
-            <div style="font-size:9px;color:#cbd5e1;line-height:1.35;margin-bottom:5px;">
-              ${
-                activeRole === 'armor'
-                  ? '<b>SKILLS:</b> +22 HP/s Hull Auto-Repair • +22% Cannon Reload • <b>[X] Trophy APS &amp; IR Smoke</b> • <b>[4] Wrench (+420 HP)</b> • 0 Bailout Damage'
-                  : activeRole === 'pilot'
-                  ? '<b>SKILLS:</b> G-Suit (+28% Turn Rate) • +25 HP/s Airframe Repair • <b>[X] ECM Radar Jammer &amp; Angel Flares</b> • Auto-DIRCM • 0 Eject Damage'
-                  : 'Customize your <b>Tank / IFV</b> (Trophy APS, Autoloader, ERA Armor) &amp; <b>Fighter / A-10 / AC-130J</b> (ECM Jammer, Ordnance Pods, Titanium Airframe)!'
-              }
-            </div>
-            <button type="button" class="gs-tab-btn" data-tab="vehicles" style="width:100%;background:${
-              activeTab === 'vehicles' ? '#0984e3' : 'rgba(9,132,227,0.34)'
-            };border:1.5px solid #48dbfb;color:#fff;border-radius:4px;padding:5px 8px;font-size:9.5px;font-weight:900;cursor:pointer;letter-spacing:0.4px;">
-              🚜 ${
-                activeTab === 'vehicles'
-                  ? '✓ CUSTOMIZING RIDE & AIRCRAFT BAY'
-                  : 'OPEN VEHICLE & AIRCRAFT CUSTOMIZATION BAY'
-              }
-            </button>
-          </div>
-
-          <!-- SLOT 4: MELEE & BREACHING TOOL (SLEDGEHAMMER / KARAMBIT / BUTTERFLY KNIFE) -->
-          <div class="abi-slot-card" style="border-color:${
-            this.player?.equippedHammerSkin ? '#ffd32a' : 'rgba(255,255,255,0.22)'
-          };background:${
-            this.player?.equippedHammerSkin
-              ? 'rgba(34,26,10,0.92)'
-              : 'rgba(14,22,32,0.92)'
-          };">
-            <div class="abi-slot-header">
-              <span style="color:${this.player?.equippedHammerSkin ? '#ffd32a' : '#bdc3c7'};">
-                SLOT 4 // MELEE &amp; BREACHING [KEY 4]
-              </span>
-              <span class="abi-cell-tag" style="${
-                this.player?.equippedHammerSkin
-                  ? 'background:rgba(255,211,42,0.25);color:#ffd32a;'
-                  : ''
-              }">
-                ${
-                  this.player?.equippedHammerSkin === 'karambit'
-                    ? '★ KARAMBIT GOLD (1/10)'
-                    : this.player?.equippedHammerSkin === 'butterfly'
-                    ? '★ BUTTERFLY KNIFE (1/10)'
-                    : 'SLEDGEHAMMER'
-                }
-              </span>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 112px;gap:6px;align-items:center;">
-              <div>
-                <div style="font-size:11.5px;font-weight:900;color:${
-                  this.player?.equippedHammerSkin ? '#ffd32a' : '#fff'
-                };">
+            <div class="cod-slot-box" style="cursor:default;">
+              <div style="min-width:0;flex:1;">
+                <div style="font-size:9px;font-weight:900;color:#f1c40f;letter-spacing:0.5px;">[3/4] GADGET &amp; MELEE</div>
+                ${gadgetBoxHtml}
+                <div style="display:flex;align-items:center;gap:4px;margin-top:3px;">
+                  <span style="font-size:9.5px;font-weight:900;color:#ffd32a;">[4] ${meleeLabel}</span>
                   ${
-                    this.player?.equippedHammerSkin === 'karambit'
-                      ? '★ KARAMBIT // TIGER CLAW GOLD'
-                      : this.player?.equippedHammerSkin === 'butterfly'
-                      ? '★ BUTTERFLY // SAPPHIRE & GOLD'
-                      : 'TACTICAL SLEDGEHAMMER'
+                    this.player?.ownedSkins?.has('hammer_karambit')
+                      ? `<button type="button" class="gs-equip-gold-skin-btn" data-skin-id="hammer_karambit" style="background:rgba(241,196,15,0.22);border:1px solid #ffd32a;color:#ffd32a;border-radius:3px;padding:1px 4px;font-size:8px;font-weight:900;cursor:pointer;">Karambit</button>`
+                      : ''
+                  }
+                  ${
+                    this.player?.ownedSkins?.has('hammer_butterfly')
+                      ? `<button type="button" class="gs-equip-gold-skin-btn" data-skin-id="hammer_butterfly" style="background:rgba(0,210,211,0.22);border:1px solid #00d2d3;color:#81ecec;border-radius:3px;padding:1px 4px;font-size:8px;font-weight:900;cursor:pointer;">Butterfly</button>`
+                      : ''
                   }
                 </div>
-                <div style="font-size:9px;color:#bdc3c7;margin-top:2px;">
-                  85 DMG • 100 VOXEL BREACH • SLOT [4]
-                </div>
-              </div>
-              <div style="background:rgba(0,0,0,0.38);border-radius:4px;padding:2px;">
-                ${this.buildWeaponSvg('hammer', {}, { height: 38 })}
-              </div>
-            </div>
-            <div style="display:flex;gap:4px;margin-top:4px;">
-              <button type="button" class="gs-equip-gold-skin-btn" data-skin-id="hammer_karambit" style="flex:1;background:${
-                this.player?.equippedHammerSkin === 'karambit'
-                  ? '#f39c12'
-                  : this.player?.ownedSkins?.has('hammer_karambit')
-                  ? 'rgba(241,196,15,0.25)'
-                  : 'rgba(255,255,255,0.08)'
-              };color:${
-                this.player?.equippedHammerSkin === 'karambit' ? '#111' : '#ffd32a'
-              };border:1px solid #ffd32a;border-radius:3px;padding:3px 5px;font-size:8.5px;font-weight:900;cursor:pointer;">
-                ${
-                  this.player?.equippedHammerSkin === 'karambit'
-                    ? '✓ ★ KARAMBIT'
-                    : this.player?.ownedSkins?.has('hammer_karambit')
-                    ? 'EQUIP KARAMBIT'
-                    : '🔒 KARAMBIT (CASE)'
-                }
-              </button>
-              <button type="button" class="gs-equip-gold-skin-btn" data-skin-id="hammer_butterfly" style="flex:1;background:${
-                this.player?.equippedHammerSkin === 'butterfly'
-                  ? '#0652dd'
-                  : this.player?.ownedSkins?.has('hammer_butterfly')
-                  ? 'rgba(6,82,221,0.3)'
-                  : 'rgba(255,255,255,0.08)'
-              };color:#fff;border:1px solid #00d2d3;border-radius:3px;padding:3px 5px;font-size:8.5px;font-weight:900;cursor:pointer;">
-                ${
-                  this.player?.equippedHammerSkin === 'butterfly'
-                    ? '✓ ★ BUTTERFLY'
-                    : this.player?.ownedSkins?.has('hammer_butterfly')
-                    ? 'EQUIP BUTTERFLY'
-                    : '🔒 BUTTERFLY (CASE)'
-                }
-              </button>
-              <button type="button" class="gs-tab-btn" data-tab="cases" style="flex:1;background:#d35400;color:#fff;border:1px solid #f1c40f;border-radius:3px;padding:3px 5px;font-size:8.5px;font-weight:900;cursor:pointer;">
-                🎰 $500 CASES
-              </button>
-            </div>
-          </div>
-          </div>
-
-          <div style="display:${rigSubTab === 'gear' ? 'flex' : 'none'};flex-direction:column;gap:6px;">
-          <!-- TARKOV CHEST RIG & ARMORED PLATE CARRIER (3x3 CELLS) -->
-          <div class="abi-slot-card armor-slot" style="overflow:hidden;min-width:0;max-width:100%;box-sizing:border-box;">
-            <div class="abi-slot-header">
-              <span style="color:#f1c40f;">CHEST RIG // ARMOR &amp; FAST-RELOAD MAG POUCHES</span>
-              <span class="abi-cell-tag">${equippedVestItem?.magSlots || 4} MAG SLOTS • ${Math.round((1 - (equippedVestItem?.magSwapMult || 1)) * 100)}% FASTER SWAP</span>
-            </div>
-            <div style="display:grid;grid-template-columns:58px minmax(0,1fr);gap:8px;align-items:center;">
-              <div style="background:rgba(0,0,0,0.35);border-radius:4px;padding:2px;">
-                ${this.buildGearSvg('vest', equippedVestId)}
-              </div>
-              <div style="min-width:0;">
-                <div style="font-size:11px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${equippedVestItem ? equippedVestItem.name : 'LIGHT CHEST RIG'}</div>
-                <div style="font-size:9.5px;color:#7bed9f;margin:1px 0 3px 0;">
-                  ARMOR: <b>${Math.ceil(this.player.armor ?? (equippedVestItem?.maxArmor || 50))}/${this.player.maxArmor || equippedVestItem?.maxArmor || 50} HP</b> • <b>+${equippedVestItem?.bonusMags || 0} RIG MAGS</b>
-                </div>
-                <div style="display:flex;gap:3px;flex-wrap:wrap;">
-                  ${vestQuickBtnsHtml}
-                </div>
               </div>
             </div>
           </div>
 
-          <!-- HEADGEAR, PANORAMIC NVG & TARKOV AUTO-STIM RIG -->
-          <div class="abi-slot-card armor-slot" style="border-color:rgba(0, 255, 136, 0.45);overflow:hidden;min-width:0;max-width:100%;box-sizing:border-box;">
-            <div class="abi-slot-header">
-              <span style="color:#00ff88;">🪖 HEADGEAR, NVG &amp; TARKOV STIM RIG</span>
-              <span class="abi-cell-tag">${equippedTacGearItem?.hasThermalGoggles ? 'NVG / IR [N]' : `+${equippedTacGearItem?.bonusArmor || 0} ARMOR`}</span>
-            </div>
-            <div style="display:grid;grid-template-columns:58px minmax(0,1fr);gap:8px;align-items:center;">
-              <div style="background:rgba(0,0,0,0.35);border-radius:4px;padding:2px;">
-                ${this.buildGearSvg('tacticalGear', equippedTacGearId)}
-              </div>
-              <div style="min-width:0;">
-                <div style="font-size:11px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${equippedTacGearItem ? equippedTacGearItem.name : 'ACH INFANTRY HELMET'}</div>
-                <div style="font-size:9px;color:#74b9ff;margin:1px 0 3px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                  ${equippedTacGearItem ? equippedTacGearItem.desc : 'Standard ballistic helmet.'}
-                </div>
-                <div style="display:flex;gap:3px;flex-wrap:wrap;">
-                  ${tacGearQuickBtnsHtml}
-                </div>
-              </div>
-            </div>
+          <!-- CoD Category Tabs + Shotgun Shell Bar -->
+          <div class="cod-cat-bar">
+            <div class="cod-cat-pills">${catButtonsHtml}</div>
+            ${shellStripHtml}
           </div>
 
-          <!-- TARKOV BACKPACK // STORAGE & LOOSE BULLETS POOL (S / M / L / XL) -->
-          <div class="abi-slot-card armor-slot" style="border-color:rgba(46, 204, 113, 0.45);overflow:hidden;min-width:0;max-width:100%;box-sizing:border-box;">
-            <div class="abi-slot-header">
-              <span style="color:#2ecc71;">🎒 BACKPACK // LOOSE BULLETS &amp; EXTRA GEAR (TARKOV)</span>
-              <span class="abi-cell-tag">${equippedBackpackItem?.gridLabel || '2×2 (4 CELLS)'}</span>
-            </div>
-            <div style="display:grid;grid-template-columns:58px minmax(0,1fr);gap:8px;align-items:center;">
-              <div style="background:rgba(0,0,0,0.35);border-radius:4px;padding:2px;">
-                ${this.buildGearSvg('backpack', equippedBackpackId)}
-              </div>
-              <div style="min-width:0;">
-                <div style="font-size:11px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${equippedBackpackItem ? equippedBackpackItem.name : 'NO BACKPACK (POCKETS)'}</div>
-                <div style="font-size:9.5px;color:#f1c40f;margin:1px 0 3px 0;">
-                  LOOSE AMMO: <b>+${loosePrimaryRds} RDS</b> (SLOW PACK [P/HOLD R]) • <b>+${equippedBackpackItem?.bonusMags || 0} MAGS</b>
-                </div>
-                <div style="display:flex;gap:3px;flex-wrap:wrap;">
-                  ${backpackQuickBtnsHtml}
-                </div>
-                <button type="button" class="gs-tab-btn" data-tab="backpack" style="margin-top:5px;width:100%;background:${activeTab === 'backpack' ? '#8e44ad' : 'rgba(155,89,182,0.32)'};border:1px solid #9b59b6;color:#fff;border-radius:4px;padding:4px 8px;font-size:9.5px;font-weight:900;cursor:pointer;letter-spacing:0.4px;">
-                  🎒 ${activeTab === 'backpack' ? '✓ VIEWING 2D BACKPACK & ENEMY LOOT [I]' : 'OPEN 2D BACKPACK & ENEMY LOOT VIEW [I]'}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- TACTICAL RIG POCKETS & POUCHES (1x2 MAGS, LOOSE AMMO, FRAGS, MEDS) -->
-          <div>
-            <div style="font-size:9.5px;font-weight:900;color:#95a5a6;margin-bottom:4px;letter-spacing:0.5px;">
-              FAST RELOAD [R] (CHEST RIG MAGS) vs. SLOW RELOAD [P / HOLD R] (BACKPACK LOOSE BULLETS)
-            </div>
-            <div class="abi-rig-pockets">
-              <div class="abi-pocket-cell">
-                <span style="font-size:8px;color:#95a5a6;font-weight:900;">RIG MAGS [R]</span>
-                <div style="font-size:12.5px;font-weight:900;color:#f1c40f;">${magCount}× MAGS</div>
-                <span style="font-size:8.5px;color:#bdc3c7;">${customPrimaryDef.clipSize}/${customPrimaryDef.reserveAmmo} RDS</span>
-              </div>
-              <div class="abi-pocket-cell">
-                <span style="font-size:8px;color:#95a5a6;font-weight:900;">PACK LOOSE [P]</span>
-                <div style="font-size:12.5px;font-weight:900;color:#7bed9f;">🎒 ${loosePrimaryRds} RDS</div>
-                <span style="font-size:8.5px;color:#bdc3c7;">SLOW PACK</span>
-              </div>
-              <div class="abi-pocket-cell">
-                <span style="font-size:8px;color:#95a5a6;font-weight:900;">1×1 FRAG</span>
-                <div style="font-size:12.5px;font-weight:900;color:#e67e22;">💣 ${fragsCount}× M67</div>
-                <span style="font-size:8.5px;color:#bdc3c7;">KEY [G]</span>
-              </div>
-              <div class="abi-pocket-cell">
-                <span style="font-size:8px;color:#95a5a6;font-weight:900;">1×1 IFAK MED</span>
-                <div style="font-size:12.5px;font-weight:900;color:#2ecc71;">🩹 ${bandagesCount}× DRESS</div>
-                <span style="font-size:8.5px;color:#bdc3c7;">KEY [H]</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- LIVE WEAPON TELEMETRY BARS -->
-          <div style="background:rgba(12,18,26,0.95);border:1px solid rgba(255,255,255,0.12);border-radius:5px;padding:7px 9px;">
-            <div style="font-size:10px;font-weight:900;color:#f1c40f;margin-bottom:4px;letter-spacing:0.5px;">
-              📊 BALLISTIC TELEMETRY (${customWorkbenchDef.shortName})
-            </div>
-            ${this.buildWeaponStatBarsHtml(baseWorkbenchDef, customWorkbenchDef)}
-          </div>
+          <!-- 3-Column Visual Weapon Cards -->
+          <div class="cod-weapon-grid">
+            ${weaponCardsHtml}
           </div>
         </div>
       `;
     };
 
-    // ─── RIGHT PANEL MODE 1: VISUAL MULTI-CELL STASH GRID ("TETRIS" WAREHOUSE) ──
-    const renderVisualStashMode = () => {
-      // Build unified Stash Grid items:
-      // 1) Primary Firearms (4x2, 3x2, 5x2)
-      // 2) Secondary Sidearms (2x1)
-      // 3) Optics, Muzzles, Grips, Magazines, Ammo, Armor Vests (2x1 / 1x1 / 2x2)
-      // 4) Warehouse Supply Crates (2x2)
-      const stashCellsHtml = [];
-      let usedCells = 0;
-
-      // Filter helper
-      const showFirearms = stashFilter === 'all' || stashFilter === 'firearms';
-      const showOptics = stashFilter === 'all' || stashFilter === 'optics';
-      const showParts = stashFilter === 'all' || stashFilter === 'parts';
-      const showArmorAmmo = stashFilter === 'all' || stashFilter === 'armor_ammo';
-      const showCrates = stashFilter === 'all' || stashFilter === 'crates';
-
-      // Sort order: if _stashSorted is toggled, owned & equipped items float to the top
-      const sortWeapons = (list) => {
-        if (!this._stashSorted) return list;
-        return [...list].sort((a, b) => {
-          const aOwn = ownedWeapons.has(a.id) || (a.warehousePrice || 0) === 0 ? 1 : 0;
-          const bOwn = ownedWeapons.has(b.id) || (b.warehousePrice || 0) === 0 ? 1 : 0;
-          return bOwn - aOwn || (a.warehousePrice || 0) - (b.warehousePrice || 0);
-        });
+    // ─── TAB 3: GEAR, SUPPLY CRATES & EXTRACTED LOOT ──────────────────────────
+    const renderGearAndStashMode = () => {
+      const renderGearRow = (catKey, title, accentCol, currentId) => {
+        const items = ATTACHMENT_CATALOG[catKey] || [];
+        return `
+          <div style="background:rgba(14,22,32,0.95);border:1px solid rgba(255,255,255,0.13);border-top:2px solid ${accentCol};border-radius:7px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-size:11px;font-weight:900;color:${accentCol};">${title}</span>
+              <div style="width:40px;height:28px;display:flex;align-items:center;justify-content:center;">
+                ${this.buildGearSvg(catKey, currentId)}
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              ${items
+                .map((it) => {
+                  const isEq = it.id === currentId;
+                  const isOwn = ownedUpgrades.has(it.id) || it.price === 0;
+                  const canBuy = totalCash >= it.price;
+                  const tag = isEq
+                    ? '✓ EQUIPPED'
+                    : it.price === 0
+                    ? 'DEFAULT'
+                    : isOwn
+                    ? 'OWNED'
+                    : `$${it.price}`;
+                  return `
+                    <button type="button" class="gunsmith-item-btn" data-cat="${catKey}" data-id="${it.id}" data-weapon="${primaryId}" style="display:flex;justify-content:space-between;align-items:center;gap:6px;background:${
+                    isEq ? 'rgba(39,174,96,0.24)' : 'rgba(20,30,42,0.9)'
+                  };border:1px solid ${
+                    isEq ? '#2ecc71' : isOwn ? 'rgba(52,152,219,0.5)' : 'rgba(255,255,255,0.14)'
+                  };color:#ecf0f1;border-radius:5px;padding:5px 7px;font-size:10px;font-weight:800;cursor:pointer;text-align:left;" title="${it.desc}">
+                      <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${it.shortName || it.name}</span>
+                      <span style="color:${
+                        isEq ? '#7bed9f' : isOwn ? '#74b9ff' : canBuy ? '#f1c40f' : '#94a3b8'
+                      };font-weight:900;font-size:9px;flex-shrink:0;">${tag}</span>
+                    </button>
+                  `;
+                })
+                .join('')}
+            </div>
+          </div>
+        `;
       };
-
-      if (showFirearms) {
-        for (const w of sortWeapons([...primaryGuns, ...secondaryGuns])) {
-          const isSec = w.slot === 'secondary';
-          const gMeta = WEAPON_GRID_SIZES[w.id] || {
-            cols: isSec ? 2 : 4,
-            rows: isSec ? 1 : 2,
-            label: isSec ? '2×1' : '4×2',
-            cat: isSec ? 'SIDEARM' : 'RIFLE'
-          };
-          const spanClass = `span-${gMeta.cols}x${gMeta.rows}`;
-          const allowed = isSec || !w.allowedClasses || w.allowedClasses.includes(activeRole);
-          const isOwned = ownedWeapons.has(w.id) || (w.warehousePrice || 0) === 0;
-          const isEquipped = (isSec ? secondaryId : primaryId) === w.id;
-          const price = w.warehousePrice || 0;
-          const canAfford = totalCash >= price;
-
-          if (isOwned) usedCells += gMeta.cols * gMeta.rows;
-
-          const gunAtts = this.player.getWeaponAttachmentMap
-            ? this.player.getWeaponAttachmentMap(w.id)
-            : {};
-
-          const borderCol = isEquipped
-            ? '#2ecc71'
-            : !allowed
-            ? 'rgba(255,255,255,0.1)'
-            : isOwned
-            ? 'rgba(52, 152, 219, 0.72)'
-            : canAfford
-            ? 'rgba(241, 196, 15, 0.65)'
-            : 'rgba(231, 76, 60, 0.4)';
-
-          const bgCol = isEquipped
-            ? 'rgba(39, 174, 96, 0.19)'
-            : isOwned
-            ? 'rgba(22, 36, 50, 0.94)'
-            : 'rgba(18, 22, 28, 0.94)';
-
-          let btnLabel = '';
-          let btnBg = '';
-          if (isEquipped) {
-            btnLabel = `✓ EQUIPPED`;
-            btnBg = '#27ae60';
-          } else if (!allowed) {
-            btnLabel = `ONLY: ${(w.allowedClasses || []).map((c) => c.toUpperCase().slice(0, 3)).join('/')}`;
-            btnBg = '#374151';
-          } else if (isOwned) {
-            btnLabel = isSec ? 'EQUIP SIDEARM' : `EQUIP ON ${activeRole.toUpperCase()}`;
-            btnBg = '#2980b9';
-          } else if (canAfford) {
-            btnLabel = `UNLOCK ($${price})`;
-            btnBg = '#f39c12';
-          } else {
-            btnLabel = `LOCKED ($${price})`;
-            btnBg = '#4b5563';
-          }
-
-          stashCellsHtml.push(`
-            <div class="abi-stash-item ${spanClass}" style="background-color:${bgCol};border:1.5px solid ${borderCol};opacity:${allowed ? '1' : '0.58'};">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
-                <div style="display:flex;align-items:center;gap:4px;min-width:0;">
-                  <span class="abi-cell-tag">${gMeta.label}</span>
-                  <span style="font-size:11.5px;font-weight:900;color:${isEquipped ? '#7bed9f' : '#fff'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.name}</span>
-                </div>
-                <span style="font-size:10px;font-weight:900;color:${isEquipped ? '#2ecc71' : isOwned ? '#74b9ff' : '#f1c40f'};flex-shrink:0;">
-                  ${isEquipped ? 'IN RIG' : price === 0 ? 'STARTER' : isOwned ? 'STASHED' : `$${price}`}
-                </span>
-              </div>
-
-              <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:2px 4px;">
-                ${this.buildWeaponSvg(w.id, gunAtts, { height: isSec ? 34 : 52 })}
-              </div>
-
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;margin-top:2px;">
-                <span style="font-size:9.5px;color:#bdc3c7;font-weight:800;">
-                  DMG <b>${w.damage}${w.pellets ? `×${w.pellets}` : ''}</b> • <b>${w.rpm}</b> RPM • <b>${w.clipSize}R</b>
-                </span>
-                <div style="display:flex;gap:3px;">
-                  ${
-                    allowed && isOwned
-                      ? `<button type="button" class="gs-stash-build-btn" data-slot="${isSec ? 'secondary' : 'primary'}" data-weapon="${w.id}" style="background:rgba(52,152,219,0.28);border:1px solid #3498db;color:#74b9ff;border-radius:3px;padding:3px 6px;font-size:9.5px;font-weight:900;cursor:pointer;" title="Open ${w.shortName} in Gunsmith Blueprint Workbench">🔧 BUILD</button>`
-                      : ''
-                  }
-                  <button type="button" class="gs-weapon-btn" data-slot="${isSec ? 'secondary' : 'primary'}" data-weapon="${w.id}" ${
-                    !allowed ? 'disabled' : ''
-                  } style="background:${btnBg};color:${
-                    !isEquipped && !isOwned && canAfford && allowed ? '#111' : '#fff'
-                  };border:none;border-radius:3px;padding:3px 7px;font-size:9.5px;font-weight:900;cursor:${
-                    allowed ? 'pointer' : 'not-allowed'
-                  };">
-                    ${btnLabel}
-                  </button>
-                </div>
-              </div>
-            </div>
-          `);
-        }
-      }
-
-      // Add Attachment / Optic / Armor / Backpack / Tactical Gear cells to the Visual Stash Grid
-      const attStashGroups = [
-        { key: 'optic', show: showOptics, span: 'span-2x1', cellLabel: '2×1 OPTIC', cells: 2 },
-        { key: 'muzzle', show: showParts, span: 'span-2x1', cellLabel: '2×1 MUZZLE', cells: 2 },
-        { key: 'grip', show: showParts, span: 'span-2x1', cellLabel: '2×1 GRIP/LASER', cells: 2 },
-        { key: 'magazine', show: showParts, span: 'span-2x1', cellLabel: '2×1 MAG', cells: 2 },
-        { key: 'ammoType', show: showArmorAmmo, span: 'span-2x1', cellLabel: '2×1 AMMO', cells: 2 },
-        { key: 'vest', show: showArmorAmmo, span: 'span-2x2', cellLabel: '2×2 CHEST RIG', cells: 4 },
-        { key: 'tacticalGear', show: showArmorAmmo, span: 'span-2x2', cellLabel: '2×2 HEAD/NVG', cells: 4 },
-        { key: 'backpack', show: showArmorAmmo, span: 'span-2x2', cellLabel: '2×2 BACKPACK', cells: 4 }
-      ];
-
-      for (const grp of attStashGroups) {
-        if (!grp.show) continue;
-        const list = ATTACHMENT_CATALOG[grp.key] || [];
-        for (const item of list) {
-          // Skip stock/default $0 items in stash unless optic factory (Bare Iron Sights)
-          if (item.price === 0 && grp.key !== 'optic') continue;
-          const isGearSlot =
-            grp.key === 'vest' || grp.key === 'backpack' || grp.key === 'tacticalGear';
-          const isEquipped =
-            grp.key === 'vest'
-              ? equippedVestId === item.id
-              : grp.key === 'backpack'
-              ? equippedBackpackId === item.id
-              : grp.key === 'tacticalGear'
-              ? equippedTacGearId === item.id
-              : (wepAttMap[grp.key] || (grp.key === 'optic' ? 'factory' : 'stock')) === item.id;
-          const isOwned = ownedUpgrades.has(item.id) || item.price === 0;
-          const canAfford = totalCash >= item.price;
-          if (isOwned) usedCells += grp.cells;
-
-          const borderCol = isEquipped
-            ? '#2ecc71'
-            : isOwned
-            ? 'rgba(52,152,219,0.68)'
-            : canAfford
-            ? 'rgba(241,196,15,0.55)'
-            : 'rgba(255,255,255,0.14)';
-
-          const stashTagExtra =
-            grp.key === 'optic' && item.isThermal
-              ? ' • 🌡️ IR'
-              : grp.key === 'optic' && Array.isArray(item.zoomLevels)
-              ? ` • ${item.zoomLevels[0]}X⇄${item.zoomLevels[1]}X`
-              : '';
-
-          const mountedGuns =
-            !isGearSlot && typeof this.player?.getWeaponsUsingUpgrade === 'function'
-              ? this.player.getWeaponsUsingUpgrade(grp.key, item.id)
-              : [];
-          const mountedInfo =
-            mountedGuns.length > 0
-              ? ` • ON: ${mountedGuns.slice(0, 3).join(', ')}${mountedGuns.length > 3 ? ` +${mountedGuns.length - 3}` : ''}`
-              : '';
-
-          stashCellsHtml.push(`
-            <div class="abi-stash-item ${grp.span}" style="background-color:${
-              isEquipped ? 'rgba(46,204,113,0.16)' : 'rgba(16,25,36,0.94)'
-            };border:1.5px solid ${borderCol};">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:3px;">
-                <span class="abi-cell-tag">${grp.cellLabel}${stashTagExtra}</span>
-                <span style="font-size:9.5px;font-weight:900;color:${
-                  isEquipped ? '#7bed9f' : isOwned ? '#74b9ff' : '#f1c40f'
-                };">${isEquipped ? 'MOUNTED' : item.price === 0 ? 'DEFAULT' : isOwned ? 'OWNED • ∞ GUNS' : `$${item.price}`}</span>
-              </div>
-              <div style="display:flex;align-items:center;gap:6px;margin:2px 0;">
-                ${
-                  grp.key === 'vest'
-                    ? `<div style="width:46px;flex-shrink:0;">${this.buildGearSvg('vest', item.id)}</div>`
-                    : grp.key === 'backpack'
-                    ? `<div style="width:46px;flex-shrink:0;">${this.buildGearSvg('backpack', item.id)}</div>`
-                    : grp.key === 'tacticalGear'
-                    ? `<div style="width:46px;flex-shrink:0;">${this.buildGearSvg('tacticalGear', item.id)}</div>`
-                    : ''
-                }
-                <div style="min-width:0;flex:1;">
-                  <div style="font-size:10.5px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.shortName || item.name}</div>
-                  <div style="font-size:9px;color:#95a5a6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${mountedInfo ? `<b style="color:#74b9ff;">${mountedInfo.slice(3)}</b> • ` : ''}${item.desc}</div>
-                </div>
-              </div>
-              <div style="display:flex;gap:3px;">
-                <button type="button" class="gunsmith-item-btn" data-cat="${grp.key}" data-id="${item.id}" data-weapon="${workbenchWeaponId}" style="
-                  flex:1;background:${isEquipped ? '#27ae60' : isOwned ? '#2980b9' : canAfford ? '#f39c12' : '#4b5563'};
-                  color:${!isEquipped && !isOwned && canAfford ? '#111' : '#fff'};
-                  border:none;border-radius:3px;padding:3px 6px;font-size:9px;font-weight:900;cursor:pointer;
-                ">
-                  ${
-                    isEquipped
-                      ? `✓ ON ${isGearSlot ? 'OPERATOR' : baseWorkbenchDef.shortName}`
-                      : isOwned
-                      ? `MOUNT ON ${isGearSlot ? 'OPERATOR' : baseWorkbenchDef.shortName}`
-                      : canAfford
-                      ? `BUY & MOUNT ($${item.price})`
-                      : `NEED $${item.price}`
-                  }
-                </button>
-                ${
-                  isOwned && !isGearSlot && item.price > 0
-                    ? `<button type="button" class="gs-mount-all-guns-btn" data-cat="${grp.key}" data-id="${item.id}" title="Mount ${item.shortName || item.name} across ALL owned guns simultaneously" style="background:rgba(0,210,211,0.22);border:1px solid #00d2d3;color:#81ecec;border-radius:3px;padding:3px 5px;font-size:8.5px;font-weight:900;cursor:pointer;flex-shrink:0;">⚡ ALL GUNS</button>`
-                    : ''
-                }
-              </div>
-            </div>
-          `);
-        }
-      }
-
-      // Add Warehouse Supply Stockpile Crates (2x2 cells)
-      if (showCrates) {
-        const crateDefs = [
-          {
-            key: 'armorPlates',
-            name: 'ARMOR PLATE CRATE',
-            count: stock.armorPlates,
-            desc: '+25 Over-Armor Plate HP',
-            useLabel: 'EQUIP PLATE',
-            col: '#74b9ff'
-          },
-          {
-            key: 'medStims',
-            name: 'COMBAT STIM CASE',
-            count: stock.medStims,
-            desc: 'Full 100 HP + +2 Bandages',
-            useLabel: 'INJECT STIM',
-            col: '#7bed9f'
-          },
-          {
-            key: 'ammoPacks',
-            name: 'BANDOLIER AMMO BOX',
-            count: stock.ammoPacks,
-            desc: 'Full Mags + +2 Frag Grenades',
-            useLabel: 'UNPACK AMMO',
-            col: '#f1c40f'
-          }
-        ];
-
-        for (const c of crateDefs) {
-          usedCells += Math.min(8, (c.count || 0) * 2);
-          stashCellsHtml.push(`
-            <div class="abi-stash-item span-2x2" style="background-color:rgba(18,28,36,0.95);border:1.5px solid rgba(241,196,15,0.45);">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span class="abi-cell-tag">2×2 CRATE</span>
-                <span style="font-size:10.5px;font-weight:900;color:${c.col};">×${c.count} IN STASH</span>
-              </div>
-              <div style="text-align:center;margin:2px 0;">
-                ${this.buildGearSvg('crate', c.key)}
-                <div style="font-size:10.5px;font-weight:900;color:#fff;">${c.name}</div>
-                <div style="font-size:9px;color:#bdc3c7;">${c.desc}</div>
-              </div>
-              <div style="display:flex;gap:3px;">
-                <button type="button" class="gs-stock-buy-btn" data-stock="${c.key}" style="flex:1;background:#f39c12;color:#111;border:none;border-radius:3px;padding:3px 4px;font-size:9px;font-weight:900;cursor:pointer;">+1 ($250)</button>
-                <button type="button" class="gs-stock-use-btn" data-stock="${c.key}" style="flex:1.2;background:#27ae60;color:#fff;border:none;border-radius:3px;padding:3px 4px;font-size:9px;font-weight:900;cursor:pointer;">${c.useLabel}</button>
-              </div>
-            </div>
-          `);
-        }
-      }
-
-      // 6. SAVED PERSONAL WAREHOUSE LOOT ITEMS (ABI Stash Grid cells with EQUIP / USE and SELL FOR CASH buttons!)
-      const savedWhItems = Array.isArray(this.player?.warehouseStashItems)
-        ? this.player.warehouseStashItems
-        : [];
-      if (stashFilter === 'all' || stashFilter === 'saved_loot') {
-        for (const sItem of savedWhItems) {
-          const isWep = sItem.type === 'weapon';
-          usedCells += isWep ? 8 : 2;
-          const spanCls = isWep ? 'span-2x4' : 'span-2x2';
-          stashCellsHtml.push(`
-            <div class="abi-stash-item ${spanCls}" style="background-color:rgba(14,26,38,0.96);border:1.5px solid #2ecc71;">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span class="abi-cell-tag">${sItem.grid || '2×2'} SAVED LOOT</span>
-                <span style="font-size:9.5px;font-weight:900;color:#7bed9f;">🏛️ IN WAREHOUSE</span>
-              </div>
-              <div style="text-align:center;margin:2px 0;">
-                ${
-                  isWep && sItem.weaponId
-                    ? this.buildWeaponSvg(sItem.weaponId, {}, { height: 42 })
-                    : `<div style="font-size:20px;">${sItem.icon || '📦'}</div>`
-                }
-                <div style="font-size:10.5px;font-weight:900;color:#fff;margin-top:2px;">${sItem.name}</div>
-                <div style="font-size:8.5px;color:#bdc3c7;">From: ${sItem.ownerLabel || 'Extracted Spoils'}</div>
-              </div>
-              <div style="display:flex;gap:4px;">
-                <button type="button" class="gs-wh-saved-use-btn" data-uid="${
-                  sItem.uid
-                }" style="flex:1.15;background:#2980b9;color:#fff;border:none;border-radius:3px;padding:4px 5px;font-size:9px;font-weight:900;cursor:pointer;">
-                  ${isWep ? '⚡ EQUIP GUN' : sItem.type === 'bounty' ? '🏷️ TROPHY' : '⚡ EQUIP / USE'}
-                </button>
-                <button type="button" class="gs-sell-extracted-btn" data-uid="${
-                  sItem.uid
-                }" style="flex:1;background:#27ae60;color:#fff;border:none;border-radius:3px;padding:4px 5px;font-size:9px;font-weight:900;cursor:pointer;">
-                  💵 SELL +$${sItem.sellPrice || 150}
-                </button>
-              </div>
-            </div>
-          `);
-        }
-      }
 
       const extractedLoot = Array.isArray(this.player?.extractedRoundLoot)
         ? this.player.extractedRoundLoot
+        : [];
+      const savedWhItems = Array.isArray(this.player?.warehouseStashItems)
+        ? this.player.warehouseStashItems
         : [];
       const totalExtractSell = extractedLoot.reduce(
         (sum, it) => sum + Math.max(50, Math.round(it.sellPrice || 150)),
         0
       );
 
-      const extractedLootTrayHtml =
-        extractedLoot.length > 0
-          ? `
-            <div style="background:rgba(12,24,36,0.96);border:1.5px solid #2ecc71;border-radius:6px;padding:9px 12px;margin-bottom:8px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:6px;">
-                <div>
-                  <span style="font-size:11.5px;font-weight:900;color:#2ecc71;letter-spacing:0.5px;">
-                    🎒 EXTRACTED ROUND LOOT (${extractedLoot.length} UNSORTED) — SELL FOR MONEY OR SAVE TO PERSONAL WAREHOUSE
-                  </span>
-                </div>
-                <div style="display:flex;gap:5px;">
-                  <button type="button" class="gs-sell-all-extracted-btn" style="background:#27ae60;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:10px;font-weight:900;cursor:pointer;">
-                    💵 SELL ALL (+$${totalExtractSell.toLocaleString()} VAULT)
-                  </button>
-                  <button type="button" class="gs-save-all-extracted-btn" style="background:#2980b9;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:10px;font-weight:900;cursor:pointer;">
-                    🏛️ SAVE ALL TO PERSONAL WAREHOUSE (${extractedLoot.length})
-                  </button>
-                </div>
-              </div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:6px;">
-                ${extractedLoot
-                  .map(
-                    (it) => `
-                    <div style="background:rgba(16,28,42,0.95);border:1px solid ${
-                      it.type === 'weapon' ? '#f1c40f' : 'rgba(46,204,113,0.5)'
-                    };border-radius:5px;padding:6px 8px;display:flex;flex-direction:column;justify-content:space-between;gap:5px;">
-                      <div>
-                        <div style="display:flex;justify-content:space-between;align-items:center;">
-                          <span style="font-size:10.5px;font-weight:900;color:${
-                            it.type === 'weapon' ? '#f1c40f' : '#7bed9f'
-                          };">${it.icon || '📦'} ${it.name}</span>
-                          <span class="abi-cell-tag">${it.grid || '1×1'}</span>
-                        </div>
-                        <div style="font-size:8.5px;color:#bdc3c7;">From: ${it.ownerLabel || 'Fallen Enemy'}</div>
-                        <div style="font-size:8.5px;color:#74b9ff;font-weight:800;">🏛️ ${it.saveSummary || 'Saves in Warehouse'}</div>
-                      </div>
-                      <div style="display:flex;gap:4px;">
-                        <button type="button" class="gs-sell-extracted-btn" data-uid="${
-                          it.uid
-                        }" style="flex:1;background:#27ae60;color:#fff;border:none;border-radius:3px;padding:4px 6px;font-size:9.5px;font-weight:900;cursor:pointer;">
-                          💵 SELL (+$${it.sellPrice || 150})
-                        </button>
-                        <button type="button" class="gs-save-extracted-btn" data-uid="${
-                          it.uid
-                        }" style="flex:1.15;background:#2980b9;color:#fff;border:none;border-radius:3px;padding:4px 6px;font-size:9.5px;font-weight:900;cursor:pointer;">
-                          🏛️ SAVE TO WAREHOUSE
-                        </button>
-                      </div>
-                    </div>
-                  `
-                  )
-                  .join('')}
-              </div>
-            </div>
-          `
-          : '';
-
-      const filterDefs = [
-        { id: 'all', label: 'ALL STASH ITEMS' },
-        { id: 'saved_loot', label: `🎒 SAVED LOOT (${savedWhItems.length})` },
-        { id: 'firearms', label: `🔫 FIREARMS (${primaryGuns.length + secondaryGuns.length})` },
-        { id: 'optics', label: `🔭 OPTICS & THERMAL (${(ATTACHMENT_CATALOG.optic || []).length})` },
-        { id: 'parts', label: '🔧 MUZZLES / GRIPS / MAGS' },
-        { id: 'armor_ammo', label: '🛡️ ARMOR, NVG & AMMO' },
-        { id: 'crates', label: '📦 SUPPLY CRATES' }
-      ];
-
-      const filterPillsHtml = filterDefs
+      const cratesHtml = [
+        { key: 'armorPlates', name: 'Armor Plate (+25 HP)', count: stock.armorPlates, col: '#74b9ff' },
+        { key: 'medStims', name: 'Combat Stim (100 HP)', count: stock.medStims, col: '#7bed9f' },
+        { key: 'ammoPacks', name: 'Ammo Bandolier', count: stock.ammoPacks, col: '#f1c40f' }
+      ]
         .map(
-          (f) => `
-          <button type="button" class="abi-filter-pill gs-stash-filter-btn ${
-            stashFilter === f.id ? 'active' : ''
-          }" data-filter="${f.id}">
-            ${f.label}
-          </button>
+          (c) => `
+          <div style="background:rgba(15,24,34,0.94);border:1px solid rgba(255,255,255,0.13);border-radius:6px;padding:7px 9px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <div>
+              <div style="font-size:10.5px;font-weight:900;color:#fff;">${c.name}</div>
+              <div style="font-size:9.5px;color:${c.col};font-weight:800;">In Stash: ×${c.count}</div>
+            </div>
+            <div style="display:flex;gap:4px;">
+              <button type="button" class="gs-stock-buy-btn" data-stock="${c.key}" style="background:#f39c12;color:#111;border:none;border-radius:4px;padding:4px 7px;font-size:9.5px;font-weight:900;cursor:pointer;">+1 ($250)</button>
+              <button type="button" class="gs-stock-use-btn" data-stock="${c.key}" style="background:#27ae60;color:#fff;border:none;border-radius:4px;padding:4px 8px;font-size:9.5px;font-weight:900;cursor:pointer;">Use</button>
+            </div>
+          </div>
         `
         )
         .join('');
 
       return `
-        ${extractedLootTrayHtml}
-        <div class="abi-filter-bar">
-          <div style="display:flex;gap:4px;flex-wrap:wrap;">
-            ${filterPillsHtml}
+        <div style="display:flex;flex-direction:column;gap:8px;overflow-y:auto;padding-right:3px;flex:1;min-height:0;">
+          <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:8px;">
+            ${renderGearRow('vest', '🛡️ PLATE CARRIER & RIG', '#f1c40f', equippedVestId)}
+            ${renderGearRow('tacticalGear', '🪖 HELMET & NVG [N]', '#00ff88', equippedTacGearId)}
+            ${renderGearRow('backpack', '🎒 TACTICAL BACKPACK', '#2ecc71', equippedBackpackId)}
           </div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-size:10.5px;font-weight:900;color:#7bed9f;">
-              📦 STASH CELLS: ${usedCells} / 120
-            </span>
-            <button type="button" id="gs-autosort-btn" style="background:rgba(52,152,219,0.22);border:1px solid #3498db;color:#74b9ff;border-radius:4px;padding:4px 8px;font-size:10px;font-weight:900;cursor:pointer;">
-              ⇅ AUTO-SORT STASH
-            </button>
-          </div>
-        </div>
 
-        <div class="abi-stash-grid">
-          ${stashCellsHtml.join('')}
+          <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:8px;">
+            ${cratesHtml}
+          </div>
+
+          ${
+            extractedLoot.length > 0
+              ? `<div style="background:rgba(12,24,36,0.96);border:1.5px solid #2ecc71;border-radius:7px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                  <span style="font-size:11px;font-weight:900;color:#7bed9f;">🎒 ${extractedLoot.length} Unsorted Extracted Loot Item(s)</span>
+                  <div style="display:flex;gap:5px;">
+                    <button type="button" class="gs-sell-all-extracted-btn" style="background:#27ae60;color:#fff;border:none;border-radius:4px;padding:4px 9px;font-size:10px;font-weight:900;cursor:pointer;">💵 Sell All (+$${totalExtractSell.toLocaleString()})</button>
+                    <button type="button" class="gs-save-all-extracted-btn" style="background:#2980b9;color:#fff;border:none;border-radius:4px;padding:4px 9px;font-size:10px;font-weight:900;cursor:pointer;">🏛️ Save All</button>
+                  </div>
+                </div>`
+              : ''
+          }
+
+          ${
+            savedWhItems.length > 0
+              ? `<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(190px, 1fr));gap:6px;">
+                  ${savedWhItems
+                    .map(
+                      (sItem) => `
+                    <div style="background:rgba(14,24,36,0.95);border:1px solid rgba(46,204,113,0.45);border-radius:6px;padding:6px 8px;display:flex;justify-content:space-between;align-items:center;gap:6px;">
+                      <span style="font-size:10px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${sItem.icon || '📦'} ${sItem.name}</span>
+                      <div style="display:flex;gap:3px;flex-shrink:0;">
+                        <button type="button" class="gs-wh-saved-use-btn" data-uid="${sItem.uid}" style="background:#2980b9;color:#fff;border:none;border-radius:3px;padding:3px 6px;font-size:9px;font-weight:900;cursor:pointer;">Equip</button>
+                        <button type="button" class="gs-sell-extracted-btn" data-uid="${sItem.uid}" style="background:#27ae60;color:#fff;border:none;border-radius:3px;padding:3px 6px;font-size:9px;font-weight:900;cursor:pointer;">+$${sItem.sellPrice || 150}</button>
+                      </div>
+                    </div>`
+                    )
+                    .join('')}
+                </div>`
+              : ''
+          }
         </div>
       `;
     };
 
-    // ─── RIGHT PANEL MODE 2: INTERACTIVE SVG GUNSMITH WORKBENCH ──────────────
+    // ─── TAB 2: COMPACT GUNSMITH ATTACHMENT WORKBENCH ─────────────────────────
     const renderWorkbenchMode = () => {
       const categories = [
-        {
-          key: 'optic',
-          short: '1. OPTIC RAIL',
-          title: '1. UPPER RECEIVER / PISTOL SLIDE OPTIC RAIL (16 REFLEX, HYBRID, LPVO & IR THERMAL SIGHTS)',
-          sub: 'Scroll Wheel in ADS switches magnification on Variable/Hybrid Optics • [V] toggles 45° Canted Sight!',
-          items: ATTACHMENT_CATALOG.optic || []
-        },
-        {
-          key: 'muzzle',
-          short: '2. MUZZLE',
-          title: '2. MUZZLE THREAD, BLAST REGULATORS & SUPPRESSOR ATTACHMENTS',
-          sub: 'Lantac Dragon Brake (-35% Recoil), SureFire Warden, SOCOM Silencer, or KAC QDC Heavy Suppressor',
-          items: ATTACHMENT_CATALOG.muzzle || []
-        },
-        {
-          key: 'ammoType',
-          short: '3. CHAMBER AMMO',
-          title: '3. TARKOV SPECIALTY AMMUNITION & CHAMBER LOADS (AP-20 SLUGS / M855A1 / RIP)',
-          sub: '12G AP-20 Precision Slugs, M855A1/7N23 Penetrators, RIP Flesh Rounds, M995 AP, or Subsonic Match',
-          items: ATTACHMENT_CATALOG.ammoType || []
-        },
-        {
-          key: 'magazine',
-          short: '4. MAGAZINE',
-          title: '4. MAGAZINE WELL & RELOAD UPGRADES (TAPED JUNGLE / QUAD-60 / DRUM MAGS)',
-          sub: 'Taped Jungle Dual-Mag (-38% Reload), PMAG D-60 Quad-Stack (+75%), Extended (+50%), or 2x Drum',
-          items: ATTACHMENT_CATALOG.magazine || []
-        },
-        {
-          key: 'grip',
-          short: '5. RAIL / LASER',
-          title: '5. UNDERBARREL FOREGRIPS, BIPODS & TACTICAL GREEN/IR LASER MODULES',
-          sub: 'Zenitco RK-1 45° Cant, Magpul RVG, Harris Swivel Bipod, PEQ-15, or BE Meyers MAWL-C1+ Laser',
-          items: ATTACHMENT_CATALOG.grip || []
-        },
-        {
-          key: 'vest',
-          short: '6. CHEST RIG',
-          title: '6. TARKOV TACTICAL CHEST RIG & ARMORED PLATE CARRIERS',
-          sub: 'Upgrades Armor HP (50→150), adds Fast-Reload Magazine Pouches (+2 to +6 Mags) & speeds up [R] Mag Swaps!',
-          items: ATTACHMENT_CATALOG.vest || []
-        },
-        {
-          key: 'backpack',
-          short: '7. BACKPACK',
-          title: '7. TARKOV BACKPACKS (S / M / L / XL — LOOSE BULLETS & EXTRA MAGS)',
-          sub: 'Carries up to +660 Loose Bullets for Slow Reload ([P] / Hold [R]), +4 Spare Mags, +4 Rockets/C4 & Meds!',
-          items: ATTACHMENT_CATALOG.backpack || []
-        },
-        {
-          key: 'tacticalGear',
-          short: '8. HEAD / NVG',
-          title: '8. HEADGEAR, PANORAMIC NVG & TARKOV AUTO-STIM RIG',
-          sub: 'Ops-Core FAST MT, Altyn Titanium Faceshield (-40% HS dmg), Propital Regen Pouch, or L3Harris GPNVG-18 [N]!',
-          items: ATTACHMENT_CATALOG.tacticalGear || []
-        }
+        { key: 'optic', short: '🔭 OPTIC', items: ATTACHMENT_CATALOG.optic || [] },
+        { key: 'muzzle', short: '🔇 MUZZLE', items: ATTACHMENT_CATALOG.muzzle || [] },
+        { key: 'grip', short: '🔦 UNDERBARREL', items: ATTACHMENT_CATALOG.grip || [] },
+        { key: 'magazine', short: '▱ MAGAZINE', items: ATTACHMENT_CATALOG.magazine || [] },
+        { key: 'ammoType', short: '🐚 AMMO / LOAD', items: ATTACHMENT_CATALOG.ammoType || [] }
       ];
+      const curHp = categories.some((c) => c.key === activeHardpoint) ? activeHardpoint : 'optic';
 
-      const hardpointTabsHtml = [
-        `<button type="button" class="abi-hardpoint-btn gs-hardpoint-filter ${
-          activeHardpoint === 'all' ? 'active' : ''
-        }" data-hardpoint="all" style="text-align:center;">
-          <div style="font-size:8.5px;color:#95a5a6;font-weight:900;">VIEW MODE</div>
-          <div style="font-size:10px;font-weight:900;color:#f1c40f;">ALL 8 SLOTS</div>
-        </button>`,
-        ...categories.map((cat) => {
-          const isSel = activeHardpoint === cat.key;
+      const hardpointTabsHtml = categories
+        .map((cat) => {
+          const isSel = curHp === cat.key;
           const eqItem =
-            cat.key === 'vest'
-              ? equippedVestItem
-              : cat.key === 'backpack'
-              ? equippedBackpackItem
-              : cat.key === 'tacticalGear'
-              ? equippedTacGearItem
-              : (cat.items || []).find(
-                  (i) => i.id === (wepAttMap[cat.key] || (cat.key === 'optic' ? 'factory' : 'stock'))
-                ) || cat.items[0];
+            (cat.items || []).find(
+              (i) => i.id === (wepAttMap[cat.key] || (cat.key === 'optic' ? 'factory' : 'stock'))
+            ) || cat.items[0];
           return `
             <button type="button" class="abi-hardpoint-btn gs-hardpoint-filter ${
               isSel ? 'active' : ''
             }" data-hardpoint="${cat.key}">
-              <div style="font-size:8px;color:#95a5a6;font-weight:900;">${cat.short}</div>
-              <div style="font-size:9.5px;font-weight:900;color:#7bed9f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+              <div style="font-size:9px;color:#94a3b8;font-weight:900;">${cat.short}</div>
+              <div style="font-size:10px;font-weight:900;color:#7bed9f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                 ${eqItem ? eqItem.shortName || eqItem.name : 'STOCK'}
               </div>
             </button>
           `;
         })
-      ].join('');
-
-      const visibleCategories =
-        activeHardpoint === 'all'
-          ? categories
-          : categories.filter((c) => c.key === activeHardpoint);
+        .join('');
 
       const matchesOpticFilter = (item) => {
         if (opticFilter === 'all') return true;
@@ -2195,209 +1452,139 @@ export const GunsmithModal = {
         return true;
       };
 
-      const renderCategoryHtml = (cat) => {
-        const isGearCat =
-          cat.key === 'vest' || cat.key === 'backpack' || cat.key === 'tacticalGear';
-        const filteredItems =
-          cat.key === 'optic' ? cat.items.filter(matchesOpticFilter) : cat.items;
+      const activeCatObj = categories.find((c) => c.key === curHp) || categories[0];
+      const filteredItems =
+        activeCatObj.key === 'optic'
+          ? activeCatObj.items.filter(matchesOpticFilter)
+          : activeCatObj.items;
 
-        const opticFilterBarHtml =
-          cat.key === 'optic'
-            ? `
-              <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;">
-                ${[
-                  { id: 'all', label: `ALL OPTICS (${cat.items.length})` },
-                  { id: '1x', label: '1X REFLEX / HOLO' },
-                  { id: 'mid', label: '2X–4X MID / HYBRID' },
-                  { id: 'lpvo_sniper', label: '3X–12X LPVO / SNIPER' },
-                  { id: 'thermal', label: '🌡️ IR THERMAL' }
-                ]
-                  .map(
-                    (f) => `
-                  <button type="button" class="abi-filter-pill gs-optic-filter-btn ${
-                    opticFilter === f.id ? 'active' : ''
-                  }" data-optic-filter="${f.id}" style="padding:3px 8px;font-size:9.5px;">
-                    ${f.label}
-                  </button>
-                `
-                  )
-                  .join('')}
-              </div>
-            `
-            : '';
+      const opticSubBarHtml =
+        activeCatObj.key === 'optic'
+          ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">
+              ${[
+                { id: 'all', label: 'All Optics' },
+                { id: '1x', label: '1× Reflex' },
+                { id: 'mid', label: '2×–4× Mid' },
+                { id: 'lpvo_sniper', label: '6×–12× Scope' },
+                { id: 'thermal', label: '🌡️ Thermal' }
+              ]
+                .map(
+                  (f) =>
+                    `<button type="button" class="abi-filter-pill gs-optic-filter-btn ${
+                      opticFilter === f.id ? 'active' : ''
+                    }" data-optic-filter="${f.id}">${f.label}</button>`
+                )
+                .join('')}
+            </div>`
+          : '';
 
-        const cardsHtml = filteredItems
-          .map((item) => {
-            const isEquipped =
-              cat.key === 'vest'
-                ? equippedVestId === item.id
-                : cat.key === 'backpack'
-                ? equippedBackpackId === item.id
-                : cat.key === 'tacticalGear'
-                ? equippedTacGearId === item.id
-                : (wepAttMap[cat.key] || (cat.key === 'optic' ? 'factory' : 'stock')) === item.id;
-            const isOwned =
-              (ownedUpgrades instanceof Set
-                ? ownedUpgrades.has(item.id)
-                : Boolean(ownedUpgrades[cat.key] && ownedUpgrades[cat.key].includes(item.id))) ||
-              item.price === 0;
-            const canAfford = totalCash >= item.price;
+      const cardsHtml = filteredItems
+        .map((item) => {
+          const isEquipped =
+            (wepAttMap[activeCatObj.key] ||
+              (activeCatObj.key === 'optic' ? 'factory' : 'stock')) === item.id;
+          const isOwned =
+            (ownedUpgrades instanceof Set
+              ? ownedUpgrades.has(item.id)
+              : Boolean(
+                  ownedUpgrades[activeCatObj.key] &&
+                    ownedUpgrades[activeCatObj.key].includes(item.id)
+                )) || item.price === 0;
+          const canAfford = totalCash >= item.price;
 
-            const borderCol = isEquipped
+          const btnText = isEquipped
+            ? '✓ MOUNTED'
+            : isOwned
+            ? 'MOUNT'
+            : canAfford
+            ? `BUY ($${item.price})`
+            : `$${item.price}`;
+          const btnBg = isEquipped
+            ? '#27ae60'
+            : isOwned
+            ? '#2980b9'
+            : canAfford
+            ? '#f39c12'
+            : '#475569';
+
+          return `
+            <div style="background:${
+              isEquipped ? 'rgba(39,174,96,0.16)' : 'rgba(15,24,34,0.95)'
+            };border:1.5px solid ${
+            isEquipped
               ? '#2ecc71'
-              : item.isThermal
-              ? '#ff9f43'
               : isOwned
-              ? 'rgba(52, 152, 219, 0.7)'
-              : canAfford
-              ? 'rgba(241, 196, 15, 0.55)'
-              : 'rgba(255, 255, 255, 0.14)';
-            const bgCol = isEquipped
-              ? 'rgba(46, 204, 113, 0.18)'
-              : item.isThermal
-              ? 'rgba(48, 28, 12, 0.92)'
-              : isOwned
-              ? 'rgba(41, 128, 185, 0.14)'
-              : 'rgba(15, 24, 34, 0.94)';
-
-            let btnText = '';
-            let btnBg = '';
-            if (isEquipped) {
-              btnText = `✓ MOUNTED ON ${isGearCat ? 'OPERATOR' : baseWorkbenchDef.shortName}`;
-              btnBg = '#27ae60';
-            } else if (isOwned) {
-              btnText = `MOUNT ON ${isGearCat ? 'OPERATOR' : baseWorkbenchDef.shortName}`;
-              btnBg = '#2980b9';
-            } else if (canAfford) {
-              btnText = `BUY & MOUNT ($${item.price})`;
-              btnBg = '#f39c12';
-            } else {
-              btnText = `NEED $${item.price} (SHORT $${item.price - totalCash})`;
-              btnBg = '#4b5563';
-            }
-
-            let badgesRowHtml = '';
-            if (cat.key === 'optic') {
-              const pills = [];
-              if (Array.isArray(item.zoomLevels)) {
-                pills.push(
-                  `<span style="background:rgba(52,152,219,0.25);border:1px solid #48dbfb;color:#74b9ff;padding:1px 5px;border-radius:3px;font-size:8.5px;font-weight:900;">🔄 ${item.zoomLevels[0]}X ⇄ ${item.zoomLevels[1]}X</span>`
-                );
-              } else {
-                const fixedMag =
-                  item.opticType === 'sniper8x'
-                    ? '8.0X'
-                    : item.opticType === 'acog'
-                    ? '3.4X'
-                    : item.opticType === 'prism2x'
-                    ? '2.0X'
-                    : '1.0X';
-                pills.push(
-                  `<span style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.2);color:#dfe6e9;padding:1px 5px;border-radius:3px;font-size:8.5px;font-weight:900;">🔭 ${fixedMag}</span>`
-                );
-              }
-              if (item.isThermal) {
-                pills.push(
-                  `<span style="background:rgba(255,159,67,0.25);border:1px solid #ff9f43;color:#ff9f43;padding:1px 5px;border-radius:3px;font-size:8.5px;font-weight:900;">🌡️ IR THERMAL</span>`
-                );
-              }
-              if (item.grantCanted) {
-                pills.push(
-                  `<span style="background:rgba(46,204,113,0.18);border:1px solid #2ecc71;color:#7bed9f;padding:1px 5px;border-radius:3px;font-size:8.5px;font-weight:900;">🎯 +45° CANTED [V]</span>`
-                );
-              }
-              badgesRowHtml = `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;">${pills.join('')}</div>`;
-            }
-
-            const mountedGuns =
-              !isGearCat && typeof this.player?.getWeaponsUsingUpgrade === 'function'
-                ? this.player.getWeaponsUsingUpgrade(cat.key, item.id)
-                : [];
-            const mountedBadgeHtml =
-              mountedGuns.length > 0
-                ? `<div style="font-size:8.5px;font-weight:900;color:#74b9ff;margin-top:2px;">🔗 MOUNTED ON: ${mountedGuns.slice(0, 4).join(', ')}${mountedGuns.length > 4 ? ` +${mountedGuns.length - 4} MORE` : ''}</div>`
-                : '';
-
-            return `
-              <div style="background:${bgCol};border:1.5px solid ${borderCol};border-radius:5px;padding:7px 9px;display:flex;flex-direction:column;justify-content:space-between;gap:5px;">
-                <div>
-                  <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
-                    <span style="font-size:11.5px;font-weight:900;color:${isEquipped ? '#7bed9f' : '#fff'};">${item.name}</span>
-                    <span style="font-size:10px;font-weight:900;color:${item.price === 0 ? '#95a5a6' : isOwned ? '#74b9ff' : '#f1c40f'};flex-shrink:0;">${
-              item.price === 0 ? 'FACTORY ($0)' : isOwned ? 'OWNED • ∞ MULTI-GUN' : `$${item.price}`
-            }</span>
-                  </div>
-                  ${badgesRowHtml}
-                  ${mountedBadgeHtml}
-                  <div style="font-size:9.5px;color:#bdc3c7;margin-top:3px;line-height:1.3;">${item.desc}</div>
+              ? 'rgba(52,152,219,0.55)'
+              : 'rgba(255,255,255,0.13)'
+          };border-radius:6px;padding:7px 9px;display:flex;flex-direction:column;justify-content:space-between;gap:5px;">
+              <div>
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
+                  <span style="font-size:11px;font-weight:900;color:${
+                    isEquipped ? '#7bed9f' : '#ffffff'
+                  };white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${item.shortName || item.name}</span>
+                  <span style="font-size:9px;font-weight:900;color:${
+                    item.price === 0 ? '#94a3b8' : isOwned ? '#74b9ff' : '#f1c40f'
+                  };flex-shrink:0;">${
+            item.price === 0 ? 'STOCK' : isOwned ? 'OWNED' : `$${item.price}`
+          }</span>
                 </div>
-                <div style="display:flex;gap:4px;">
-                  <button type="button" class="gunsmith-item-btn" data-cat="${cat.key}" data-id="${item.id}" data-weapon="${workbenchWeaponId}" style="flex:1;background:${btnBg};color:${
-              !isEquipped && !isOwned && canAfford ? '#111' : '#fff'
-            };border:none;border-radius:4px;padding:5px 8px;font-size:9.5px;font-weight:900;cursor:pointer;letter-spacing:0.4px;">
-                    ${btnText}
-                  </button>
-                  ${
-                    isOwned && !isGearCat && item.price > 0
-                      ? `<button type="button" class="gs-mount-all-guns-btn" data-cat="${cat.key}" data-id="${item.id}" title="Mount ${item.shortName || item.name} across ALL owned guns simultaneously" style="background:rgba(0,210,211,0.22);border:1px solid #00d2d3;color:#81ecec;border-radius:4px;padding:5px 7px;font-size:9px;font-weight:900;cursor:pointer;flex-shrink:0;">⚡ ALL GUNS</button>`
-                      : ''
-                  }
-                </div>
+                <div style="font-size:9.5px;color:#94a3b8;margin-top:2px;line-height:1.28;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${item.desc}</div>
               </div>
-            `;
-          })
-          .join('');
-
-        return `
-          <div style="margin-bottom:8px;">
-            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;flex-wrap:wrap;">
-              <span style="font-size:11px;font-weight:900;color:#f1c40f;letter-spacing:0.6px;">${cat.title}</span>
-              <span style="font-size:9.5px;color:#95a5a6;">${cat.sub}</span>
+              <div style="display:flex;gap:4px;">
+                <button type="button" class="gunsmith-item-btn" data-cat="${activeCatObj.key}" data-id="${item.id}" data-weapon="${workbenchWeaponId}" style="flex:1;background:${btnBg};color:${
+            !isEquipped && !isOwned && canAfford ? '#111' : '#fff'
+          };border:none;border-radius:4px;padding:4.5px 7px;font-size:9.5px;font-weight:900;cursor:pointer;">
+                  ${btnText}
+                </button>
+                ${
+                  isOwned && item.price > 0
+                    ? `<button type="button" class="gs-mount-all-guns-btn" data-cat="${activeCatObj.key}" data-id="${item.id}" title="Mount across ALL owned firearms" style="background:rgba(0,210,211,0.2);border:1px solid #00d2d3;color:#81ecec;border-radius:4px;padding:4.5px 6px;font-size:9px;font-weight:900;cursor:pointer;flex-shrink:0;">⚡ All</button>`
+                    : ''
+                }
+              </div>
             </div>
-            ${opticFilterBarHtml}
-            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(195px, 1fr));gap:6px;">
+          `;
+        })
+        .join('');
+
+      return `
+        <div style="display:flex;flex-direction:column;gap:7px;flex:1;min-height:0;">
+          <div style="display:grid;grid-template-columns:1.25fr 1fr;gap:8px;align-items:stretch;flex-shrink:0;">
+            <div class="abi-workbench-wrap" style="display:flex;flex-direction:column;justify-content:space-between;">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+                <div style="display:flex;gap:4px;">
+                  <button type="button" class="gs-wep-workbench-btn" data-wep-slot="primary" style="padding:3px 8px;border-radius:4px;border:1px solid ${
+                    workbenchSlot === 'primary' ? '#2ecc71' : 'rgba(255,255,255,0.2)'
+                  };background:${
+                    workbenchSlot === 'primary' ? 'rgba(46,204,113,0.24)' : 'rgba(15,24,34,0.9)'
+                  };color:#fff;font-size:10px;font-weight:900;cursor:pointer;">[1] ${customPrimaryDef.shortName}</button>
+                  <button type="button" class="gs-wep-workbench-btn" data-wep-slot="secondary" style="padding:3px 8px;border-radius:4px;border:1px solid ${
+                    workbenchSlot === 'secondary' ? '#2ecc71' : 'rgba(255,255,255,0.2)'
+                  };background:${
+                    workbenchSlot === 'secondary' ? 'rgba(46,204,113,0.24)' : 'rgba(15,24,34,0.9)'
+                  };color:#fff;font-size:10px;font-weight:900;cursor:pointer;">[2] ${customSecondaryDef.shortName}</button>
+                </div>
+                <span style="font-size:10px;font-weight:900;color:#f1c40f;">${customWorkbenchDef.name}</span>
+              </div>
+              <div style="height:68px;display:flex;align-items:center;justify-content:center;">
+                ${this.buildWeaponSvg(baseWorkbenchDef.id, wepAttMap, { height: 60 })}
+              </div>
+            </div>
+            <div style="background:rgba(12,18,26,0.95);border:1px solid rgba(255,255,255,0.12);border-radius:7px;padding:7px 10px;overflow-y:auto;max-height:112px;">
+              ${this.buildWeaponStatBarsHtml(baseWorkbenchDef, customWorkbenchDef)}
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));gap:5px;flex-shrink:0;">
+            ${hardpointTabsHtml}
+          </div>
+
+          <div style="flex:1;min-height:0;overflow-y:auto;padding-right:3px;">
+            ${opticSubBarHtml}
+            <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:6px;">
               ${cardsHtml}
             </div>
           </div>
-        `;
-      };
-
-      return `
-        <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;flex-wrap:wrap;">
-          <span style="font-size:10.5px;font-weight:900;color:#f1c40f;letter-spacing:0.5px;">🔧 WORKBENCH WEAPON TARGET:</span>
-          <button type="button" class="gs-wep-workbench-btn" data-wep-slot="primary" style="flex:1;min-width:210px;padding:6px 10px;border-radius:4px;border:1.5px solid ${
-            workbenchSlot === 'primary' ? '#2ecc71' : 'rgba(255,255,255,0.2)'
-          };background:${
-            workbenchSlot === 'primary' ? 'rgba(46,204,113,0.24)' : 'rgba(15,24,34,0.9)'
-          };color:${
-            workbenchSlot === 'primary' ? '#7bed9f' : '#ecf0f1'
-          };font-size:11px;font-weight:900;cursor:pointer;">
-            🔫 [SLOT 1] PRIMARY FIREARM: ${customPrimaryDef.name} (${customPrimaryDef.clipSize}R)
-          </button>
-          <button type="button" class="gs-wep-workbench-btn" data-wep-slot="secondary" style="flex:1;min-width:210px;padding:6px 10px;border-radius:4px;border:1.5px solid ${
-            workbenchSlot === 'secondary' ? '#2ecc71' : 'rgba(255,255,255,0.2)'
-          };background:${
-            workbenchSlot === 'secondary' ? 'rgba(46,204,113,0.24)' : 'rgba(15,24,34,0.9)'
-          };color:${
-            workbenchSlot === 'secondary' ? '#7bed9f' : '#ecf0f1'
-          };font-size:11px;font-weight:900;cursor:pointer;">
-            🔫 [SLOT 2] SIDEARM PISTOL: ${customSecondaryDef.name} (${customSecondaryDef.clipSize}R)
-          </button>
-        </div>
-        ${this.buildWorkbenchBlueprintSvg(
-          baseWorkbenchDef,
-          customWorkbenchDef,
-          wepAttMap,
-          activeHardpoint,
-          equippedVestItem,
-          equippedBackpackItem,
-          equippedTacGearItem
-        )}
-        <div class="abi-hardpoint-tabs" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(84px, 1fr));gap:4px;margin-bottom:6px;">
-          ${hardpointTabsHtml}
-        </div>
-        <div style="flex:1;min-height:0;overflow-y:auto;padding-right:4px;">
-          ${visibleCategories.map(renderCategoryHtml).join('')}
         </div>
       `;
     };
@@ -2644,23 +1831,22 @@ export const GunsmithModal = {
             </div>
           </div>
 
-          <!-- 4 ZERO-SCROLL SUB-TABS FOR VEHICLE & AIRCRAFT TECH BAYS -->
-          <div style="display:flex;gap:6px;flex-shrink:0;">
+          <!-- 5 SUB-TABS FOR VEHICLE, AIRCRAFT & FIELD REQUISITIONS -->
+          <div style="display:flex;gap:5px;flex-shrink:0;flex-wrap:wrap;">
             ${[
-              { id: 'airwing', lbl: '✈️ 1. JETS & SENSORS (F-15 / A-10 / B-2)', col: '#48dbfb' },
-              { id: 'ac130', lbl: '🛸 2. AC-130 EVOLUTION (1968 ➔ 2024)', col: '#2ecc71' },
-              { id: 'armor', lbl: '🛡️ 3. TANKS, IFVs & AA BAY', col: '#f1c40f' },
-              { id: 'b2_secret', lbl: '🦇 4. B-2 PAINT STUDIO & 1903 CAVE', col: '#00d2d3' }
+              { id: 'airwing', lbl: '✈️ Jets & Helis', col: '#48dbfb' },
+              { id: 'ac130', lbl: '🛸 AC-130 Tech', col: '#2ecc71' },
+              { id: 'armor', lbl: '🛡️ Ground Armor', col: '#f1c40f' },
+              { id: 'b2_secret', lbl: '🦇 B-2 & 1903', col: '#00d2d3' },
+              { id: 'drops', lbl: '⚡ Field Drops', col: '#3498db' }
             ]
               .map((st) => {
                 const isAct = vSubTab === st.id;
-                return `<button type="button" class="gs-veh-subtab-btn" data-vsub="${st.id}" style="flex:1;padding:6px 8px;border-radius:5px;border:1.5px solid ${
+                return `<button type="button" class="gs-veh-subtab-btn" data-vsub="${st.id}" style="flex:1;padding:5px 7px;border-radius:5px;border:1.5px solid ${
                   isAct ? st.col : 'rgba(255,255,255,0.16)'
                 };background:${
                   isAct ? 'rgba(18,36,54,0.98)' : 'rgba(12,18,26,0.9)'
-                };color:${isAct ? st.col : '#cbd5e1'};font-size:10.5px;font-weight:900;cursor:pointer;box-shadow:${
-                  isAct ? `0 0 10px ${st.col}33` : 'none'
-                };">${st.lbl}</button>`;
+                };color:${isAct ? st.col : '#cbd5e1'};font-size:10px;font-weight:900;cursor:pointer;">${st.lbl}</button>`;
               })
               .join('')}
           </div>
@@ -2808,6 +1994,11 @@ export const GunsmithModal = {
                 </table>
               </div>
             </div>
+          </div>
+
+          <!-- SUB-TAB 5: FIELD REQUISITIONS & BANK WIRE -->
+          <div style="display:${vSubTab === 'drops' ? 'flex' : 'none'};flex-direction:column;gap:8px;flex:1;min-height:0;overflow-y:auto;">
+            ${renderRequisitionsMode()}
           </div>
         </div>
       `;
@@ -3490,9 +2681,9 @@ export const GunsmithModal = {
             🔧 OPEN 5. VEHICLE &amp; JET BAY [KEY L] ➔
           </button>
         </div>
-        <div id="gs-side-by-side-loot-view" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:stretch;min-height:calc(96vh - 185px);">
+        <div id="gs-side-by-side-loot-view" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:stretch;flex:1;min-height:0;">
           <!-- LEFT VIEW (50% WIDTH): MY OPERATOR INVENTORY, SLING, RIG & 2D BACKPACK DROP ZONES -->
-          <div id="gs-my-inventory-drop-pane" class="gs-drop-target" data-drop-zone="inventory" style="background:rgba(12,22,32,0.97);border:2px solid #2ecc71;border-radius:8px;padding:14px 18px;display:flex;flex-direction:column;justify-content:space-between;transition:box-shadow 0.15s, border-color 0.15s;">
+          <div id="gs-my-inventory-drop-pane" class="gs-drop-target" data-drop-zone="inventory" style="background:rgba(12,22,32,0.97);border:1.5px solid #2ecc71;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;justify-content:space-between;overflow-y:auto;">
             <div>
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;border-bottom:1px solid rgba(46,204,113,0.3);padding-bottom:6px;">
                 <div style="font-size:13.5px;font-weight:900;color:#2ecc71;letter-spacing:0.7px;">
@@ -3588,173 +2779,66 @@ export const GunsmithModal = {
 
     modal.innerHTML = `
       <div class="abi-header-bar">
-        <div>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span style="font-size:17px;font-weight:900;color:#f1c40f;letter-spacing:1.1px;">
-              ${
-                activeTab === 'backpack'
-                  ? '🎒 SIDE-BY-SIDE TACTICAL LOOTING &amp; BACKPACK INVENTORY [F / I]'
-                  : '🎒 TACTICAL ROLE, WEAPON, GUNSMITH &amp; VISUALIZED BACKPACK HUB [L / I]'
-              }
-            </span>
-            ${
-              workbenchAccess.allowed
-                ? `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(46,204,113,0.18);border:1.5px solid #2ecc71;color:#7bed9f;border-radius:4px;padding:2px 9px;font-size:10.5px;font-weight:900;letter-spacing:0.4px;">📍 WORKBENCH LOCATION: ${workbenchAccess.locationLabel}</span>`
-                : `<span style="display:inline-flex;align-items:center;gap:4px;background:rgba(243,156,18,0.18);border:1.5px solid #f39c12;color:#f1c40f;border-radius:4px;padding:2px 9px;font-size:10.5px;font-weight:900;letter-spacing:0.4px;">🔒 FIELD BACKPACK ONLY — VISIT HQ / FOB / AMMO STASH FOR GUNSMITH [L]</span>`
-            }
-          </div>
-          <div style="font-size:10.5px;color:#bdc3c7;">
-            ${
-              activeTab === 'backpack'
-                ? '<span style="color:#7bed9f;font-weight:900;">🖱️ DRAG ANY ENEMY ITEM FROM RIGHT VIEW ➔ DROP INTO YOUR INVENTORY ON LEFT VIEW (OR CLICK / PRESS [SPACE] TO LOOT ALL)!</span>'
-                : atResupply
-                ? '<span style="color:#2ecc71;font-weight:900;">📦 AT BASE / AMMO STASH — SELECT ANY ROLE, PRIMARY/SECONDARY WEAPON OR ATTACHMENT TO EQUIP &amp; RESUPPLY INSTANTLY!</span>'
-                : 'Select Role, Primary/Secondary Firearms, Customize Attachments, or Scavenge Enemy Gear into your Visualized Backpack!'
-            }
-          </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:15px;font-weight:900;color:#f1c40f;letter-spacing:0.8px;">
+            ${activeTab === 'backpack' ? '🎒 LOOT &amp; PACK' : '🔫 LOADOUT'}
+          </span>
+          <div class="gs-role-strip">${classHeaderPillsHtml}</div>
+          ${
+            !workbenchAccess.allowed
+              ? `<span style="background:rgba(243,156,18,0.16);border:1px solid rgba(243,156,18,0.5);color:#ffd32a;border-radius:4px;padding:2px 7px;font-size:9.5px;font-weight:900;" title="Visit Main Base HQ, Friendly FOB, or Ammo Stash [7] for live field resupply">⏳ Applies Next Spawn / At FOB</span>`
+              : ''
+          }
         </div>
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-          <button id="gs-header-roll-case-btn" type="button" style="background:linear-gradient(135deg, #f39c12, #d35400);color:#fff;border:1.5px solid #ffd700;border-radius:4px;padding:6px 10px;font-size:10px;font-weight:900;cursor:pointer;box-shadow:0 0 10px rgba(243,156,18,0.45);opacity:${workbenchAccess.allowed ? '1' : '0.45'};" title="Open CS2 Cases &amp; Roll a $50,000 Armory Case!">🎲 ROLL CASE ($50,000)</button>
-          <button id="gs-inspect-weapon-btn" type="button" style="background:rgba(241,196,15,0.22);color:#ffd700;border:1.5px solid #ffd700;border-radius:4px;padding:6px 9px;font-size:10px;font-weight:900;cursor:pointer;" title="Close menu and play Counter-Strike 2 Weapon / Knife Inspect Animation [F / V]">🔍 INSPECT [F/V]</button>
-          <select id="gs-playstyle-title-select" title="Choose Scoreboard &amp; HUD Playstyle Title (AUTO adapts to your live battle style, or pin a specific Title!)" style="background:rgba(16,26,38,0.95);color:#ffd32a;border:1.5px solid #ffd32a;border-radius:4px;padding:5px 7px;font-size:10px;font-weight:900;cursor:pointer;">
-            ${[
-              ['auto', '🏅 TITLE: AUTO (LIVE PLAYSTYLE)'],
-              ['sharpshooter', '🎯 SHARPSHOOTER'],
-              ['ace_pilot', '✈️ ACE PILOT'],
-              ['tank_buster', '💥 TANK BUSTER'],
-              ['lifesaver', '⚕️ LIFESAVER'],
-              ['attacker', '⚔️ ATTACKER'],
-              ['defender', '🛡️ DEFENDER'],
-              ['braveheart', '🦁 BRAVEHEART'],
-              ['camper', '🏕️ ROOFTOP CAMPER']
-            ]
-              .map(
-                ([tid, tlbl]) =>
-                  `<option value="${tid}" ${
-                    (this.player?.marksmanProfile?.pinnedTitleId || 'auto') === tid ? 'selected' : ''
-                  }>${tlbl}</option>`
-              )
-              .join('')}
-          </select>
-          <button id="gs-toggle-bhop-btn" type="button" style="background:${
-            this.player?.bhopEnabled !== false ? 'rgba(46,204,113,0.24)' : 'rgba(255,255,255,0.08)'
-          };color:${
-            this.player?.bhopEnabled !== false ? '#7bed9f' : '#94a3b8'
-          };border:1.5px solid ${
-            this.player?.bhopEnabled !== false ? '#2ecc71' : 'rgba(255,255,255,0.22)'
-          };border-radius:4px;padding:6px 9px;font-size:10px;font-weight:900;cursor:pointer;" title="Toggle Quake Bunnyhopping (Hold Space) + Uncapped Air-Strafing">🐇 BHOP: ${
-            this.player?.bhopEnabled !== false ? 'ON' : 'OFF'
-          }</button>
-          <button id="gs-toggle-ff-btn" type="button" style="background:${
-            this.player?.friendlyFireEnabled ? 'rgba(231,76,60,0.3)' : 'rgba(52,152,219,0.18)'
-          };color:${
-            this.player?.friendlyFireEnabled ? '#ff7675' : '#74b9ff'
-          };border:1.5px solid ${
-            this.player?.friendlyFireEnabled ? '#ff5252' : '#74b9ff'
-          };border-radius:4px;padding:6px 9px;font-size:10px;font-weight:900;cursor:pointer;" title="Toggle Friendly Fire ON/OFF (-$0.10 / 10 cents deducted per teammate kill)">${
-            this.player?.friendlyFireEnabled
-              ? `⚠️ FF: ON (-10¢/TK${
-                  (this.player?.friendlyFireKills || 0) > 0
-                    ? ` • -$${(this.player.friendlyFirePenaltyTotal || 0).toFixed(2)}`
-                    : ''
-                })`
-              : '🛡️ FF: OFF (-10¢/TK)'
-          }</button>
-          <button id="gs-resupply-now-btn" type="button" style="background:#00b894;color:#fff;border:1.5px solid #55efc4;border-radius:4px;padding:6px 10px;font-size:10.5px;font-weight:900;cursor:pointer;" title="Resupply 100% Magazines, Loose Bullets, Field Dressings, Medic Bag & Armor!">📦 [F] RESUPPLY 100%</button>
-          <div style="background:rgba(46,204,113,0.15);border:1.5px solid #2ecc71;border-radius:5px;padding:4px 10px;font-size:12.5px;font-weight:900;color:#7bed9f;" title="Persistent Warehouse Vault saved across matches!">
-            🏦 VAULT: <span id="gs-wh-cash">$${this.formatCashAmount(whCash)}</span>
+        <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+          <div style="background:rgba(46,204,113,0.14);border:1px solid rgba(46,204,113,0.55);border-radius:5px;padding:3px 8px;font-size:11px;font-weight:900;color:#7bed9f;" title="Persistent Armory Vault">
+            🏦 <span id="gs-wh-cash">$${this.formatCashAmount(whCash)}</span>
           </div>
-          <div style="background:rgba(241,196,15,0.16);border:1.5px solid #f1c40f;border-radius:5px;padding:4px 10px;font-size:12.5px;font-weight:900;color:#f1c40f;" title="Current Round Tactical Cash (Extracts to Warehouse at round end with 1.5x Victory Multiplier!)">
-            ⚡ MATCH: <span id="gs-modal-cash">$${this.formatCashAmount(matchCash)}</span>
+          <div style="background:rgba(241,196,15,0.14);border:1px solid rgba(241,196,15,0.55);border-radius:5px;padding:3px 8px;font-size:11px;font-weight:900;color:#f1c40f;" title="Current Match Cash">
+            ⚡ <span id="gs-modal-cash">$${this.formatCashAmount(matchCash)}</span>
           </div>
-          <button id="gs-grant-cash-btn" type="button" style="background:#27ae60;color:#fff;border:none;border-radius:4px;padding:6px 9px;font-size:10px;font-weight:900;cursor:pointer;" title="Grant +$250 stipend to both Match & Warehouse funds!">💵 +$250 STIPEND</button>
-          <button id="gs-toggle-fullscreen-btn" type="button" style="background:#8e44ad;color:#fff;border:1px solid #9b59b6;border-radius:4px;padding:6px 9px;font-size:10px;font-weight:900;cursor:pointer;" title="Toggle between 100% Full-Screen View and 92% Windowed Pop-Out">⛶ ${isFullScreen ? 'FULLSCREEN: ON' : 'FULLSCREEN: OFF'}</button>
-          <button id="gs-audio-settings-btn" type="button" style="background:#2980b9;color:#fff;border:none;border-radius:4px;padding:6px 9px;font-size:10px;font-weight:900;cursor:pointer;">🔊 SETTINGS</button>
-          <button id="gs-close-btn" type="button" style="background:#e74c3c;color:#fff;border:none;border-radius:4px;padding:6px 11px;font-size:10px;font-weight:900;cursor:pointer;">✕ CLOSE [F / ESC / L / I]</button>
+          <button id="gs-resupply-now-btn" type="button" style="background:rgba(0,184,148,0.24);color:#7bed9f;border:1px solid #00b894;border-radius:5px;padding:4px 8px;font-size:10px;font-weight:900;cursor:pointer;" title="Resupply Magazines, Dressings &amp; Armor at HQ/FOB/Stash">📦 Resupply</button>
+          <button id="gs-inspect-weapon-btn" type="button" style="background:rgba(255,255,255,0.08);color:#dfe6e9;border:1px solid rgba(255,255,255,0.2);border-radius:5px;padding:4px 8px;font-size:10px;font-weight:900;cursor:pointer;" title="Play Weapon Inspect Animation [F/V]">🔍 Inspect</button>
+          <button id="gs-toggle-fullscreen-btn" type="button" style="background:rgba(255,255,255,0.07);color:#cbd5e1;border:1px solid rgba(255,255,255,0.18);border-radius:5px;padding:4px 7px;font-size:10px;font-weight:900;cursor:pointer;" title="Toggle Compact Centered Window vs Fullscreen">⛶</button>
+          <button id="gs-close-btn" type="button" style="background:rgba(231,76,60,0.25);color:#ff7675;border:1px solid #e74c3c;border-radius:5px;padding:4px 10px;font-size:10.5px;font-weight:900;cursor:pointer;">✕ Close</button>
         </div>
       </div>
 
-      <div class="abi-mode-tabs" style="display:flex;gap:6px;margin-bottom:6px;flex-shrink:0;">
-        <button type="button" class="gs-tab-btn" data-tab="warehouse" style="flex:1;padding:5px 7px;border-radius:5px;border:1.5px solid ${
-          activeTab === 'warehouse' ? '#f1c40f' : 'rgba(255,255,255,0.16)'
-        };background:${
-          activeTab === 'warehouse' ? 'rgba(241,196,15,0.22)' : 'rgba(16,24,34,0.9)'
-        };color:${
-          activeTab === 'warehouse' ? '#f1c40f' : '#ecf0f1'
-        };font-size:10.5px;font-weight:900;cursor:${workbenchAccess.allowed ? 'pointer' : 'not-allowed'};opacity:${workbenchAccess.allowed ? '1' : '0.45'};letter-spacing:0.4px;">
-          ${workbenchAccess.allowed ? '🏛️' : '🔒'} 1. WEAPONS &amp; STASH
+      <div class="abi-mode-tabs">
+        <button type="button" class="gs-tab-btn gs-top-tab ${activeTab === 'warehouse' ? 'active' : ''}" data-tab="warehouse">
+          🔫 Weapons
         </button>
-        <button type="button" class="gs-tab-btn" data-tab="attachments" style="flex:1;padding:5px 7px;border-radius:5px;border:1.5px solid ${
-          activeTab === 'attachments' ? '#2ecc71' : 'rgba(255,255,255,0.16)'
-        };background:${
-          activeTab === 'attachments' ? 'rgba(46,204,113,0.22)' : 'rgba(16,24,34,0.9)'
-        };color:${
-          activeTab === 'attachments' ? '#7bed9f' : '#ecf0f1'
-        };font-size:10.5px;font-weight:900;cursor:${workbenchAccess.allowed ? 'pointer' : 'not-allowed'};opacity:${workbenchAccess.allowed ? '1' : '0.45'};letter-spacing:0.4px;">
-          ${workbenchAccess.allowed ? '🔧' : '🔒'} 2. GUNSMITH (${baseWorkbenchDef.shortName})
+        <button type="button" class="gs-tab-btn gs-top-tab ${activeTab === 'attachments' ? 'active' : ''}" data-tab="attachments">
+          🔧 Gunsmith (${baseWorkbenchDef.shortName})
         </button>
-        <button type="button" class="gs-tab-btn" data-tab="backpack" style="flex:1.1;padding:5px 7px;border-radius:5px;border:1.5px solid ${
-          activeTab === 'backpack' ? '#2ecc71' : 'rgba(255,255,255,0.16)'
-        };background:${
-          activeTab === 'backpack' ? 'rgba(46,204,113,0.26)' : 'rgba(16,24,34,0.9)'
-        };color:${
-          activeTab === 'backpack' ? '#7bed9f' : '#ecf0f1'
-        };font-size:10.5px;font-weight:900;cursor:pointer;letter-spacing:0.4px;">
-          🎒 3. LOOT &amp; BACKPACK${nearbyEnemyPacksCount > 0 ? ` (${nearbyEnemyPacksCount})` : ''}
+        <button type="button" class="gs-tab-btn gs-top-tab ${activeTab === 'gear' ? 'active' : ''}" data-tab="gear">
+          🛡️ Gear &amp; Stash
         </button>
-        <button type="button" class="gs-tab-btn" data-tab="requisitions" style="flex:0.8;padding:5px 7px;border-radius:5px;border:1.5px solid ${
-          activeTab === 'requisitions' ? '#3498db' : 'rgba(255,255,255,0.16)'
-        };background:${
-          activeTab === 'requisitions' ? 'rgba(52,152,219,0.22)' : 'rgba(16,24,34,0.9)'
-        };color:${
-          activeTab === 'requisitions' ? '#74b9ff' : '#ecf0f1'
-        };font-size:10.5px;font-weight:900;cursor:pointer;letter-spacing:0.4px;">
-          ⚡ 4. REQUISITIONS
+        <button type="button" class="gs-tab-btn gs-top-tab ${activeTab === 'backpack' ? 'active' : ''}" data-tab="backpack">
+          🎒 Pack / Loot${nearbyEnemyPacksCount > 0 ? ` (${nearbyEnemyPacksCount})` : ''}
         </button>
-        <button type="button" class="gs-tab-btn" data-tab="vehicles" style="flex:1.15;padding:5px 7px;border-radius:5px;border:1.5px solid ${
-          activeTab === 'vehicles' ? '#48dbfb' : 'rgba(72,219,251,0.75)'
-        };background:${
-          activeTab === 'vehicles' ? 'rgba(9,132,227,0.38)' : 'rgba(12,28,44,0.96)'
-        };color:#48dbfb;font-size:10.5px;font-weight:900;cursor:pointer;letter-spacing:0.4px;">
-          🚜✈️ 5. VEHICLE &amp; JET BAY [L]
+        <button type="button" class="gs-tab-btn gs-top-tab ${activeTab === 'vehicles' ? 'active' : ''}" data-tab="vehicles">
+          🚜 Vehicles &amp; Drops
         </button>
-        <button type="button" class="gs-tab-btn" data-tab="cases" style="flex:1.1;padding:5px 7px;border-radius:5px;border:1.5px solid ${
-          activeTab === 'cases' ? '#ffd32a' : 'rgba(255,211,42,0.55)'
-        };background:${
-          activeTab === 'cases'
-            ? 'linear-gradient(135deg, rgba(243,156,18,0.38), rgba(255,211,42,0.24))'
-            : 'rgba(32,24,10,0.92)'
-        };color:#ffd32a;font-size:10.5px;font-weight:900;cursor:${workbenchAccess.allowed ? 'pointer' : 'not-allowed'};opacity:${workbenchAccess.allowed ? '1' : '0.45'};letter-spacing:0.4px;">
-          ${workbenchAccess.allowed ? '📦' : '🔒'} 6. CS2 CASES (🔑 ${this.player?.caseKeys ?? 1})
+        <button type="button" class="gs-tab-btn gs-top-tab ${activeTab === 'cases' ? 'active' : ''}" data-tab="cases">
+          🎰 Cases (🔑 ${this.player?.caseKeys ?? 1})
         </button>
       </div>
 
       <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;">
-      ${
-        activeTab === 'backpack'
-          ? renderBackpackAndLootMode()
-          : activeTab === 'cases'
-          ? renderMysteryCasesMode()
-          : `
-            <div class="abi-split-layout" style="min-width:0;max-width:100%;">
-              <!-- LEFT PANEL: OPERATOR EQUIPMENT SLOTS ("PAPER DOLL" RIG VIEW) -->
-              ${renderOperatorRigPanel()}
-
-              <!-- RIGHT PANEL: STASH GRID / GUNSMITH WORKBENCH / FIELD REQUISITIONS / VEHICLE BAY -->
-              <div class="abi-right-panel" style="min-width:0;max-width:100%;overflow-x:hidden;">
-                ${
-                  activeTab === 'attachments'
-                    ? renderWorkbenchMode()
-                    : activeTab === 'requisitions'
-                    ? renderRequisitionsMode()
-                    : activeTab === 'vehicles'
-                    ? renderVehicleBayMode()
-                    : renderVisualStashMode()
-                }
-              </div>
-            </div>
-          `
-      }
+        ${
+          activeTab === 'backpack'
+            ? renderBackpackAndLootMode()
+            : activeTab === 'cases'
+            ? renderMysteryCasesMode()
+            : activeTab === 'attachments'
+            ? renderWorkbenchMode()
+            : activeTab === 'gear'
+            ? renderGearAndStashMode()
+            : activeTab === 'vehicles'
+            ? renderVehicleBayMode()
+            : renderCodWeaponsMode()
+        }
       </div>
     `;
 
@@ -3999,7 +3083,7 @@ export const GunsmithModal = {
     const toggleFsBtn = modal.querySelector('#gs-toggle-fullscreen-btn');
     if (toggleFsBtn) {
       toggleFsBtn.addEventListener('click', () => {
-        this._gunsmithEdgeFullscreen = this._gunsmithEdgeFullscreen === false ? true : false;
+        this._gunsmithEdgeFullscreen = !this._gunsmithEdgeFullscreen;
         this.renderGunsmithModalContent(modal);
       });
     }
@@ -4110,21 +3194,40 @@ export const GunsmithModal = {
     modal.querySelectorAll('.gs-tab-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const nextTab = btn.dataset.tab || 'warehouse';
-        if (
-          nextTab !== 'backpack' &&
-          nextTab !== 'vehicles' &&
-          nextTab !== 'requisitions' &&
-          !workbenchAccess.allowed
-        ) {
-          sound.playEmptyClick?.();
-          this.addXpNotification?.(
-            0,
-            '🔧 FIREARM GUNSMITH REQUIRES MAIN BASE HQ, CAPTURED FRIENDLY FOB (A–E), OR AMMO STASH [7]! (TAB 5 VEHICLE & JET BAY IS OPEN ANYWHERE!)'
-          );
-          return;
-        }
         this._gunsmithActiveTab = nextTab;
         this.renderGunsmithModalContent(modal);
+      });
+    });
+
+    modal.querySelectorAll('[data-cod-slot]').forEach((box) => {
+      box.addEventListener('click', (ev) => {
+        if (ev.target && ev.target.closest('button')) return;
+        this._codBrowseSlot = box.dataset.codSlot || 'primary';
+        this.renderGunsmithModalContent(modal);
+      });
+    });
+
+    modal.querySelectorAll('.cod-cat-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const cat = btn.dataset.codCat || 'assault_rifle';
+        if (cat === 'pistol') {
+          this._codBrowseSlot = 'secondary';
+        } else {
+          this._codBrowseSlot = 'primary';
+          this._codPrimaryCategory = cat;
+        }
+        this.renderGunsmithModalContent(modal);
+      });
+    });
+
+    modal.querySelectorAll('.gs-shell-pill').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const shId = btn.dataset.shellId;
+        if (shId && typeof this.player?.cycleShotgunShellType === 'function') {
+          this.player.cycleShotgunShellType(shId);
+          this._lastMagSignature = '';
+          this.updateCashAndGunsmithHud();
+        }
       });
     });
 
@@ -4206,8 +3309,7 @@ export const GunsmithModal = {
 
     modal.querySelectorAll('.gs-hardpoint-filter, .gs-svg-hardpoint').forEach((el) => {
       el.addEventListener('click', () => {
-        const hp = el.dataset.hardpoint || 'all';
-        this._gunsmithHardpoint = this._gunsmithHardpoint === hp && hp !== 'all' ? 'all' : hp;
+        this._gunsmithHardpoint = el.dataset.hardpoint || 'optic';
         this.renderGunsmithModalContent(modal);
       });
     });

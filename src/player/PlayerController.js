@@ -1,22 +1,26 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=144';
-import { sound } from '../audio.js?v=144';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=144';
+import { VOXEL_SIZE } from '../world.js?v=145';
+import { sound } from '../audio.js?v=145';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=145';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=144';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=144';
-import { events, makeEventBridge } from '../events.js?v=144';
-import { GunsmithMethods } from './GunsmithState.js?v=144';
-import { FortificationMethods } from './FortificationBuilder.js?v=144';
-import { CommanderMethods } from './CommanderAbilities.js?v=144';
-import { VehicleControlMethods } from './VehicleControl.js?v=144';
-import { CombatMethods } from './PlayerCombat.js?v=144';
-import { loadMarksmanProfile } from './MarksmanSystem.js?v=144';
+} from '../utils/KeyboardShortcuts.js?v=145';
+import {
+  animateBowOrCrossbowMesh,
+  getWeaponHipOffsetX,
+  updateFirstPersonArmShoulders
+} from '../models/weapon-model.js?v=145';
+import { events, makeEventBridge } from '../events.js?v=145';
+import { GunsmithMethods } from './GunsmithState.js?v=145';
+import { FortificationMethods } from './FortificationBuilder.js?v=145';
+import { CommanderMethods } from './CommanderAbilities.js?v=145';
+import { VehicleControlMethods } from './VehicleControl.js?v=145';
+import { CombatMethods } from './PlayerCombat.js?v=145';
+import { loadMarksmanProfile } from './MarksmanSystem.js?v=145';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -24,7 +28,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=144';
+} from '../core/StateMachines.js?v=145';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -3438,8 +3442,9 @@ export class PlayerController {
           ? Math.sin(Math.min(1, this.bandageProgress * 4) * Math.PI * 0.5)
           : 0;
 
+      const hipBaseX = getWeaponHipOffsetX(cur.def);
       const hipPos = new THREE.Vector3(
-        0.22 + bobX + idleBreathX + this.swayX + sprSweepX - bandageBlend * 0.06,
+        hipBaseX + bobX + idleBreathX + this.swayX + sprSweepX - bandageBlend * 0.06,
         -0.2 + bobY * 0.65 + idleBreathY + vertInertiaY + this.swayY + sprSweepY - drawFrac * 0.16 - bandageBlend * 0.09,
         -0.31 + this.recoilKickZ + sprSweepZ + drawFrac * 0.05
       );
@@ -3940,13 +3945,27 @@ export class PlayerController {
         }
         const armAdsDropY = (isPistol ? 0.058 : 0.036) * this.adsAmount;
         const armAdsPushZ = (isPistol ? 0.035 : 0.02) * this.adsAmount;
+        // Pump-action shotgun slide & left-hand rack animation after each Remington 870 shot
+        let pumpSlideZ = 0;
+        if (cur.def.id === 'rem870' && (this.fireTimer || 0) > 0) {
+          const shotInterval = 60 / Math.max(40, cur.def.rpm || 88);
+          const elapsedSinceShot = Math.max(0, shotInterval - this.fireTimer);
+          if (elapsedSinceShot >= 0.08 && elapsedSinceShot <= 0.46) {
+            const pNorm = (elapsedSinceShot - 0.08) / 0.38;
+            pumpSlideZ = Math.sin(pNorm * Math.PI) * 0.082;
+          }
+        }
+        const pumpForend = cur.mesh.getObjectByName('pumpForendMesh');
+        if (pumpForend && pumpForend.userData.baseZ !== undefined) {
+          pumpForend.position.z = pumpForend.userData.baseZ + pumpSlideZ;
+        }
         if (leftArm && leftArm.userData.basePos) {
           const bandWrapWave =
             bandageBlend > 0 ? Math.sin((this.bandageProgress || 0) * Math.PI * 6) * 0.035 * bandageBlend : 0;
           leftArm.position.set(
             leftArm.userData.basePos.x + bandageBlend * 0.08 + bandWrapWave,
             leftArm.userData.basePos.y - armAdsDropY + bandageBlend * 0.04,
-            leftArm.userData.basePos.z - armAdsPushZ + bandageBlend * 0.08
+            leftArm.userData.basePos.z - armAdsPushZ + pumpSlideZ + bandageBlend * 0.08
           );
           leftArm.rotation.set(
             leftArm.userData.baseRot.x + bandageBlend * 0.45,
@@ -4377,6 +4396,10 @@ export class PlayerController {
           }
         }
       }
+
+      // Solve live 2-bone Shoulder -> Elbow -> Wrist IK so left arm enters from bottom-left shoulder
+      // and right arm enters from bottom-right shoulder across all poses (hipfire, ADS, reload, inspect, gadgets)
+      updateFirstPersonArmShoulders(cur.mesh);
 
       // Keep the 3D weapon body (receiver, Picatinny rail, handguard, barrel, iron sights & hands) visible
       // in ADS view while hiding only the 3D sight box once a mounted 2D optic overlay takes over!

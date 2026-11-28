@@ -1,16 +1,26 @@
-import { SQUAD_DEFS } from '../bots.js?v=144';
-import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=144';
-import { events } from '../events.js?v=144';
+import { SQUAD_DEFS } from '../bots.js?v=145';
+import { CLASS_TRAITS, VEHICLE_STATS, SQUAD_KIT_CAPS, getAllowedRoleIds } from '../config.js?v=145';
+import { events } from '../events.js?v=145';
+import {
+  WEAPON_DEFS,
+  CLASS_LOADOUTS,
+  PRIMARY_WEAPON_CATEGORIES,
+  SECONDARY_WEAPON_CATEGORIES,
+  SHOTGUN_SHELL_TYPES,
+  getWeaponCategory
+} from '../weapons.js?v=145';
+import { buildWeaponSvg } from '../assets/gunsmith-svg.js?v=145';
+import { sound } from '../audio.js?v=145';
 import {
   DEPLOYABLE_EVENTS,
   syncSquadDeployablesFSM,
   syncBaseProtectionFSM
-} from '../core/StateMachines.js?v=144';
+} from '../core/StateMachines.js?v=145';
 import {
   isMacPlatform,
   hasAnyModifier,
   resolveGlobalCommandShortcut
-} from '../utils/KeyboardShortcuts.js?v=144';
+} from '../utils/KeyboardShortcuts.js?v=145';
 
 export const DeployScreen = {
   bindDeployEvents() {
@@ -40,6 +50,8 @@ export const DeployScreen = {
               document.querySelectorAll('.squad-btn').forEach((sb) => {
                 sb.classList.toggle('active', sb.dataset.squad === autoSquad);
               });
+              const sqSel = document.getElementById('deploy-squad-select');
+              if (sqSel) sqSel.value = autoSquad;
             }
           }
           // Consistent HQ Vehicle Crew Auto-Selection:
@@ -69,6 +81,7 @@ export const DeployScreen = {
           }
         }
         this.updateDeployClassTraitsCard?.();
+        this.renderDeployLoadoutCards?.();
         this.renderDeployB2CustomizerBar?.();
       });
     });
@@ -133,6 +146,10 @@ export const DeployScreen = {
         document.querySelectorAll('.squad-btn').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         this.selectedSquad = btn.dataset.squad;
+        const sqSel = document.getElementById('deploy-squad-select');
+        if (sqSel && sqSel.value !== this.selectedSquad) {
+          sqSel.value = this.selectedSquad;
+        }
         const sqDef = SQUAD_DEFS.find((s) => s.id === this.selectedSquad);
         if (
           sqDef &&
@@ -149,6 +166,31 @@ export const DeployScreen = {
       });
     };
     document.querySelectorAll('.squad-btn').forEach(bindSquadButton);
+
+    const deploySquadSelect = document.getElementById('deploy-squad-select');
+    if (deploySquadSelect) {
+      deploySquadSelect.addEventListener('change', () => {
+        const targetSq = deploySquadSelect.value;
+        const matchingBtn = document.querySelector(`.squad-btn[data-squad="${targetSq}"]`);
+        if (matchingBtn) {
+          matchingBtn.click();
+        } else {
+          this.selectedSquad = targetSq;
+          this.updateDeployClassTraitsCard?.();
+        }
+      });
+    }
+
+    const lobbyToggleBtn = document.getElementById('deploy-lobby-toggle-btn');
+    const lobbyDrawer = document.getElementById('deploy-lobby-drawer');
+    if (lobbyToggleBtn && lobbyDrawer) {
+      lobbyToggleBtn.addEventListener('click', () => {
+        const openNow = lobbyDrawer.classList.contains('hidden');
+        lobbyDrawer.classList.toggle('hidden', !openNow);
+        lobbyDrawer.style.display = openNow ? 'flex' : 'none';
+        lobbyToggleBtn.textContent = openNow ? '🌐 Lobby ▴' : '🌐 Lobby ▾';
+      });
+    }
 
     // Custom Specialized Squad Creator (`➕ Create Squad` on Deploy Screen)
     const openCreateSqBtn = document.getElementById('open-create-squad-btn');
@@ -214,6 +256,14 @@ export const DeployScreen = {
           }${shortType}</small>`;
           squadRow.prepend(newBtn);
           bindSquadButton(newBtn);
+        }
+        const sqSelectEl = document.getElementById('deploy-squad-select');
+        if (sqSelectEl) {
+          const opt = document.createElement('option');
+          opt.value = sq.id;
+          opt.textContent = `${sq.icon} ${sq.id} (${sq.squadType})`;
+          sqSelectEl.prepend(opt);
+          sqSelectEl.value = sq.id;
         }
         this.selectedSquad = sq.id;
         this.selectedRank = 'SQUAD_LEADER';
@@ -1434,7 +1484,7 @@ export const DeployScreen = {
     const hudRuLbl = document.querySelector('#top-bar .ru-team .team-label');
 
     if (era === 'medieval') {
-      if (eraTagEl) eraTagEl.textContent = '🏰 MEDIEVAL BLOCKFARE';
+      if (eraTagEl) eraTagEl.textContent = '🏰 MEDIEVAL';
       if (mapTitleEl) mapTitleEl.textContent = 'IRONKEEP CITADEL';
       if (betaPillEl) {
         betaPillEl.classList.remove('hidden');
@@ -1446,12 +1496,12 @@ export const DeployScreen = {
       if (usTeamBtn) {
         usTeamBtn.dataset.team = 'US';
         usTeamBtn.dataset.subfaction = 'US';
-        usTeamBtn.textContent = '🏰 WEST KINGDOM';
+        usTeamBtn.textContent = '🏰 WEST';
       }
       if (ruTeamBtn) {
         ruTeamBtn.dataset.team = 'RU';
         ruTeamBtn.dataset.subfaction = 'RU';
-        ruTeamBtn.textContent = '⚔️ EAST EMPIRE';
+        ruTeamBtn.textContent = '⚔️ EAST';
       }
       if (dinoTeamBtn) {
         dinoTeamBtn.classList.add('hidden');
@@ -1460,7 +1510,7 @@ export const DeployScreen = {
       if (hudUsLbl) hudUsLbl.textContent = 'WEST KINGDOM';
       if (hudRuLbl) hudRuLbl.textContent = 'EAST EMPIRE';
     } else if (era === 'jurassic') {
-      if (eraTagEl) eraTagEl.textContent = '🦖 JURASSIC BLOCKFARE';
+      if (eraTagEl) eraTagEl.textContent = '🦖 JURASSIC';
       if (mapTitleEl) mapTitleEl.textContent = 'ISLA CARNIVORA';
       if (betaPillEl) {
         betaPillEl.classList.remove('hidden');
@@ -1472,19 +1522,19 @@ export const DeployScreen = {
       if (usTeamBtn) {
         usTeamBtn.dataset.team = 'US';
         usTeamBtn.dataset.subfaction = 'US';
-        usTeamBtn.textContent = '🇺🇸 US HUNTERS';
+        usTeamBtn.textContent = '🇺🇸 US';
       }
       if (ruTeamBtn) {
         ruTeamBtn.dataset.team = 'US';
         ruTeamBtn.dataset.subfaction = 'RU';
-        ruTeamBtn.textContent = '🇷🇺 RU HUNTERS';
+        ruTeamBtn.textContent = '🇷🇺 RU';
       }
       if (dinoTeamBtn) {
         dinoTeamBtn.classList.remove('hidden');
         dinoTeamBtn.style.display = '';
         dinoTeamBtn.dataset.team = 'RU';
         dinoTeamBtn.dataset.subfaction = 'DINO';
-        dinoTeamBtn.textContent = '🦖 DINOSAURS';
+        dinoTeamBtn.textContent = '🦖 DINO';
       }
       const activeBtn = document.querySelector('.team-btn.active');
       if (activeBtn) {
@@ -1494,7 +1544,7 @@ export const DeployScreen = {
       if (hudUsLbl) hudUsLbl.textContent = 'USA + RUSSIA';
       if (hudRuLbl) hudRuLbl.textContent = 'DINOSAURS';
     } else {
-      if (eraTagEl) eraTagEl.textContent = '✈️ MODERN BLOCKFARE';
+      if (eraTagEl) eraTagEl.textContent = '✈️ MODERN';
       if (mapTitleEl) mapTitleEl.textContent = 'FRUGIS RIVER VALLEY';
       if (betaPillEl) {
         betaPillEl.classList.add('hidden');
@@ -1506,12 +1556,12 @@ export const DeployScreen = {
       if (usTeamBtn) {
         usTeamBtn.dataset.team = 'US';
         usTeamBtn.dataset.subfaction = 'US';
-        usTeamBtn.textContent = 'US FORCES (BLUE)';
+        usTeamBtn.textContent = '🇺🇸 US';
       }
       if (ruTeamBtn) {
         ruTeamBtn.dataset.team = 'RU';
         ruTeamBtn.dataset.subfaction = 'RU';
-        ruTeamBtn.textContent = 'RU FORCES (RED)';
+        ruTeamBtn.textContent = '🇷🇺 RU';
       }
       if (dinoTeamBtn) {
         dinoTeamBtn.classList.add('hidden');
@@ -1549,30 +1599,30 @@ export const DeployScreen = {
       btn.classList.toggle('active', btn.dataset.class === this.selectedClass);
     });
 
-    // 4. Filter Modern-Only Spawn Buttons (B2_LANE, WRIGHT_CAVE) & Update Objective Labels
-    const flagLabels =
+    // 4. Filter Modern-Only Spawn Buttons (B2_LANE, WRIGHT_CAVE) & Update Objective Tooltips
+    const flagTitles =
       era === 'medieval'
         ? {
-            A: 'OBJ A (WEST KEEP)',
-            B: 'OBJ B (TREBUCHET RIDGE)',
-            C: 'OBJ C (RIVER CITADEL)',
-            D: 'OBJ D (WATCHTOWER)',
-            E: 'OBJ E (EAST FORTRESS)'
+            A: 'Objective A — West Keep',
+            B: 'Objective B — Trebuchet Ridge',
+            C: 'Objective C — River Citadel',
+            D: 'Objective D — Watchtower',
+            E: 'Objective E — East Fortress'
           }
         : era === 'jurassic'
         ? {
-            A: 'OBJ A (RAPTOR PADDOCK)',
-            B: 'OBJ B (SKELETON CANYON)',
-            C: 'OBJ C (LAGOON CROSSING)',
-            D: 'OBJ D (VOLCANIC RIDGE)',
-            E: 'OBJ E (T-REX NEST)'
+            A: 'Objective A — Raptor Paddock',
+            B: 'Objective B — Skeleton Canyon',
+            C: 'Objective C — Lagoon Crossing',
+            D: 'Objective D — Volcanic Ridge',
+            E: 'Objective E — T-Rex Nest'
           }
         : {
-            A: 'OBJ A (WEST TOWN)',
-            B: 'OBJ B (CONTAINERS)',
-            C: 'OBJ C (DOWNTOWN)',
-            D: 'OBJ D (RADAR HILL)',
-            E: 'OBJ E (INDUSTRIAL)'
+            A: 'Objective A — West Town',
+            B: 'Objective B — Containers',
+            C: 'Objective C — Downtown',
+            D: 'Objective D — Radar Hill',
+            E: 'Objective E — Industrial'
           };
 
     document.querySelectorAll('.spawn-btn').forEach((btn) => {
@@ -1584,18 +1634,286 @@ export const DeployScreen = {
         if (!showModernSpawns && this.selectedSpawn === sp) {
           this.selectedSpawn = 'BASE';
         }
-      } else if (flagLabels[sp]) {
-        btn.textContent = flagLabels[sp];
+      } else if (flagTitles[sp]) {
+        btn.textContent = `Obj ${sp}`;
+        btn.title = flagTitles[sp];
       }
     });
 
     this.updateCommandOrderHud?.(era);
+    this.renderDeployLoadoutCards?.();
     this.renderDeployB2CustomizerBar?.();
     this.updateDeployClassTraitsCard?.();
     this.drawDeployMap?.(true);
   },
 
+  /**
+   * Renders the Call of Duty Create-a-Class Primary & Secondary Weapon Cards
+   * directly inside `#deploy-cod-loadout` on the Deploy Screen, including:
+   * - 1-click inline CoD Weapon Category Picker (`Assault Rifles`, `SMGs`, `Shotguns`, `LMGs`, `Marksman`, `Snipers` / `Handguns`)
+   * - Inline 12G Shotgun Shell Pills (`00 Buck`, `Flechette`, `AP-20`, `FRAG-12`) when a Shotgun is equipped
+   * - Direct `[🔧]` button to jump straight to Gunsmith attachments for that weapon
+   */
+  renderDeployLoadoutCards() {
+    if (typeof document === 'undefined') return;
+    const box = document.getElementById('deploy-cod-loadout');
+    if (!box || !this.player) return;
+
+    const era = (this.world && this.world.era) || 'modern';
+    if (era === 'jurassic' && this.selectedTeam === 'RU') {
+      box.innerHTML = '';
+      return;
+    }
+
+    const role = this.selectedClass || 'engineer';
+    const isPrimitive = era === 'medieval' || era === 'jurassic';
+    const baseLoadout = CLASS_LOADOUTS[role] || CLASS_LOADOUTS.engineer;
+    const primaryId = this.player.getSelectedWeaponIdForClass
+      ? this.player.getSelectedWeaponIdForClass(role, 'primary')
+      : baseLoadout[0];
+    const secondaryId = this.player.getSelectedWeaponIdForClass
+      ? this.player.getSelectedWeaponIdForClass(role, 'secondary')
+      : baseLoadout[1];
+
+    const basePrim = WEAPON_DEFS[primaryId] || WEAPON_DEFS[baseLoadout[0]] || WEAPON_DEFS.m4a1;
+    const baseSec = WEAPON_DEFS[secondaryId] || WEAPON_DEFS[baseLoadout[1]] || WEAPON_DEFS.mp443;
+    const custPrim = this.player.buildCustomizedWeaponDef
+      ? this.player.buildCustomizedWeaponDef(basePrim, true, basePrim.id)
+      : basePrim;
+    const custSec = this.player.buildCustomizedWeaponDef
+      ? this.player.buildCustomizedWeaponDef(baseSec, false, baseSec.id)
+      : baseSec;
+
+    const primAtts = this.player.getWeaponAttachmentMap
+      ? this.player.getWeaponAttachmentMap(basePrim.id)
+      : {};
+    const secAtts = this.player.getWeaponAttachmentMap
+      ? this.player.getWeaponAttachmentMap(baseSec.id)
+      : {};
+
+    const primCatId = getWeaponCategory(basePrim);
+    const primCatObj =
+      PRIMARY_WEAPON_CATEGORIES.find((c) => c.id === primCatId) || PRIMARY_WEAPON_CATEGORIES[0];
+    const openSlot = this._deployPickerSlot || null; // 'primary' | 'secondary' | null
+
+    const isShotgunEquipped = Boolean(
+      !isPrimitive && (basePrim.isShotgun || primCatId === 'shotgun')
+    );
+    const activeShellId = custPrim.activeShellId || this.player.activeShotgunShellId || 'buckshot_00';
+
+    const shellBarHtml = isShotgunEquipped
+      ? `<div class="dep-shell-bar">
+          <span style="font-size:8.5px;font-weight:900;color:#f39c12;margin-right:2px;">12G SHELL [B]:</span>
+          ${SHOTGUN_SHELL_TYPES.map(
+            (sh) =>
+              `<button type="button" class="dep-shell-pill ${
+                activeShellId === sh.id ? 'active' : ''
+              }" data-shell-id="${sh.id}" title="${sh.name}: ${sh.desc}">${sh.badge}</button>`
+          ).join('')}
+        </div>`
+      : '';
+
+    let pickerHtml = '';
+    if (openSlot && !isPrimitive) {
+      const isSecSlot = openSlot === 'secondary';
+      const cats = isSecSlot ? SECONDARY_WEAPON_CATEGORIES : PRIMARY_WEAPON_CATEGORIES;
+      if (!this._deployPickerCat || !cats.some((c) => c.id === this._deployPickerCat)) {
+        this._deployPickerCat = isSecSlot ? 'pistol' : primCatId;
+      }
+      const activeCat = this._deployPickerCat;
+      const ownedSet = this.player.ownedWeapons || new Set();
+      const totalFunds = (this.player.warehouseCash || 0) + (this.player.matchCash || 0);
+
+      const candidateGuns = Object.values(WEAPON_DEFS).filter((w) => {
+        if (w.type !== 'gun' || w.isPrimitiveOnly || w.isDinoWeapon) return false;
+        if (isSecSlot) return w.slot === 'secondary';
+        return w.slot !== 'secondary' && getWeaponCategory(w) === activeCat;
+      });
+
+      const catTabsHtml = cats
+        .map(
+          (c) =>
+            `<button type="button" class="dep-cat-tab ${
+              activeCat === c.id ? 'active' : ''
+            }" data-pick-cat="${c.id}">${c.icon} ${c.short}</button>`
+        )
+        .join('');
+
+      const gunCardsHtml = candidateGuns
+        .map((w) => {
+          const eqId = isSecSlot ? baseSec.id : basePrim.id;
+          const isEq = w.id === eqId;
+          const price = w.warehousePrice || 0;
+          const isOwn = ownedSet.has(w.id) || price === 0;
+          const canBuy = totalFunds >= price;
+          const badgeTxt = isEq ? '✓ EQUIPPED' : isOwn ? 'OWNED' : `$${price.toLocaleString()}`;
+          const badgeCol = isEq ? '#2ecc71' : isOwn ? '#74b9ff' : canBuy ? '#f1c40f' : '#ff7675';
+          const dmgStr = w.pellets > 1 ? `${w.damage}×${w.pellets}` : `${w.damage}`;
+          return `
+            <button type="button" class="dep-pick-gun-btn ${isEq ? 'equipped' : ''}" data-pick-slot="${openSlot}" data-pick-wep="${w.id}" title="${w.name} (${w.caliber})">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:3px;">
+                <span style="font-size:9.5px;font-weight:900;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.shortName || w.name}</span>
+                <span style="font-size:8px;font-weight:900;color:${badgeCol};flex-shrink:0;">${badgeTxt}</span>
+              </div>
+              <div style="height:26px;display:flex;align-items:center;justify-content:center;">
+                ${buildWeaponSvg(w.id, {}, { height: 24 })}
+              </div>
+              <div style="font-size:8px;color:#94a3b8;font-weight:700;">DMG ${dmgStr} &bull; ${w.rpm} RPM</div>
+            </button>
+          `;
+        })
+        .join('');
+
+      pickerHtml = `
+        <div class="dep-picker-drawer" id="deploy-weapon-picker-drawer">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
+            <span style="font-size:9.5px;font-weight:900;color:#f1c40f;">
+              ${isSecSlot ? 'CHOOSE SECONDARY SIDEARM' : 'CHOOSE PRIMARY WEAPON (ALL CLASSES)'}
+            </span>
+            <button type="button" id="dep-close-picker-btn" style="background:transparent;border:none;color:#94a3b8;font-size:11px;font-weight:900;cursor:pointer;">✕</button>
+          </div>
+          <div class="dep-cat-tabs">${catTabsHtml}</div>
+          <div class="dep-picker-grid">${gunCardsHtml}</div>
+        </div>
+      `;
+    }
+
+    const primDmgLbl =
+      custPrim.pellets > 1 ? `${custPrim.damage}×${custPrim.pellets}` : `${custPrim.damage}`;
+
+    box.innerHTML = `
+      <div class="dep-wep-row">
+        <div class="dep-wep-card primary ${openSlot === 'primary' ? 'picker-open' : ''}">
+          <div class="dep-wep-top">
+            <span class="dep-slot-lbl">[1] PRIMARY</span>
+            <span class="dep-cat-badge">${isPrimitive ? 'MELEE / BOW' : primCatObj.short.toUpperCase()}</span>
+          </div>
+          <div class="dep-wep-mid">
+            <div style="min-width:0;flex:1;">
+              <div class="dep-wep-name">${custPrim.shortName || custPrim.name}</div>
+              <div class="dep-wep-sub">DMG ${primDmgLbl} &bull; ${custPrim.clipSize}R</div>
+            </div>
+            <div style="width:92px;flex-shrink:0;display:flex;justify-content:center;">
+              ${buildWeaponSvg(basePrim.id, primAtts, { height: 32 })}
+            </div>
+          </div>
+          ${
+            !isPrimitive
+              ? `<div class="dep-wep-actions">
+                  <button type="button" class="dep-swap-btn" data-open-slot="primary">${
+                    openSlot === 'primary' ? '▴ Close' : '⇄ Swap Primary ▾'
+                  }</button>
+                  <button type="button" class="dep-mods-btn" data-mod-slot="primary" title="Customize Optics &amp; Attachments">🔧</button>
+                </div>`
+              : ''
+          }
+        </div>
+
+        <div class="dep-wep-card secondary ${openSlot === 'secondary' ? 'picker-open' : ''}">
+          <div class="dep-wep-top">
+            <span class="dep-slot-lbl">[2] SECONDARY</span>
+            <span class="dep-cat-badge" style="color:#74b9ff;border-color:rgba(52,152,219,0.5);background:rgba(52,152,219,0.16);">${
+              isPrimitive ? 'BACKUP' : 'PISTOL'
+            }</span>
+          </div>
+          <div class="dep-wep-mid">
+            <div style="min-width:0;flex:1;">
+              <div class="dep-wep-name">${custSec.shortName || custSec.name}</div>
+              <div class="dep-wep-sub">DMG ${custSec.damage} &bull; ${custSec.clipSize}R</div>
+            </div>
+            <div style="width:68px;flex-shrink:0;display:flex;justify-content:center;">
+              ${buildWeaponSvg(baseSec.id, secAtts, { height: 28 })}
+            </div>
+          </div>
+          ${
+            !isPrimitive
+              ? `<div class="dep-wep-actions">
+                  <button type="button" class="dep-swap-btn" data-open-slot="secondary">${
+                    openSlot === 'secondary' ? '▴ Close' : '⇄ Swap'
+                  }</button>
+                  <button type="button" class="dep-mods-btn" data-mod-slot="secondary" title="Customize Sidearm">🔧</button>
+                </div>`
+              : ''
+          }
+        </div>
+      </div>
+      ${shellBarHtml}
+      ${pickerHtml}
+    `;
+
+    box.querySelectorAll('.dep-swap-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const s = btn.dataset.openSlot;
+        if (this._deployPickerSlot === s) {
+          this._deployPickerSlot = null;
+        } else {
+          this._deployPickerSlot = s;
+          this._deployPickerCat = s === 'secondary' ? 'pistol' : primCatId;
+        }
+        this.renderDeployLoadoutCards();
+      });
+    });
+
+    box.querySelector('#dep-close-picker-btn')?.addEventListener('click', () => {
+      this._deployPickerSlot = null;
+      this.renderDeployLoadoutCards();
+    });
+
+    box.querySelectorAll('.dep-cat-tab').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this._deployPickerCat = btn.dataset.pickCat;
+        this.renderDeployLoadoutCards();
+      });
+    });
+
+    box.querySelectorAll('.dep-pick-gun-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const slot = btn.dataset.pickSlot || 'primary';
+        const wepId = btn.dataset.pickWep;
+        const res = this.player.buyOrSelectWeapon?.(role, slot, wepId);
+        if (res && res.ok) {
+          this._deployPickerSlot = null;
+          this.updateCashAndGunsmithHud?.();
+          this.renderDeployLoadoutCards();
+        } else if (res && res.reason === 'INSUFFICIENT_FUNDS') {
+          sound.playEmptyClick?.();
+          this.addXpNotification?.(
+            0,
+            `⚠️ Need $${(res.shortBy || res.weapon?.warehousePrice || 0).toLocaleString()} more to unlock ${res.weapon?.shortName || wepId}!`
+          );
+        }
+      });
+    });
+
+    box.querySelectorAll('.dep-mods-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this._gunsmithRole = role;
+        this._gunsmithWeaponSlot = btn.dataset.modSlot || 'primary';
+        this._gunsmithActiveTab = 'attachments';
+        this.toggleGunsmithModal?.(true);
+      });
+    });
+
+    box.querySelectorAll('.dep-shell-pill').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const shId = btn.dataset.shellId;
+        if (shId && typeof this.player.cycleShotgunShellType === 'function') {
+          this.player.cycleShotgunShellType(shId);
+          this.renderDeployLoadoutCards();
+        }
+      });
+    });
+  },
+
     updateDeployClassTraitsCard() {
+    if (typeof document === 'undefined') return;
+    const roleSummaryEl = document.getElementById('deploy-role-summary');
+    if (roleSummaryEl) {
+      const activeBtn = document.querySelector(`.class-btn[data-class="${this.selectedClass}"]`);
+      if (activeBtn && activeBtn.dataset.trait) {
+        roleSummaryEl.textContent = activeBtn.dataset.trait;
+      }
+    }
     const airEcoEl = document.getElementById('deploy-air-economy-bar');
     if (airEcoEl) {
       const era = (this.world && this.world.era) || 'modern';
@@ -2180,6 +2498,9 @@ export const DeployScreen = {
     const flirFs = this.el('flir-fullscreen-canvas');
     if (flirFs) flirFs.classList.add('hidden');
     this.syncDeployActionButtons();
+    if (typeof this.renderDeployLoadoutCards === 'function') {
+      this.renderDeployLoadoutCards();
+    }
     if (typeof this.renderDeployExtractedLootBar === 'function') {
       this.renderDeployExtractedLootBar();
     }
@@ -2208,7 +2529,7 @@ export const DeployScreen = {
         const peers = Array.from(this.network.remotePlayers.values());
         const hasPeer = peers.length > 0;
         btn.classList.toggle('locked-spawn', !hasPeer);
-        btn.textContent = hasPeer ? `🟢 JOIN: ${peers[0].name}` : '🟢 CO-OP PEER';
+        btn.textContent = hasPeer ? `🟢 ${peers[0].name}` : '🟢 Co-op';
         if (!hasPeer && this.selectedSpawn === 'FRIEND') {
           this.selectedSpawn = 'BASE';
           spawnBtns.forEach((b) => b.classList.toggle('active', b.dataset.spawn === 'BASE'));
@@ -2218,8 +2539,8 @@ export const DeployScreen = {
         const hasRally = Boolean(this.player.rallyPoint && this.player.rallyPoint.timer > 0);
         btn.classList.toggle('locked-spawn', !hasRally);
         btn.textContent = hasRally
-          ? `🟢 RALLY (${Math.ceil(this.player.rallyPoint.timer)}s)`
-          : '🟢 RALLY [5]';
+          ? `🟢 Rally (${Math.ceil(this.player.rallyPoint.timer)}s)`
+          : '🟢 Rally';
         if (!hasRally && this.selectedSpawn === 'RALLY') {
           this.selectedSpawn = 'BASE';
           spawnBtns.forEach((b) => b.classList.toggle('active', b.dataset.spawn === 'BASE'));
@@ -2230,8 +2551,8 @@ export const DeployScreen = {
         );
         btn.classList.toggle('locked-spawn', !hasBeacon);
         btn.textContent = hasBeacon
-          ? `🔵 BEACON (${this.player.insertionBeacon.spawnsLeft}×)`
-          : '🔵 BEACON [6]';
+          ? `🔵 Beacon (${this.player.insertionBeacon.spawnsLeft}×)`
+          : '🔵 Beacon';
         if (!hasBeacon && this.selectedSpawn === 'BEACON') {
           this.selectedSpawn = 'BASE';
           spawnBtns.forEach((b) => b.classList.toggle('active', b.dataset.spawn === 'BASE'));
@@ -2246,8 +2567,8 @@ export const DeployScreen = {
           : kills >= reqKills;
         btn.classList.toggle('locked-spawn', !b2Unlocked);
         btn.textContent = b2Unlocked
-          ? '🦇 B-2 SPIRIT LANE'
-          : `🔒 B-2 (${kills}/${reqKills} KILLS)`;
+          ? '🦇 B-2 Ready'
+          : `🔒 B-2 (${kills}/${reqKills})`;
         if (!b2Unlocked && this.selectedSpawn === 'B2_LANE') {
           this.selectedSpawn = 'BASE';
           spawnBtns.forEach((b) => b.classList.toggle('active', b.dataset.spawn === 'BASE'));

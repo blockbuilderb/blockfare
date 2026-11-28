@@ -1,18 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from '../vendor/three.module.js';
-import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=144';
-import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=144';
-import { VoxelWorld } from '../src/world/VoxelWorld.js?v=144';
-import { VehicleManager } from '../src/vehicles.js?v=144';
+import { WEAPON_DEFS } from '../src/assets/weapon-defs.js?v=145';
+import { ATTACHMENT_CATALOG } from '../src/assets/attachment-defs.js?v=145';
+import { VoxelWorld } from '../src/world/VoxelWorld.js?v=145';
+import { VehicleManager } from '../src/vehicles.js?v=145';
 import {
   evaluateMarksmanShot,
   resolveUnitPlaystyleTitle
-} from '../src/player/MarksmanSystem.js?v=144';
-import { HudRenderer } from '../src/ui/HudRenderer.js?v=144';
-import { CommandPanel } from '../src/ui/CommandPanel.js?v=144';
-import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=144';
-import { PlayerController } from '../src/player/PlayerController.js?v=144';
+} from '../src/player/MarksmanSystem.js?v=145';
+import { HudRenderer } from '../src/ui/HudRenderer.js?v=145';
+import { CommandPanel } from '../src/ui/CommandPanel.js?v=145';
+import { MinimapRenderer } from '../src/ui/MinimapRenderer.js?v=145';
+import { PlayerController } from '../src/player/PlayerController.js?v=145';
 
 function makeMockElement(id = '') {
   const classes = new Set();

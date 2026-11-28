@@ -8,11 +8,11 @@ import {
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL,
   createWeaponViewModel
-} from '../weapons.js?v=144';
-import { sound } from '../audio.js?v=144';
-import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=144';
-import { events } from '../events.js?v=144';
-import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=144';
+} from '../weapons.js?v=145';
+import { sound } from '../audio.js?v=145';
+import { PLAYER, ECONOMY, CLASS_TRAITS, resolveRoleForEra } from '../config.js?v=145';
+import { events } from '../events.js?v=145';
+import { B2_COLOR_PRESETS, applyB2SpiritColorToMesh } from '../models/vehicle-model.js?v=145';
 
 const DEFAULT_WEAPON_ATTACHMENTS = {
   muzzle: 'stock',
@@ -1777,13 +1777,24 @@ export const GunsmithMethods = {
   buyOrSelectWeapon(roleName, slotType, weaponId, paySource = 'warehouse') {
     this.ensureWarehouseStructures();
     const wepDef = WEAPON_DEFS[weaponId];
-    if (!wepDef || wepDef.type !== 'gun') {
+    if (!wepDef || (wepDef.type !== 'gun' && !wepDef.isPrimitiveOnly)) {
       return { ok: false, reason: 'INVALID_WEAPON' };
     }
     const targetRole = roleName && DEFAULT_CLASS_SELECTIONS[roleName] ? roleName : this.role;
     const targetSlot = slotType === 'secondary' || wepDef.slot === 'secondary' ? 'secondary' : 'primary';
+    const isPrimitiveRole = [
+      'swordsman',
+      'greatsword_knight',
+      'polearm_knight',
+      'archer',
+      'crossbowman',
+      'mounted_knight'
+    ].includes(targetRole);
 
+    // CoD Create-a-Class: Every modern unit can equip ANY modern Primary weapon (AR, SMG, Shotgun, LMG, DMR, Sniper)
+    // and ANY Secondary weapon; medieval primitive roles keep their medieval class restrictions.
     if (
+      isPrimitiveRole &&
       targetSlot === 'primary' &&
       Array.isArray(wepDef.allowedClasses) &&
       !wepDef.allowedClasses.includes(targetRole)

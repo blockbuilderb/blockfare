@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=144';
-import { sound } from '../audio.js?v=144';
-import { DISTANCES } from '../config.js?v=144';
-import { events } from '../events.js?v=144';
+import { VOXEL_SIZE } from '../world.js?v=145';
+import { sound } from '../audio.js?v=145';
+import { DISTANCES } from '../config.js?v=145';
+import { events } from '../events.js?v=145';
 
 export const FortificationMethods = {
   getBlueprintName() {
