@@ -10,18 +10,18 @@ import {
   CASE_GOLD_CHANCE,
   CASE_GUN_POOL,
   GOLD_SPECIAL_POOL
-} from '../weapons.js?v=145';
-import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=145';
-import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=145';
-import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=145';
-import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=145';
-import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=145';
-import { sound } from '../audio.js?v=145';
+} from '../weapons.js?v=146';
+import { CLASS_META, WEAPON_GRID_SIZES, buildWeaponSvg, buildGearSvg } from '../assets/gunsmith-svg.js?v=146';
+import { FIELD_REQUISITIONS, VEHICLE_UPGRADE_CATALOG } from '../player/GunsmithState.js?v=146';
+import { B2_COLOR_PRESETS } from '../models/vehicle-model.js?v=146';
+import { AIRCRAFT_SPEED_RESEARCH } from '../assets/vehicle-defs.js?v=146';
+import { getAllowedRoleIds, resolveRoleForEra, ECONOMY, VEHICLE_STATS } from '../config.js?v=146';
+import { sound } from '../audio.js?v=146';
 import {
   ARMORY_CASE_STATES,
   ARMORY_CASE_EVENTS,
   createArmoryCaseRouletteFSM
-} from '../core/StateMachines.js?v=145';
+} from '../core/StateMachines.js?v=146';
 
 export const GunsmithModal = {
   formatCashAmount(val) {

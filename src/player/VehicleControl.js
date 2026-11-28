@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=145';
-import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=145';
-import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=145';
-import { getRideShortcutLabel } from '../utils/KeyboardShortcuts.js?v=145';
-import { events } from '../events.js?v=145';
+import { sound } from '../audio.js?v=146';
+import { PLAYER, PROJECTILES, DISTANCES, VEHICLE_STATS } from '../config.js?v=146';
+import { animateBowOrCrossbowMesh } from '../models/weapon-model.js?v=146';
+import { getRideShortcutLabel } from '../utils/KeyboardShortcuts.js?v=146';
+import { events } from '../events.js?v=146';
 import {
   AIRCRAFT_FLIGHT_EVENTS,
   PLAYER_PARACHUTE_EVENTS,
@@ -12,7 +12,7 @@ import {
   syncGroundVehicleFSM,
   syncVehicleSubsystemsFSM,
   updateTargetLockScanner
-} from '../core/StateMachines.js?v=145';
+} from '../core/StateMachines.js?v=146';
 
 function markShared(asset) {
   if (asset) {
@@ -420,11 +420,43 @@ export const VehicleControlMethods = {
           v.rideTask.phase = 'RTB_DEPART';
           v.rideTask.departDelay = 5.5;
         }
-        const exitOffsetX = v.type === 'bike' || v.type === 'atv' ? 2.1 : 3.6;
-        const outX = v.pos.x + exitOffsetX;
-        const outZ = v.pos.z;
-        const outGroundY = this.world ? this.world.getGroundHeightAt(outX, outZ) : v.pos.y;
-        this.pos.set(outX, Math.max(outGroundY, v.pos.y) + 0.35, outZ);
+        const sideDist = v.type === 'bike' || v.type === 'atv' || v.type === 'warhorse' ? 1.85 : 3.4;
+        const rightX = Math.cos(v.yaw || 0);
+        const rightZ = -Math.sin(v.yaw || 0);
+        const backX = Math.sin(v.yaw || 0);
+        const backZ = Math.cos(v.yaw || 0);
+        const candOffsets = [
+          [rightX * sideDist, rightZ * sideDist],
+          [-rightX * sideDist, -rightZ * sideDist],
+          [backX * (sideDist + 0.8), backZ * (sideDist + 0.8)],
+          [0, 0]
+        ];
+        let chosenX = v.pos.x + rightX * sideDist;
+        let chosenZ = v.pos.z + rightZ * sideDist;
+        let chosenY = this.world ? this.world.getGroundHeightAt(chosenX, chosenZ) : v.pos.y;
+        for (let ci = 0; ci < candOffsets.length; ci++) {
+          const cx = v.pos.x + candOffsets[ci][0];
+          const cz = v.pos.z + candOffsets[ci][1];
+          const cy =
+            typeof this.getSupportSurfaceY === 'function' && this.world
+              ? this.getSupportSurfaceY(cx, Math.max(v.pos.y, this.world.getGroundHeightAt(cx, cz)) + 0.5, cz, 0.38)
+              : this.world
+              ? this.world.getGroundHeightAt(cx, cz)
+              : v.pos.y;
+          const blocked =
+            typeof this.checkBodyOverlap === 'function' && this.world
+              ? this.checkBodyOverlap(cx, cy + 0.15, cz, 0.38, 1.7)
+              : false;
+          if (!blocked) {
+            chosenX = cx;
+            chosenZ = cz;
+            chosenY = cy;
+            break;
+          }
+        }
+        this.pos.set(chosenX, chosenY + 0.12, chosenZ);
+        this.vel.set(0, 0, 0);
+        this.isGrounded = true;
       }
       return;
     }

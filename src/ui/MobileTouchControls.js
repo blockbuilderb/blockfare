@@ -11,7 +11,7 @@
 // - Context-Smart Pill: Auto-shows Revive, Bandage, Board/Exit Vehicle, Resupply & Ride
 // ============================================================================
 
-import { sound } from '../audio.js?v=145';
+import { sound } from '../audio.js?v=146';
 
 const TOUCH_MODE_STORAGE_KEY = 'bb_mobile_touch_mode_v1';
 const TOUCH_SENS_STORAGE_KEY = 'bb_mobile_touch_sens_v1';

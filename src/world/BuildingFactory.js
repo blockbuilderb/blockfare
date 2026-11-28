@@ -5,7 +5,7 @@ import {
   createSkyscraper3DMesh,
   RADAR_TOWER_SPEC,
   POWER_TOWER_SPEC
-} from '../models/prop-models.js?v=145';
+} from '../models/prop-models.js?v=146';
 
 const VOXEL_SIZE = 1.25;
 const SPATIAL_MIN_X = -2048;
@@ -313,13 +313,7 @@ export const BuildingFactory = {
         const dist = ring * 1.8;
         const tx = baseX + Math.cos(angle) * dist;
         const tz = baseZ + Math.sin(angle) * dist;
-        const rCx = typeof this.getRiverCenterX === 'function' ? this.getRiverCenterX(tz) : 0;
-        if (
-          Math.abs(tx - rCx) < 25 &&
-          Math.abs(tz) > 18 &&
-          Math.abs(tz - 400) > 8.5 &&
-          Math.abs(tz + 400) > 8.5
-        ) {
+        if (typeof this.isRiverWaterAt === 'function' ? this.isRiverWaterAt(tx, tz) : false) {
           continue; // Never spawn inside the sunken river water
         }
         if (
@@ -445,14 +439,18 @@ export const BuildingFactory = {
   },
 
   isVehicleBoxBlocked(wx, wz, yaw = 0, halfW = 1.95, halfL = 3.55, padMeters = 1.2) {
-    const rCenter = typeof this.getRiverCenterX === 'function' ? this.getRiverCenterX(wz) : 0;
-    if (
-      Math.abs(wx - rCenter) < 26 &&
-      Math.abs(wz) > 16 &&
-      Math.abs(wz - 220) > 7.5 &&
-      Math.abs(wz + 220) > 7.5
-    ) {
-      return true; // River gorge outside bridge decks
+    if (typeof this.isRiverWaterAt === 'function') {
+      if (this.isRiverWaterAt(wx, wz)) return true; // River gorge outside bridge decks
+    } else {
+      const rCenter = typeof this.getRiverCenterX === 'function' ? this.getRiverCenterX(wz) : 0;
+      if (
+        Math.abs(wx - rCenter) < 25 &&
+        Math.abs(wz) > 18 &&
+        Math.abs(wz - 400) > 8.5 &&
+        Math.abs(wz + 400) > 8.5
+      ) {
+        return true;
+      }
     }
     const fwdX = -Math.sin(yaw);
     const fwdZ = -Math.cos(yaw);

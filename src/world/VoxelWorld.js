@@ -1,14 +1,14 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=145';
-import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=145';
-import { getMapDefinition } from '../maps/index.js?v=145';
-import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=145';
-import { events, makeEventBridge } from '../events.js?v=145';
-import { TerrainGenerator } from './TerrainGenerator.js?v=145';
-import { BuildingFactory } from './BuildingFactory.js?v=145';
-import { ConquestSystem } from './ConquestSystem.js?v=145';
-import { ProjectileManager } from './ProjectileManager.js?v=145';
-import { WeatherSystem } from './WeatherSystem.js?v=145';
+import { TEXTURES } from '../assets/textures.js?v=146';
+import { VOXEL_SIZE, MAT_DEFS } from '../assets/voxel-materials.js?v=146';
+import { getMapDefinition } from '../maps/index.js?v=146';
+import { WEATHER, TERRAIN, MAT_HP, DISTANCES } from '../config.js?v=146';
+import { events, makeEventBridge } from '../events.js?v=146';
+import { TerrainGenerator } from './TerrainGenerator.js?v=146';
+import { BuildingFactory } from './BuildingFactory.js?v=146';
+import { ConquestSystem } from './ConquestSystem.js?v=146';
+import { ProjectileManager } from './ProjectileManager.js?v=146';
+import { WeatherSystem } from './WeatherSystem.js?v=146';
 
 export { VOXEL_SIZE, MAT_DEFS };
 
@@ -605,7 +605,7 @@ export class VoxelWorld {
     gx |= 0;
     gy |= 0;
     gz |= 0;
-    if (gy < -8) return null;
+    if (gy < -15) return null;
     const k = this.key(gx, gy, gz);
     if (typeof k === 'string') {
       this._hasOverflowVoxels = true;

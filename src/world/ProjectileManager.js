@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=145';
-import { TERRAIN } from '../config.js?v=145';
-import { events } from '../events.js?v=145';
-import { createAmmoStashMesh } from '../models/prop-models.js?v=145';
+import { sound } from '../audio.js?v=146';
+import { TERRAIN } from '../config.js?v=146';
+import { events } from '../events.js?v=146';
+import { createAmmoStashMesh } from '../models/prop-models.js?v=146';
 
 const VOXEL_SIZE = 1.25;
 const DEBRIS_POOL_CAPACITY = 384;
@@ -486,7 +486,7 @@ export const ProjectileManager = {
       for (let gz = minGz; gz <= maxGz; gz++) {
         const groundGy = this.getBaseGy(gx, gz);
         const isBoundary = gx === minGx || gx === maxGx || gz === minGz || gz === maxGz;
-        for (let gy = -1; gy <= 84; gy++) {
+        for (let gy = Math.min(-1, groundGy); gy <= 105; gy++) {
           const v = this.getVoxel(gx, gy, gz);
           if (!v) continue;
           _integrityVoxels.push(v);

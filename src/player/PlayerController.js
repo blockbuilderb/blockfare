@@ -1,26 +1,26 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=145';
-import { sound } from '../audio.js?v=145';
-import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=145';
+import { VOXEL_SIZE } from '../world.js?v=146';
+import { sound } from '../audio.js?v=146';
+import { PLAYER, DISTANCES, CLASS_TRAITS, ERA_ROLES, getEraRoles, getRoleByHotkey, resolveRoleForEra } from '../config.js?v=146';
 import {
   isMacPlatform,
   hasAnyModifier,
   shouldClearStuckKeysOnKeyup,
   shouldControlLeftCrouch,
   resolveFieldRoleShortcutIndex
-} from '../utils/KeyboardShortcuts.js?v=145';
+} from '../utils/KeyboardShortcuts.js?v=146';
 import {
   animateBowOrCrossbowMesh,
   getWeaponHipOffsetX,
   updateFirstPersonArmShoulders
-} from '../models/weapon-model.js?v=145';
-import { events, makeEventBridge } from '../events.js?v=145';
-import { GunsmithMethods } from './GunsmithState.js?v=145';
-import { FortificationMethods } from './FortificationBuilder.js?v=145';
-import { CommanderMethods } from './CommanderAbilities.js?v=145';
-import { VehicleControlMethods } from './VehicleControl.js?v=145';
-import { CombatMethods } from './PlayerCombat.js?v=145';
-import { loadMarksmanProfile } from './MarksmanSystem.js?v=145';
+} from '../models/weapon-model.js?v=146';
+import { events, makeEventBridge } from '../events.js?v=146';
+import { GunsmithMethods } from './GunsmithState.js?v=146';
+import { FortificationMethods } from './FortificationBuilder.js?v=146';
+import { CommanderMethods } from './CommanderAbilities.js?v=146';
+import { VehicleControlMethods } from './VehicleControl.js?v=146';
+import { CombatMethods } from './PlayerCombat.js?v=146';
+import { loadMarksmanProfile } from './MarksmanSystem.js?v=146';
 import {
   PLAYER_PARACHUTE_EVENTS,
   createPlayerParachuteFSM,
@@ -28,7 +28,7 @@ import {
   createCommanderAirstrikeFSM,
   createTargetLockScannerFSM,
   createSquadDeployablesFSM
-} from '../core/StateMachines.js?v=145';
+} from '../core/StateMachines.js?v=146';
 
 export class PlayerController {
   constructor(camera, scene, world, botManager, vehicleManager) {
@@ -2574,11 +2574,18 @@ export class PlayerController {
     }
 
     const activeReviveUnit = nearDownedRemoteAlly || nearDownedBot;
-    const riverSurfForRev = this.world?.mapDef?.dimensions?.riverWaterY ?? -0.85;
+    const isUnitSubmerged = (u) => {
+      if (!u || !u.pos || this.world?.era === 'jurassic') return false;
+      if (u.isSwimming) return true;
+      if (typeof this.world?.isSubmergedInRiver === 'function') {
+        return this.world.isSubmergedInRiver(u.pos.x, u.pos.y, u.pos.z, 0.9);
+      }
+      return false;
+    };
     const targetSubmerged = Boolean(
       activeReviveUnit &&
         this.world?.era !== 'jurassic' &&
-        (this.inDeepWater || activeReviveUnit.isSwimming || (activeReviveUnit.pos?.y ?? 0) < riverSurfForRev - 0.9)
+        (this.inDeepWater || isUnitSubmerged(activeReviveUnit))
     );
     if (activeReviveUnit && this.keys['KeyF'] && targetSubmerged) {
       this.reviveProgress = 0;
@@ -3212,9 +3219,17 @@ export class PlayerController {
     }
 
     // Buoyant River Surface Swimming (`riverWaterY = -0.85m`):
-    // Prevents infantry from walking along the `-3.75m` riverbed underwater (`eyeHeight +1.65m` stays `+0.47m` above water!).
+    // Strictly gated by `world.isSubmergedInRiver(x, y, z)` so infantry ONLY swim inside the actual
+    // 48m-wide meandering river channel — NEVER on dry valley depressions or inside subterranean HQ bunkers!
     const riverWaterY = this.world?.mapDef?.dimensions?.riverWaterY ?? -0.85;
-    if (!this.activeVehicle && !this.parachuting && this.world?.era !== 'jurassic' && this.pos.y < riverWaterY - 0.95) {
+    const inActualRiverChannel =
+      !this.activeVehicle &&
+      !this.parachuting &&
+      this.world?.era !== 'jurassic' &&
+      (typeof this.world?.isSubmergedInRiver === 'function'
+        ? this.world.isSubmergedInRiver(this.pos.x, this.pos.y, this.pos.z, 0.95)
+        : false);
+    if (inActualRiverChannel) {
       this.inDeepWater = true;
       const swimFloorY = riverWaterY - 1.18;
       if (this.pos.y < swimFloorY) {
@@ -3263,7 +3278,11 @@ export class PlayerController {
       const dragTarget = this.pos.clone().addScaledVector(forward, 1.15);
       nearDownedBot.pos.x = THREE.MathUtils.lerp(nearDownedBot.pos.x, dragTarget.x, Math.min(1, dt * 14));
       nearDownedBot.pos.z = THREE.MathUtils.lerp(nearDownedBot.pos.z, dragTarget.z, Math.min(1, dt * 14));
-      nearDownedBot.pos.y = this.world.getGroundHeightAt(nearDownedBot.pos.x, nearDownedBot.pos.z) + 0.22;
+      const dragSupportY =
+        typeof this.getSupportSurfaceY === 'function'
+          ? this.getSupportSurfaceY(nearDownedBot.pos.x, this.pos.y + 0.4, nearDownedBot.pos.z, 0.35)
+          : this.world.getGroundHeightAt(nearDownedBot.pos.x, nearDownedBot.pos.z);
+      nearDownedBot.pos.y = dragSupportY + 0.22;
       nearDownedBot.mesh.rotation.y = this.yaw;
     }
 

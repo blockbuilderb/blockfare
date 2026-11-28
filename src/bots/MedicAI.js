@@ -1,11 +1,11 @@
 import * as THREE from '../../vendor/three.module.js';
-import { BOT } from '../config.js?v=145';
-import { tmpVec3 } from '../utils/VectorPool.js?v=145';
-import { events } from '../events.js?v=145';
+import { BOT } from '../config.js?v=146';
+import { tmpVec3 } from '../utils/VectorPool.js?v=146';
+import { events } from '../events.js?v=146';
 import {
   MEDIC_RESCUE_EVENTS,
   createMedicRescueFSM
-} from '../core/StateMachines.js?v=145';
+} from '../core/StateMachines.js?v=146';
 
 const REVIVE_PARTICLE_COLOR = new THREE.Color(0x2ecc71);
 const SHARED_SMOKE_PUFF_GEO = new THREE.BoxGeometry(1.5, 1.3, 1.5);
@@ -566,9 +566,13 @@ export function updateMedicRescue(bot, dt, player, onKillFn) {
     }
     return false;
   }
-  const riverWaterY = this.world?.mapDef?.dimensions?.riverWaterY ?? -0.85;
-  const isDeepWaterPos = (p) =>
-    Boolean(p && this.world?.era !== 'jurassic' && p.y < riverWaterY - 0.9);
+  const isDeepWaterPos = (p) => {
+    if (!p || this.world?.era === 'jurassic') return false;
+    if (typeof this.world?.isSubmergedInRiver === 'function') {
+      return this.world.isSubmergedInRiver(p.x, p.y, p.z, 0.9);
+    }
+    return false;
+  };
   const parts = bot.mesh.userData.parts;
   bot.assessThreatEnemy = null;
 

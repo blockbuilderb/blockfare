@@ -18,29 +18,30 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=145';
+import { TEXTURES } from '../assets/textures.js?v=146';
 
-// Cached shared geometries & materials for 1st-person Spec-Ops Operator Arms, Watch & Articulated Tactical Gloves
+// Cached shared BLOCKY geometries & flat-shaded materials for 1st-person Operator Arms, Watch & Tactical Gloves
+// Matches 3rd-person blocky voxel-operator limb aesthetic (`soldier-model.js` BoxGeometry limbs, zero round noodle cylinders!)
 const _fpArmGeos = {
-  upperSleeve: new THREE.CylinderGeometry(0.039, 0.045, 0.22, 10),
-  forearmSleeve: new THREE.CylinderGeometry(0.033, 0.04, 0.22, 10),
-  sleeveFold: new THREE.CylinderGeometry(0.042, 0.041, 0.038, 10),
-  elbowPad: new THREE.BoxGeometry(0.056, 0.026, 0.095),
-  wristSkin: new THREE.CylinderGeometry(0.027, 0.03, 0.046, 10),
-  gloveCuff: new THREE.CylinderGeometry(0.031, 0.032, 0.034, 10),
-  velcroTab: new THREE.BoxGeometry(0.038, 0.012, 0.024),
-  watchBand: new THREE.CylinderGeometry(0.0315, 0.0315, 0.022, 12),
-  watchCase: new THREE.BoxGeometry(0.034, 0.012, 0.038),
-  watchScreen: new THREE.BoxGeometry(0.026, 0.004, 0.028),
-  watchTick: new THREE.BoxGeometry(0.016, 0.0045, 0.005),
-  palmCore: new THREE.BoxGeometry(0.06, 0.034, 0.074),
-  suedePatch: new THREE.BoxGeometry(0.054, 0.008, 0.062),
-  knuckleGuard: new THREE.BoxGeometry(0.062, 0.012, 0.022),
-  knucklePod: new THREE.SphereGeometry(0.0075, 6, 6),
-  thumbProx: new THREE.CylinderGeometry(0.0095, 0.011, 0.036, 8),
-  thumbDist: new THREE.CylinderGeometry(0.008, 0.0095, 0.028, 8),
-  fingerProx: new THREE.CylinderGeometry(0.008, 0.009, 0.034, 7),
-  fingerDist: new THREE.CylinderGeometry(0.007, 0.008, 0.028, 7)
+  upperSleeve: new THREE.BoxGeometry(0.124, 0.22, 0.124),
+  forearmSleeve: new THREE.BoxGeometry(0.108, 0.22, 0.108),
+  sleeveFold: new THREE.BoxGeometry(0.116, 0.044, 0.116),
+  elbowPad: new THREE.BoxGeometry(0.118, 0.064, 0.120),
+  wristSkin: new THREE.BoxGeometry(0.080, 0.048, 0.080),
+  gloveCuff: new THREE.BoxGeometry(0.090, 0.040, 0.090),
+  velcroTab: new THREE.BoxGeometry(0.050, 0.014, 0.028),
+  watchBand: new THREE.BoxGeometry(0.086, 0.024, 0.086),
+  watchCase: new THREE.BoxGeometry(0.042, 0.014, 0.044),
+  watchScreen: new THREE.BoxGeometry(0.030, 0.004, 0.032),
+  watchTick: new THREE.BoxGeometry(0.020, 0.0045, 0.005),
+  palmCore: new THREE.BoxGeometry(0.078, 0.042, 0.082),
+  suedePatch: new THREE.BoxGeometry(0.066, 0.008, 0.068),
+  knuckleGuard: new THREE.BoxGeometry(0.076, 0.014, 0.026),
+  knucklePod: new THREE.BoxGeometry(0.015, 0.011, 0.015),
+  thumbProx: new THREE.BoxGeometry(0.022, 0.036, 0.022),
+  thumbDist: new THREE.BoxGeometry(0.020, 0.028, 0.020),
+  fingerProx: new THREE.BoxGeometry(0.018, 0.034, 0.018),
+  fingerDist: new THREE.BoxGeometry(0.017, 0.028, 0.017)
 };
 for (const g of Object.values(_fpArmGeos)) {
   g.userData.shared = true;
@@ -48,8 +49,9 @@ for (const g of Object.values(_fpArmGeos)) {
 
 const _fpWatchCaseMat = new THREE.MeshStandardMaterial({
   color: 0x15191e,
-  roughness: 0.35,
-  metalness: 0.78
+  roughness: 0.38,
+  metalness: 0.72,
+  flatShading: true
 });
 _fpWatchCaseMat.userData.shared = true;
 const _fpWatchScreenMat = new THREE.MeshBasicMaterial({ color: 0x0a2e24 });
@@ -57,19 +59,24 @@ _fpWatchScreenMat.userData.shared = true;
 const _fpWatchGlowMat = new THREE.MeshBasicMaterial({ color: 0x2ed573 });
 _fpWatchGlowMat.userData.shared = true;
 const _fpCarbonKnuckleMat = new THREE.MeshStandardMaterial({
-  color: 0x111418,
-  roughness: 0.26,
-  metalness: 0.65
+  color: 0x161a1f,
+  roughness: 0.35,
+  metalness: 0.55,
+  flatShading: true
 });
 _fpCarbonKnuckleMat.userData.shared = true;
 const _fpTanSuedeMat = new THREE.MeshStandardMaterial({
   color: 0x594a3a,
-  roughness: 0.88
+  roughness: 0.88,
+  flatShading: true
 });
 _fpTanSuedeMat.userData.shared = true;
 
-// Pre-allocated scratch math objects for zero-GC 2-bone 1st-person Shoulder-to-Wrist IK
-const _ikUpY = new THREE.Vector3(0, 1, 0);
+// Pre-allocated scratch math objects for zero-GC 2-bone 1st-person Blocky Shoulder-to-Wrist IK
+const _ikUpLocal = new THREE.Vector3();
+const _ikRightAxis = new THREE.Vector3();
+const _ikFwdAxis = new THREE.Vector3();
+const _ikBasisMat = new THREE.Matrix4();
 const _ikScaleOne = new THREE.Vector3(1, 1, 1);
 const _ikWepPos = new THREE.Vector3();
 const _ikWepMat = new THREE.Matrix4();
@@ -83,6 +90,18 @@ const _ikElbowLocal = new THREE.Vector3();
 const _ikShoulderLocal = new THREE.Vector3();
 const _ikSegDir = new THREE.Vector3();
 const _ikSegMid = new THREE.Vector3();
+
+function setBlockyLimbQuaternion(targetQuat, segAxisY, upHintLocal) {
+  _ikRightAxis.crossVectors(upHintLocal, segAxisY);
+  if (_ikRightAxis.lengthSq() < 1e-5) {
+    _ikRightAxis.set(1, 0, 0);
+  } else {
+    _ikRightAxis.normalize();
+  }
+  _ikFwdAxis.crossVectors(segAxisY, _ikRightAxis).normalize();
+  _ikBasisMat.makeBasis(_ikRightAxis, segAxisY, _ikFwdAxis);
+  targetQuat.setFromRotationMatrix(_ikBasisMat);
+}
 
 /**
  * Returns the natural camera-space horizontal hipfire offset (`X`) for a weapon or gadget.
@@ -132,44 +151,44 @@ export function updateFirstPersonArmShoulders(weaponMesh, overrideWeaponPos = nu
     // Wrist anchor in camera space
     _ikWristCam.copy(arm.position).applyMatrix4(_ikWepMat);
 
-    // Fixed anatomical left/right shoulders in camera space (bottom-left & bottom-right off-screen)
-    _ikShoulderCam.set(isLeft ? -0.28 : 0.28, -0.32, 0.12);
+    // Fixed anatomical left/right shoulders in camera space (chunky blocky BattleBit operator proportions)
+    _ikShoulderCam.set(isLeft ? -0.24 : 0.24, -0.29, -0.04);
 
-    // Natural outward & downward elbow bend (clamped strictly below y = -0.22 so ADS bore is never occluded)
-    _ikElbowCam.lerpVectors(_ikWristCam, _ikShoulderCam, 0.48);
+    // Natural outward & downward elbow bend (clamped strictly below y = -0.23 so ADS bore is never occluded)
+    _ikElbowCam.lerpVectors(_ikWristCam, _ikShoulderCam, 0.50);
     _ikElbowCam.x += isLeft ? -0.075 : 0.065;
-    _ikElbowCam.y = Math.min(_ikElbowCam.y - 0.085, -0.22);
-    _ikElbowCam.z += 0.02;
+    _ikElbowCam.y = Math.min(_ikElbowCam.y - 0.072, -0.23);
+    _ikElbowCam.z += 0.012;
 
-    // Transform joints into `arm` local space
+    // Transform joints & camera-up hint into `arm` local space so blocky square sleeves never twist into diamonds
     _ikWristLocal.set(0, -0.002, 0.018);
     _ikElbowLocal.copy(_ikElbowCam).applyMatrix4(_ikInvArmWorldMat);
     _ikShoulderLocal.copy(_ikShoulderCam).applyMatrix4(_ikInvArmWorldMat);
+    _ikUpLocal.set(0, 1, 0).transformDirection(_ikInvArmWorldMat);
 
-    // 1) Forearm segment: Elbow (bottom) -> Wrist (top)
+    // 1) Blocky Forearm segment: Elbow (bottom) -> Wrist (top)
     _ikSegDir.subVectors(_ikWristLocal, _ikElbowLocal);
-    const forearmLen = Math.max(0.06, _ikSegDir.length());
+    const forearmLen = Math.max(0.08, _ikSegDir.length());
     _ikSegDir.divideScalar(forearmLen);
     _ikSegMid.addVectors(_ikElbowLocal, _ikWristLocal).multiplyScalar(0.5);
     forearm.position.copy(_ikSegMid);
-    forearm.quaternion.setFromUnitVectors(_ikUpY, _ikSegDir);
+    setBlockyLimbQuaternion(forearm.quaternion, _ikSegDir, _ikUpLocal);
     forearm.scale.set(1, forearmLen / 0.22, 1);
 
-    sleeveFold.position.copy(_ikWristLocal).addScaledVector(_ikSegDir, -0.02);
+    sleeveFold.position.copy(_ikWristLocal).addScaledVector(_ikSegDir, -0.022);
     sleeveFold.quaternion.copy(forearm.quaternion);
 
-    // 2) Upper-arm segment: Shoulder (bottom) -> Elbow (top)
+    // 2) Blocky Upper-arm segment: Shoulder (bottom) -> Elbow (top)
     _ikSegDir.subVectors(_ikElbowLocal, _ikShoulderLocal);
-    const upperLen = Math.max(0.06, _ikSegDir.length());
+    const upperLen = Math.max(0.08, _ikSegDir.length());
     _ikSegDir.divideScalar(upperLen);
     _ikSegMid.addVectors(_ikShoulderLocal, _ikElbowLocal).multiplyScalar(0.5);
     upperSleeve.position.copy(_ikSegMid);
-    upperSleeve.quaternion.setFromUnitVectors(_ikUpY, _ikSegDir);
+    setBlockyLimbQuaternion(upperSleeve.quaternion, _ikSegDir, _ikUpLocal);
     upperSleeve.scale.set(1, upperLen / 0.22, 1);
 
     elbowPad.position.copy(_ikElbowLocal);
     elbowPad.quaternion.copy(forearm.quaternion);
-    elbowPad.rotateX(Math.PI / 2);
   }
 }
 
@@ -205,17 +224,20 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
 
   const sleeveMat = new THREE.MeshStandardMaterial({
     map: team === 'US' ? TEXTURES.camoUS : TEXTURES.camoRU,
-    roughness: 0.85
+    roughness: 0.85,
+    flatShading: true
   });
 
   const gloveMat = new THREE.MeshStandardMaterial({
     color: 0x1e2226,
-    roughness: 0.78
+    roughness: 0.78,
+    flatShading: true
   });
 
   const skinMat = new THREE.MeshStandardMaterial({
     color: 0xe0b899,
-    roughness: 0.8
+    roughness: 0.8,
+    flatShading: true
   });
 
   const buildArm = (isLeft) => {
@@ -248,7 +270,7 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     gloveCuff.position.set(0, 0, -0.016);
 
     const velcroTab = new THREE.Mesh(_fpArmGeos.velcroTab, _fpTanSuedeMat);
-    velcroTab.position.set(0, 0.028, -0.016);
+    velcroTab.position.set(0, 0.045, -0.016);
 
     armGroup.add(upperSleeve, forearm, sleeveFold, elbowPad, wrist, gloveCuff, velcroTab);
     armGroup.userData.ikRefs = {
@@ -260,22 +282,22 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
     };
 
     if (isLeft) {
-      // Inward-canted Operator Tactical Watch / GPS Foretrex (visible during hipfire,ADS, reload & inspect!)
+      // Blocky Operator Tactical Watch / GPS Foretrex sitting flush on the square camo/wrist cuff
       const watchGroup = new THREE.Group();
       watchGroup.name = 'tacticalWatchGroup';
       watchGroup.position.set(0, 0, 0.008);
-      watchGroup.rotation.z = -0.78; // Angled inward toward the operator's eyes
+      watchGroup.rotation.z = -0.52; // Canted inward toward the operator's eyes
       const band = new THREE.Mesh(_fpArmGeos.watchBand, _fpWatchCaseMat);
       band.rotation.x = Math.PI / 2;
       const bezel = new THREE.Mesh(_fpArmGeos.watchCase, _fpWatchCaseMat);
-      bezel.position.set(0, 0.031, 0);
+      bezel.position.set(0, 0.045, 0);
       const screen = new THREE.Mesh(_fpArmGeos.watchScreen, _fpWatchScreenMat);
-      screen.position.set(0, 0.036, 0);
+      screen.position.set(0, 0.0505, 0);
       const readoutTop = new THREE.Mesh(_fpArmGeos.watchTick, _fpWatchGlowMat);
-      readoutTop.position.set(0, 0.0375, -0.005);
+      readoutTop.position.set(0, 0.053, -0.005);
       const readoutBot = new THREE.Mesh(_fpArmGeos.watchTick, _fpWatchGlowMat);
       readoutBot.scale.set(0.68, 1, 0.8);
-      readoutBot.position.set(-0.003, 0.0375, 0.005);
+      readoutBot.position.set(-0.003, 0.053, 0.005);
       watchGroup.add(band, bezel, screen, readoutTop, readoutBot);
       armGroup.add(watchGroup);
     } else {
@@ -292,14 +314,14 @@ export function createWeaponViewModel(def, team = 'US', custom = {}) {
 
     const palm = new THREE.Mesh(_fpArmGeos.palmCore, gloveMat);
     const suedePalm = new THREE.Mesh(_fpArmGeos.suedePatch, _fpTanSuedeMat);
-    suedePalm.position.set(-sideSign * 0.004, -0.015, 0);
+    suedePalm.position.set(-sideSign * 0.004, -0.019, 0);
 
     const knuckleBar = new THREE.Mesh(_fpArmGeos.knuckleGuard, _fpCarbonKnuckleMat);
-    knuckleBar.position.set(0, 0.018, -0.024);
+    knuckleBar.position.set(0, 0.021, -0.024);
     handGroup.add(palm, suedePalm, knuckleBar);
     for (let k = 0; k < 4; k++) {
       const pod = new THREE.Mesh(_fpArmGeos.knucklePod, _fpCarbonKnuckleMat);
-      pod.position.set((k - 1.5) * 0.014, 0.023, -0.026);
+      pod.position.set((k - 1.5) * 0.016, 0.027, -0.026);
       handGroup.add(pod);
     }
 

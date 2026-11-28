@@ -6,7 +6,7 @@
 // ============================================================================
 
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../assets/textures.js?v=145';
+import { TEXTURES } from '../assets/textures.js?v=146';
 
 let propShared = null;
 

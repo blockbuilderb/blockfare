@@ -1,7 +1,7 @@
 import * as THREE from '../../vendor/three.module.js';
-import { TEXTURES } from '../textures.js?v=145';
-import { TERRAIN } from '../config.js?v=145';
-import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=145';
+import { TEXTURES } from '../textures.js?v=146';
+import { TERRAIN } from '../config.js?v=146';
+import { WAREHOUSE_BAY_CATALOG, OBJECTIVE_MOTORPOOL_BASES } from '../assets/vehicle-defs.js?v=146';
 
 const VOXEL_SIZE = 1.25;
 
@@ -114,11 +114,13 @@ export const TerrainGenerator = {
    * Analytic terrain evaluation used to bake the 1.25m static heightmap and as fallback outside [-2000..2000] x [-1150..1150].
    */
   _computeRawTerrainHeight(x, z) {
-    // Broad rolling valley hills + secondary tactical ridges
-    let h =
+    // Broad rolling valley hills + secondary tactical ridges, smoothly cushioned above the river water table (-0.85m)
+    // so dry-land valley meadows roll naturally (+0.12m .. +12.2m) without sinking below the riverbed!
+    const rawWave =
       Math.sin(x * 0.011) * Math.cos(z * 0.013) * 5.6 +
       Math.sin(x * 0.028 + z * 0.024) * 2.2 +
       Math.cos(x * 0.006 - z * 0.009) * 3.8;
+    let h = 1.65 + 0.52 * rawWave + 0.46 * (Math.sqrt(rawWave * rawWave + 4.0) - 2.0);
 
     // Natural Alpine Mountain Ranges framing the 7,600m x 5,200m Grand Theater (smooth broad ridges, no thin needle spikes!)
     const rimWaveX = Math.sin(z * 0.0024) * 185 + Math.cos(z * 0.0058) * 85;
@@ -310,12 +312,26 @@ export const TerrainGenerator = {
       }
 
       const rowOff = iz * HM_COLS;
+      const rimWaveX = Math.sin(z * 0.0024) * 185 + Math.cos(z * 0.0058) * 85;
+      const rimThreshX = 3020 + rimWaveX;
       for (let ix = 0; ix < HM_COLS; ix++) {
         const x = xs[ix];
-        let h =
+        const rawWave =
           sinX011[ix] * cosZ013 +
           (sinX028[ix] * cosZ024 + cosX028[ix] * sinZ024) +
           (cosX006[ix] * cosZ009 + sinX006[ix] * sinZ009);
+        let h = 1.65 + 0.52 * rawWave + 0.46 * (Math.sqrt(rawWave * rawWave + 4.0) - 2.0);
+
+        const absXForRim = x < 0 ? -x : x;
+        if (absXForRim > rimThreshX) {
+          const edgeX = (absXForRim - rimThreshX) / 210;
+          const rimEnv = edgeX * edgeX;
+          const smoothRidges =
+            0.78 +
+            0.26 * Math.sin(x * 0.0038 + z * 0.0031) +
+            0.18 * Math.cos(x * 0.0065 - z * 0.0054);
+          h += Math.min(245, Math.pow(rimEnv, 0.78) * 42.0 * smoothRidges);
+        }
 
         for (let pIdx = 0; pIdx < rowPadCount; pIdx++) {
           const pad = rowPads[pIdx];
@@ -428,19 +444,55 @@ export const TerrainGenerator = {
   },
 
   /**
-   * Returns walkable surface height including the 3 grand bridges over the river canyon.
+   * Returns true if `(x, z)` lies on one of the 3 grand river bridges (`z = -400, 0, +400`).
    */
-  getGroundHeightAt(x, z) {
+  isOnBridgeDeck(x, z) {
     if (x >= -46.0 && x <= 46.0) {
       if (
         (z >= -18.0 && z <= 18.0) ||
         (z >= -408.5 && z <= -391.5) ||
         (z >= 391.5 && z <= 408.5)
       ) {
-        return TERRAIN.BRIDGE_DECK_HEIGHT;
+        return true;
       }
     }
+    return false;
+  },
+
+  /**
+   * Returns walkable surface height including the 3 grand bridges over the river canyon.
+   */
+  getGroundHeightAt(x, z) {
+    if (this.isOnBridgeDeck(x, z)) {
+      return TERRAIN.BRIDGE_DECK_HEIGHT;
+    }
     return this.getTerrainHeight(x, z);
+  },
+
+  /**
+   * Authoritative spatial river-channel check: returns `true` ONLY when `(x, z)` lies inside
+   * the 48m-wide meandering river water ribbon (and NOT on a bridge deck, dry valley depression,
+   * or subterranean HQ bunker).
+   */
+  isRiverWaterAt(x, z) {
+    const era = this.era || (this.mapDef && this.mapDef.era) || 'modern';
+    if (era === 'jurassic') return false;
+    if (Math.abs(z) >= 2450) return false;
+    if (this.isOnBridgeDeck(x, z)) return false;
+    const riverCenterX = this.getRiverCenterX(z);
+    if (Math.abs(x - riverCenterX) >= 25.0) return false;
+    const riverWaterY = this.mapDef?.dimensions?.riverWaterY ?? -0.85;
+    return this.getTerrainHeight(x, z) < riverWaterY - 0.15;
+  },
+
+  /**
+   * Returns `true` ONLY when `(x, y, z)` is physically submerged inside the meandering river channel
+   * below `riverWaterY - minDepth`. Never triggers on dry land or inside subterranean HQ bunkers!
+   */
+  isSubmergedInRiver(x, y, z, minDepth = 0.95) {
+    if (!this.isRiverWaterAt(x, z)) return false;
+    const riverWaterY = this.mapDef?.dimensions?.riverWaterY ?? -0.85;
+    return y < riverWaterY - minDepth;
   },
 
   /**
@@ -449,7 +501,7 @@ export const TerrainGenerator = {
   getBaseGy(gx, gz) {
     const wx = gx * VOXEL_SIZE;
     const wz = gz * VOXEL_SIZE;
-    return Math.max(-4, Math.floor((this.getGroundHeightAt(wx, wz) + 0.08) / VOXEL_SIZE));
+    return Math.max(-12, Math.floor((this.getGroundHeightAt(wx, wz) + 0.08) / VOXEL_SIZE));
   },
 
   buildEnvironment() {
@@ -461,11 +513,30 @@ export const TerrainGenerator = {
     const isMedieval = era === 'medieval';
     const isJurassic = era === 'jurassic';
 
-    // 1. Expansive Battlefield-Scale 7,600m x 5,200m (39.52 km^2) 3D Terrain & Air Theater with Vertex Colors
-    const groundGeo = new THREE.PlaneGeometry(7600, 5200, 560, 380);
+    // 1. Expansive Battlefield-Scale 7,600m x 5,200m (39.52 km^2) 3D Terrain & Air Theater with Graded Combat-Zone Mesh Density:
+    // Concentrates 80% of grid resolution inside the active ground-combat valley ([-1760..+1760] x [-560..+560] -> ~5.8m x 2.7m triangles)
+    // so visual ground triangles match `getTerrainHeight(x, z)` within centimeters on slopes, riverbanks & HQ sunken bunkers,
+    // while smoothly stretching to the exact ±3,800m × ±2,600m outer perimeter for seamless ContinentalHorizonSkirt stitching!
+    const groundGeo = new THREE.PlaneGeometry(7600, 5200, 760, 520);
     groundGeo.rotateX(-Math.PI / 2);
 
+    const remapTerrainAxis = (rawVal, halfSpan, innerFrac, innerWorldSpan) => {
+      const u = rawVal / halfSpan;
+      const absU = Math.abs(u);
+      if (absU >= 0.999999) return u < 0 ? -halfSpan : halfSpan;
+      if (absU <= innerFrac) {
+        return (u / innerFrac) * innerWorldSpan;
+      }
+      const remFrac = 1.0 - innerFrac;
+      const t = (absU - innerFrac) / remFrac;
+      const s0 = (innerWorldSpan / innerFrac) * remFrac;
+      const delta = halfSpan - innerWorldSpan;
+      const mag = innerWorldSpan + s0 * t + (delta - s0) * t * t;
+      return u < 0 ? -mag : mag;
+    };
+
     const posAttr = groundGeo.attributes.position;
+    const uvAttr = groundGeo.attributes.uv;
     const colors = [];
     const cGrass = new THREE.Color(isJurassic ? 0x4f8a46 : isMedieval ? 0x7ca05e : 0x86a870);
     const cFieldMeadow = new THREE.Color(isJurassic ? 0x58944d : isMedieval ? 0x86ab64 : 0x93b26f);
@@ -478,10 +549,13 @@ export const TerrainGenerator = {
     const cRoad = new THREE.Color(isJurassic ? 0x69543e : isMedieval ? 0x7c7265 : 0x434950);
 
     for (let i = 0; i < posAttr.count; i++) {
-      const vx = posAttr.getX(i);
-      const vz = posAttr.getZ(i);
+      const vx = remapTerrainAxis(posAttr.getX(i), 3800, 0.8, 1760);
+      const vz = remapTerrainAxis(posAttr.getZ(i), 2600, 0.8, 560);
       const vy = this.getTerrainHeight(vx, vz);
-      posAttr.setY(i, vy);
+      posAttr.setXYZ(i, vx, vy, vz);
+      if (uvAttr) {
+        uvAttr.setXY(i, (vx + 3800) / 7600, 1.0 - (vz + 2600) / 5200);
+      }
 
       // Determine biome vertex tint from height, meandering riverbanks, road network & countryside plots
       let col = cGrass;
@@ -492,7 +566,7 @@ export const TerrainGenerator = {
       const teamVz = vx < 0 ? -vz : vz;
       const inAirbaseLawn = isModern && absVx >= 2538 && absVx <= 2930 && teamVz >= 46 && teamVz <= 170;
 
-      if (vy < -0.15 || distRiver < 31) {
+      if (distRiver < 31 && Math.abs(vz) < 2450) {
         col = cSand;
       } else if (onValleyRoad) {
         col = cRoad;

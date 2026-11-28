@@ -1,8 +1,8 @@
 import * as THREE from '../../vendor/three.module.js';
-import { VOXEL_SIZE } from '../world.js?v=145';
-import { sound } from '../audio.js?v=145';
-import { DISTANCES } from '../config.js?v=145';
-import { events } from '../events.js?v=145';
+import { VOXEL_SIZE } from '../world.js?v=146';
+import { sound } from '../audio.js?v=146';
+import { DISTANCES } from '../config.js?v=146';
+import { events } from '../events.js?v=146';
 
 export const FortificationMethods = {
   getBlueprintName() {
@@ -424,7 +424,7 @@ export const FortificationMethods = {
       }
     }
 
-    const g = this.world.worldToGrid(placePos.x, Math.max(0.1, placePos.y), placePos.z);
+    const g = this.world.worldToGrid(placePos.x, placePos.y, placePos.z);
     const pGrid = this.world.worldToGrid(this.pos.x, this.pos.y + 0.5, this.pos.z);
     if (g.gx === pGrid.gx && g.gz === pGrid.gz && Math.abs(g.gy - pGrid.gy) <= 2) {
       return 0;
@@ -436,7 +436,8 @@ export const FortificationMethods = {
       const res = this.buildPaidHouseOrBunker('AUTO');
       return res && res.ok ? res.blocksBuilt || 1 : 0;
     }
-    const baseGy = fromInteractKey ? this.world.getBaseGy(g.gx, g.gz) : Math.max(0, g.gy);
+    const groundFloorGy = this.world.getBaseGy(g.gx, g.gz);
+    const baseGy = fromInteractKey ? groundFloorGy : Math.max(groundFloorGy, g.gy);
     const alongX = Math.abs(Math.cos(this.yaw)) >= Math.abs(Math.sin(this.yaw));
     const dx = alongX ? 1 : 0;
     const dz = alongX ? 0 : 1;

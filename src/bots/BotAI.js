@@ -1,9 +1,9 @@
 import * as THREE from '../../vendor/three.module.js';
-import { sound } from '../audio.js?v=145';
-import { BOT } from '../config.js?v=145';
-import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=145';
-import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=145';
-import { events } from '../events.js?v=145';
+import { sound } from '../audio.js?v=146';
+import { BOT } from '../config.js?v=146';
+import { tmpVec3, tmpVec3Copy } from '../utils/VectorPool.js?v=146';
+import { SpatialGrid2D } from '../utils/SpatialGrid2D.js?v=146';
+import { events } from '../events.js?v=146';
 
 const BACKBLAST_COLOR = new THREE.Color(0x95a5a6);
 
@@ -897,8 +897,28 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
         bot.bleedOutTimer -= dt;
       }
 
-      const gY = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
-      bot.pos.y = gY + 0.22;
+      let downedSupportY = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
+      if (bot.pos.y > downedSupportY + 1.1 && this.world.getVoxel) {
+        const gx = Math.round(bot.pos.x / 1.25);
+        const gz = Math.round(bot.pos.z / 1.25);
+        const startGy = Math.floor((bot.pos.y + 0.35) / 1.25);
+        const minGy = Math.floor(downedSupportY / 1.25);
+        for (let gy = startGy; gy >= minGy; gy--) {
+          const fv = this.world.getVoxel(gx, gy, gz);
+          if (fv && !fv.isProp && fv.maxY <= bot.pos.y + 0.55) {
+            downedSupportY = Math.max(downedSupportY, fv.maxY);
+            break;
+          }
+        }
+      }
+      if (typeof this.world.isRiverWaterAt === 'function' && this.world.isRiverWaterAt(bot.pos.x, bot.pos.z)) {
+        const rwY = this.world.mapDef?.dimensions?.riverWaterY ?? -0.85;
+        downedSupportY = Math.max(downedSupportY, rwY - 0.85);
+      }
+      bot.pos.y = downedSupportY + 0.22;
+      if (bot.mesh && bot.mesh.position !== bot.pos) {
+        bot.mesh.position.copy(bot.pos);
+      }
       bot.mesh.rotation.x = -Math.PI / 2;
       if (parts.muzzleFlash && parts.muzzleFlash.visible) {
         parts.muzzleFlash.visible = false;
@@ -2890,9 +2910,15 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
     bot.pos.y += bot.velY * dt;
     let groundY = this.world.getGroundHeightAt(bot.pos.x, bot.pos.z);
     const riverWaterY = this.world.mapDef?.dimensions?.riverWaterY ?? -0.85;
-    if (this.world.era !== 'jurassic' && groundY < riverWaterY - 0.3 && this.world.voxels) {
+    const inRiverCorridor =
+      typeof this.world.isRiverWaterAt === 'function'
+        ? this.world.isRiverWaterAt(bot.pos.x, bot.pos.z)
+        : this.world.era !== 'jurassic' &&
+          Math.abs(bot.pos.x - (this.world.getRiverCenterX ? this.world.getRiverCenterX(bot.pos.z) : 0)) < 25.0 &&
+          groundY < riverWaterY - 0.15;
+    if (inRiverCorridor && groundY < riverWaterY - 0.3 && this.world.voxels) {
       // Check if soldier is crossing on top of a solid voxel bridge deck above the river
-      const gBridge = this.world.worldToGrid(bot.pos.x, Math.max(0.2, prevPosY - 0.3), bot.pos.z);
+      const gBridge = this.world.worldToGrid(bot.pos.x, Math.max(riverWaterY, prevPosY - 0.3), bot.pos.z);
       for (let bGy = gBridge.gy + 1; bGy >= -1; bGy--) {
         const bVox = this.world.getVoxel ? this.world.getVoxel(gBridge.gx, bGy, gBridge.gz) : null;
         if (bVox && !bVox.isProp) {
@@ -2914,8 +2940,12 @@ export function update(dt, player, onKillFn, onTicketBleedFn, vehicleManager = n
       bot.velY = 0;
       bot.isGrounded = true;
     }
-    // Buoyant River Surface Swimming: smooth buoyant float instead of instant snap!
-    if (this.world.era !== 'jurassic' && bot.pos.y < riverWaterY - 0.95) {
+    // Buoyant River Surface Swimming: ONLY inside the actual 48m-wide meandering river channel, NEVER on dry land or in HQ bunkers!
+    const botSubmergedInRiver =
+      typeof this.world.isSubmergedInRiver === 'function'
+        ? this.world.isSubmergedInRiver(bot.pos.x, bot.pos.y, bot.pos.z, 0.95)
+        : inRiverCorridor && bot.pos.y < riverWaterY - 0.95;
+    if (botSubmergedInRiver) {
       bot.isSwimming = true;
       const swimTargetY = riverWaterY - 1.08;
       bot.pos.y = THREE.MathUtils.lerp(bot.pos.y, swimTargetY, Math.min(1, dt * 8.5));

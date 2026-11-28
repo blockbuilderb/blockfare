@@ -3,4 +3,4 @@
 // Re-exports SoundManager and sound singleton from src/audio/SoundManager.js
 // ============================================================================
 
-export { SoundManager, sound } from './audio/SoundManager.js?v=145';
+export { SoundManager, sound } from './audio/SoundManager.js?v=146';
